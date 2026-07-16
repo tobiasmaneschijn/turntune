@@ -37,7 +37,9 @@ persistence, copy `.env.example` to `.env` and add your Supabase project values.
 
 1. Create a Supabase project.
 2. Open the SQL editor and run
-   `supabase/migrations/001_initial.sql`.
+   `supabase/migrations/20260716213000_initial_soundspin.sql`, or enable the
+   Supabase GitHub integration to apply it automatically from the production
+   branch.
 3. In **Authentication → URL Configuration**, set the site URL to your
    production SoundSpin URL.
 4. Add `http://localhost:5173/**` as a redirect URL for local development.
@@ -63,6 +65,15 @@ endpoint, so Dokploy does not need to bake them into the frontend bundle.
 Supabase Auth stores the browser session persistently and refreshes access
 tokens automatically. Users remain signed in across refreshes and browser
 restarts until they explicitly sign out or the session is revoked.
+
+### GitHub database deployments
+
+The Supabase GitHub integration should use `.` as its working directory because
+the `supabase/` directory is at the repository root. With **Deploy to
+production** enabled, pushing or merging a new timestamped migration into the
+configured production branch applies it automatically. Keep all future schema
+changes as new files in `supabase/migrations`; do not edit an already-deployed
+migration.
 
 ## Production
 

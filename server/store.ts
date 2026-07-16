@@ -54,7 +54,14 @@ export class Store {
       .eq("slug", id)
       .maybeSingle();
 
-    if (error) throw new Error(`Could not load room: ${error.message}`);
+    if (error) {
+      if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
+        throw new Error(
+          "SoundSpin database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+        );
+      }
+      throw new Error(`Could not load room: ${error.message}`);
+    }
     if (!data) return undefined;
     const room = data.state as Room;
     this.data.rooms[id] = room;
@@ -75,7 +82,14 @@ export class Store {
           },
           { onConflict: "slug" }
         );
-        if (error) throw new Error(`Could not save room: ${error.message}`);
+        if (error) {
+          if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
+            throw new Error(
+              "SoundSpin database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+            );
+          }
+          throw new Error(`Could not save room: ${error.message}`);
+        }
       } else {
         await this.persistFile();
       }

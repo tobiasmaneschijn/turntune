@@ -12,6 +12,10 @@ import {
   UsersIcon
 } from "./components/Icons";
 import { YouTubePlayer } from "./components/YouTubePlayer";
+import { ForgotPasswordForm } from "./components/forgot-password-form";
+import { LoginForm } from "./components/login-form";
+import { SignUpForm } from "./components/sign-up-form";
+import { UpdatePasswordForm } from "./components/update-password-form";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import type { RoomSnapshot, User } from "./types";
@@ -75,7 +79,8 @@ export function App() {
     client: SupabaseClient | null;
     session: Session | null;
     enabled: boolean;
-  }>({ loading: true, client: null, session: null, enabled: false });
+    recovery: boolean;
+  }>({ loading: true, client: null, session: null, enabled: false, recovery: false });
 
   useEffect(() => {
     let active = true;
@@ -85,22 +90,35 @@ export function App() {
       .then(async (client) => {
         if (!active) return;
         if (!client) {
-          setAuth({ loading: false, client: null, session: null, enabled: false });
+          setAuth({ loading: false, client: null, session: null, enabled: false, recovery: false });
           return;
         }
 
         const { data } = await client.auth.getSession();
         if (!active) return;
-        setAuth({ loading: false, client, session: data.session, enabled: true });
+        const recovery = new URLSearchParams(location.hash.slice(1)).get("type") === "recovery";
+        setAuth({ loading: false, client, session: data.session, enabled: true, recovery });
 
-        const { data: listener } = client.auth.onAuthStateChange((_event, session) => {
-          if (active) setAuth({ loading: false, client, session, enabled: true });
+        const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+          if (active) {
+            setAuth((current) => ({
+              loading: false,
+              client,
+              session,
+              enabled: true,
+              recovery: event === "PASSWORD_RECOVERY"
+                ? true
+                : event === "SIGNED_IN" || event === "SIGNED_OUT"
+                  ? false
+                  : current.recovery
+            }));
+          }
         });
         unsubscribe = () => listener.subscription.unsubscribe();
       })
       .catch((error) => {
         console.error(error);
-        if (active) setAuth({ loading: false, client: null, session: null, enabled: false });
+        if (active) setAuth({ loading: false, client: null, session: null, enabled: false, recovery: false });
       });
 
     return () => {
@@ -184,12 +202,24 @@ export function App() {
     return <AuthScreen client={auth.client!} />;
   }
 
+  if (auth.enabled && auth.session && auth.recovery) {
+    return (
+      <PasswordRecoveryScreen
+        client={auth.client!}
+        onComplete={() => {
+          history.replaceState({}, "", "/");
+          setAuth((current) => ({ ...current, recovery: false }));
+        }}
+      />
+    );
+  }
+
   if (!roomId || !profile.name) {
     return <Welcome initialName={profile.name} joining={Boolean(roomId)} onEnter={enterRoom} />;
   }
 
   if (!snapshot) {
-    return <LoadingScreen label={connected ? "Tuning into the room…" : "Connecting…"} />;
+    return <LoadingScreen label={notice || (connected ? "Tuning into the room…" : "Connecting…")} />;
   }
 
   const isDj = snapshot.room.djUserId === profile.id;
@@ -250,25 +280,17 @@ function LoadingScreen({ label }: { label: string }) {
 }
 
 function AuthScreen({ client }: { client: SupabaseClient }) {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("");
-  const [sending, setSending] = useState(false);
-
-  const signIn = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!email.trim()) return;
-    setSending(true);
-    setStatus("");
-    const { error } = await client.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: `${location.origin}${location.pathname}`,
-        shouldCreateUser: true
-      }
-    });
-    setSending(false);
-    setStatus(error ? error.message : "Check your email for your sign-in link.");
+  const [path, setPath] = useState(location.pathname);
+  const navigate = (nextPath: string) => {
+    history.pushState({}, "", nextPath);
+    setPath(nextPath);
   };
+
+  const form = path === "/sign-up"
+    ? <SignUpForm client={client} onNavigate={navigate} className="w-full" />
+    : path === "/forgot-password"
+      ? <ForgotPasswordForm client={client} onNavigate={navigate} className="w-full" />
+      : <LoginForm client={client} onNavigate={navigate} className="w-full" />;
 
   return (
     <main className="welcome auth-welcome">
@@ -279,26 +301,33 @@ function AuthScreen({ client }: { client: SupabaseClient }) {
         <div>
           <div className="eyebrow"><span /> WELCOME TO SOUNDSPIN</div>
           <h1>Sign in.<br /><em>Stay in sync.</em></h1>
-          <p>We'll email you a secure link. SoundSpin keeps your session active until you choose to sign out.</p>
+          <p>Your rooms, profile, and queue follow you. SoundSpin keeps your session active until you choose to sign out.</p>
         </div>
-        <form className="welcome-card auth-card" onSubmit={signIn}>
-          <label>
-            Email address
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-              autoFocus
-            />
-          </label>
-          <button type="submit" disabled={sending}>
-            {sending ? "Sending…" : "Email me a sign-in link"} <span>→</span>
-          </button>
-          {status && <p className="auth-status">{status}</p>}
-        </form>
+        {form}
+      </section>
+    </main>
+  );
+}
+
+function PasswordRecoveryScreen({
+  client,
+  onComplete
+}: {
+  client: SupabaseClient;
+  onComplete: () => void;
+}) {
+  return (
+    <main className="welcome auth-welcome">
+      <div className="welcome-glow glow-one" />
+      <div className="welcome-glow glow-two" />
+      <nav><Logo /><span>Secure your account.</span></nav>
+      <section className="auth-content">
+        <div>
+          <div className="eyebrow"><span /> ACCOUNT RECOVERY</div>
+          <h1>Fresh start.<br /><em>Same rooms.</em></h1>
+          <p>Choose a new password and you'll return to SoundSpin with your rooms and profile intact.</p>
+        </div>
+        <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
     </main>
   );

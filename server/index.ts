@@ -144,7 +144,13 @@ io.on("connection", (socket) => {
       reply?.({ ok: true });
     } catch (error) {
       console.error(error);
-      reply?.({ ok: false, error: "Could not load this room." });
+      const message = error instanceof Error ? error.message : "Could not load this room.";
+      reply?.({
+        ok: false,
+        error: message.startsWith("SoundSpin database is not initialized")
+          ? message
+          : "Could not load this room."
+      });
     }
   });
 
