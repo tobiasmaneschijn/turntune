@@ -52,6 +52,7 @@ const userSchema = z.object({
 const joinSchema = z.object({
   roomId: z.string().regex(/^[a-z0-9-]{3,48}$/),
   roomName: z.string().trim().min(1).max(48).optional(),
+  password: z.string().max(128).optional(),
   user: userSchema
 });
 
@@ -87,6 +88,56 @@ const profileUpdateSchema = z.object({
   bio: z.string().trim().max(160).optional(),
   avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional()
 }).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.");
+
+const roomCreateSchema = z.object({
+  name: z.string().trim().min(1).max(48),
+  isPublic: z.boolean().default(true),
+  password: z.string().max(128).optional()
+});
+
+const roomSettingsSchema = z.object({
+  name: z.string().trim().min(1).max(48).optional(),
+  isPublic: z.boolean().optional(),
+  password: z.union([z.string().max(128), z.null()]).optional()
+}).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
+
+const favoriteSchema = z.object({ favorite: z.boolean() });
+
+const moderatorSchema = z.object({
+  userId: z.string().uuid(),
+  moderator: z.boolean()
+});
+
+function roomSlug(name: string) {
+  const base = name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 38) || "room";
+  return `${base}-${crypto.randomBytes(3).toString("hex")}`;
+}
+
+function hashRoomPassword(password?: string | null) {
+  if (!password?.trim()) return null;
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, 64);
+  return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+
+function passwordMatches(password: string | undefined, encoded: string | null) {
+  if (!encoded) return true;
+  if (!password) return false;
+  const [algorithm, saltValue, hashValue] = encoded.split("$");
+  if (algorithm !== "scrypt" || !saltValue || !hashValue) return false;
+  try {
+    const expected = Buffer.from(hashValue, "base64");
+    const actual = crypto.scryptSync(password, Buffer.from(saltValue, "base64"), expected.length);
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
 
 function decodeYouTubeText(value: string) {
   return value
@@ -126,6 +177,10 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
     id,
     name: name || id.replaceAll("-", " "),
     ownerUserId,
+    moderatorUserIds: [],
+    isPublic: true,
+    passwordProtected: false,
+    settings: {},
     djUserId: null,
     queue: [],
     history: [],
@@ -195,7 +250,7 @@ io.on("connection", (socket) => {
       if (joinedRoom !== socket.id) await socket.leave(joinedRoom);
     }
     leaveCurrentRoom(socket.id);
-    const { roomId, roomName } = parsed.data;
+    const { roomId, roomName, password } = parsed.data;
     let user: User = {
       ...parsed.data.user,
       id: authEnabled ? socket.data.authUserId : parsed.data.user.id
@@ -212,14 +267,31 @@ io.on("connection", (socket) => {
           };
         }
       }
+      const access = await store.getRoomAccess(roomId, user.id);
+      if (authEnabled && !access.exists) {
+        return reply?.({ ok: false, error: "That room does not exist." });
+      }
+      if (access.passwordHash && !passwordMatches(password, access.passwordHash)) {
+        return reply?.({
+          ok: false,
+          error: password ? "That room password is incorrect." : "This room needs a password.",
+          requiresPassword: true
+        });
+      }
+
       const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
       if (!room.ownerUserId) room.ownerUserId = user.id;
+      if (!room.moderatorUserIds) room.moderatorUserIds = [];
+      if (room.isPublic === undefined) room.isPublic = true;
+      if (room.passwordProtected === undefined) room.passwordProtected = Boolean(access.passwordHash);
+      if (!room.settings) room.settings = {};
       if (!room.history) room.history = [];
       if (room.vibe === undefined) room.vibe = null;
       if (room.vibe && room.playback.track && room.vibe.trackId === room.playback.track.id) {
         delete room.vibe.votes[room.playback.track.addedBy.id];
       }
       if (room.ownerUserId === user.id || !room.djUserId) room.djUserId = user.id;
+      await store.recordRoomMember(roomId, user.id);
       await store.saveRoom(room);
 
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
@@ -237,6 +309,26 @@ io.on("connection", (socket) => {
           ? message
           : "Could not load this room."
       });
+    }
+  });
+
+  socket.on("room:moderator:set", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = moderatorSchema.safeParse(payload);
+    if (!membership || !parsed.success) {
+      return reply?.({ ok: false, error: "Invalid moderator change." });
+    }
+    try {
+      await store.setModerator(
+        membership.room.id,
+        membership.user.id,
+        parsed.data.userId,
+        parsed.data.moderator
+      );
+      broadcast(membership.room);
+      reply?.({ ok: true });
+    } catch (error) {
+      reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not update moderator." });
     }
   });
 
@@ -472,6 +564,78 @@ app.get("/api/profiles/:userId", async (request, response) => {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Could not load profile."
     });
+  }
+});
+
+app.get("/api/rooms", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    const listenerCounts = Object.fromEntries(
+      [...roomUsers.entries()].map(([slug, users]) => [slug, new Set([...users.values()].map((user) => user.id)).size])
+    );
+    const rooms = await store.listRooms(userId, listenerCounts);
+    response.json({ rooms });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load rooms." });
+  }
+});
+
+app.post("/api/rooms", express.json(), async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  const parsed = roomCreateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid room." });
+  }
+  try {
+    const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
+    room.isPublic = parsed.data.isPublic;
+    room.passwordProtected = Boolean(parsed.data.password?.trim());
+    await store.createRoom(room, hashRoomPassword(parsed.data.password));
+    await store.setFavorite(room.id, userId, true);
+    response.status(201).json({ room: { slug: room.id, name: room.name } });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not create room." });
+  }
+});
+
+app.put("/api/rooms/:slug/favorite", express.json(), async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
+  const parsed = favoriteSchema.safeParse(request.body);
+  if (!slug.success || !parsed.success) return response.status(400).json({ error: "Invalid favorite." });
+  try {
+    const access = await store.getRoomAccess(slug.data, userId);
+    if (!access.exists || (!access.isPublic && !access.role)) {
+      return response.status(404).json({ error: "Room not found." });
+    }
+    await store.setFavorite(slug.data, userId, parsed.data.favorite);
+    response.json({ favorite: parsed.data.favorite });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not update favorite." });
+  }
+});
+
+app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
+  const parsed = roomSettingsSchema.safeParse(request.body);
+  if (!slug.success || !parsed.success) {
+    return response.status(400).json({ error: parsed.success ? "Invalid room." : parsed.error.issues[0]?.message });
+  }
+  try {
+    const room = await store.updateRoomSettings(slug.data, userId, {
+      name: parsed.data.name,
+      isPublic: parsed.data.isPublic,
+      passwordHash: parsed.data.password === undefined ? undefined : hashRoomPassword(parsed.data.password)
+    });
+    if (room) broadcast(room);
+    response.json({ room });
+  } catch (error) {
+    response.status(403).json({ error: error instanceof Error ? error.message : "Could not update room." });
   }
 });
 

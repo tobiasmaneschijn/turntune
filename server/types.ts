@@ -51,12 +51,31 @@ export interface Room {
   id: string;
   name: string;
   ownerUserId: string;
+  moderatorUserIds: string[];
+  isPublic: boolean;
+  passwordProtected: boolean;
+  settings: Record<string, unknown>;
   djUserId: string | null;
   queue: Track[];
   history: Track[];
   playback: Playback;
   vibe: VibeState | null;
   createdAt: number;
+}
+
+export type RoomRole = "owner" | "moderator" | "member";
+
+export interface RoomDirectoryEntry {
+  slug: string;
+  name: string;
+  ownerId: string;
+  isPublic: boolean;
+  passwordProtected: boolean;
+  isFavorite: boolean;
+  role: RoomRole | null;
+  listenerCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RoomSnapshot {

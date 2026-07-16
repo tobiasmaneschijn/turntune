@@ -7,16 +7,20 @@ import {
   Clock3,
   GripVertical,
   Heart,
+  House,
   ListMusic,
   Maximize2,
   Minimize2,
   Search,
+  Settings,
   Trash2,
   ThumbsDown,
   Volume2
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
 import { ProfilePage } from "./components/ProfilePage";
+import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
+import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
 import {
   CopyIcon,
   MessageIcon,
@@ -95,6 +99,10 @@ export function App() {
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
   const [compactPlayer, setCompactPlayer] = useState(false);
+  const [roomPassword, setRoomPassword] = useState("");
+  const [roomPasswordRequired, setRoomPasswordRequired] = useState(false);
+  const [roomJoinError, setRoomJoinError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [auth, setAuth] = useState<{
     loading: boolean;
@@ -219,7 +227,12 @@ export function App() {
     const onPopState = () => {
       const nextRoomId = getRoomId();
       setRoomId((currentRoomId) => {
-        if (currentRoomId !== nextRoomId) setSnapshot(null);
+        if (currentRoomId !== nextRoomId) {
+          setSnapshot(null);
+          setRoomPassword("");
+          setRoomPasswordRequired(false);
+          setRoomJoinError("");
+        }
         return nextRoomId;
       });
       setProfilePageId(getProfilePageId());
@@ -235,8 +248,18 @@ export function App() {
     socket.connect();
     const onConnect = () => {
       setConnected(true);
-      socket.emit("room:join", { roomId, roomName: history.state?.roomName, user: profile }, (result: { ok: boolean; error?: string }) => {
-        if (!result.ok) setNotice(result.error || "Could not join the room.");
+      socket.emit("room:join", { roomId, roomName: history.state?.roomName, password: roomPassword || undefined, user: profile }, (result: { ok: boolean; error?: string; requiresPassword?: boolean }) => {
+        if (result.ok) {
+          setRoomPasswordRequired(false);
+          setRoomJoinError("");
+          return;
+        }
+        if (result.requiresPassword) {
+          setRoomPasswordRequired(true);
+          setRoomJoinError(result.error || "Enter the room password.");
+        } else {
+          setRoomJoinError(result.error || "Could not join the room.");
+        }
       });
     };
     const onDisconnect = () => setConnected(false);
@@ -259,7 +282,16 @@ export function App() {
       socket.off("room:snapshot", onSnapshot);
       socket.off("profile:xp", onXp);
     };
-  }, [roomId, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, auth.loading, auth.enabled, auth.session?.access_token]);
+  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, auth.loading, auth.enabled, auth.session?.access_token]);
+
+  const openRoom = (id: string, password?: string) => {
+    setSnapshot(null);
+    setRoomPassword(password || "");
+    setRoomPasswordRequired(false);
+    setRoomJoinError("");
+    history.pushState({}, "", `/room/${id}`);
+    setRoomId(id);
+  };
 
   const enterRoom = (name: string, roomName?: string) => {
     const nextProfile = { ...profile, name: name.trim() };
@@ -271,6 +303,17 @@ export function App() {
     const id = roomId || `${slugify(roomName || "room")}-${Math.random().toString(36).slice(2, 7)}`;
     history.pushState({ roomName: roomId ? undefined : roomName?.trim() }, "", `/room/${id}`);
     setRoomId(id);
+  };
+
+  const goHome = () => {
+    socket.disconnect();
+    setSnapshot(null);
+    setRoomPassword("");
+    setRoomPasswordRequired(false);
+    setRoomJoinError("");
+    setSettingsOpen(false);
+    history.pushState({}, "", "/");
+    setRoomId(null);
   };
 
   if (auth.loading || (auth.enabled && auth.session && (profile.id !== auth.session.user.id || !profileReady))) {
@@ -326,8 +369,50 @@ export function App() {
     );
   }
 
+  if (!roomId && auth.session) {
+    return (
+      <RoomLobby
+        accessToken={auth.session.access_token}
+        currentUser={profile}
+        onOpenRoom={openRoom}
+        onOpenProfile={() => openProfile(profile.id)}
+        onSignOut={() => void auth.client?.auth.signOut()}
+      />
+    );
+  }
+
   if (!roomId || !profile.name) {
     return <Welcome initialName={profile.name} joining={Boolean(roomId)} onEnter={enterRoom} />;
+  }
+
+  if (roomPasswordRequired) {
+    return (
+      <main className="room-access-screen">
+        <PasswordDialog
+          roomName={roomId.replaceAll("-", " ")}
+          error={roomJoinError}
+          onClose={goHome}
+          onSubmit={(password) => {
+            setRoomJoinError("");
+            setRoomPasswordRequired(false);
+            setRoomPassword(password);
+          }}
+        />
+      </main>
+    );
+  }
+
+  if (roomJoinError && !snapshot) {
+    return (
+      <main className="room-access-screen">
+        <div className="room-access-error panel">
+          <Logo />
+          <h1>Couldn’t join this room</h1>
+          <p>{roomJoinError}</p>
+          <button onClick={goHome}>Back to rooms</button>
+        </div>
+      </main>
+    );
   }
 
   if (!snapshot) {
@@ -339,7 +424,7 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Logo />
+        <button className="header-home-logo" onClick={goHome} title="Back to rooms"><Logo /></button>
         <div className="room-heading">
           <span className="live-dot" />
           <div>
@@ -348,6 +433,10 @@ export function App() {
           </div>
         </div>
         <div className="header-actions">
+          <button className="icon-button" onClick={goHome} title="Room directory"><House size={16} /><span>Rooms</span></button>
+          {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
+            <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Room settings"><Settings size={16} /></button>
+          )}
           <button
             className="icon-button invite-button"
             onClick={() => {
@@ -396,6 +485,15 @@ export function App() {
           onOpenProfile={openProfile}
         />
       </section>
+      {settingsOpen && auth.session && (
+        <RoomSettingsDialog
+          snapshot={snapshot}
+          currentUserId={profile.id}
+          accessToken={auth.session.access_token}
+          onClose={() => setSettingsOpen(false)}
+          onNotice={setNotice}
+        />
+      )}
     </main>
   );
 }

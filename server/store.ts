@@ -3,7 +3,13 @@ import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { levelForXp, TRACK_LIKED_XP } from "./progression.js";
-import type { Room, SoundSpinProfile, SoundSpinUnlock } from "./types.js";
+import type {
+  Room,
+  RoomDirectoryEntry,
+  RoomRole,
+  SoundSpinProfile,
+  SoundSpinUnlock
+} from "./types.js";
 
 interface Database {
   rooms: Record<string, Room>;
@@ -51,7 +57,7 @@ export class Store {
 
     const { data, error } = await this.supabase
       .from("soundspin_rooms")
-      .select("state")
+      .select("state, name, owner_id, is_public, password_hash, settings")
       .eq("slug", id)
       .maybeSingle();
 
@@ -64,9 +70,214 @@ export class Store {
       throw new Error(`Could not load room: ${error.message}`);
     }
     if (!data) return undefined;
-    const room = data.state as Room;
+    const { data: moderators, error: moderatorError } = await this.supabase
+      .from("soundspin_room_members")
+      .select("user_id")
+      .eq("room_slug", id)
+      .eq("role", "moderator");
+    if (moderatorError) throw new Error(`Could not load room moderators: ${moderatorError.message}`);
+
+    const room = {
+      ...(data.state as Room),
+      name: data.name,
+      ownerUserId: data.owner_id,
+      moderatorUserIds: (moderators || []).map((member) => member.user_id),
+      isPublic: data.is_public,
+      passwordProtected: Boolean(data.password_hash),
+      settings: data.settings || {}
+    };
     this.data.rooms[id] = room;
     return room;
+  }
+
+  async listRooms(userId: string, listenerCounts: Record<string, number>) {
+    if (!this.supabase) {
+      return Object.values(this.data.rooms).map((room): RoomDirectoryEntry => ({
+        slug: room.id,
+        name: room.name,
+        ownerId: room.ownerUserId,
+        isPublic: room.isPublic ?? true,
+        passwordProtected: room.passwordProtected ?? false,
+        isFavorite: false,
+        role: room.ownerUserId === userId ? "owner" : null,
+        listenerCount: listenerCounts[room.id] || 0,
+        createdAt: new Date(room.createdAt).toISOString(),
+        updatedAt: new Date(room.createdAt).toISOString()
+      }));
+    }
+
+    const [{ data: favorites, error: favoriteError }, { data: memberships, error: membershipError }] = await Promise.all([
+      this.supabase.from("soundspin_room_favorites").select("room_slug").eq("user_id", userId),
+      this.supabase.from("soundspin_room_members").select("room_slug, role").eq("user_id", userId)
+    ]);
+    if (favoriteError) throw new Error(`Could not load room favorites: ${favoriteError.message}`);
+    if (membershipError) throw new Error(`Could not load room memberships: ${membershipError.message}`);
+
+    const favoriteSlugs = new Set((favorites || []).map((favorite) => favorite.room_slug));
+    const roles = new Map((memberships || []).map((member) => [member.room_slug, member.role as RoomRole]));
+    const { data: rooms, error } = await this.supabase
+      .from("soundspin_rooms")
+      .select("slug, name, owner_id, is_public, password_hash, created_at, updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(200);
+    if (error) throw new Error(`Could not load rooms: ${error.message}`);
+
+    return (rooms || [])
+      .filter((room) => room.is_public || favoriteSlugs.has(room.slug) || roles.has(room.slug))
+      .map((room): RoomDirectoryEntry => ({
+        slug: room.slug,
+        name: room.name,
+        ownerId: room.owner_id,
+        isPublic: room.is_public,
+        passwordProtected: Boolean(room.password_hash),
+        isFavorite: favoriteSlugs.has(room.slug),
+        role: roles.get(room.slug) || null,
+        listenerCount: listenerCounts[room.slug] || 0,
+        createdAt: room.created_at,
+        updatedAt: room.updated_at
+      }));
+  }
+
+  async createRoom(room: Room, passwordHash: string | null) {
+    if (!this.supabase) return this.saveRoom(room);
+    const { error } = await this.supabase.from("soundspin_rooms").insert({
+      slug: room.id,
+      name: room.name,
+      owner_id: room.ownerUserId,
+      state: room,
+      is_public: room.isPublic,
+      password_hash: passwordHash,
+      settings: room.settings,
+      updated_at: new Date().toISOString()
+    });
+    if (error) {
+      if (error.code === "23505") throw new Error("That room address is already in use.");
+      throw new Error(`Could not create room: ${error.message}`);
+    }
+    this.data.rooms[room.id] = room;
+  }
+
+  async getRoomAccess(roomSlug: string, userId: string) {
+    if (!this.supabase) {
+      const room = this.getRoom(roomSlug);
+      return room ? {
+        exists: true,
+        isPublic: room.isPublic ?? true,
+        passwordHash: null,
+        role: room.ownerUserId === userId ? "owner" as const : null
+      } : { exists: false, isPublic: false, passwordHash: null, role: null };
+    }
+    const [{ data: room, error }, { data: membership, error: membershipError }] = await Promise.all([
+      this.supabase.from("soundspin_rooms").select("is_public, password_hash").eq("slug", roomSlug).maybeSingle(),
+      this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle()
+    ]);
+    if (error) throw new Error(`Could not check room access: ${error.message}`);
+    if (membershipError) throw new Error(`Could not check room membership: ${membershipError.message}`);
+    return {
+      exists: Boolean(room),
+      isPublic: room?.is_public ?? false,
+      passwordHash: room?.password_hash || null,
+      role: (membership?.role as RoomRole | undefined) || null
+    };
+  }
+
+  async recordRoomMember(roomSlug: string, userId: string) {
+    if (!this.supabase) return;
+    const { error } = await this.supabase.from("soundspin_room_members").upsert(
+      { room_slug: roomSlug, user_id: userId, role: "member", updated_at: new Date().toISOString() },
+      { onConflict: "room_slug,user_id", ignoreDuplicates: true }
+    );
+    if (error) throw new Error(`Could not record room membership: ${error.message}`);
+  }
+
+  async setFavorite(roomSlug: string, userId: string, favorite: boolean) {
+    if (!this.supabase) return;
+    const query = favorite
+      ? this.supabase.from("soundspin_room_favorites").upsert(
+          { room_slug: roomSlug, user_id: userId },
+          { onConflict: "room_slug,user_id" }
+        )
+      : this.supabase.from("soundspin_room_favorites").delete().eq("room_slug", roomSlug).eq("user_id", userId);
+    const { error } = await query;
+    if (error) throw new Error(`Could not update favorite: ${error.message}`);
+  }
+
+  async updateRoomSettings(
+    roomSlug: string,
+    userId: string,
+    update: { name?: string; isPublic?: boolean; passwordHash?: string | null }
+  ) {
+    if (!this.supabase) {
+      const room = this.getRoom(roomSlug);
+      if (!room || (room.ownerUserId !== userId && !room.moderatorUserIds?.includes(userId))) {
+        throw new Error("Only the owner or a moderator can change room settings.");
+      }
+      if (update.name !== undefined) room.name = update.name;
+      if (update.isPublic !== undefined) room.isPublic = update.isPublic;
+      if (update.passwordHash !== undefined) room.passwordProtected = Boolean(update.passwordHash);
+      await this.saveRoom(room);
+      return room;
+    }
+    const { data: membership, error: membershipError } = await this.supabase
+      .from("soundspin_room_members")
+      .select("role")
+      .eq("room_slug", roomSlug)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (membershipError) throw new Error(`Could not verify room role: ${membershipError.message}`);
+    if (!membership || !["owner", "moderator"].includes(membership.role)) {
+      throw new Error("Only the owner or a moderator can change room settings.");
+    }
+
+    const values: Record<string, string | boolean | null> = { updated_at: new Date().toISOString() };
+    if (update.name !== undefined) values.name = update.name;
+    if (update.isPublic !== undefined) values.is_public = update.isPublic;
+    if (update.passwordHash !== undefined) values.password_hash = update.passwordHash;
+    const { data, error } = await this.supabase
+      .from("soundspin_rooms")
+      .update(values)
+      .eq("slug", roomSlug)
+      .select("name, is_public, password_hash")
+      .single();
+    if (error) throw new Error(`Could not update room: ${error.message}`);
+
+    const room = await this.loadRoom(roomSlug) || this.getRoom(roomSlug);
+    if (room) {
+      room.name = data.name;
+      room.isPublic = data.is_public;
+      room.passwordProtected = Boolean(data.password_hash);
+      await this.saveRoom(room);
+    }
+    return room;
+  }
+
+  async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean) {
+    if (!this.supabase) return;
+    const { data: room, error: roomError } = await this.supabase
+      .from("soundspin_rooms")
+      .select("owner_id")
+      .eq("slug", roomSlug)
+      .single();
+    if (roomError) throw new Error(`Could not load room owner: ${roomError.message}`);
+    if (room.owner_id !== ownerUserId) throw new Error("Only the room owner can manage moderators.");
+    if (targetUserId === ownerUserId) throw new Error("The owner already has full room access.");
+    const { error } = await this.supabase.from("soundspin_room_members").upsert(
+      {
+        room_slug: roomSlug,
+        user_id: targetUserId,
+        role: moderator ? "moderator" : "member",
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "room_slug,user_id" }
+    );
+    if (error) throw new Error(`Could not update moderator: ${error.message}`);
+    const cached = this.getRoom(roomSlug);
+    if (cached) {
+      cached.moderatorUserIds = moderator
+        ? [...new Set([...(cached.moderatorUserIds || []), targetUserId])]
+        : (cached.moderatorUserIds || []).filter((id) => id !== targetUserId);
+      await this.saveRoom(cached);
+    }
   }
 
   async loadOrCreateProfile(userId: string, displayName: string) {
@@ -165,6 +376,8 @@ export class Store {
             name: room.name,
             owner_id: room.ownerUserId,
             state: room,
+            is_public: room.isPublic ?? true,
+            settings: room.settings || {},
             updated_at: new Date().toISOString()
           },
           { onConflict: "slug" }
