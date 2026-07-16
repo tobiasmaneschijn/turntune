@@ -65,6 +65,14 @@ const playbackSchema = z.object({
   position: z.number().min(0).max(60 * 60 * 24)
 });
 
+const queueTrackSchema = z.object({
+  trackId: z.string().uuid()
+});
+
+const queueMoveSchema = queueTrackSchema.extend({
+  toIndex: z.number().int().min(0).max(999)
+});
+
 const youtubeSearchSchema = z.object({
   q: z.string().trim().min(2).max(100)
 });
@@ -213,6 +221,23 @@ io.on("connection", (socket) => {
     if (parsed.data.provider !== "youtube") {
       return reply?.({ ok: false, error: "That provider is not enabled yet." });
     }
+    if (
+      membership.room.playback.track?.provider === parsed.data.provider &&
+      membership.room.playback.track.providerId === parsed.data.providerId
+    ) {
+      return reply?.({ ok: false, error: "That track is already playing." });
+    }
+    const duplicateIndex = membership.room.queue.findIndex(
+      (track) =>
+        track.provider === parsed.data.provider &&
+        track.providerId === parsed.data.providerId
+    );
+    if (duplicateIndex >= 0) {
+      return reply?.({
+        ok: false,
+        error: `That track is already #${duplicateIndex + 1} in the queue.`
+      });
+    }
     const track: Track = {
       id: crypto.randomUUID(),
       ...parsed.data,
@@ -220,7 +245,8 @@ io.on("connection", (socket) => {
       addedAt: Date.now()
     };
     membership.room.queue.push(track);
-    if (!membership.room.playback.track) {
+    const startedPlaying = !membership.room.playback.track;
+    if (startedPlaying) {
       membership.room.playback = {
         track: membership.room.queue.shift()!,
         playing: false,
@@ -228,6 +254,65 @@ io.on("connection", (socket) => {
         updatedAt: Date.now()
       };
     }
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({
+      ok: true,
+      started: startedPlaying,
+      position: startedPlaying ? 0 : membership.room.queue.length
+    });
+  });
+
+  socket.on("queue:remove", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = queueTrackSchema.safeParse(payload);
+    if (!membership || !parsed.success) {
+      return reply?.({ ok: false, error: "Invalid queue item." });
+    }
+    const index = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    if (index < 0) return reply?.({ ok: false, error: "Track not found." });
+    const track = membership.room.queue[index];
+    const canRemove =
+      track.addedBy.id === membership.user.id ||
+      membership.room.djUserId === membership.user.id ||
+      membership.room.ownerUserId === membership.user.id;
+    if (!canRemove) {
+      return reply?.({ ok: false, error: "You can only remove tracks you added." });
+    }
+    membership.room.queue.splice(index, 1);
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("queue:play-next", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = queueTrackSchema.safeParse(payload);
+    if (!membership || membership.room.djUserId !== membership.user.id) {
+      return reply?.({ ok: false, error: "Only the DJ can change the queue order." });
+    }
+    if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue item." });
+    const index = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    if (index < 0) return reply?.({ ok: false, error: "Track not found." });
+    const [track] = membership.room.queue.splice(index, 1);
+    membership.room.queue.unshift(track);
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("queue:move", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = queueMoveSchema.safeParse(payload);
+    if (!membership || membership.room.djUserId !== membership.user.id) {
+      return reply?.({ ok: false, error: "Only the DJ can reorder the queue." });
+    }
+    if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue move." });
+    const fromIndex = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    if (fromIndex < 0) return reply?.({ ok: false, error: "Track not found." });
+    const [track] = membership.room.queue.splice(fromIndex, 1);
+    const toIndex = Math.min(parsed.data.toIndex, membership.room.queue.length);
+    membership.room.queue.splice(toIndex, 0, track);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });

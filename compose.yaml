@@ -14,7 +14,7 @@ services:
     volumes:
       - soundspin-data:/app/data
     ports:
-      - "3000:3000"
+      - "3000"
 
 volumes:
   soundspin-data:

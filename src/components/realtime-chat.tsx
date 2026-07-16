@@ -1,4 +1,4 @@
-import { ImagePlus, Images, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, ImagePlus, Images, Send, Smile, X } from 'lucide-react'
 import type { Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -44,7 +44,7 @@ export const RealtimeChat = ({
   onSend,
   messages: initialMessages = [],
 }: RealtimeChatProps) => {
-  const { containerRef, scrollToBottom } = useChatScroll()
+  const { containerRef, scrollToBottom, isNearBottom } = useChatScroll()
 
   const {
     messages: realtimeMessages,
@@ -62,7 +62,11 @@ export const RealtimeChat = ({
   const [gifs, setGifs] = useState<Array<{ id: string; title: string; url: string; preview: string }>>([])
   const [mediaError, setMediaError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previousMessageCountRef = useRef(0)
+  const initializedScrollRef = useRef(false)
+  const unreadStartRef = useRef<number | null>(null)
   const [giphyKey, setGiphyKey] = useState<string | undefined>(
     import.meta.env.VITE_GIPHY_API_KEY || undefined
   )
@@ -99,9 +103,33 @@ export const RealtimeChat = ({
   }, [allMessages, onMessage])
 
   useEffect(() => {
-    // Scroll to bottom whenever messages change
-    scrollToBottom()
-  }, [allMessages, scrollToBottom])
+    const nextCount = allMessages.length
+    const previousCount = previousMessageCountRef.current
+    const addedCount = Math.max(0, nextCount - previousCount)
+
+    if (!initializedScrollRef.current && nextCount > 0) {
+      initializedScrollRef.current = true
+      requestAnimationFrame(() => scrollToBottom('auto'))
+    } else if (addedCount > 0) {
+      const newestMessage = allMessages.at(-1)
+      if (isNearBottom || newestMessage?.user.id === user.id) {
+        requestAnimationFrame(() => scrollToBottom())
+        setUnreadCount(0)
+        unreadStartRef.current = null
+      } else {
+        if (unreadStartRef.current === null) unreadStartRef.current = previousCount
+        setUnreadCount((current) => current + addedCount)
+      }
+    }
+
+    previousMessageCountRef.current = nextCount
+  }, [allMessages, isNearBottom, scrollToBottom, user.id])
+
+  useEffect(() => {
+    if (!isNearBottom) return
+    setUnreadCount(0)
+    unreadStartRef.current = null
+  }, [isNearBottom])
 
   const handleSendMessage = useCallback(
     async (e: React.FormEvent) => {
@@ -241,6 +269,10 @@ export const RealtimeChat = ({
         <div className="space-y-1">
           {allMessages.map((message, index) => {
             const prevMessage = index > 0 ? allMessages[index - 1] : null
+            const startsNewDay =
+              !prevMessage ||
+              new Date(prevMessage.createdAt).toDateString() !==
+                new Date(message.createdAt).toDateString()
             const minutesSincePrevious = prevMessage
               ? (new Date(message.createdAt).getTime() - new Date(prevMessage.createdAt).getTime()) / 60000
               : Number.POSITIVE_INFINITY
@@ -254,6 +286,20 @@ export const RealtimeChat = ({
                 key={message.id}
                 className="animate-in fade-in slide-in-from-bottom-4 duration-300"
               >
+                {startsNewDay && (
+                  <div className="chat-date-divider">
+                    <span>
+                      {new Date(message.createdAt).toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </span>
+                  </div>
+                )}
+                {unreadStartRef.current === index && (
+                  <div className="chat-unread-divider"><span>New messages</span></div>
+                )}
                 <ChatMessageItem
                   message={message}
                   isOwnMessage={message.user.id === user.id}
@@ -264,6 +310,21 @@ export const RealtimeChat = ({
           })}
         </div>
       </div>
+
+      {!isNearBottom && (
+        <button
+          type="button"
+          className="chat-scroll-button"
+          onClick={() => {
+            scrollToBottom()
+            setUnreadCount(0)
+            unreadStartRef.current = null
+          }}
+        >
+          {unreadCount > 0 && <span>{unreadCount} new</span>}
+          <ArrowDown className="size-4" />
+        </button>
+      )}
 
       {(showEmoji || showGiphy) && (
         <div className="absolute inset-x-3 bottom-28 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">

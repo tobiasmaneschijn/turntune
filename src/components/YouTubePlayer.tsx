@@ -12,7 +12,7 @@ declare global {
           events?: Record<string, (event: { data: number }) => void>;
         }
       ) => YouTubePlayerApi;
-      PlayerState: { ENDED: number };
+      PlayerState: { ENDED: number; BUFFERING: number };
     };
     onYouTubeIframeAPIReady?: () => void;
   }
@@ -25,7 +25,17 @@ interface YouTubePlayerApi {
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   getCurrentTime(): number;
+  getDuration(): number;
+  getPlayerState(): number;
+  setVolume(volume: number): void;
   destroy(): void;
+}
+
+export interface YouTubePlayerStatus {
+  ready: boolean;
+  buffering: boolean;
+  currentTime: number;
+  duration: number;
 }
 
 let apiPromise: Promise<void> | null = null;
@@ -53,19 +63,29 @@ function targetPosition(playback: Playback) {
 export function YouTubePlayer({
   playback,
   isDj,
-  onEnded
+  volume,
+  onEnded,
+  onStatus
 }: {
   playback: Playback;
   isDj: boolean;
+  volume: number;
   onEnded: () => void;
+  onStatus: (status: YouTubePlayerStatus) => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerApi | null>(null);
   const trackIdRef = useRef<string | null>(null);
   const playbackRef = useRef(playback);
+  const onStatusRef = useRef(onStatus);
+  const isDjRef = useRef(isDj);
+  const onEndedRef = useRef(onEnded);
   const [ready, setReady] = useState(false);
 
   playbackRef.current = playback;
+  onStatusRef.current = onStatus;
+  isDjRef.current = isDj;
+  onEndedRef.current = onEnded;
 
   useEffect(() => {
     let active = true;
@@ -76,7 +96,15 @@ export function YouTubePlayer({
         events: {
           onReady: () => setReady(true),
           onStateChange: (event) => {
-            if (event.data === window.YT?.PlayerState.ENDED && isDj) onEnded();
+            if (event.data === window.YT?.PlayerState.ENDED && isDjRef.current) {
+              onEndedRef.current();
+            }
+            onStatusRef.current({
+              ready: true,
+              buffering: event.data === window.YT?.PlayerState.BUFFERING,
+              currentTime: playerRef.current?.getCurrentTime() || 0,
+              duration: playerRef.current?.getDuration() || 0
+            });
           }
         }
       });
@@ -103,14 +131,28 @@ export function YouTubePlayer({
   }, [ready, playback.track?.id, playback.playing, playback.position, playback.updatedAt]);
 
   useEffect(() => {
+    if (!ready || !playerRef.current) return;
+    playerRef.current.setVolume(volume);
+  }, [ready, volume]);
+
+  useEffect(() => {
     if (!ready) return;
     const timer = window.setInterval(() => {
       const player = playerRef.current;
       const current = playbackRef.current;
-      if (!player || !current.playing || !current.track) return;
-      const expected = targetPosition(current);
-      if (Math.abs(player.getCurrentTime() - expected) > 2.5) player.seekTo(expected, true);
-    }, 5000);
+      if (!player || !current.track) return;
+      const currentTime = player.getCurrentTime();
+      onStatusRef.current({
+        ready: true,
+        buffering: player.getPlayerState() === window.YT?.PlayerState.BUFFERING,
+        currentTime,
+        duration: player.getDuration() || 0
+      });
+      if (current.playing) {
+        const expected = targetPosition(current);
+        if (Math.abs(currentTime - expected) > 2.5) player.seekTo(expected, true);
+      }
+    }, 750);
     return () => window.clearInterval(timer);
   }, [ready]);
 
