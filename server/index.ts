@@ -18,6 +18,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
+const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const authEnabled = Boolean(
   supabaseUrl &&
   supabasePublishableKey &&
@@ -27,6 +28,19 @@ const authEnabled = Boolean(
 );
 const roomUsers = new Map<string, Map<string, User>>();
 const socketRooms = new Map<string, string>();
+const youtubeSearchCache = new Map<string, {
+  expiresAt: number;
+  results: YouTubeSearchResult[];
+}>();
+const youtubeSearchLimits = new Map<string, { count: number; resetAt: number }>();
+
+interface YouTubeSearchResult {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  duration?: string;
+}
 
 const userSchema = z.object({
   id: z.string().min(1).max(100),
@@ -50,6 +64,43 @@ const playbackSchema = z.object({
   playing: z.boolean(),
   position: z.number().min(0).max(60 * 60 * 24)
 });
+
+const youtubeSearchSchema = z.object({
+  q: z.string().trim().min(2).max(100)
+});
+
+function decodeYouTubeText(value: string) {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function formatYouTubeDuration(value?: string) {
+  if (!value) return undefined;
+  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return undefined;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3] || 0);
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+async function hasApiAccess(request: express.Request) {
+  if (!authEnabled) return true;
+  const authorization = request.get("authorization");
+  const token = authorization?.match(/^Bearer (.+)$/i)?.[1];
+  if (!token) return false;
+  const { data, error } = await verifyCredentials(
+    { token, apikey: null },
+    { auth: "user" }
+  );
+  return !error && Boolean(data.userClaims);
+}
 
 function createRoom(id: string, ownerUserId: string, name?: string): Room {
   return {
@@ -240,6 +291,110 @@ io.on("connection", (socket) => {
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
+});
+
+app.get("/api/youtube/search", async (request, response) => {
+  if (!(await hasApiAccess(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!youtubeApiKey) {
+    return response.status(503).json({ error: "YouTube search is not configured yet." });
+  }
+
+  const parsed = youtubeSearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  }
+
+  const now = Date.now();
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const currentLimit = youtubeSearchLimits.get(rateKey);
+  const limit = !currentLimit || currentLimit.resetAt <= now
+    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+    : currentLimit;
+  if (limit.count >= 30) {
+    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
+  }
+  limit.count += 1;
+  youtubeSearchLimits.set(rateKey, limit);
+
+  const cacheKey = parsed.data.q.toLocaleLowerCase();
+  const cached = youtubeSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return response.json({ results: cached.results });
+  }
+
+  try {
+    const searchParams = new URLSearchParams({
+      key: youtubeApiKey,
+      part: "snippet",
+      type: "video",
+      videoEmbeddable: "true",
+      safeSearch: "moderate",
+      maxResults: "12",
+      q: parsed.data.q
+    });
+    const searchResponse = await fetch(`https://www.googleapis.com/youtube/v3/search?${searchParams}`);
+    const searchPayload = await searchResponse.json() as {
+      error?: { message?: string };
+      items?: Array<{
+        id: { videoId?: string };
+        snippet: {
+          title: string;
+          channelTitle: string;
+          thumbnails: {
+            medium?: { url: string };
+            default?: { url: string };
+          };
+        };
+      }>;
+    };
+    if (!searchResponse.ok) {
+      throw new Error(searchPayload.error?.message || "YouTube search failed.");
+    }
+
+    const items = (searchPayload.items || []).filter((item) => item.id.videoId);
+    const ids = items.map((item) => item.id.videoId!).join(",");
+    const durations = new Map<string, string>();
+    if (ids) {
+      const videoParams = new URLSearchParams({
+        key: youtubeApiKey,
+        part: "contentDetails",
+        id: ids
+      });
+      const videoResponse = await fetch(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`);
+      if (videoResponse.ok) {
+        const videoPayload = await videoResponse.json() as {
+          items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
+        };
+        for (const video of videoPayload.items || []) {
+          const duration = formatYouTubeDuration(video.contentDetails?.duration);
+          if (duration) durations.set(video.id, duration);
+        }
+      }
+    }
+
+    const results: YouTubeSearchResult[] = items.map((item) => ({
+      id: item.id.videoId!,
+      title: decodeYouTubeText(item.snippet.title),
+      channel: decodeYouTubeText(item.snippet.channelTitle),
+      thumbnail:
+        item.snippet.thumbnails.medium?.url ||
+        item.snippet.thumbnails.default?.url ||
+        `https://i.ytimg.com/vi/${item.id.videoId}/mqdefault.jpg`,
+      duration: durations.get(item.id.videoId!)
+    }));
+    youtubeSearchCache.set(cacheKey, {
+      expiresAt: now + 5 * 60 * 1000,
+      results
+    });
+    response.json({ results });
+  } catch (error) {
+    console.error("YouTube search failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "YouTube search failed."
+    });
+  }
 });
 
 app.get("/api/config", (_request, response) => {

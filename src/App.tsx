@@ -257,7 +257,12 @@ export function App() {
       {notice && <div className="toast">{notice}</div>}
 
       <section className="room-layout">
-        <MusicRail snapshot={snapshot} isDj={isDj} setNotice={setNotice} />
+        <MusicRail
+          snapshot={snapshot}
+          isDj={isDj}
+          accessToken={auth.session?.access_token}
+          setNotice={setNotice}
+        />
         <div className="player-column">
           <NowPlaying snapshot={snapshot} isDj={isDj} />
         </div>
@@ -443,16 +448,32 @@ function NowPlaying({ snapshot, isDj }: { snapshot: RoomSnapshot; isDj: boolean 
   );
 }
 
+interface YouTubeSearchResult {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  duration?: string;
+}
+
 function MusicRail({
   snapshot,
   isDj,
+  accessToken,
   setNotice
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
+  accessToken?: string;
   setNotice: (message: string) => void;
 }) {
   const [tab, setTab] = useState<"history" | "search" | "queue">("queue");
+  const [provider, setProvider] = useState<"youtube" | "spotify" | "apple" | "soundcloud">("youtube");
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<YouTubeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [addingResultId, setAddingResultId] = useState("");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
@@ -480,6 +501,7 @@ function MusicRail({
       "queue:add",
       { provider: "youtube", providerId, title: resolvedTitle || "YouTube track" },
       (result: { ok: boolean; error?: string }) => {
+        setAddingResultId("");
         if (!result.ok) return setNotice(result.error || "Could not add track");
         setUrl("");
         setTitle("");
@@ -496,6 +518,36 @@ function MusicRail({
 
   const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
     void addTrack(track.providerId, track.title);
+  };
+
+  const searchYouTube = async (event: FormEvent) => {
+    event.preventDefault();
+    const searchQuery = query.trim();
+    if (searchQuery.length < 2) return setSearchError("Enter at least 2 characters.");
+
+    setSearching(true);
+    setSearchError("");
+    try {
+      const response = await fetch(`/api/youtube/search?q=${encodeURIComponent(searchQuery)}`, {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
+      });
+      const payload = await response.json() as {
+        results?: YouTubeSearchResult[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "Could not search YouTube.");
+      setSearchResults(payload.results || []);
+    } catch (error) {
+      setSearchResults([]);
+      setSearchError(error instanceof Error ? error.message : "Could not search YouTube.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const addSearchResult = (result: YouTubeSearchResult) => {
+    setAddingResultId(result.id);
+    void addTrack(result.id, result.title);
   };
 
   return (
@@ -521,32 +573,96 @@ function MusicRail({
       {tab === "search" && (
         <div className="rail-pane search-pane">
           <div className="rail-pane-title">
-            <span>ADD FROM YOUTUBE</span>
-            <small>Paste a link or video ID</small>
+            <span>SEARCH MUSIC</span>
+            <small>Add results to the shared queue</small>
           </div>
-          <form className="rail-search-form" onSubmit={add}>
-            <label>
-              YouTube link
+          <form className="provider-search-form" onSubmit={searchYouTube}>
+            <Search size={16} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search YouTube"
+              autoFocus
+            />
+            {query && (
+              <button
+                type="button"
+                className="clear-search"
+                aria-label="Clear search"
+                onClick={() => {
+                  setQuery("");
+                  setSearchResults([]);
+                  setSearchError("");
+                }}
+              >
+                ×
+              </button>
+            )}
+            <span className="provider-divider" />
+            <select
+              value={provider}
+              onChange={(event) => setProvider(event.target.value as typeof provider)}
+              aria-label="Music provider"
+            >
+              <option value="youtube">YouTube</option>
+              <option value="spotify" disabled>Spotify · Soon</option>
+              <option value="apple" disabled>Apple Music · Soon</option>
+              <option value="soundcloud" disabled>SoundCloud · Soon</option>
+            </select>
+            <button type="submit" className="search-submit" disabled={searching || provider !== "youtube"}>
+              {searching ? "…" : "Go"}
+            </button>
+          </form>
+
+          <div className="search-result-list">
+            {searchError && <div className="rail-search-state error">{searchError}</div>}
+            {!searchError && searching && (
+              <div className="rail-search-state"><div className="equalizer"><i /><i /><i /><i /></div><span>Searching YouTube…</span></div>
+            )}
+            {!searchError && !searching && searchResults.map((result) => (
+              <div className="search-result-row" key={result.id}>
+                <span className="search-provider-mark">▶</span>
+                <img src={result.thumbnail} alt="" />
+                <span className="search-result-copy">
+                  <strong>{result.title}</strong>
+                  <small>{result.channel}{result.duration ? ` · ${result.duration}` : ""}</small>
+                </span>
+                <button
+                  type="button"
+                  title="Add to shared queue"
+                  disabled={addingResultId === result.id}
+                  onClick={() => addSearchResult(result)}
+                >
+                  {addingResultId === result.id ? "…" : <PlusIcon size={15} />}
+                </button>
+              </div>
+            ))}
+            {!searchError && !searching && !searchResults.length && (
+              <div className="rail-search-state">
+                <Search size={22} />
+                <span>Search YouTube for a song, artist, or video.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="manual-add">
+            <div className="manual-add-heading">
+              <span>MANUAL ADD</span>
+              <small>YouTube URL or video ID</small>
+            </div>
+            <form className="rail-manual-add" onSubmit={add}>
               <input
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
                 placeholder="youtube.com/watch?v=…"
-                autoFocus
               />
-            </label>
-            <label>
-              Title <small>optional</small>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Fetched automatically"
+                placeholder="Title (optional)"
               />
-            </label>
-            <button type="submit"><PlusIcon size={15} /> Add to shared queue</button>
-          </form>
-          <div className="provider-note">
-            <span className="youtube-badge">▶</span>
-            YouTube is connected. Spotify and Apple Music can be added later.
+              <button type="submit"><PlusIcon size={14} /> Add manually</button>
+            </form>
           </div>
         </div>
       )}

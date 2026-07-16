@@ -54,6 +54,7 @@ SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_SECRET_KEY=your-secret-key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
 GIPHY_API_KEY=your-giphy-api-key
+YOUTUBE_API_KEY=your-youtube-data-api-key
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 VITE_GIPHY_API_KEY=your-giphy-api-key
@@ -89,6 +90,11 @@ stored in the public `chat-media` Supabase Storage bucket created by
 GIPHY developer key in `VITE_GIPHY_API_KEY`; without it, the GIF button remains
 disabled. In Dokploy, set `GIPHY_API_KEY` instead; SoundSpin exposes that public
 key to the browser through its runtime configuration endpoint.
+
+YouTube keyword search requires a YouTube Data API v3 key in
+`YOUTUBE_API_KEY`. Keep this server-side variable in `.env` locally and in
+Dokploy's environment settings in production. The browser calls SoundSpin's
+authenticated search endpoint; the key is never returned to the client.
 
 ## Production
 

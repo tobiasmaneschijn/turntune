@@ -10,6 +10,7 @@ services:
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
       SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
       GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
     volumes:
       - soundspin-data:/app/data
     ports:
