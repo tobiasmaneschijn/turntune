@@ -150,6 +150,41 @@ export const RealtimeChat = ({
     await sendMediaMessage('image', data.publicUrl, file.name, storagePath)
   }
 
+  const pasteMedia = async (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const imageItem = Array.from(event.clipboardData.items).find(
+      (item) => item.kind === 'file' && item.type.startsWith('image/')
+    )
+    const imageFile = imageItem?.getAsFile()
+    if (imageFile) {
+      event.preventDefault()
+      await uploadImage(imageFile)
+      return
+    }
+
+    const html = event.clipboardData.getData('text/html')
+    const htmlImageUrl = html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]
+    const plainText = event.clipboardData.getData('text/plain').trim()
+    const candidate = htmlImageUrl || plainText
+
+    try {
+      const url = new URL(candidate)
+      const isImageUrl =
+        url.protocol === 'https:' &&
+        (
+          /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href) ||
+          /(^|\.)giphy\.com$|(^|\.)giphy\.media$/i.test(url.hostname)
+        )
+
+      if (isImageUrl) {
+        event.preventDefault()
+        const isGif = /\.gif(?:$|[?#])/i.test(url.href) || /giphy/i.test(url.hostname)
+        await sendMediaMessage(isGif ? 'gif' : 'image', url.href, isGif ? 'Pasted GIF' : 'Pasted image')
+      }
+    } catch {
+      // Clipboard text is not an image URL, so let the browser paste it normally.
+    }
+  }
+
   const loadGifs = async (query = '') => {
     if (!giphyKey) return
     setMediaError('')
@@ -330,7 +365,8 @@ export const RealtimeChat = ({
           value={newMessage}
           maxLength={500}
           onChange={(e) => setNewMessage(e.target.value)}
-          placeholder={uploading ? 'Uploading image…' : 'Type a message...'}
+          onPaste={(event) => void pasteMedia(event)}
+          placeholder={uploading ? 'Uploading image…' : 'Type or paste an image…'}
           disabled={!isConnected || uploading}
         />
         <Button
