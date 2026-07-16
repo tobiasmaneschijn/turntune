@@ -1,0 +1,14 @@
+services:
+  soundspin:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DATA_DIR: /app/data
+    volumes:
+      - soundspin-data:/app/data
+    ports:
+      - "3000:3000"
+
+volumes:
+  soundspin-data:
