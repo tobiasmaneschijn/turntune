@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import { Clock3, ListMusic, Search } from "lucide-react";
 import { Avatar } from "./components/Avatar";
 import {
   CopyIcon,
@@ -256,9 +257,9 @@ export function App() {
       {notice && <div className="toast">{notice}</div>}
 
       <section className="room-layout">
-        <div className="music-column">
+        <MusicRail snapshot={snapshot} isDj={isDj} setNotice={setNotice} />
+        <div className="player-column">
           <NowPlaying snapshot={snapshot} isDj={isDj} />
-          <Queue snapshot={snapshot} isDj={isDj} setNotice={setNotice} />
         </div>
         <RoomChat
           snapshot={snapshot}
@@ -442,7 +443,7 @@ function NowPlaying({ snapshot, isDj }: { snapshot: RoomSnapshot; isDj: boolean 
   );
 }
 
-function Queue({
+function MusicRail({
   snapshot,
   isDj,
   setNotice
@@ -451,62 +452,174 @@ function Queue({
   isDj: boolean;
   setNotice: (message: string) => void;
 }) {
-  const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState<"history" | "search" | "queue">("queue");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
+  const [adding, setAdding] = useState(false);
 
-  const add = (event: FormEvent) => {
-    event.preventDefault();
-    const providerId = youtubeId(url);
+  const addTrack = async (trackUrl: string, trackTitle?: string) => {
+    const providerId = youtubeId(trackUrl);
     if (!providerId) return setNotice("Please enter a valid YouTube URL");
+
+    let resolvedTitle = trackTitle?.trim();
+    if (!resolvedTitle) {
+      try {
+        const response = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${providerId}`)}&format=json`
+        );
+        if (response.ok) {
+          const metadata = await response.json() as { title?: string };
+          resolvedTitle = metadata.title;
+        }
+      } catch {
+        // Fall back to a generic title if YouTube metadata is unavailable.
+      }
+    }
+
     socket.emit(
       "queue:add",
-      { provider: "youtube", providerId, title: title.trim() || "YouTube track" },
+      { provider: "youtube", providerId, title: resolvedTitle || "YouTube track" },
       (result: { ok: boolean; error?: string }) => {
         if (!result.ok) return setNotice(result.error || "Could not add track");
         setUrl("");
         setTitle("");
         setAdding(false);
+        setTab("queue");
       }
     );
   };
 
+  const add = (event: FormEvent) => {
+    event.preventDefault();
+    void addTrack(url, title);
+  };
+
+  const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
+    void addTrack(track.providerId, track.title);
+  };
+
   return (
-    <section className="queue panel">
-      <div className="panel-title">
-        <div>
-          <span>UP NEXT</span>
-          <small>{snapshot.room.queue.length} tracks in the queue</small>
+    <aside className="music-rail panel">
+      <div className="music-rail-heading">
+        <span>MUSIC</span>
+        <strong>Shared by everyone</strong>
+      </div>
+
+      <div className="music-tabs" role="tablist" aria-label="Music tools">
+        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+          <Clock3 size={14} /> History
+        </button>
+        <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}>
+          <Search size={14} /> Search
+        </button>
+        <button className={tab === "queue" ? "active" : ""} onClick={() => setTab("queue")}>
+          <ListMusic size={14} /> Queue
+          {snapshot.room.queue.length > 0 && <i>{snapshot.room.queue.length}</i>}
+        </button>
+      </div>
+
+      {tab === "search" && (
+        <div className="rail-pane search-pane">
+          <div className="rail-pane-title">
+            <span>ADD FROM YOUTUBE</span>
+            <small>Paste a link or video ID</small>
+          </div>
+          <form className="rail-search-form" onSubmit={add}>
+            <label>
+              YouTube link
+              <input
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="youtube.com/watch?v=…"
+                autoFocus
+              />
+            </label>
+            <label>
+              Title <small>optional</small>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Fetched automatically"
+              />
+            </label>
+            <button type="submit"><PlusIcon size={15} /> Add to shared queue</button>
+          </form>
+          <div className="provider-note">
+            <span className="youtube-badge">▶</span>
+            YouTube is connected. Spotify and Apple Music can be added later.
+          </div>
         </div>
-        <button className="add-track" onClick={() => setAdding(!adding)}><PlusIcon size={17} /> Add track</button>
-      </div>
-      {adding && (
-        <form className="add-form" onSubmit={add}>
-          <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Paste a YouTube link" autoFocus />
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Track title (optional)" />
-          <button type="submit">Add</button>
-        </form>
       )}
-      <div className="queue-list">
-        {snapshot.room.queue.map((track, index) => (
-          <button
-            className="queue-row"
-            key={track.id}
-            disabled={!isDj}
-            onClick={() => socket.emit("queue:play", track.id)}
-          >
-            <span className="queue-number">{String(index + 1).padStart(2, "0")}</span>
-            <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
-            <span className="queue-copy">
-              <strong>{track.title}</strong>
-              <small>Added by {track.addedBy.name}</small>
-            </span>
-            <Avatar user={track.addedBy} size={28} />
-          </button>
-        ))}
-        {!snapshot.room.queue.length && <p className="empty-list">The queue is wide open. Add something good.</p>}
-      </div>
-    </section>
+
+      {tab === "history" && (
+        <div className="rail-pane">
+          <div className="rail-pane-title">
+            <span>RECENTLY PLAYED</span>
+            <small>{snapshot.room.history.length} tracks</small>
+          </div>
+          <div className="rail-track-list">
+            {snapshot.room.history.map((track, index) => (
+              <div className="rail-track-row" key={`${track.id}-${index}`}>
+                <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
+                <span className="rail-track-copy">
+                  <strong>{track.title}</strong>
+                  <small>Added by {track.addedBy.name}</small>
+                </span>
+                <button title="Add to queue again" onClick={() => addAgain(track)}>
+                  <PlusIcon size={14} />
+                </button>
+              </div>
+            ))}
+            {!snapshot.room.history.length && (
+              <div className="rail-empty"><Clock3 size={22} /><p>Played tracks will appear here.</p></div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && (
+        <div className="rail-pane">
+          <div className="rail-pane-title queue-title">
+            <div>
+              <span>SHARED QUEUE</span>
+              <small>Anyone can add tracks</small>
+            </div>
+            <button className="rail-add-button" onClick={() => { setAdding(!adding); setTab("queue"); }}>
+              <PlusIcon size={14} /> Add
+            </button>
+          </div>
+          {adding && (
+            <form className="rail-quick-add" onSubmit={add}>
+              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Paste YouTube link" autoFocus />
+              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title (optional)" />
+              <button type="submit">Add to queue</button>
+            </form>
+          )}
+          <div className="rail-track-list">
+            {snapshot.room.queue.map((track, index) => (
+              <button
+                className="rail-track-row queue-track"
+                key={track.id}
+                disabled={!isDj}
+                title={isDj ? "Play this track now" : "The DJ controls playback"}
+                onClick={() => socket.emit("queue:play", track.id)}
+              >
+                <span className="rail-track-number">{String(index + 1).padStart(2, "0")}</span>
+                <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
+                <span className="rail-track-copy">
+                  <strong>{track.title}</strong>
+                  <small>{track.addedBy.name}</small>
+                </span>
+                <Avatar user={track.addedBy} size={24} />
+              </button>
+            ))}
+            {!snapshot.room.queue.length && (
+              <div className="rail-empty"><ListMusic size={22} /><p>The shared queue is empty.</p></div>
+            )}
+          </div>
+        </div>
+      )}
+    </aside>
   );
 }
 

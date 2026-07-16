@@ -58,6 +58,7 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
     ownerUserId,
     djUserId: null,
     queue: [],
+    history: [],
     playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
     createdAt: Date.now()
   };
@@ -132,6 +133,7 @@ io.on("connection", (socket) => {
     try {
       const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
       if (!room.ownerUserId) room.ownerUserId = user.id;
+      if (!room.history) room.history = [];
       if (room.ownerUserId === user.id || !room.djUserId) room.djUserId = user.id;
       await store.saveRoom(room);
 
@@ -188,6 +190,10 @@ io.on("connection", (socket) => {
     const index = membership.room.queue.findIndex((track) => track.id === trackId);
     if (index < 0) return reply?.({ ok: false, error: "Track not found." });
     const [track] = membership.room.queue.splice(index, 1);
+    if (membership.room.playback.track) {
+      membership.room.history.unshift(membership.room.playback.track);
+      membership.room.history = membership.room.history.slice(0, 100);
+    }
     membership.room.playback = { track, playing: true, position: 0, updatedAt: Date.now() };
     await store.saveRoom(membership.room);
     broadcast(membership.room);
@@ -200,6 +206,10 @@ io.on("connection", (socket) => {
       return reply?.({ ok: false, error: "Only the DJ can skip tracks." });
     }
     const track = membership.room.queue.shift() || null;
+    if (membership.room.playback.track) {
+      membership.room.history.unshift(membership.room.playback.track);
+      membership.room.history = membership.room.history.slice(0, 100);
+    }
     membership.room.playback = { track, playing: Boolean(track), position: 0, updatedAt: Date.now() };
     await store.saveRoom(membership.room);
     broadcast(membership.room);

@@ -59,12 +59,12 @@ button { color: inherit; }
 .sign-out:hover { color: #d7d7dc; }
 .icon-button { border: 1px solid var(--line); background: #121318; border-radius: 8px; padding: 8px 12px; display: flex; gap: 7px; align-items: center; cursor: pointer; font-size: 12px; }
 .avatar { border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: white; flex: 0 0 auto; box-shadow: inset 0 0 0 2px rgba(255,255,255,.12); }
-.room-layout { padding: 28px clamp(18px, 4vw, 58px) 50px; max-width: 1500px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 22px; }
-.music-column { display: grid; gap: 22px; min-width: 0; }
+.room-layout { height: calc(100vh - 72px); padding: 14px; display: grid; grid-template-areas: "rail player chat"; grid-template-columns: 300px minmax(420px, 1fr) 350px; gap: 14px; overflow: hidden; }
+.player-column { grid-area: player; min-width: 0; min-height: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.16); overflow: hidden; }
 .section-kicker { color: #777984; font-size: 9px; font-weight: 800; letter-spacing: 2.2px; margin-bottom: 18px; }
-.now-playing { padding: 22px; position: relative; }
-.track-stage { height: 300px; border-radius: 10px; overflow: hidden; background: #0b0b0d; position: relative; display: grid; place-items: center; }
+.now-playing { height: 100%; padding: 22px; position: relative; display: flex; flex-direction: column; }
+.track-stage { min-height: 300px; flex: 1; border-radius: 10px; overflow: hidden; background: #0b0b0d; position: relative; display: grid; place-items: center; }
 .track-stage > img { width: 100%; height: 100%; object-fit: cover; filter: blur(28px) brightness(.36) saturate(.75); transform: scale(1.14); }
 .youtube-shell { position: absolute; width: min(480px, 72%); aspect-ratio: 16/9; box-shadow: 0 20px 50px rgba(0,0,0,.55); z-index: 2; border-radius: 7px; overflow: hidden; }
 .youtube-shell > div, .youtube-shell iframe { width: 100%; height: 100%; }
@@ -106,7 +106,49 @@ button { color: inherit; }
 .queue-copy small { color: var(--muted); font-size: 10px; }
 .empty-list { text-align: center; color: #676973; font-size: 12px; padding: 28px; }
 
-.chat { display: grid; grid-template-rows: auto auto 1fr auto; height: calc(100vh - 128px); min-height: 560px; position: sticky; top: 100px; }
+.music-rail { grid-area: rail; height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto 1fr; background: rgba(14,15,19,.94); }
+.music-rail-heading { padding: 15px 17px 12px; display: flex; justify-content: space-between; align-items: baseline; }
+.music-rail-heading > span { color: #777984; font-size: 9px; font-weight: 800; letter-spacing: 2px; }
+.music-rail-heading strong { color: #777984; font-size: 9px; font-weight: 500; }
+.music-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.music-tabs button { position: relative; border: 0; border-right: 1px solid var(--line); background: transparent; color: #777984; padding: 11px 5px 10px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 9px; font-weight: 700; cursor: pointer; }
+.music-tabs button:last-child { border-right: 0; }
+.music-tabs button::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 2px; background: transparent; }
+.music-tabs button.active { color: #f3f3f1; }
+.music-tabs button.active::after { background: var(--lime); }
+.music-tabs button i { min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; border-radius: 8px; background: #be5cff; color: white; font-size: 8px; font-style: normal; }
+.rail-pane { min-height: 0; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
+.search-pane { grid-template-rows: auto auto 1fr; }
+.rail-pane-title { padding: 14px 15px 10px; display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; }
+.rail-pane-title > div { display: flex; flex-direction: column; gap: 3px; }
+.rail-pane-title > span, .rail-pane-title div > span { color: #b9bac0; font-size: 9px; font-weight: 800; letter-spacing: 1.4px; }
+.rail-pane-title small { color: #62646d; font-size: 9px; }
+.queue-title { align-items: center; }
+.rail-add-button { border: 0; background: transparent; color: var(--lime); display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.rail-track-list { min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+.rail-track-row { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid rgba(255,255,255,.04); background: transparent; display: grid; grid-template-columns: 40px minmax(0,1fr) 28px; gap: 10px; align-items: center; padding: 8px 12px; color: inherit; text-align: left; }
+.rail-track-row:hover { background: rgba(255,255,255,.025); }
+.rail-track-row > img { width: 40px; height: 40px; border-radius: 5px; object-fit: cover; }
+.rail-track-row > button { width: 27px; height: 27px; border: 1px solid var(--line); border-radius: 50%; background: transparent; color: #898b94; display: grid; place-items: center; cursor: pointer; }
+.rail-track-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rail-track-copy strong { overflow: hidden; color: #dedee2; font-size: 11px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.rail-track-copy small { overflow: hidden; color: #6f717a; font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
+.queue-track { grid-template-columns: 20px 40px minmax(0,1fr) 24px; cursor: pointer; }
+.queue-track:disabled { cursor: default; opacity: .8; }
+.rail-track-number { color: #51535c; font: 600 9px "Manrope"; }
+.rail-empty { height: 180px; color: #555761; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; font-size: 10px; }
+.rail-search-form, .rail-quick-add { padding: 8px 14px 14px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+.rail-search-form label { color: #7e8089; font-size: 9px; font-weight: 600; }
+.rail-search-form label small { float: right; color: #51535b; font-weight: 400; }
+.rail-search-form input, .rail-quick-add input { width: 100%; margin-top: 6px; border: 1px solid #292a31; border-radius: 7px; background: #0d0e12; color: #f5f5f4; padding: 9px 10px; outline: 0; font-size: 11px; }
+.rail-search-form input:focus, .rail-quick-add input:focus { border-color: #62654a; }
+.rail-search-form > button, .rail-quick-add > button { border: 0; border-radius: 7px; background: var(--lime); color: #11120b; padding: 10px; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.rail-quick-add { gap: 7px; background: rgba(0,0,0,.16); }
+.rail-quick-add input { margin-top: 0; }
+.provider-note { margin: 14px; align-self: end; border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: #656771; display: flex; gap: 8px; align-items: center; font-size: 9px; line-height: 1.45; }
+.youtube-badge { width: 24px; height: 18px; flex: 0 0 auto; border-radius: 5px; background: #ff0033; color: white; display: grid; place-items: center; font-size: 8px; }
+
+.chat { grid-area: chat; display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; position: static; }
 .chat-header { padding: 17px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .chat-header div, .chat-header span { display: flex; align-items: center; gap: 8px; }
 .chat-header strong { font: 700 13px "Manrope"; }
@@ -135,11 +177,17 @@ button { color: inherit; }
 .equalizer i:nth-child(1) { height: 8px; }.equalizer i:nth-child(2) { height: 20px; animation-delay: -.3s; }.equalizer i:nth-child(3) { height: 13px; animation-delay: -.6s; }.equalizer i:nth-child(4) { height: 17px; animation-delay: -.15s; }
 @keyframes equalize { to { height: 5px; } }
 
+@media (max-width: 1200px) and (min-width: 901px) {
+  .room-layout { grid-template-columns: 270px minmax(360px, 1fr) 310px; gap: 10px; padding: 10px; }
+  .youtube-shell { width: 84%; }
+}
 @media (max-width: 900px) {
   .welcome-content, .auth-content { grid-template-columns: 1fr; padding: 70px 0; gap: 35px; }
   .welcome h1 { font-size: clamp(48px, 13vw, 72px); }
-  .room-layout { grid-template-columns: 1fr; }
-  .chat { position: static; height: 650px; }
+  .room-layout { height: auto; overflow: visible; grid-template-areas: "player" "rail" "chat"; grid-template-columns: 1fr; }
+  .player-column { min-height: 600px; }
+  .music-rail { height: 620px; }
+  .chat { height: 650px; }
 }
 @media (max-width: 600px) {
   .welcome { padding: 22px; }
@@ -149,8 +197,9 @@ button { color: inherit; }
   .room-heading { justify-self: center; }
   .invite-button span { display: none; }
   .sign-out { display: none; }
-  .room-layout { padding: 16px 12px 35px; }
-  .track-stage { height: 225px; }
+  .room-layout { padding: 10px 8px 30px; }
+  .player-column { min-height: 500px; }
+  .track-stage { min-height: 225px; }
   .youtube-shell { width: 88%; }
   .add-form { grid-template-columns: 1fr; }
   .add-form button { padding: 10px; }

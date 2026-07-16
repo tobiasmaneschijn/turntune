@@ -28,6 +28,7 @@ export interface Room {
   ownerUserId: string;
   djUserId: string | null;
   queue: Track[];
+  history: Track[];
   playback: Playback;
   createdAt: number;
 }
