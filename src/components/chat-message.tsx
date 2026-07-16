@@ -6,13 +6,18 @@ interface ChatMessageItemProps {
   message: ChatMessage
   isOwnMessage: boolean
   showHeader: boolean
+  onOpenProfile?: (userId: string) => void
 }
 
-export const ChatMessageItem = ({ message, isOwnMessage, showHeader }: ChatMessageItemProps) => {
+export const ChatMessageItem = ({ message, isOwnMessage, showHeader, onOpenProfile }: ChatMessageItemProps) => {
   return (
     <div className={cn('chat-message-item', { 'chat-message-grouped': !showHeader })}>
       <div className="chat-message-avatar">
-        {showHeader && <Avatar user={message.user} size={30} />}
+        {showHeader && (
+          <button type="button" title={`Open ${message.user.name}'s profile`} onClick={() => onOpenProfile?.(message.user.id)}>
+            <Avatar user={message.user} size={30} />
+          </button>
+        )}
       </div>
       <div className="chat-message-content">
         {showHeader && (

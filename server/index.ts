@@ -7,6 +7,7 @@ import { verifyCredentials } from "@supabase/server/core";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
+import { TRACK_LIKED_XP } from "./progression.js";
 import type { Room, RoomSnapshot, Track, User } from "./types.js";
 
 const port = Number(process.env.PORT || 3000);
@@ -81,6 +82,12 @@ const youtubeSearchSchema = z.object({
   q: z.string().trim().min(2).max(100)
 });
 
+const profileUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(32).optional(),
+  bio: z.string().trim().max(160).optional(),
+  avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional()
+}).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.");
+
 function decodeYouTubeText(value: string) {
   return value
     .replaceAll("&amp;", "&")
@@ -102,16 +109,16 @@ function formatYouTubeDuration(value?: string) {
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-async function hasApiAccess(request: express.Request) {
-  if (!authEnabled) return true;
+async function getApiUserId(request: express.Request) {
+  if (!authEnabled) return null;
   const authorization = request.get("authorization");
   const token = authorization?.match(/^Bearer (.+)$/i)?.[1];
-  if (!token) return false;
+  if (!token) return null;
   const { data, error } = await verifyCredentials(
     { token, apikey: null },
     { auth: "user" }
   );
-  return !error && Boolean(data.userClaims);
+  return error ? null : data.userClaims?.id || null;
 }
 
 function createRoom(id: string, ownerUserId: string, name?: string): Room {
@@ -189,12 +196,22 @@ io.on("connection", (socket) => {
     }
     leaveCurrentRoom(socket.id);
     const { roomId, roomName } = parsed.data;
-    const user = {
+    let user: User = {
       ...parsed.data.user,
       id: authEnabled ? socket.data.authUserId : parsed.data.user.id
     };
 
     try {
+      if (authEnabled) {
+        const soundspinProfile = await store.loadOrCreateProfile(user.id, user.name);
+        if (soundspinProfile) {
+          user = {
+            ...user,
+            name: soundspinProfile.display_name,
+            avatarKey: soundspinProfile.avatar_key
+          };
+        }
+      }
       const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
       if (!room.ownerUserId) room.ownerUserId = user.id;
       if (!room.history) room.history = [];
@@ -404,8 +421,30 @@ io.on("connection", (socket) => {
     } else {
       membership.room.vibe.votes[membership.user.id] = parsed.data.value;
     }
+    let awardedXp = false;
+    if (parsed.data.value === 1) {
+      try {
+        awardedXp = await store.awardTrackLikedXp(
+          track.addedBy.id,
+          membership.room.id,
+          track.id
+        );
+      } catch (error) {
+        console.error(error);
+      }
+    }
     await store.saveRoom(membership.room);
     broadcast(membership.room);
+    if (awardedXp) {
+      for (const [socketId, roomUser] of roomUsers.get(membership.room.id) || []) {
+        if (roomUser.id === track.addedBy.id) {
+          io.to(socketId).emit("profile:xp", {
+            amount: TRACK_LIKED_XP,
+            message: `${membership.user.name} liked your track`
+          });
+        }
+      }
+    }
     reply?.({ ok: true });
   });
 
@@ -416,8 +455,45 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
+app.get("/api/profiles/:userId", async (request, response) => {
+  if (!(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  const userId = z.string().uuid().safeParse(request.params.userId);
+  if (!userId.success) return response.status(400).json({ error: "Invalid profile." });
+  try {
+    const [profile, unlocks] = await Promise.all([
+      store.getProfile(userId.data),
+      store.getUnlocks()
+    ]);
+    if (!profile) return response.status(404).json({ error: "Profile not found." });
+    response.json({ profile, unlocks });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : "Could not load profile."
+    });
+  }
+});
+
+app.patch("/api/profile", express.json(), async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  const parsed = profileUpdateSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid profile." });
+  }
+  try {
+    const profile = await store.updateProfile(userId, parsed.data);
+    response.json({ profile });
+  } catch (error) {
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Could not update profile."
+    });
+  }
+});
+
 app.get("/api/youtube/search", async (request, response) => {
-  if (!(await hasApiAccess(request))) {
+  if (authEnabled && !(await getApiUserId(request))) {
     return response.status(401).json({ error: "Authentication required." });
   }
   if (!youtubeApiKey) {

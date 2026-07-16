@@ -10,6 +10,7 @@ interface UseRealtimeChatProps {
     id: string
     name: string
     avatarSeed: string
+    avatarKey?: string
   }
 }
 
@@ -23,6 +24,7 @@ export interface ChatMessage {
     id: string
     name: string
     avatarSeed: string
+    avatarKey?: string
   }
   createdAt: string
 }

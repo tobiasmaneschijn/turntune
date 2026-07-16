@@ -16,6 +16,7 @@ import {
   Volume2
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
+import { ProfilePage } from "./components/ProfilePage";
 import {
   CopyIcon,
   MessageIcon,
@@ -34,7 +35,7 @@ import { RealtimeChat } from "./components/realtime-chat";
 import type { ChatMessage as RealtimeChatMessage } from "./hooks/use-realtime-chat";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
-import type { RoomSnapshot, User } from "./types";
+import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
 
 function randomId() {
   return crypto.randomUUID();
@@ -54,16 +55,21 @@ function getRoomId() {
   return match?.[1] || null;
 }
 
+function getProfilePageId() {
+  const match = location.pathname.match(/^\/profile\/([0-9a-f-]{36})$/i);
+  return match?.[1] || null;
+}
+
 function readProfile(): User {
   const stored = localStorage.getItem("soundspin-profile");
   if (stored) {
     try {
-      return JSON.parse(stored) as User;
+      return { avatarKey: "pulse", ...(JSON.parse(stored) as User) };
     } catch {
       // Create a fresh profile below.
     }
   }
-  return { id: randomId(), name: "", avatarSeed: randomId() };
+  return { id: randomId(), name: "", avatarSeed: randomId(), avatarKey: "pulse" };
 }
 
 function youtubeId(value: string) {
@@ -83,6 +89,9 @@ function youtubeId(value: string) {
 export function App() {
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
+  const [profilePageId, setProfilePageId] = useState(getProfilePageId);
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileRefresh, setProfileRefresh] = useState(0);
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
   const [compactPlayer, setCompactPlayer] = useState(false);
@@ -103,6 +112,7 @@ export function App() {
       .then(async (client) => {
         if (!active) return;
         if (!client) {
+          setProfileReady(true);
           setAuth({ loading: false, client: null, session: null, enabled: false, recovery: false });
           return;
         }
@@ -146,11 +156,51 @@ export function App() {
     const nextProfile = {
       id: authUser.id,
       name: String(authUser.user_metadata.display_name || authUser.email?.split("@")[0] || ""),
-      avatarSeed: authUser.id
+      avatarSeed: authUser.id,
+      avatarKey: "pulse"
     };
     localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
     setProfile(nextProfile);
   }, [auth.session?.user.id, profile.id]);
+
+  useEffect(() => {
+    const session = auth.session;
+    if (!auth.enabled) {
+      setProfileReady(true);
+      return;
+    }
+    if (!session || !auth.client) {
+      setProfileReady(false);
+      return;
+    }
+
+    let active = true;
+    setProfileReady(false);
+    void fetch(`/api/profiles/${session.user.id}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+      .then(async (response) => {
+        const payload = await response.json() as { profile?: SoundSpinProfile };
+        if (!response.ok || !payload.profile) return;
+        const nextProfile: User = {
+          id: payload.profile.user_id,
+          name: payload.profile.display_name,
+          avatarSeed: payload.profile.user_id,
+          avatarKey: payload.profile.avatar_key
+        };
+        if (active) {
+          localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+          setProfile(nextProfile);
+        }
+      })
+      .catch(() => {
+        // The room join path will create a missing profile after migrations deploy.
+      })
+      .finally(() => {
+        if (active) setProfileReady(true);
+      });
+    return () => { active = false; };
+  }, [auth.enabled, auth.client, auth.session?.user.id, auth.session?.access_token]);
 
   useEffect(() => {
     if (auth.enabled && !auth.session) {
@@ -167,8 +217,12 @@ export function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      setRoomId(getRoomId());
-      setSnapshot(null);
+      const nextRoomId = getRoomId();
+      setRoomId((currentRoomId) => {
+        if (currentRoomId !== nextRoomId) setSnapshot(null);
+        return nextRoomId;
+      });
+      setProfilePageId(getProfilePageId());
     };
     addEventListener("popstate", onPopState);
     return () => removeEventListener("popstate", onPopState);
@@ -188,18 +242,24 @@ export function App() {
     const onDisconnect = () => setConnected(false);
     const onConnectError = (error: Error) => setNotice(error.message);
     const onSnapshot = (next: RoomSnapshot) => setSnapshot(next);
+    const onXp = (event: { amount: number; message: string }) => {
+      setNotice(`+${event.amount} XP · ${event.message}`);
+      setProfileRefresh((revision) => revision + 1);
+    };
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("room:snapshot", onSnapshot);
+    socket.on("profile:xp", onXp);
     if (socket.connected) onConnect();
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("room:snapshot", onSnapshot);
+      socket.off("profile:xp", onXp);
     };
-  }, [roomId, profile.id, profile.name, profile.avatarSeed, auth.loading, auth.enabled, auth.session?.access_token]);
+  }, [roomId, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, auth.loading, auth.enabled, auth.session?.access_token]);
 
   const enterRoom = (name: string, roomName?: string) => {
     const nextProfile = { ...profile, name: name.trim() };
@@ -213,7 +273,7 @@ export function App() {
     setRoomId(id);
   };
 
-  if (auth.loading || (auth.enabled && auth.session && profile.id !== auth.session.user.id)) {
+  if (auth.loading || (auth.enabled && auth.session && (profile.id !== auth.session.user.id || !profileReady))) {
     return <LoadingScreen label="Restoring your session…" />;
   }
 
@@ -228,6 +288,39 @@ export function App() {
         onComplete={() => {
           history.replaceState({}, "", "/");
           setAuth((current) => ({ ...current, recovery: false }));
+        }}
+      />
+    );
+  }
+
+  const openProfile = (userId: string) => {
+    history.pushState({ from: location.pathname }, "", `/profile/${userId}`);
+    setProfilePageId(userId);
+  };
+
+  if (profilePageId && auth.session) {
+    return (
+      <ProfilePage
+        key={`${profilePageId}:${profileRefresh}`}
+        profileId={profilePageId}
+        accessToken={auth.session.access_token}
+        currentUser={profile}
+        onBack={() => {
+          if (history.state?.from) history.back();
+          else {
+            history.pushState({}, "", "/");
+            setProfilePageId(null);
+          }
+        }}
+        onOwnProfileUpdated={(updated) => {
+          const nextProfile = {
+            id: updated.user_id,
+            name: updated.display_name,
+            avatarSeed: updated.user_id,
+            avatarKey: updated.avatar_key
+          };
+          localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+          setProfile(nextProfile);
         }}
       />
     );
@@ -266,7 +359,9 @@ export function App() {
             <CopyIcon size={17} />
             <span>Invite</span>
           </button>
-          <Avatar user={profile} size={38} />
+          <button className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
+            <Avatar user={profile} size={38} />
+          </button>
           {auth.enabled && (
             <button className="sign-out" onClick={() => void auth.client?.auth.signOut()}>
               Sign out
@@ -298,6 +393,7 @@ export function App() {
           snapshot={snapshot}
           currentUser={profile}
           client={auth.client!}
+          onOpenProfile={openProfile}
         />
       </section>
     </main>
@@ -1045,11 +1141,13 @@ function MusicRail({
 function RoomChat({
   snapshot,
   currentUser,
-  client
+  client,
+  onOpenProfile
 }: {
   snapshot: RoomSnapshot;
   currentUser: User;
   client: SupabaseClient;
+  onOpenProfile: (userId: string) => void;
 }) {
   const [messages, setMessages] = useState<RealtimeChatMessage[]>([]);
   const [error, setError] = useState("");
@@ -1116,6 +1214,12 @@ function RoomChat({
                 key={user.id}
                 className={user.id === snapshot.room.djUserId ? "chat-presence-dj" : undefined}
                 title={`${user.id === currentUser.id ? "You" : user.name}${user.id === snapshot.room.djUserId ? " · DJ" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenProfile(user.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") onOpenProfile(user.id);
+                }}
               >
                 <Avatar user={user} size={26} />
               </span>
@@ -1133,6 +1237,7 @@ function RoomChat({
           user={currentUser}
           messages={messages}
           onSend={persistMessage}
+          onOpenProfile={onOpenProfile}
         />
       </div>
     </aside>

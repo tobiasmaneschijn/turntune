@@ -4,6 +4,26 @@ export interface User {
   id: string;
   name: string;
   avatarSeed: string;
+  avatarKey?: string;
+}
+
+export interface SoundSpinProfile {
+  user_id: string;
+  display_name: string;
+  bio: string;
+  avatar_key: string;
+  xp: number;
+  songs_liked: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SoundSpinUnlock {
+  key: string;
+  kind: "avatar";
+  name: string;
+  required_level: number;
+  metadata: { glyph?: string; gradient?: string };
 }
 
 export interface Track {

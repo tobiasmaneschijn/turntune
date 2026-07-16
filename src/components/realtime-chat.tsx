@@ -26,6 +26,7 @@ interface RealtimeChatProps {
   onMessage?: (messages: ChatMessage[]) => void
   onSend?: (message: ChatMessage) => Promise<void> | void
   messages?: ChatMessage[]
+  onOpenProfile?: (userId: string) => void
 }
 
 /**
@@ -42,6 +43,7 @@ export const RealtimeChat = ({
   user,
   onMessage,
   onSend,
+  onOpenProfile,
   messages: initialMessages = [],
 }: RealtimeChatProps) => {
   const { containerRef, scrollToBottom, isNearBottom } = useChatScroll()
@@ -304,6 +306,7 @@ export const RealtimeChat = ({
                   message={message}
                   isOwnMessage={message.user.id === user.id}
                   showHeader={showHeader}
+                  onOpenProfile={onOpenProfile}
                 />
               </div>
             )

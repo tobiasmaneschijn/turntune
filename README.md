@@ -84,6 +84,13 @@ stored in `soundspin_messages` and created by the
 `20260716214500_realtime_chat.sql` migration. Socket.IO remains responsible for
 synchronized playback and listener presence.
 
+Profiles and progression are created by
+`20260716213923_profiles_and_progression.sql`. Every account receives a public
+SoundSpin profile and a level-based avatar collection. The server awards 10 XP
+once per played track instance when the first eligible listener likes it;
+unique XP events and server-side avatar validation prevent duplicate awards or
+unlock bypasses.
+
 Emoji support works without additional configuration. Uploaded chat images are
 stored in the public `chat-media` Supabase Storage bucket created by
 `20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a
