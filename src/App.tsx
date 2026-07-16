@@ -526,7 +526,7 @@ function RoomChat({
     let active = true;
     void client
       .from("soundspin_messages")
-      .select("id, content, user_id, user_name, avatar_seed, created_at")
+      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at")
       .eq("room_slug", snapshot.room.id)
       .order("created_at", { ascending: false })
       .limit(200)
@@ -540,6 +540,9 @@ function RoomChat({
           (data || []).reverse().map((message) => ({
             id: message.id,
             content: message.content,
+            type: message.message_type,
+            mediaUrl: message.media_url || undefined,
+            storagePath: message.storage_path || undefined,
             user: {
               id: message.user_id,
               name: message.user_name,
@@ -562,6 +565,9 @@ function RoomChat({
       user_name: currentUser.name,
       avatar_seed: currentUser.avatarSeed,
       content: message.content,
+      message_type: message.type,
+      media_url: message.mediaUrl || null,
+      storage_path: message.storagePath || null,
       created_at: message.createdAt
     });
     if (insertError) setError("The message was sent live but could not be saved to history.");

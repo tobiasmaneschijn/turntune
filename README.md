@@ -53,8 +53,10 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_SECRET_KEY=your-secret-key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
+GIPHY_API_KEY=your-giphy-api-key
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+VITE_GIPHY_API_KEY=your-giphy-api-key
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
@@ -80,6 +82,13 @@ Chat is delivered through Supabase Realtime Broadcast. Message history is
 stored in `soundspin_messages` and created by the
 `20260716214500_realtime_chat.sql` migration. Socket.IO remains responsible for
 synchronized playback and listener presence.
+
+Emoji support works without additional configuration. Uploaded chat images are
+stored in the public `chat-media` Supabase Storage bucket created by
+`20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a
+GIPHY developer key in `VITE_GIPHY_API_KEY`; without it, the GIF button remains
+disabled. In Dokploy, set `GIPHY_API_KEY` instead; SoundSpin exposes that public
+key to the browser through its runtime configuration endpoint.
 
 ## Production
 

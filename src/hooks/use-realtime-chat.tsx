@@ -16,6 +16,9 @@ interface UseRealtimeChatProps {
 export interface ChatMessage {
   id: string
   content: string
+  type: 'text' | 'image' | 'gif'
+  mediaUrl?: string
+  storagePath?: string
   user: {
     id: string
     name: string
@@ -54,12 +57,22 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
   }, [client, roomName])
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (
+      content: string,
+      media?: {
+        type: 'image' | 'gif'
+        mediaUrl: string
+        storagePath?: string
+      }
+    ) => {
       if (!channel || !isConnected) return null
 
       const message: ChatMessage = {
         id: crypto.randomUUID(),
         content,
+        type: media?.type || 'text',
+        mediaUrl: media?.mediaUrl,
+        storagePath: media?.storagePath,
         user,
         createdAt: new Date().toISOString(),
       }

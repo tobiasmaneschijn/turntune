@@ -234,6 +234,7 @@ app.get("/api/health", (_request, response) => {
 
 app.get("/api/config", (_request, response) => {
   response.json({
+    giphyKey: process.env.GIPHY_API_KEY || null,
     supabase: authEnabled
       ? { url: supabaseUrl, anonKey: supabasePublishableKey }
       : null

@@ -41,7 +41,18 @@ export const ChatMessageItem = ({ message, isOwnMessage, showHeader }: ChatMessa
             isOwnMessage ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
           )}
         >
-          {message.content}
+          {message.mediaUrl && (
+            <img
+              src={message.mediaUrl}
+              alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
+              className="mb-1 max-h-64 w-full rounded-lg object-contain"
+              loading="lazy"
+            />
+          )}
+          {message.content && message.type === 'text' && message.content}
+          {message.content && message.type !== 'text' && (
+            <span className="sr-only">{message.content}</span>
+          )}
         </div>
       </div>
     </div>
