@@ -10,6 +10,7 @@ and generated avatars.
 - DJ-controlled synchronized YouTube playback
 - Collaborative queue
 - Real-time room chat
+- Supabase Realtime Broadcast chat with persisted message history
 - Deterministic, privacy-friendly avatars
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
@@ -74,6 +75,11 @@ production** enabled, pushing or merging a new timestamped migration into the
 configured production branch applies it automatically. Keep all future schema
 changes as new files in `supabase/migrations`; do not edit an already-deployed
 migration.
+
+Chat is delivered through Supabase Realtime Broadcast. Message history is
+stored in `soundspin_messages` and created by the
+`20260716214500_realtime_chat.sql` migration. Socket.IO remains responsible for
+synchronized playback and listener presence.
 
 ## Production
 

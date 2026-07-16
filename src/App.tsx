@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { Avatar } from "./components/Avatar";
 import {
@@ -7,7 +7,6 @@ import {
   PauseIcon,
   PlayIcon,
   PlusIcon,
-  SendIcon,
   SkipIcon,
   UsersIcon
 } from "./components/Icons";
@@ -16,6 +15,8 @@ import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
 import { UpdatePasswordForm } from "./components/update-password-form";
+import { RealtimeChat } from "./components/realtime-chat";
+import type { ChatMessage as RealtimeChatMessage } from "./hooks/use-realtime-chat";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import type { RoomSnapshot, User } from "./types";
@@ -62,10 +63,6 @@ function youtubeId(value: string) {
     if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
   }
   return null;
-}
-
-function timeLabel(timestamp: number) {
-  return new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" }).format(timestamp);
 }
 
 export function App() {
@@ -263,7 +260,11 @@ export function App() {
           <NowPlaying snapshot={snapshot} isDj={isDj} />
           <Queue snapshot={snapshot} isDj={isDj} setNotice={setNotice} />
         </div>
-        <Chat snapshot={snapshot} currentUser={profile} />
+        <RoomChat
+          snapshot={snapshot}
+          currentUser={profile}
+          client={auth.client!}
+        />
       </section>
     </main>
   );
@@ -509,25 +510,61 @@ function Queue({
   );
 }
 
-function Chat({ snapshot, currentUser }: { snapshot: RoomSnapshot; currentUser: User }) {
-  const [message, setMessage] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
-  const messages = snapshot.room.messages;
-  const grouped = useMemo(() => messages.map((item, index) => ({
-    ...item,
-    compact: messages[index - 1]?.user.id === item.user.id && item.sentAt - messages[index - 1].sentAt < 120000
-  })), [messages]);
+function RoomChat({
+  snapshot,
+  currentUser,
+  client
+}: {
+  snapshot: RoomSnapshot;
+  currentUser: User;
+  client: SupabaseClient;
+}) {
+  const [messages, setMessages] = useState<RealtimeChatMessage[]>([]);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    let active = true;
+    void client
+      .from("soundspin_messages")
+      .select("id, content, user_id, user_name, avatar_seed, created_at")
+      .eq("room_slug", snapshot.room.id)
+      .order("created_at", { ascending: false })
+      .limit(200)
+      .then(({ data, error: loadError }) => {
+        if (!active) return;
+        if (loadError) {
+          setError("Chat history is unavailable until the realtime-chat migration is deployed.");
+          return;
+        }
+        setMessages(
+          (data || []).reverse().map((message) => ({
+            id: message.id,
+            content: message.content,
+            user: {
+              id: message.user_id,
+              name: message.user_name,
+              avatarSeed: message.avatar_seed
+            },
+            createdAt: message.created_at
+          }))
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, snapshot.room.id]);
 
-  const send = (event: FormEvent) => {
-    event.preventDefault();
-    if (!message.trim()) return;
-    socket.emit("chat:send", message, (result: { ok: boolean }) => {
-      if (result.ok) setMessage("");
+  const persistMessage = async (message: RealtimeChatMessage) => {
+    const { error: insertError } = await client.from("soundspin_messages").insert({
+      id: message.id,
+      room_slug: snapshot.room.id,
+      user_id: currentUser.id,
+      user_name: currentUser.name,
+      avatar_seed: currentUser.avatarSeed,
+      content: message.content,
+      created_at: message.createdAt
     });
+    if (insertError) setError("The message was sent live but could not be saved to history.");
   };
 
   return (
@@ -545,25 +582,16 @@ function Chat({ snapshot, currentUser }: { snapshot: RoomSnapshot; currentUser: 
           </div>
         ))}
       </div>
-      <div className="messages">
-        {grouped.map((item) => (
-          <div className={`message ${item.compact ? "compact" : ""}`} key={item.id}>
-            {!item.compact && <Avatar user={item.user} size={32} />}
-            <div>
-              {!item.compact && <p><strong>{item.user.name}</strong><time>{timeLabel(item.sentAt)}</time></p>}
-              <span>{item.text}</span>
-            </div>
-          </div>
-        ))}
-        {!messages.length && (
-          <div className="chat-empty"><MessageIcon size={26} /><p>Say hello to the room.</p></div>
-        )}
-        <div ref={endRef} />
+      <div className="supabase-chat-body">
+        {error && <div className="chat-error">{error}</div>}
+        <RealtimeChat
+          client={client}
+          roomName={`soundspin:${snapshot.room.id}`}
+          user={currentUser}
+          messages={messages}
+          onSend={persistMessage}
+        />
       </div>
-      <form className="chat-form" onSubmit={send}>
-        <input value={message} onChange={(event) => setMessage(event.target.value)} maxLength={500} placeholder="Message the room…" />
-        <button type="submit" aria-label="Send"><SendIcon size={18} /></button>
-      </form>
     </aside>
   );
 }

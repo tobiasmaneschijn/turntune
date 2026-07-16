@@ -59,7 +59,6 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
     djUserId: null,
     queue: [],
     playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
-    messages: [],
     createdAt: Date.now()
   };
 }
@@ -221,24 +220,6 @@ io.on("connection", (socket) => {
       ...parsed.data,
       updatedAt: Date.now()
     };
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  socket.on("chat:send", async (text, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = z.string().trim().min(1).max(500).safeParse(text);
-    if (!membership || !parsed.success) {
-      return reply?.({ ok: false, error: "Message must be between 1 and 500 characters." });
-    }
-    membership.room.messages.push({
-      id: crypto.randomUUID(),
-      user: membership.user,
-      text: parsed.data,
-      sentAt: Date.now()
-    });
-    membership.room.messages = membership.room.messages.slice(-200);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });

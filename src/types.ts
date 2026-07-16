@@ -22,13 +22,6 @@ export interface Playback {
   updatedAt: number;
 }
 
-export interface ChatMessage {
-  id: string;
-  user: User;
-  text: string;
-  sentAt: number;
-}
-
 export interface Room {
   id: string;
   name: string;
@@ -36,7 +29,6 @@ export interface Room {
   djUserId: string | null;
   queue: Track[];
   playback: Playback;
-  messages: ChatMessage[];
   createdAt: number;
 }
 
