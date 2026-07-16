@@ -1,3 +1,4 @@
+-- Ordered after the existing 20260716220000 migration so hosted deploys apply it.
 create schema if not exists private;
 
 create table public.soundspin_unlocks (
