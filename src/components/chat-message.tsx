@@ -10,44 +10,32 @@ interface ChatMessageItemProps {
 
 export const ChatMessageItem = ({ message, isOwnMessage, showHeader }: ChatMessageItemProps) => {
   return (
-    <div className={`flex mt-2 gap-2 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-      {!isOwnMessage && showHeader && (
-        <Avatar user={message.user} size={28} />
-      )}
-      <div
-        className={cn('max-w-[75%] w-fit flex flex-col gap-1', {
-          'items-end': isOwnMessage,
-        })}
-      >
+    <div className={cn('chat-message-item', { 'chat-message-grouped': !showHeader })}>
+      <div className="chat-message-avatar">
+        {showHeader && <Avatar user={message.user} size={30} />}
+      </div>
+      <div className="chat-message-content">
         {showHeader && (
-          <div
-            className={cn('flex items-center gap-2 text-xs px-3', {
-              'justify-end flex-row-reverse': isOwnMessage,
-            })}
-          >
-            <span className={'font-medium'}>{message.user.name}</span>
-            <span className="text-foreground/50 text-xs">
+          <div className="chat-message-meta">
+            <strong>{isOwnMessage ? 'You' : message.user.name}</strong>
+            <time>
               {new Date(message.createdAt).toLocaleTimeString('en-US', {
                 hour: '2-digit',
                 minute: '2-digit',
                 hour12: true,
               })}
-            </span>
+            </time>
           </div>
         )}
-        <div
-          className={cn(
-            'py-2 px-3 rounded-xl text-sm w-fit',
-            isOwnMessage ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
-          )}
-        >
+        <div className="chat-message-body">
           {message.mediaUrl && (
-            <img
-              src={message.mediaUrl}
-              alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
-              className="mb-1 max-h-64 w-full rounded-lg object-contain"
-              loading="lazy"
-            />
+            <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
+              <img
+                src={message.mediaUrl}
+                alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
+                loading="lazy"
+              />
+            </a>
           )}
           {message.content && message.type === 'text' && message.content}
           {message.content && message.type !== 'text' && (

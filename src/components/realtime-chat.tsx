@@ -241,7 +241,13 @@ export const RealtimeChat = ({
         <div className="space-y-1">
           {allMessages.map((message, index) => {
             const prevMessage = index > 0 ? allMessages[index - 1] : null
-            const showHeader = !prevMessage || prevMessage.user.name !== message.user.name
+            const minutesSincePrevious = prevMessage
+              ? (new Date(message.createdAt).getTime() - new Date(prevMessage.createdAt).getTime()) / 60000
+              : Number.POSITIVE_INFINITY
+            const showHeader =
+              !prevMessage ||
+              prevMessage.user.id !== message.user.id ||
+              minutesSincePrevious > 5
 
             return (
               <div
@@ -250,7 +256,7 @@ export const RealtimeChat = ({
               >
                 <ChatMessageItem
                   message={message}
-                   isOwnMessage={message.user.id === user.id}
+                  isOwnMessage={message.user.id === user.id}
                   showHeader={showHeader}
                 />
               </div>
@@ -260,7 +266,7 @@ export const RealtimeChat = ({
       </div>
 
       {(showEmoji || showGiphy) && (
-        <div className="absolute inset-x-3 bottom-17 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">
+        <div className="absolute inset-x-3 bottom-28 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <strong className="text-xs">{showEmoji ? 'Choose an emoji' : 'Choose a GIF'}</strong>
             <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setShowEmoji(false); setShowGiphy(false) }}>
@@ -316,7 +322,7 @@ export const RealtimeChat = ({
       )}
 
       {mediaError && <p className="px-4 pt-2 text-xs text-red-400">{mediaError}</p>}
-      <form onSubmit={handleSendMessage} className="flex w-full items-center gap-1 border-t border-border p-3">
+      <form onSubmit={handleSendMessage} className="chat-composer">
         <input
           ref={fileInputRef}
           className="hidden"
@@ -360,7 +366,7 @@ export const RealtimeChat = ({
           <Images className="size-4" />
         </Button>
         <Input
-          className={cn('min-w-0 flex-1 rounded-full bg-background text-sm')}
+          className={cn('chat-composer-input')}
           type="text"
           value={newMessage}
           maxLength={500}
@@ -370,11 +376,12 @@ export const RealtimeChat = ({
           disabled={!isConnected || uploading}
         />
         <Button
-          className="aspect-square rounded-full"
+          className="chat-send-button"
           type="submit"
           size="icon"
           disabled={!isConnected || !newMessage.trim()}
         >
+          <span>Send</span>
           <Send className="size-4" />
         </Button>
       </form>

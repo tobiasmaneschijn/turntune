@@ -690,16 +690,21 @@ function RoomChat({
     <aside className="chat panel">
       <div className="chat-header">
         <div><MessageIcon size={18} /><strong>Room chat</strong></div>
-        <span><UsersIcon size={15} /> {snapshot.users.length}</span>
-      </div>
-      <div className="people-strip">
-        {snapshot.users.map((user) => (
-          <div className="person" key={user.id}>
-            <Avatar user={user} size={34} />
-            <span>{user.id === currentUser.id ? "You" : user.name.split(" ")[0]}</span>
-            {user.id === snapshot.room.djUserId && <i>DJ</i>}
+        <div className="chat-presence">
+          <div className="chat-presence-avatars">
+            {snapshot.users.slice(0, 5).map((user) => (
+              <span
+                key={user.id}
+                className={user.id === snapshot.room.djUserId ? "chat-presence-dj" : undefined}
+                title={`${user.id === currentUser.id ? "You" : user.name}${user.id === snapshot.room.djUserId ? " · DJ" : ""}`}
+              >
+                <Avatar user={user} size={26} />
+              </span>
+            ))}
+            {snapshot.users.length > 5 && <i>+{snapshot.users.length - 5}</i>}
           </div>
-        ))}
+          <span><UsersIcon size={14} /> {snapshot.users.length}</span>
+        </div>
       </div>
       <div className="supabase-chat-body">
         {error && <div className="chat-error">{error}</div>}
