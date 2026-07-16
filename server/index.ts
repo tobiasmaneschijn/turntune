@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { createServer } from "node:http";
+import { verifyCredentials } from "@supabase/server/core";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
@@ -13,6 +14,17 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: true } });
 const store = new Store();
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
+const authEnabled = Boolean(
+  supabaseUrl &&
+  supabasePublishableKey &&
+  supabaseSecretKey &&
+  supabaseJwksUrl &&
+  store.usesSupabase
+);
 const roomUsers = new Map<string, Map<string, User>>();
 const socketRooms = new Map<string, string>();
 
@@ -39,10 +51,11 @@ const playbackSchema = z.object({
   position: z.number().min(0).max(60 * 60 * 24)
 });
 
-function createRoom(id: string, name?: string): Room {
+function createRoom(id: string, ownerUserId: string, name?: string): Room {
   return {
     id,
     name: name || id.replaceAll("-", " "),
+    ownerUserId,
     djUserId: null,
     queue: [],
     playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
@@ -88,6 +101,20 @@ function leaveCurrentRoom(socketId: string) {
   broadcast(room);
 }
 
+io.use(async (socket, next) => {
+  if (!authEnabled) return next();
+  const accessToken = z.string().min(1).safeParse(socket.handshake.auth?.accessToken);
+  if (!accessToken.success) return next(new Error("Authentication required."));
+
+  const { data, error } = await verifyCredentials(
+    { token: accessToken.data, apikey: null },
+    { auth: "user" }
+  );
+  if (error || !data.userClaims) return next(new Error("Your session has expired."));
+  socket.data.authUserId = data.userClaims.id;
+  next();
+});
+
 io.on("connection", (socket) => {
   socket.on("room:join", async (payload, reply) => {
     const parsed = joinSchema.safeParse(payload);
@@ -97,17 +124,28 @@ io.on("connection", (socket) => {
       if (joinedRoom !== socket.id) await socket.leave(joinedRoom);
     }
     leaveCurrentRoom(socket.id);
-    const { roomId, roomName, user } = parsed.data;
-    const room = store.getRoom(roomId) || createRoom(roomId, roomName);
-    if (!room.djUserId) room.djUserId = user.id;
-    await store.saveRoom(room);
+    const { roomId, roomName } = parsed.data;
+    const user = {
+      ...parsed.data.user,
+      id: authEnabled ? socket.data.authUserId : parsed.data.user.id
+    };
 
-    if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
-    roomUsers.get(roomId)!.set(socket.id, user);
-    socketRooms.set(socket.id, roomId);
-    await socket.join(roomId);
-    broadcast(room);
-    reply?.({ ok: true });
+    try {
+      const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
+      if (!room.ownerUserId) room.ownerUserId = user.id;
+      if (room.ownerUserId === user.id || !room.djUserId) room.djUserId = user.id;
+      await store.saveRoom(room);
+
+      if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
+      roomUsers.get(roomId)!.set(socket.id, user);
+      socketRooms.set(socket.id, roomId);
+      await socket.join(roomId);
+      broadcast(room);
+      reply?.({ ok: true });
+    } catch (error) {
+      console.error(error);
+      reply?.({ ok: false, error: "Could not load this room." });
+    }
   });
 
   socket.on("queue:add", async (payload, reply) => {
@@ -205,6 +243,14 @@ io.on("connection", (socket) => {
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
+});
+
+app.get("/api/config", (_request, response) => {
+  response.json({
+    supabase: authEnabled
+      ? { url: supabaseUrl, anonKey: supabasePublishableKey }
+      : null
+  });
 });
 
 if (process.env.NODE_ENV === "production") {

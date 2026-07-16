@@ -27,6 +27,11 @@ button { color: inherit; }
 .welcome nav, .welcome-content, .welcome footer { z-index: 1; }
 .welcome nav { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 13px; }
 .welcome-content { width: min(1020px, 100%); margin: auto; display: grid; grid-template-columns: 1.2fr .75fr; align-items: center; gap: clamp(50px, 9vw, 130px); }
+.auth-content { width: min(920px, 100%); margin: auto; display: grid; grid-template-columns: 1.1fr .75fr; align-items: center; gap: clamp(50px, 9vw, 120px); z-index: 1; }
+.auth-content > div > p { color: #999ba5; max-width: 520px; font-size: 17px; line-height: 1.7; }
+.auth-card { width: 100%; }
+.auth-status { margin: 14px 0 0; color: #b7b9c0; font-size: 11px; line-height: 1.5; text-align: center; }
+.welcome-card button:disabled { opacity: .6; cursor: wait; }
 .eyebrow { color: #b8b5c2; font-size: 11px; font-weight: 700; letter-spacing: 2.5px; display: flex; gap: 10px; align-items: center; }
 .eyebrow span { width: 24px; height: 1px; background: var(--lime); }
 .welcome h1 { font: 700 clamp(50px, 6vw, 82px)/.98 "Manrope", sans-serif; letter-spacing: -4px; margin: 22px 0; }
@@ -50,6 +55,8 @@ button { color: inherit; }
 .room-heading small { color: var(--muted); font-size: 10px; margin-top: 2px; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px var(--lime); }
 .header-actions { justify-self: end; display: flex; align-items: center; gap: 14px; }
+.sign-out { border: 0; background: transparent; color: #777984; padding: 4px; font-size: 10px; cursor: pointer; }
+.sign-out:hover { color: #d7d7dc; }
 .icon-button { border: 1px solid var(--line); background: #121318; border-radius: 8px; padding: 8px 12px; display: flex; gap: 7px; align-items: center; cursor: pointer; font-size: 12px; }
 .avatar { border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: white; flex: 0 0 auto; box-shadow: inset 0 0 0 2px rgba(255,255,255,.12); }
 .room-layout { padding: 28px clamp(18px, 4vw, 58px) 50px; max-width: 1500px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 22px; }
@@ -126,7 +133,7 @@ button { color: inherit; }
 @keyframes equalize { to { height: 5px; } }
 
 @media (max-width: 900px) {
-  .welcome-content { grid-template-columns: 1fr; padding: 70px 0; gap: 35px; }
+  .welcome-content, .auth-content { grid-template-columns: 1fr; padding: 70px 0; gap: 35px; }
   .welcome h1 { font-size: clamp(48px, 13vw, 72px); }
   .room-layout { grid-template-columns: 1fr; }
   .chat { position: static; height: 650px; }
@@ -138,6 +145,7 @@ button { color: inherit; }
   .topbar > .logo > span:last-child { display: none; }
   .room-heading { justify-self: center; }
   .invite-button span { display: none; }
+  .sign-out { display: none; }
   .room-layout { padding: 16px 12px 35px; }
   .track-stage { height: 225px; }
   .youtube-shell { width: 88%; }

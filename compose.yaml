@@ -5,6 +5,10 @@ services:
     environment:
       PORT: 3000
       DATA_DIR: /app/data
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
     volumes:
       - soundspin-data:/app/data
     ports:

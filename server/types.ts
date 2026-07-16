@@ -32,6 +32,7 @@ export interface ChatMessage {
 export interface Room {
   id: string;
   name: string;
+  ownerUserId: string;
   djUserId: string | null;
   queue: Track[];
   playback: Playback;
