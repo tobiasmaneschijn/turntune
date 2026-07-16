@@ -22,6 +22,11 @@ export interface Playback {
   updatedAt: number;
 }
 
+export interface VibeState {
+  trackId: string;
+  votes: Record<string, -1 | 1>;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -30,6 +35,7 @@ export interface Room {
   queue: Track[];
   history: Track[];
   playback: Playback;
+  vibe: VibeState | null;
   createdAt: number;
 }
 

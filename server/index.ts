@@ -73,6 +73,10 @@ const queueMoveSchema = queueTrackSchema.extend({
   toIndex: z.number().int().min(0).max(999)
 });
 
+const vibeVoteSchema = z.object({
+  value: z.union([z.literal(-1), z.literal(0), z.literal(1)])
+});
+
 const youtubeSearchSchema = z.object({
   q: z.string().trim().min(2).max(100)
 });
@@ -119,6 +123,7 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
     queue: [],
     history: [],
     playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
+    vibe: null,
     createdAt: Date.now()
   };
 }
@@ -193,6 +198,10 @@ io.on("connection", (socket) => {
       const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
       if (!room.ownerUserId) room.ownerUserId = user.id;
       if (!room.history) room.history = [];
+      if (room.vibe === undefined) room.vibe = null;
+      if (room.vibe && room.playback.track && room.vibe.trackId === room.playback.track.id) {
+        delete room.vibe.votes[room.playback.track.addedBy.id];
+      }
       if (room.ownerUserId === user.id || !room.djUserId) room.djUserId = user.id;
       await store.saveRoom(room);
 
@@ -252,6 +261,10 @@ io.on("connection", (socket) => {
         playing: false,
         position: 0,
         updatedAt: Date.now()
+      };
+      membership.room.vibe = {
+        trackId: track.id,
+        votes: {}
       };
     }
     await store.saveRoom(membership.room);
@@ -331,6 +344,7 @@ io.on("connection", (socket) => {
       membership.room.history = membership.room.history.slice(0, 100);
     }
     membership.room.playback = { track, playing: true, position: 0, updatedAt: Date.now() };
+    membership.room.vibe = { trackId: track.id, votes: {} };
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
@@ -347,6 +361,7 @@ io.on("connection", (socket) => {
       membership.room.history = membership.room.history.slice(0, 100);
     }
     membership.room.playback = { track, playing: Boolean(track), position: 0, updatedAt: Date.now() };
+    membership.room.vibe = track ? { trackId: track.id, votes: {} } : null;
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
@@ -366,6 +381,29 @@ io.on("connection", (socket) => {
       ...parsed.data,
       updatedAt: Date.now()
     };
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("vibe:vote", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = vibeVoteSchema.safeParse(payload);
+    const track = membership?.room.playback.track;
+    if (!membership || !track || !parsed.success) {
+      return reply?.({ ok: false, error: "There is no track to vote on." });
+    }
+    if (track.addedBy.id === membership.user.id) {
+      return reply?.({ ok: false, error: "You cannot vote on a track you added." });
+    }
+    if (!membership.room.vibe || membership.room.vibe.trackId !== track.id) {
+      membership.room.vibe = { trackId: track.id, votes: {} };
+    }
+    if (parsed.data.value === 0) {
+      delete membership.room.vibe.votes[membership.user.id];
+    } else {
+      membership.room.vibe.votes[membership.user.id] = parsed.data.value;
+    }
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });

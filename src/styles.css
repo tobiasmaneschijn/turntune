@@ -64,7 +64,7 @@ button { color: inherit; }
 .player-column { grid-area: player; min-width: 0; min-height: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.16); overflow: hidden; }
 .section-kicker { color: #777984; font-size: 10px; font-weight: 800; letter-spacing: 2.2px; }
-.now-playing { height: 100%; padding: 22px; position: relative; display: flex; flex-direction: column; }
+.now-playing { container-type: inline-size; height: 100%; padding: 22px; position: relative; display: flex; flex-direction: column; }
 .now-playing-heading { min-height: 24px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .now-playing-heading > button { border: 0; background: transparent; color: #777984; display: flex; align-items: center; gap: 5px; font-size: 10px; cursor: pointer; }
 .now-playing-heading > button:hover { color: #d8d9dd; }
@@ -90,12 +90,45 @@ button { color: inherit; }
 .pulse { animation: pulse 1.5s infinite; }
 .volume-control { display: flex; align-items: center; gap: 6px; color: #777984; }
 .volume-control input { width: 74px; }
+.vibe-meter { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.vibe-meter-heading { display: flex; align-items: center; justify-content: space-between; color: #777984; }
+.vibe-meter-heading > span { font-size: 9px; font-weight: 800; letter-spacing: 1.7px; }
+.vibe-meter-heading small { font-size: 9px; }
+.vibe-meter-body { min-height: 112px; display: grid; grid-template-columns: minmax(76px, auto) 210px minmax(76px, auto); align-items: center; justify-content: center; gap: 18px; }
+.vibe-meter-body > button { min-width: 84px; padding: 8px 10px; border: 1px solid #30313a; border-radius: 18px; background: #1d1e24; color: #858791; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; font-weight: 700; cursor: pointer; transition: .15s ease; }
+.vibe-meter-body > button:hover { border-color: #4a4c55; color: #d8d9dd; }
+.vibe-meter-body > button:disabled { opacity: .35; cursor: not-allowed; }
+.vibe-meter-body > button:disabled:hover { border-color: #30313a; color: #858791; }
+.vibe-meter-body > button.negative.active { border-color: rgba(248,113,113,.45); background: rgba(127,29,29,.25); color: #fca5a5; }
+.vibe-meter-body > button.positive.active { border-color: rgba(216,255,87,.4); background: rgba(216,255,87,.1); color: var(--lime); }
+.vibe-dial { width: 210px; height: 106px; position: relative; }
+.vibe-arc { position: absolute; left: 50%; bottom: 7px; width: 176px; height: 88px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.11); border-bottom: 0; border-radius: 176px 176px 0 0; background: linear-gradient(100deg, rgba(190,55,64,.28), rgba(231,181,72,.16) 48%, rgba(121,181,76,.26)); box-shadow: inset 0 0 28px rgba(0,0,0,.42); }
+.vibe-arc::after { content: ""; position: absolute; left: 17px; right: 17px; bottom: 0; height: 64px; border: 1px solid rgba(255,255,255,.06); border-bottom: 0; border-radius: 130px 130px 0 0; }
+.vibe-lights { position: absolute; inset: 0; z-index: 3; }
+.vibe-lights i { position: absolute; width: 8px; height: 8px; transform: translate(-50%, -50%); border-radius: 50%; background: #393a3e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); transition: background .25s ease, box-shadow .25s ease; }
+.vibe-lights i.lit { background: #ffd85a; box-shadow: 0 0 7px #ffd85a, 0 0 15px rgba(255,216,90,.45); }
+.vibe-low, .vibe-high { position: absolute; z-index: 4; bottom: 20px; color: #686a72; font-size: 7px; font-weight: 800; letter-spacing: 1px; }
+.vibe-low { left: 31px; }
+.vibe-high { right: 27px; }
+.vibe-needle { position: absolute; z-index: 5; left: 50%; bottom: 11px; width: 3px; height: 72px; transform-origin: 50% 100%; border-radius: 3px; background: linear-gradient(to top, #ff8b2d, #fff08a 65%, white); box-shadow: 0 0 6px #ffb52f, 0 0 13px rgba(255,181,47,.6); transition: transform .45s cubic-bezier(.2,.8,.2,1); }
+.vibe-hub { position: absolute; z-index: 6; left: 50%; bottom: 2px; width: 22px; height: 22px; transform: translateX(-50%); border: 4px solid #3c3d45; border-radius: 50%; background: #17181d; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+.vibe-dial > strong { position: absolute; z-index: 7; left: 50%; bottom: -5px; transform: translateX(-50%); color: #a9abb2; font-size: 9px; white-space: nowrap; }
 .now-playing.compact { padding: 18px; }
 .now-playing.compact .track-stage { flex: 0 0 1px; min-height: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .now-playing.compact .current-track { padding-top: 8px; align-items: flex-start; flex-direction: column; }
 .now-playing.compact .current-track h2 { font-size: 16px; line-height: 1.3; }
 .now-playing.compact .player-controls { order: -1; align-self: flex-end; }
 .now-playing.compact .player-footer { align-items: flex-start; flex-direction: column; }
+.now-playing.compact .vibe-meter-body { grid-template-columns: 34px minmax(0,1fr) 34px; gap: 3px; }
+.now-playing.compact .vibe-meter-body > button { min-width: 32px; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+.now-playing.compact .vibe-meter-body > button span { display: none; }
+.now-playing.compact .vibe-dial { width: 190px; transform: scale(.88); transform-origin: center; }
+@container (max-width: 520px) {
+  .vibe-meter-body { grid-template-columns: 34px minmax(0, 210px) 34px; gap: 4px; }
+  .vibe-meter-body > button { min-width: 32px; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+  .vibe-meter-body > button span { display: none; }
+  .vibe-dial { max-width: 100%; transform: scale(.9); transform-origin: center; }
+}
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(216,255,87,0); } 0%,100% { box-shadow: 0 0 0 0 rgba(216,255,87,.35); } }
 .empty-player { height: 350px; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--muted); }
 .empty-player h2 { color: #eee; margin: 18px 0 4px; font: 700 20px "Manrope"; }

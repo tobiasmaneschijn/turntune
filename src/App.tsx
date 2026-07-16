@@ -6,11 +6,13 @@ import {
   ChevronsUp,
   Clock3,
   GripVertical,
+  Heart,
   ListMusic,
   Maximize2,
   Minimize2,
   Search,
   Trash2,
+  ThumbsDown,
   Volume2
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
@@ -287,6 +289,7 @@ export function App() {
           <NowPlaying
             snapshot={snapshot}
             isDj={isDj}
+            currentUserId={profile.id}
             compact={compactPlayer}
             onToggleCompact={() => setCompactPlayer((compact) => !compact)}
           />
@@ -430,14 +433,119 @@ function formatPlaybackTime(seconds: number) {
     : `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
+function VibeMeter({
+  snapshot,
+  currentUserId
+}: {
+  snapshot: RoomSnapshot;
+  currentUserId: string;
+}) {
+  const track = snapshot.room.playback.track;
+  const vibe = track && snapshot.room.vibe?.trackId === track.id
+    ? snapshot.room.vibe
+    : null;
+  const eligibleUserIds = new Set(
+    snapshot.users
+      .filter((user) => user.id !== track?.addedBy.id)
+      .map((user) => user.id)
+  );
+  const votes = Object.entries(vibe?.votes || {})
+    .filter(([userId]) => eligibleUserIds.has(userId))
+    .map(([, vote]) => vote);
+  const eligibleListenerCount = eligibleUserIds.size;
+  const score = eligibleListenerCount
+    ? votes.reduce<number>((total, vote) => total + vote, 0) / eligibleListenerCount
+    : 0;
+  const currentVote = vibe?.votes[currentUserId];
+  const addedByCurrentUser = track?.addedBy.id === currentUserId;
+  const litMarkers = votes.length ? Math.round(((score + 1) / 2) * 8) : 4;
+  const label =
+    !votes.length ? "Be the first" :
+    score >= .55 ? "Electric" :
+    score >= .15 ? "Feeling it" :
+    score <= -.55 ? "Not landing" :
+    score <= -.15 ? "Cooling off" :
+    "Mixed vibes";
+
+  const vote = (value: -1 | 1) => {
+    if (addedByCurrentUser) return;
+    socket.emit("vibe:vote", { value: currentVote === value ? 0 : value });
+  };
+
+  return (
+    <section className="vibe-meter" aria-label="Vibe meter for the current track">
+      <div className="vibe-meter-heading">
+        <span>VIBE METER</span>
+        <small>
+          {addedByCurrentUser
+            ? "You added this track"
+            : `${votes.length} / ${eligibleListenerCount} voted`}
+        </small>
+      </div>
+      <div className="vibe-meter-body">
+        <button
+          type="button"
+          className={currentVote === -1 ? "active negative" : ""}
+          aria-pressed={currentVote === -1}
+          disabled={addedByCurrentUser}
+          title={addedByCurrentUser ? "You cannot vote on a track you added" : undefined}
+          onClick={() => vote(-1)}
+        >
+          <ThumbsDown size={16} />
+          <span>Not my vibe</span>
+        </button>
+        <div className="vibe-dial">
+          <div className="vibe-lights" aria-hidden="true">
+            {Array.from({ length: 9 }, (_, index) => {
+              const radians = Math.PI + (index / 8) * Math.PI;
+              return (
+                <i
+                  key={index}
+                  className={index <= litMarkers ? "lit" : ""}
+                  style={{
+                    left: `${50 + Math.cos(radians) * 43}%`,
+                    top: `${91 + Math.sin(radians) * 75}%`
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="vibe-arc" />
+          <span className="vibe-low">LOW</span>
+          <span className="vibe-high">HIGH</span>
+          <div
+            className="vibe-needle"
+            style={{ transform: `translateX(-50%) rotate(${score * 68}deg)` }}
+          />
+          <div className="vibe-hub" />
+          <strong>{label}</strong>
+        </div>
+        <button
+          type="button"
+          className={currentVote === 1 ? "active positive" : ""}
+          aria-pressed={currentVote === 1}
+          disabled={addedByCurrentUser}
+          title={addedByCurrentUser ? "You cannot vote on a track you added" : undefined}
+          onClick={() => vote(1)}
+        >
+          <Heart size={16} />
+          <span>Love it</span>
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function NowPlaying({
   snapshot,
   isDj,
+  currentUserId,
   compact,
   onToggleCompact
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
+  currentUserId: string;
   compact: boolean;
   onToggleCompact: () => void;
 }) {
@@ -542,6 +650,7 @@ function NowPlaying({
               />
             </label>
           </div>
+          <VibeMeter snapshot={snapshot} currentUserId={currentUserId} />
         </>
       ) : (
         <div className="empty-player">
