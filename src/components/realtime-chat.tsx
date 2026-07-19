@@ -1,4 +1,4 @@
-import { ArrowDown, ImagePlus, Images, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, ImagePlus, Images, Reply, Send, Smile, X } from 'lucide-react'
 import type { Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -9,6 +9,7 @@ import { useChatScroll } from '@/hooks/use-chat-scroll'
 import {
   useRealtimeChat,
   type ChatMessage,
+  type ChatReply,
 } from '@/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,6 +52,8 @@ export const RealtimeChat = ({
   const {
     messages: realtimeMessages,
     sendMessage,
+    broadcastReaction,
+    reactionEvents,
     isConnected,
   } = useRealtimeChat({
     client,
@@ -58,6 +61,7 @@ export const RealtimeChat = ({
     user,
   })
   const [newMessage, setNewMessage] = useState('')
+  const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
   const [giphyQuery, setGiphyQuery] = useState('')
@@ -66,6 +70,8 @@ export const RealtimeChat = ({
   const [uploading, setUploading] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const messageInputRef = useRef<HTMLInputElement>(null)
+  const pendingReactionsRef = useRef(new Set<string>())
   const previousMessageCountRef = useRef(0)
   const initializedScrollRef = useRef(false)
   const unreadStartRef = useRef<number | null>(null)
@@ -86,7 +92,7 @@ export const RealtimeChat = ({
   }, [giphyKey])
 
   // Merge realtime messages with initial messages
-  const allMessages = useMemo(() => {
+  const baseMessages = useMemo(() => {
     const mergedMessages = [...initialMessages, ...realtimeMessages]
     // Remove duplicates based on message id
     const uniqueMessages = mergedMessages.filter(
@@ -97,6 +103,22 @@ export const RealtimeChat = ({
 
     return sortedMessages
   }, [initialMessages, realtimeMessages])
+
+  const allMessages = useMemo(() => baseMessages.map((message) => {
+    const reactions = [...(message.reactions || [])]
+    for (const event of reactionEvents) {
+      if (event.messageId !== message.id) continue
+      const reactionIndex = reactions.findIndex(
+        (reaction) => reaction.userId === event.userId && reaction.emoji === event.emoji
+      )
+      if (event.action === 'add' && reactionIndex === -1) {
+        reactions.push({ userId: event.userId, emoji: event.emoji })
+      } else if (event.action === 'remove' && reactionIndex >= 0) {
+        reactions.splice(reactionIndex, 1)
+      }
+    }
+    return { ...message, reactions }
+  }), [baseMessages, reactionEvents])
 
   useEffect(() => {
     if (onMessage) {
@@ -138,11 +160,12 @@ export const RealtimeChat = ({
       e.preventDefault()
       if (!newMessage.trim() || !isConnected) return
 
-      const sentMessage = await sendMessage(newMessage)
+      const sentMessage = await sendMessage(newMessage, undefined, replyingTo || undefined)
       if (sentMessage) await onSend?.(sentMessage)
       setNewMessage('')
+      setReplyingTo(null)
     },
-    [newMessage, isConnected, sendMessage, onSend]
+    [newMessage, isConnected, sendMessage, onSend, replyingTo]
   )
 
   const sendMediaMessage = useCallback(
@@ -153,11 +176,63 @@ export const RealtimeChat = ({
       storagePath?: string
     ) => {
       if (!isConnected) return
-      const sentMessage = await sendMessage(content, { type, mediaUrl, storagePath })
+      const sentMessage = await sendMessage(
+        content,
+        { type, mediaUrl, storagePath },
+        replyingTo || undefined
+      )
       if (sentMessage) await onSend?.(sentMessage)
+      setReplyingTo(null)
     },
-    [isConnected, onSend, sendMessage]
+    [isConnected, onSend, replyingTo, sendMessage]
   )
+
+  const selectReply = useCallback((message: ChatMessage) => {
+    setReplyingTo({
+      id: message.id,
+      content: message.content,
+      type: message.type,
+      mediaUrl: message.mediaUrl,
+      user: { id: message.user.id, name: message.user.name },
+    })
+    setShowEmoji(false)
+    setShowGiphy(false)
+    requestAnimationFrame(() => messageInputRef.current?.focus())
+  }, [])
+
+  const jumpToMessage = useCallback((messageId: string) => {
+    const messageElement = document.getElementById(`chat-message-${messageId}`)
+    messageElement?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    messageElement?.focus({ preventScroll: true })
+  }, [])
+
+  const toggleReaction = useCallback(async (message: ChatMessage, emoji: string) => {
+    if (!isConnected) return
+    const key = `${message.id}:${user.id}:${emoji}`
+    if (pendingReactionsRef.current.has(key)) return
+    pendingReactionsRef.current.add(key)
+
+    const hasReacted = (message.reactions || []).some(
+      (reaction) => reaction.userId === user.id && reaction.emoji === emoji
+    )
+    const query = client.from('soundspin_message_reactions')
+    const { error } = hasReacted
+      ? await query.delete().eq('message_id', message.id).eq('user_id', user.id).eq('emoji', emoji)
+      : await query.insert({ message_id: message.id, user_id: user.id, emoji })
+
+    if (error) {
+      setMediaError('Could not update that reaction. The chat migration may still need to be deployed.')
+    } else {
+      setMediaError('')
+      await broadcastReaction({
+        messageId: message.id,
+        userId: user.id,
+        emoji,
+        action: hasReacted ? 'remove' : 'add',
+      })
+    }
+    pendingReactionsRef.current.delete(key)
+  }, [broadcastReaction, client, isConnected, user.id])
 
   const uploadImage = async (file: File) => {
     setMediaError('')
@@ -305,8 +380,12 @@ export const RealtimeChat = ({
                 <ChatMessageItem
                   message={message}
                   isOwnMessage={message.user.id === user.id}
+                  currentUserId={user.id}
                   showHeader={showHeader}
                   onOpenProfile={onOpenProfile}
+                  onReply={selectReply}
+                  onReact={(selectedMessage, emoji) => void toggleReaction(selectedMessage, emoji)}
+                  onJumpToMessage={jumpToMessage}
                 />
               </div>
             )
@@ -330,7 +409,10 @@ export const RealtimeChat = ({
       )}
 
       {(showEmoji || showGiphy) && (
-        <div className="absolute inset-x-3 bottom-28 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl">
+        <div className={cn(
+          'absolute inset-x-3 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl',
+          replyingTo ? 'bottom-40' : 'bottom-28'
+        )}>
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <strong className="text-xs">{showEmoji ? 'Choose an emoji' : 'Choose a GIF'}</strong>
             <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setShowEmoji(false); setShowGiphy(false) }}>
@@ -386,7 +468,7 @@ export const RealtimeChat = ({
       )}
 
       {mediaError && <p className="px-4 pt-2 text-xs text-red-400">{mediaError}</p>}
-      <form onSubmit={handleSendMessage} className="chat-composer">
+      <form onSubmit={handleSendMessage} className="chat-composer" autoComplete="off">
         <input
           ref={fileInputRef}
           className="hidden"
@@ -398,6 +480,24 @@ export const RealtimeChat = ({
             event.currentTarget.value = ''
           }}
         />
+        {replyingTo && (
+          <div className="chat-reply-composer">
+            <Reply className="size-3.5" />
+            <div>
+              <span>Replying to <strong>@{replyingTo.user.name}</strong></span>
+              <small>{replyingTo.content || (replyingTo.type === 'gif' ? 'GIF' : 'Image')}</small>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Cancel reply"
+              onClick={() => setReplyingTo(null)}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        )}
         <Button
           type="button"
           variant="ghost"
@@ -430,8 +530,13 @@ export const RealtimeChat = ({
           <Images className="size-4" />
         </Button>
         <Input
+          ref={messageInputRef}
           className={cn('chat-composer-input')}
           type="text"
+          autoComplete="off"
+          autoCorrect="off"
+          aria-autocomplete="none"
+          data-form-type="other"
           value={newMessage}
           maxLength={500}
           onChange={(e) => setNewMessage(e.target.value)}

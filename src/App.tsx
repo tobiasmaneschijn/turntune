@@ -1254,7 +1254,7 @@ function RoomChat({
     let active = true;
     void client
       .from("soundspin_messages")
-      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at")
+      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at, reply_to_id, reply_to:soundspin_messages!soundspin_messages_reply_same_room_fk(id, content, message_type, media_url, user_id, user_name), soundspin_message_reactions(emoji, user_id)")
       .eq("room_slug", snapshot.room.id)
       .order("created_at", { ascending: false })
       .limit(200)
@@ -1265,19 +1265,36 @@ function RoomChat({
           return;
         }
         setMessages(
-          (data || []).reverse().map((message) => ({
-            id: message.id,
-            content: message.content,
-            type: message.message_type,
-            mediaUrl: message.media_url || undefined,
-            storagePath: message.storage_path || undefined,
-            user: {
-              id: message.user_id,
-              name: message.user_name,
-              avatarSeed: message.avatar_seed
-            },
-            createdAt: message.created_at
-          }))
+          (data || []).reverse().map((message) => {
+            const reply = Array.isArray(message.reply_to) ? message.reply_to[0] : message.reply_to;
+            return ({
+              id: message.id,
+              content: message.content,
+              type: message.message_type,
+              mediaUrl: message.media_url || undefined,
+              storagePath: message.storage_path || undefined,
+              user: {
+                id: message.user_id,
+                name: message.user_name,
+                avatarSeed: message.avatar_seed
+              },
+              replyTo: reply ? {
+                id: reply.id,
+                content: reply.content,
+                type: reply.message_type,
+                mediaUrl: reply.media_url || undefined,
+                user: {
+                  id: reply.user_id,
+                  name: reply.user_name
+                }
+              } : undefined,
+              reactions: (message.soundspin_message_reactions || []).map((reaction) => ({
+                emoji: reaction.emoji,
+                userId: reaction.user_id
+              })),
+              createdAt: message.created_at
+            })
+          })
         );
       });
     return () => {
@@ -1296,6 +1313,7 @@ function RoomChat({
       message_type: message.type,
       media_url: message.mediaUrl || null,
       storage_path: message.storagePath || null,
+      reply_to_id: message.replyTo?.id || null,
       created_at: message.createdAt
     });
     if (insertError) setError("The message was sent live but could not be saved to history.");
