@@ -6,10 +6,12 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 import {
   coalesceReactionEvent,
   type ChatMedia,
+  type ChatMention,
   type ChatMessage,
   type ChatReactionEvent,
   type ChatReply,
 } from '@/chat/model'
+import { normalizeChatMentions } from '@/chat/mentions'
 import type { User } from '@/types'
 
 interface UseRealtimeChatProps {
@@ -21,9 +23,14 @@ interface UseRealtimeChatProps {
 function stripUntrustedAdminFlair(message: ChatMessage): ChatMessage {
   return {
     ...message,
+    mentions: normalizeChatMentions(message.mentions),
     user: { ...message.user, isAppAdmin: false },
     replyTo: message.replyTo
-      ? { ...message.replyTo, user: { ...message.replyTo.user, isAppAdmin: false } }
+      ? {
+          ...message.replyTo,
+          mentions: normalizeChatMentions(message.replyTo.mentions),
+          user: { ...message.replyTo.user, isAppAdmin: false },
+        }
       : undefined,
   }
 }
@@ -69,7 +76,8 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
     async (
       content: string,
       media?: ChatMedia,
-      replyTo?: ChatReply
+      replyTo?: ChatReply,
+      mentions: ChatMention[] = []
     ) => {
       const channel = channelRef.current
       if (!channel || !isConnected) return null
@@ -81,6 +89,7 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
         mediaUrl: media?.mediaUrl,
         storagePath: media?.storagePath,
         user,
+        mentions,
         replyTo,
         reactions: [],
         createdAt: new Date().toISOString(),

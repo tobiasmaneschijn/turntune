@@ -7,6 +7,7 @@ import {
   type ChatUserProfile,
 } from '@/chat/model'
 import type { User } from '@/types'
+import { normalizeChatMentions } from '@/chat/mentions'
 
 export const CHAT_HISTORY_LIMIT = 200
 
@@ -18,6 +19,7 @@ const CHAT_HISTORY_SELECT = [
   'message_type',
   'media_url',
   'storage_path',
+  'mentions',
   'user_id',
   'user_name',
   'avatar_seed',
@@ -32,6 +34,7 @@ interface ChatHistoryRow {
   message_type: ChatMessageType
   media_url: string | null
   storage_path: string | null
+  mentions: unknown
   user_id: string
   user_name: string
   avatar_seed: string
@@ -84,6 +87,7 @@ export async function loadChatHistory(
       type: row.message_type,
       mediaUrl: row.media_url || undefined,
       storagePath: row.storage_path || undefined,
+      mentions: normalizeChatMentions(row.mentions),
       user: {
         id: row.user_id,
         name: row.user_name,
@@ -94,6 +98,7 @@ export async function loadChatHistory(
         content: reply.content,
         type: reply.message_type,
         mediaUrl: reply.media_url || undefined,
+        mentions: normalizeChatMentions(reply.mentions),
         user: {
           id: reply.user_id,
           name: reply.user_name,
@@ -126,6 +131,7 @@ export async function saveChatMessage(
     message_type: message.type,
     media_url: message.mediaUrl || null,
     storage_path: message.storagePath || null,
+    mentions: message.mentions || [],
     reply_to_id: message.replyTo?.id || null,
     created_at: message.createdAt,
   })

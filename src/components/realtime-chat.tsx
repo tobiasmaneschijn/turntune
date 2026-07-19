@@ -12,8 +12,17 @@ import {
   shouldShowMessageHeader,
   startsNewDay,
   type ChatMessage,
+  type ChatMention,
   type ChatReply,
 } from '@/chat/model'
+import {
+  activeMentions,
+  buildRoomMentionOptions,
+  findMentionQuery,
+  insertMention,
+  type MentionQuery,
+  type RoomMentionOption,
+} from '@/chat/mentions'
 import {
   CHAT_IMAGE_ACCEPT,
   createChatStoragePath,
@@ -25,6 +34,7 @@ import {
 import { persistReactionChange } from '@/chat/persistence'
 import { cn } from '@/lib/utils'
 import { ChatMessageItem } from '@/components/chat-message'
+import { Avatar } from '@/components/Avatar'
 import { DevFlair } from '@/components/DevFlair'
 import {
   chatPickerEmojiStyle,
@@ -90,6 +100,9 @@ export const RealtimeChat = ({
   const [gifs, setGifs] = useState<GiphyGif[]>([])
   const [composerError, setComposerError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
+  const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>([])
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [unreadCount, setUnreadCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
@@ -101,6 +114,18 @@ export const RealtimeChat = ({
     import.meta.env.VITE_GIPHY_API_KEY || undefined
   )
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
+  const roomMentionOptions = useMemo(
+    () => buildRoomMentionOptions(roomUsers, user.id),
+    [roomUsers, user.id]
+  )
+  const mentionCandidates = useMemo(() => {
+    if (!mentionQuery) return []
+    const query = mentionQuery.query.toLocaleLowerCase()
+    return roomMentionOptions.filter((option) =>
+      option.mention.handle.toLocaleLowerCase().includes(query) ||
+      option.user.name.toLocaleLowerCase().includes(query)
+    ).slice(0, 8)
+  }, [mentionQuery, roomMentionOptions])
 
   useEffect(() => {
     if (giphyKey) return
@@ -167,13 +192,38 @@ export const RealtimeChat = ({
       e.preventDefault()
       if (!newMessage.trim() || !isConnected) return
 
-      const sentMessage = await sendMessage(newMessage, undefined, replyingTo || undefined)
+      const content = newMessage.trim()
+      const sentMessage = await sendMessage(
+        content,
+        undefined,
+        replyingTo || undefined,
+        activeMentions(content, selectedMentions)
+      )
       if (sentMessage) await onSend?.(sentMessage)
       setNewMessage('')
+      setSelectedMentions([])
+      setMentionQuery(null)
       setReplyingTo(null)
     },
-    [newMessage, isConnected, sendMessage, onSend, replyingTo]
+    [newMessage, isConnected, sendMessage, onSend, replyingTo, selectedMentions]
   )
+
+  const chooseMention = useCallback((option: RoomMentionOption) => {
+    if (!mentionQuery) return
+    const inserted = insertMention(newMessage, mentionQuery, option.mention)
+    if (inserted.text.length > 500) return
+    setNewMessage(inserted.text)
+    setSelectedMentions((current) => [
+      ...current.filter((mention) => mention.userId !== option.mention.userId),
+      option.mention,
+    ])
+    setMentionQuery(null)
+    setActiveMentionIndex(0)
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus()
+      messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
+    })
+  }, [mentionQuery, newMessage])
 
   const sendMediaMessage = useCallback(
     async (
@@ -515,6 +565,27 @@ export const RealtimeChat = ({
             </Button>
           </div>
         )}
+        {mentionQuery && mentionCandidates.length > 0 && (
+          <div className="chat-mention-picker" id="chat-mention-list" role="listbox" aria-label="Tag a listener">
+            <div className="chat-mention-picker-heading"><strong>Tag someone</strong><span>In this room</span></div>
+            {mentionCandidates.map((option, index) => (
+              <button
+                id={`chat-mention-option-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === activeMentionIndex}
+                className={index === activeMentionIndex ? 'active' : undefined}
+                key={option.user.id}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveMentionIndex(index)}
+                onClick={() => chooseMention(option)}
+              >
+                <Avatar user={option.user} size={34} />
+                <span><strong>{option.user.name}</strong><small>@{option.mention.handle}</small></span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="chat-composer-bar">
           <Button
             className="chat-composer-add"
@@ -534,11 +605,38 @@ export const RealtimeChat = ({
             type="text"
             autoComplete="off"
             autoCorrect="off"
-            aria-autocomplete="none"
+            aria-autocomplete="list"
+            aria-controls={mentionQuery && mentionCandidates.length ? 'chat-mention-list' : undefined}
+            aria-expanded={Boolean(mentionQuery && mentionCandidates.length)}
+            aria-activedescendant={mentionQuery && mentionCandidates.length ? `chat-mention-option-${activeMentionIndex}` : undefined}
             data-form-type="other"
             value={newMessage}
             maxLength={500}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={(event) => {
+              const nextMessage = event.target.value
+              setNewMessage(nextMessage)
+              setSelectedMentions((current) => activeMentions(nextMessage, current))
+              setMentionQuery(findMentionQuery(nextMessage, event.target.selectionStart))
+              setActiveMentionIndex(0)
+            }}
+            onKeyDown={(event) => {
+              if (!mentionQuery || mentionCandidates.length === 0) return
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setActiveMentionIndex((current) => (current + 1) % mentionCandidates.length)
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setActiveMentionIndex((current) => (current - 1 + mentionCandidates.length) % mentionCandidates.length)
+              } else if (event.key === 'Enter' || event.key === 'Tab') {
+                event.preventDefault()
+                chooseMention(mentionCandidates[activeMentionIndex] || mentionCandidates[0])
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                setMentionQuery(null)
+              }
+            }}
+            onClick={(event) => setMentionQuery(findMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart))}
+            onBlur={() => setMentionQuery(null)}
             onPaste={(event) => void pasteMedia(event)}
             placeholder={uploading ? 'Uploading image…' : `Message #${roomName.replace(/^soundspin:/, '')}`}
             disabled={!isConnected || uploading}

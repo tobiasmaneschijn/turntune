@@ -9,6 +9,7 @@ export interface ChatMessage {
   mediaUrl?: string
   storagePath?: string
   user: User
+  mentions?: ChatMention[]
   replyTo?: ChatReply
   reactions?: ChatReaction[]
   createdAt: string
@@ -21,6 +22,13 @@ export interface ChatReply {
   type: ChatMessageType
   mediaUrl?: string
   user: Pick<User, 'id' | 'name' | 'isAppAdmin'>
+  mentions?: ChatMention[]
+}
+
+export interface ChatMention {
+  userId: string
+  userName: string
+  handle: string
 }
 
 export interface ChatReaction {
@@ -58,6 +66,7 @@ export function createReplySnapshot(message: ChatMessage): ChatReply {
     content: message.content,
     type: message.type,
     mediaUrl: message.mediaUrl,
+    mentions: message.mentions,
     user: {
       id: message.user.id,
       name: message.user.name,

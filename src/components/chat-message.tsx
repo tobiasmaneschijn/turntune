@@ -3,6 +3,7 @@ import { Reply, SmilePlus, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 
 import { getMessagePreview, groupReactions, type ChatMessage } from '@/chat/model'
+import { splitMentionText } from '@/chat/mentions'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
 import { DevFlair } from '@/components/DevFlair'
@@ -15,6 +16,28 @@ import {
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
 const QUICK_REACTIONS = ['❤️', '😂', '😮']
+
+function MentionText({
+  message,
+  onOpenProfile,
+}: {
+  message: ChatMessage
+  onOpenProfile?: (userId: string) => void
+}) {
+  return splitMentionText(message.content, message.mentions || []).map((part, index) =>
+    part.mention ? (
+      <button
+        type="button"
+        className="chat-mention"
+        title={`Open ${part.mention.userName}'s profile`}
+        key={`${part.mention.userId}:${index}`}
+        onClick={() => onOpenProfile?.(part.mention!.userId)}
+      >
+        {part.text}
+      </button>
+    ) : <PlatformEmojiText text={part.text} key={`text:${index}`} />
+  )
+}
 
 interface ChatMessageItemProps {
   message: ChatMessage
@@ -44,6 +67,7 @@ export const ChatMessageItem = ({
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const reply = message.replyTo
+  const isMentioned = (message.mentions || []).some((mention) => mention.userId === currentUserId)
   const reactionGroups = useMemo(
     () => groupReactions(message.reactions, currentUserId),
     [currentUserId, message.reactions]
@@ -56,6 +80,7 @@ export const ChatMessageItem = ({
       className={cn('chat-message-item', {
         'chat-message-grouped': !showHeader,
         'chat-message-own': isOwnMessage,
+        'chat-message-mentioned': isMentioned,
         'chat-message-has-reply': Boolean(reply),
       })}
     >
@@ -137,6 +162,7 @@ export const ChatMessageItem = ({
           <div className="chat-message-meta">
             <strong>{isOwnMessage ? 'You' : message.user.name}</strong>
             {isAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
+            {isMentioned && <span className="chat-mentioned-badge">Mentioned you</span>}
             <time>
               {new Date(message.createdAt).toLocaleTimeString('en-US', {
                 hour: '2-digit',
@@ -156,7 +182,7 @@ export const ChatMessageItem = ({
               />
             </a>
           )}
-          {message.content && message.type === 'text' && <PlatformEmojiText text={message.content} />}
+          {message.content && message.type === 'text' && <MentionText message={message} onOpenProfile={onOpenProfile} />}
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
           )}

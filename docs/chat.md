@@ -15,6 +15,7 @@ loads the durable database history when it enters a room.
 | File | Responsibility |
 | --- | --- |
 | `src/chat/model.ts` | Chat types and pure helpers for merging messages, applying reaction events, grouping reactions, and timeline layout. |
+| `src/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
 | `src/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
 | `src/chat/persistence.ts` | All chat table names, Data API queries, database-row mapping, and durable writes. |
 | `src/hooks/use-realtime-chat.tsx` | Supabase channel lifecycle and Broadcast send/receive behavior. It does not write chat tables. |
@@ -51,6 +52,19 @@ author's current `soundspin_profiles` row. Trusted live room profiles are then
 overlaid on the visible timeline so an avatar change updates messages that are
 already on screen.
 
+## Mentions
+
+Typing `@` in the composer opens a filtered list of listeners currently in the
+room. Selecting a listener inserts a readable handle and stores a small mention
+snapshot containing the user ID, display name, and handle. Duplicate display
+names receive a short stable suffix so a tag always targets one account.
+
+Mention metadata is delivered in the same Broadcast payload and persisted in
+the message row as bounded JSON. History therefore preserves the original tag,
+while the stored user ID makes recipient highlighting and profile navigation
+unambiguous. Plain `@text` that was not selected from the room list remains
+ordinary text.
+
 ### Reply loading detail
 
 `reply_to_id` is a composite self-reference that also enforces the same room.
@@ -86,6 +100,7 @@ The chat schema is introduced incrementally by these migrations:
   `chat-media` Storage bucket policies.
 - `20260719130616_chat_replies_and_reactions.sql` adds same-room replies and
   `soundspin_message_reactions` with RLS.
+- `20260719204302_chat_mentions.sql` adds bounded mention metadata to messages.
 
 Browser code uses only the Supabase publishable key. The secret key remains
 server-side. Chat tables are exposed deliberately to authenticated clients and
