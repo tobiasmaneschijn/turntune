@@ -24,6 +24,7 @@ import {
 import { persistReactionChange } from '@/chat/persistence'
 import { cn } from '@/lib/utils'
 import { ChatMessageItem } from '@/components/chat-message'
+import { DevFlair } from '@/components/DevFlair'
 import {
   chatPickerEmojiStyle,
   PlatformEmojiText,
@@ -46,6 +47,7 @@ interface RealtimeChatProps {
   onSend?: (message: ChatMessage) => Promise<void> | void
   messages?: ChatMessage[]
   onOpenProfile?: (userId: string) => void
+  adminUserIds?: string[]
 }
 
 /**
@@ -60,6 +62,7 @@ export const RealtimeChat = ({
   onMessage,
   onSend,
   onOpenProfile,
+  adminUserIds = [],
   messages: initialMessages = [],
 }: RealtimeChatProps) => {
   const { containerRef, scrollToBottom, isNearBottom } = useChatScroll()
@@ -94,6 +97,7 @@ export const RealtimeChat = ({
   const [giphyKey, setGiphyKey] = useState<string | undefined>(
     import.meta.env.VITE_GIPHY_API_KEY || undefined
   )
+  const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
 
   useEffect(() => {
     if (giphyKey) return
@@ -184,11 +188,17 @@ export const RealtimeChat = ({
   )
 
   const selectReply = useCallback((message: ChatMessage) => {
-    setReplyingTo(createReplySnapshot(message))
+    setReplyingTo(createReplySnapshot({
+      ...message,
+      user: {
+        ...message.user,
+        isAppAdmin: message.user.isAppAdmin || liveAdminUserIds.has(message.user.id),
+      },
+    }))
     setShowEmoji(false)
     setShowGiphy(false)
     requestAnimationFrame(() => messageInputRef.current?.focus())
-  }, [])
+  }, [liveAdminUserIds])
 
   const jumpToMessage = useCallback((messageId: string) => {
     const messageElement = document.getElementById(`chat-message-${messageId}`)
@@ -324,6 +334,10 @@ export const RealtimeChat = ({
                   isOwnMessage={message.user.id === user.id}
                   currentUserId={user.id}
                   showHeader={showHeader}
+                  isAuthorAppAdmin={Boolean(message.user.isAppAdmin || liveAdminUserIds.has(message.user.id))}
+                  isReplyAuthorAppAdmin={Boolean(message.replyTo && (
+                    message.replyTo.user.isAppAdmin || liveAdminUserIds.has(message.replyTo.user.id)
+                  ))}
                   onOpenProfile={onOpenProfile}
                   onReply={selectReply}
                   onReact={(selectedMessage, emoji) => void toggleReaction(selectedMessage, emoji)}
@@ -477,7 +491,10 @@ export const RealtimeChat = ({
           <div className="chat-reply-composer">
             <Reply className="size-3.5" />
             <div>
-              <span>Replying to <strong>@{replyingTo.user.name}</strong></span>
+              <span>
+                Replying to <strong>@{replyingTo.user.name}</strong>
+                {(replyingTo.user.isAppAdmin || liveAdminUserIds.has(replyingTo.user.id)) && <DevFlair className="chat-dev-flair" />}
+              </span>
               <small><PlatformEmojiText text={getMessagePreview(replyingTo)} /></small>
             </div>
             <Button

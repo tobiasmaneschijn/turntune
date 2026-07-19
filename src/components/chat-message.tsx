@@ -5,6 +5,7 @@ import type { SkinTones, Theme } from 'emoji-picker-react'
 import { getMessagePreview, groupReactions, type ChatMessage } from '@/chat/model'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
+import { DevFlair } from '@/components/DevFlair'
 import {
   chatPickerEmojiStyle,
   PlatformEmojiText,
@@ -20,6 +21,8 @@ interface ChatMessageItemProps {
   isOwnMessage: boolean
   currentUserId: string
   showHeader: boolean
+  isAuthorAppAdmin: boolean
+  isReplyAuthorAppAdmin: boolean
   onOpenProfile?: (userId: string) => void
   onReply: (message: ChatMessage) => void
   onReact: (message: ChatMessage, emoji: string) => void
@@ -31,6 +34,8 @@ export const ChatMessageItem = ({
   isOwnMessage,
   currentUserId,
   showHeader,
+  isAuthorAppAdmin,
+  isReplyAuthorAppAdmin,
   onOpenProfile,
   onReply,
   onReact,
@@ -62,6 +67,7 @@ export const ChatMessageItem = ({
         >
           <Reply size={12} />
           <strong>{reply.user.name}</strong>
+          {isReplyAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
           <PlatformEmojiText text={getMessagePreview(reply)} />
         </button>
       )}
@@ -130,6 +136,7 @@ export const ChatMessageItem = ({
         {showHeader && (
           <div className="chat-message-meta">
             <strong>{isOwnMessage ? 'You' : message.user.name}</strong>
+            {isAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
             <time>
               {new Date(message.createdAt).toLocaleTimeString('en-US', {
                 hour: '2-digit',

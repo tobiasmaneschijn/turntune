@@ -18,6 +18,16 @@ interface UseRealtimeChatProps {
   user: User
 }
 
+function stripUntrustedAdminFlair(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    user: { ...message.user, isAppAdmin: false },
+    replyTo: message.replyTo
+      ? { ...message.replyTo, user: { ...message.replyTo.user, isAppAdmin: false } }
+      : undefined,
+  }
+}
+
 const EVENT_MESSAGE_TYPE = 'message'
 const EVENT_REACTION_TYPE = 'reaction'
 
@@ -36,7 +46,10 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
 
     newChannel
       .on('broadcast', { event: EVENT_MESSAGE_TYPE }, (payload) => {
-        setMessages((current) => [...current, payload.payload as ChatMessage])
+        setMessages((current) => [
+          ...current,
+          stripUntrustedAdminFlair(payload.payload as ChatMessage),
+        ])
       })
       .on('broadcast', { event: EVENT_REACTION_TYPE }, (payload) => {
         const event = payload.payload as ChatReactionEvent
@@ -61,7 +74,7 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
       const channel = channelRef.current
       if (!channel || !isConnected) return null
 
-      const message: ChatMessage = {
+      const message = stripUntrustedAdminFlair({
         id: crypto.randomUUID(),
         content,
         type: media?.type || 'text',
@@ -71,7 +84,7 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
         replyTo,
         reactions: [],
         createdAt: new Date().toISOString(),
-      }
+      })
 
       // Broadcast does not echo to the sender by default, so add the message
       // locally before sending it to the other room members.

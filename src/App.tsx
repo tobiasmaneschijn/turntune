@@ -1670,6 +1670,11 @@ function RoomChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
   const seenMentionIdsRef = useRef(new Set<string>());
+  const adminUserIds = [...new Set(
+    snapshot.users
+      .filter((user) => user.isAppAdmin)
+      .map((user) => user.id)
+  )];
 
   useEffect(() => {
     let active = true;
@@ -1753,6 +1758,7 @@ function RoomChat({
           onMessage={handleMessages}
           onSend={persistMessage}
           onOpenProfile={onOpenProfile}
+          adminUserIds={adminUserIds}
         />
       </div>
     </aside>

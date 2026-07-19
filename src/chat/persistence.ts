@@ -50,6 +50,20 @@ export async function loadChatHistory(
 
   const history = ([...(data || [])] as unknown as ChatHistoryRow[]).reverse()
   const rowsById = new Map(history.map((row) => [row.id, row]))
+  const userIds = [...new Set(history.map((row) => row.user_id))]
+  const adminUserIds = new Set<string>()
+
+  if (userIds.length > 0) {
+    const { data: profiles, error: profileError } = await client
+      .from('soundspin_profiles')
+      .select('user_id, is_app_admin')
+      .in('user_id', userIds)
+
+    if (profileError) throw profileError
+    for (const profile of profiles || []) {
+      if (profile.is_app_admin) adminUserIds.add(profile.user_id)
+    }
+  }
 
   return history.map((row) => {
     const reply = row.reply_to_id ? rowsById.get(row.reply_to_id) : undefined
@@ -63,13 +77,18 @@ export async function loadChatHistory(
         id: row.user_id,
         name: row.user_name,
         avatarSeed: row.avatar_seed,
+        isAppAdmin: adminUserIds.has(row.user_id),
       },
       replyTo: reply ? {
         id: reply.id,
         content: reply.content,
         type: reply.message_type,
         mediaUrl: reply.media_url || undefined,
-        user: { id: reply.user_id, name: reply.user_name },
+        user: {
+          id: reply.user_id,
+          name: reply.user_name,
+          isAppAdmin: adminUserIds.has(reply.user_id),
+        },
       } : undefined,
       reactions: (row.soundspin_message_reactions || []).map((reaction) => ({
         emoji: reaction.emoji,

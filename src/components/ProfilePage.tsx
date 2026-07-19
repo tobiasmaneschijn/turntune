@@ -15,6 +15,7 @@ import {
   X
 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { DevFlair } from "./DevFlair";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -259,7 +260,7 @@ export function ProfilePage({
             </div>
             <h1>
               {profile.display_name}
-              {profile.is_app_admin && <span className="profile-dev-flair" title="SoundSpin developer">[DEV]</span>}
+              {profile.is_app_admin && <DevFlair className="profile-dev-flair" />}
             </h1>
             <p>{profile.bio || (isOwnProfile ? "Add a short bio to tell other listeners about yourself." : "No bio yet.")}</p>
           </div>

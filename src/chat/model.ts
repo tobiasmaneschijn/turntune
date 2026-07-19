@@ -20,7 +20,7 @@ export interface ChatReply {
   content: string
   type: ChatMessageType
   mediaUrl?: string
-  user: Pick<User, 'id' | 'name'>
+  user: Pick<User, 'id' | 'name' | 'isAppAdmin'>
 }
 
 export interface ChatReaction {
@@ -53,7 +53,11 @@ export function createReplySnapshot(message: ChatMessage): ChatReply {
     content: message.content,
     type: message.type,
     mediaUrl: message.mediaUrl,
-    user: { id: message.user.id, name: message.user.name },
+    user: {
+      id: message.user.id,
+      name: message.user.name,
+      isAppAdmin: message.user.isAppAdmin,
+    },
   }
 }
 
