@@ -77,6 +77,10 @@ function wait(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function isDeviceUnavailable(error: unknown) {
+  return /device not found|no active device|device.*offline/i.test(error instanceof Error ? error.message : "");
+}
+
 async function transferSpotifyPlayback(accessToken: string, deviceId: string) {
   let lastError: unknown;
   for (const delay of [0, 250, 750, 1_500]) {
@@ -89,7 +93,7 @@ async function transferSpotifyPlayback(accessToken: string, deviceId: string) {
       return;
     } catch (error) {
       lastError = error;
-      if (!/device not found/i.test(error instanceof Error ? error.message : "")) throw error;
+      if (!isDeviceUnavailable(error)) throw error;
     }
   }
   throw lastError;
@@ -136,6 +140,8 @@ export function SpotifyPlayer({
   const hasBeenReadyRef = useRef(false);
   const suppressedReconnectRef = useRef("");
   const playbackRef = useRef(playback);
+  const mappingRef = useRef(mapping);
+  const recoverWebPlayerRef = useRef<() => void>(() => undefined);
   const [deviceId, setDeviceId] = useState("");
   const [error, setError] = useState("");
   const [activationNeeded, setActivationNeeded] = useState(false);
@@ -145,6 +151,7 @@ export function SpotifyPlayer({
   const track = playback.track;
   const spotifyUri = mapping ? `spotify:track:${mapping.providerId}` : "";
   playbackRef.current = playback;
+  mappingRef.current = mapping;
 
   useEffect(() => {
     if (error) onError?.(error);
@@ -152,6 +159,7 @@ export function SpotifyPlayer({
 
   useEffect(() => {
     let alive = true;
+    let cleanupWebPlayer = () => undefined;
     setError("");
     commandRef.current = "";
     if (mode === "desktop") {
@@ -182,6 +190,10 @@ export function SpotifyPlayer({
 
     void loadSpotifySdk().then((sdk) => {
       if (!alive) return;
+      let reconnectTimer: number | undefined;
+      let readyWatchdog: number | undefined;
+      let reconnectAttempts = 0;
+      let reconnecting = false;
       const player = new sdk.Player({
         name: "SoundSpin Web Player",
         volume: volume / 100,
@@ -196,17 +208,60 @@ export function SpotifyPlayer({
         }
       });
       playerRef.current = player;
+      const scheduleReconnect = (immediate = false) => {
+        if (!alive || reconnecting || reconnectTimer !== undefined) return;
+        const delay = immediate ? 0 : Math.min(1_000 * (2 ** reconnectAttempts), 15_000);
+        setError("Reconnecting the SoundSpin Spotify device…");
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = undefined;
+          if (!alive) return;
+          reconnecting = true;
+          player.disconnect();
+          void wait(250).then(async () => {
+            if (!alive) return;
+            const connected = await player.connect();
+            if (!connected) throw new Error("Spotify did not accept the reconnect request.");
+            if (deviceIdRef.current) {
+              reconnecting = false;
+              return;
+            }
+            reconnectAttempts += 1;
+            readyWatchdog = window.setTimeout(() => {
+              readyWatchdog = undefined;
+              reconnecting = false;
+              scheduleReconnect();
+            }, 6_000);
+          }).catch((cause) => {
+            if (!alive) return;
+            reconnecting = false;
+            reconnectAttempts += 1;
+            setError(cause instanceof Error ? cause.message : "Spotify reconnection failed.");
+            scheduleReconnect();
+          });
+        }, delay);
+      };
+      recoverWebPlayerRef.current = () => scheduleReconnect(true);
+
       player.addListener("ready", ((payload: { device_id: string }) => {
         if (!alive) return;
-        const reconnecting = hasBeenReadyRef.current;
+        if (readyWatchdog !== undefined) window.clearTimeout(readyWatchdog);
+        if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+        readyWatchdog = undefined;
+        reconnectTimer = undefined;
+        reconnecting = false;
+        reconnectAttempts = 0;
+        const wasReconnecting = hasBeenReadyRef.current;
         hasBeenReadyRef.current = true;
         deviceIdRef.current = payload.device_id;
-        void transferSpotifyPlayback(accessToken, payload.device_id)
+        const currentPlayback = playbackRef.current;
+        const activateDevice = currentPlayback.track && mappingRef.current
+          ? transferSpotifyPlayback(accessToken, payload.device_id)
+          : Promise.resolve();
+        void activateDevice
           .then(() => {
             if (!alive || deviceIdRef.current !== payload.device_id) return;
             setError("");
-            const currentPlayback = playbackRef.current;
-            suppressedReconnectRef.current = reconnecting && !resumeAfterReconnect
+            suppressedReconnectRef.current = wasReconnecting && !resumeAfterReconnect
               ? `${currentPlayback.track?.id || "empty"}:${currentPlayback.updatedAt}`
               : "";
             commandRef.current = "";
@@ -215,14 +270,18 @@ export function SpotifyPlayer({
           .catch((cause) => {
             if (!alive) return;
             setError(cause instanceof Error ? cause.message : "Could not activate the SoundSpin Spotify device.");
+            scheduleReconnect();
           });
       }) as (payload: never) => void);
       player.addListener("not_ready", (() => {
         if (alive) {
           deviceIdRef.current = "";
           setDeviceId("");
-          setError("The SoundSpin Spotify player went offline.");
+          scheduleReconnect();
         }
+      }) as (payload: never) => void);
+      player.addListener("initialization_error", ((payload: { message: string }) => {
+        if (alive) setError(payload.message || "Spotify could not initialize this browser player.");
       }) as (payload: never) => void);
       player.addListener("authentication_error", ((payload: { message: string }) => {
         if (alive) {
@@ -233,20 +292,53 @@ export function SpotifyPlayer({
       player.addListener("account_error", ((payload: { message: string }) => {
         if (alive) setError(payload.message || "Spotify Premium is required.");
       }) as (payload: never) => void);
+      player.addListener("playback_error", ((payload: { message: string }) => {
+        if (!alive) return;
+        setError(payload.message || "Spotify playback stopped unexpectedly.");
+        if (isDeviceUnavailable(new Error(payload.message))) scheduleReconnect();
+      }) as (payload: never) => void);
       player.addListener("autoplay_failed", (() => {
         if (alive) {
           setActivationNeeded(true);
           setActivationDismissed(false);
         }
       }) as (payload: never) => void);
+      const wakePlayer = () => {
+        if (!alive || document.visibilityState === "hidden") return;
+        if (!playbackRef.current.track || !mappingRef.current) return;
+        const currentDeviceId = deviceIdRef.current;
+        if (!currentDeviceId) {
+          scheduleReconnect(true);
+          return;
+        }
+        void transferSpotifyPlayback(accessToken, currentDeviceId).then(() => {
+          if (!alive) return;
+          commandRef.current = "";
+          setActivationRevision((revision) => revision + 1);
+        }).catch(() => scheduleReconnect(true));
+      };
+      window.addEventListener("online", wakePlayer);
+      document.addEventListener("visibilitychange", wakePlayer);
+      cleanupWebPlayer = () => {
+        if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+        if (readyWatchdog !== undefined) window.clearTimeout(readyWatchdog);
+        window.removeEventListener("online", wakePlayer);
+        document.removeEventListener("visibilitychange", wakePlayer);
+      };
+
       return player.connect().then((connected) => {
-        if (!connected) throw new Error("Spotify could not connect the SoundSpin Web Player.");
+        if (!connected) {
+          scheduleReconnect();
+          throw new Error("Spotify could not connect the SoundSpin Web Player.");
+        }
       });
     }).catch((cause) => {
       if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Spotify.");
     });
     return () => {
       alive = false;
+      cleanupWebPlayer();
+      recoverWebPlayerRef.current = () => undefined;
       playerRef.current?.removeListener();
       playerRef.current?.disconnect();
       playerRef.current = null;
@@ -256,7 +348,10 @@ export function SpotifyPlayer({
 
   useEffect(() => {
     if (mode === "web") {
-      void playerRef.current?.setVolume(volume / 100);
+      void playerRef.current?.setVolume(volume / 100).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Could not set Spotify volume.");
+        recoverWebPlayerRef.current();
+      });
     } else if (deviceId) {
       void api("/api/spotify/playback", accessToken, {
         method: "POST",
@@ -266,6 +361,10 @@ export function SpotifyPlayer({
       });
     }
   }, [mode, volume, deviceId, accessToken]);
+
+  useEffect(() => {
+    if (mode === "web" && track && mapping && !deviceId) recoverWebPlayerRef.current();
+  }, [mode, track?.id, mapping?.providerId, deviceId]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -278,7 +377,10 @@ export function SpotifyPlayer({
         method: "POST",
         body: JSON.stringify({ action: "pause", deviceId })
       }).catch((cause) => {
-        if (!/no active device|device not found/i.test(cause instanceof Error ? cause.message : "")) {
+        if (mode === "web" && isDeviceUnavailable(cause)) {
+          commandRef.current = "";
+          recoverWebPlayerRef.current();
+        } else {
           setError(cause instanceof Error ? cause.message : "Could not pause Spotify playback.");
         }
       });
@@ -295,9 +397,16 @@ export function SpotifyPlayer({
       body: JSON.stringify(command)
     });
     void sendCommand().catch(async (cause) => {
-      if (mode !== "web" || !/device not found/i.test(cause instanceof Error ? cause.message : "")) throw cause;
-      await transferSpotifyPlayback(accessToken, deviceId);
-      return sendCommand();
+      if (mode !== "web" || !isDeviceUnavailable(cause)) throw cause;
+      try {
+        await transferSpotifyPlayback(accessToken, deviceId);
+        return await sendCommand();
+      } catch (recoveryError) {
+        if (!isDeviceUnavailable(recoveryError)) throw recoveryError;
+        commandRef.current = "";
+        recoverWebPlayerRef.current();
+        return null;
+      }
     }).then(() => setError("")).catch((cause) => {
       const message = cause instanceof Error ? cause.message : "Spotify playback failed.";
       setError(message);
