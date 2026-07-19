@@ -1,4 +1,4 @@
-import { ArrowDown, Plus, Reply, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import type { Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -344,59 +344,100 @@ export const RealtimeChat = ({
       )}
 
       {(showEmoji || showGiphy) && (
-        <div className={cn(
-          'absolute inset-x-3 z-10 overflow-hidden rounded-xl border border-border bg-popover shadow-2xl',
-          replyingTo ? 'bottom-40' : 'bottom-28'
-        )}>
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <strong className="text-xs">{showEmoji ? 'Choose an emoji' : 'Choose a GIF'}</strong>
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setShowEmoji(false); setShowGiphy(false) }}>
-              <X className="size-3.5" />
-            </Button>
+        <div className={cn('chat-picker-popover', { 'chat-picker-with-reply': Boolean(replyingTo) })}>
+          <div className="chat-picker-tabs" role="tablist" aria-label="Message media">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showGiphy}
+              className={showGiphy ? 'active' : undefined}
+              disabled={!giphyKey}
+              onClick={() => {
+                setShowEmoji(false)
+                setShowGiphy(true)
+                if (!gifs.length) void loadGifs(giphyQuery)
+              }}
+            >
+              GIFs
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showEmoji}
+              className={showEmoji ? 'active' : undefined}
+              onClick={() => {
+                setShowGiphy(false)
+                setShowEmoji(true)
+              }}
+            >
+              Emoji
+            </button>
+            <button
+              type="button"
+              className="chat-picker-close"
+              aria-label="Close media picker"
+              onClick={() => { setShowEmoji(false); setShowGiphy(false) }}
+            >
+              <X size={15} />
+            </button>
           </div>
           {showEmoji ? (
-            <Suspense fallback={<div className="grid h-64 place-items-center text-xs text-muted-foreground">Loading emoji…</div>}>
-              <EmojiPicker
-                theme={'dark' as Theme}
-                width="100%"
-                height={340}
-                lazyLoadEmojis
-                onEmojiClick={(emoji) => setNewMessage((current) => `${current}${emoji.emoji}`)}
-              />
-            </Suspense>
+            <div className="chat-emoji-panel">
+              <Suspense fallback={<div className="chat-picker-loading">Loading emoji…</div>}>
+                <EmojiPicker
+                  theme={'dark' as Theme}
+                  width="100%"
+                  height={390}
+                  lazyLoadEmojis
+                  previewConfig={{ showPreview: false }}
+                  searchPlaceholder="Find the perfect emoji"
+                  onEmojiClick={(emoji) => setNewMessage((current) => `${current}${emoji.emoji}`)}
+                />
+              </Suspense>
+            </div>
           ) : (
-            <div className="p-3">
+            <div className="chat-gif-panel">
               <form
-                className="mb-3 flex gap-2"
+                className="chat-gif-search"
                 onSubmit={(event) => {
                   event.preventDefault()
                   void loadGifs(giphyQuery)
                 }}
               >
+                <Search size={16} aria-hidden="true" />
                 <Input
                   value={giphyQuery}
                   onChange={(event) => setGiphyQuery(event.target.value)}
-                  placeholder="Search GIPHY"
+                  placeholder="Search GIFs"
                   maxLength={50}
                 />
-                <Button type="submit" size="sm">Search</Button>
-              </form>
-              <div className="grid max-h-72 grid-cols-3 gap-2 overflow-y-auto">
-                {gifs.map((gif) => (
-                  <button
-                    type="button"
-                    key={gif.id}
-                    className="overflow-hidden rounded-md bg-muted"
-                    onClick={() => {
-                      void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF')
-                      setShowGiphy(false)
-                    }}
-                  >
-                    <img src={gif.preview} alt={gif.title} className="h-24 w-full object-cover" loading="lazy" />
+                {giphyQuery && (
+                  <button type="button" aria-label="Clear GIF search" onClick={() => setGiphyQuery('')}>
+                    <X size={14} />
                   </button>
+                )}
+                <button type="submit" className="sr-only">Search GIFs</button>
+              </form>
+              <div className="chat-gif-grid">
+                {[0, 1].map((column) => (
+                  <div key={column}>
+                    {gifs.filter((_, index) => index % 2 === column).map((gif) => (
+                      <button
+                        type="button"
+                        key={gif.id}
+                        className="chat-gif-tile"
+                        onClick={() => {
+                          void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF')
+                          setShowGiphy(false)
+                        }}
+                      >
+                        <img src={gif.preview} alt={gif.title} loading="lazy" />
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
-              <p className="mt-2 text-right text-[10px] text-muted-foreground">Powered by GIPHY</p>
+              <p className="chat-gif-footer">Powered by GIPHY</p>
             </div>
           )}
         </div>

@@ -1284,7 +1284,7 @@ function RoomChat({
   return (
     <aside className="chat panel">
       <div className="chat-header">
-        <div><MessageIcon size={18} /><strong>Room chat</strong></div>
+        <div><MessageIcon size={20} /><strong>Room chat</strong></div>
         <div className="chat-presence">
           <div className="chat-presence-avatars">
             {snapshot.users.slice(0, 5).map((user) => (
@@ -1299,12 +1299,12 @@ function RoomChat({
                   if (event.key === "Enter" || event.key === " ") onOpenProfile(user.id);
                 }}
               >
-                <Avatar user={user} size={26} />
+                <Avatar user={user} size={32} />
               </span>
             ))}
             {snapshot.users.length > 5 && <i>+{snapshot.users.length - 5}</i>}
           </div>
-          <span><UsersIcon size={14} /> {snapshot.users.length}</span>
+          <span><UsersIcon size={16} /> {snapshot.users.length}</span>
         </div>
       </div>
       <div className="supabase-chat-body">

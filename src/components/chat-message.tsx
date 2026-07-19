@@ -61,7 +61,7 @@ export const ChatMessageItem = ({
       <div className="chat-message-avatar">
         {showHeader && (
           <button type="button" title={`Open ${message.user.name}'s profile`} onClick={() => onOpenProfile?.(message.user.id)}>
-            <Avatar user={message.user} size={36} />
+            <Avatar user={message.user} size={46} />
           </button>
         )}
       </div>
@@ -104,6 +104,8 @@ export const ChatMessageItem = ({
                 width={300}
                 height={320}
                 lazyLoadEmojis
+                previewConfig={{ showPreview: false }}
+                searchPlaceholder="Find an emoji"
                 onEmojiClick={(emoji) => {
                   onReact(message, emoji.emoji)
                   setShowReactionPicker(false)
