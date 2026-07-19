@@ -17,13 +17,13 @@ interface SoundCloudWidgetApi {
   setVolume(volume: number): void;
   getDuration(callback: (milliseconds: number) => void): void;
   getPosition(callback: (milliseconds: number) => void): void;
-  isPaused(callback: (paused: boolean) => void): void;
 }
 
 interface SoundCloudWidgetOptions {
   auto_play: boolean;
   visual: boolean;
   color: string;
+  single_active: boolean;
   sharing: boolean;
   download: boolean;
   buying: boolean;
@@ -37,6 +37,7 @@ interface SoundCloudWidgetFactory {
     READY: string;
     LOAD_PROGRESS: string;
     PLAY_PROGRESS: string;
+    SEEK: string;
     FINISH: string;
     ERROR: string;
   };
@@ -72,6 +73,9 @@ const widgetOptions = (callback?: () => void): SoundCloudWidgetOptions => {
     auto_play: false,
     visual: true,
     color: "d8ff57",
+    // React can briefly overlap widget lifecycles during navigation. Do not let
+    // SoundCloud's global single-player coordination pause the active iframe.
+    single_active: false,
     sharing: false,
     download: false,
     buying: false,
@@ -112,6 +116,8 @@ export function SoundCloudPlayer({
   const loadingTrackRef = useRef(false);
   const loadedTrackIdRef = useRef<string | null>(null);
   const initialTrackIdRef = useRef(playback.track?.id || null);
+  const commandRevisionRef = useRef(0);
+  const pendingSeekRef = useRef<{ trackId: string; revision: number } | null>(null);
   const playbackRef = useRef(playback);
   const isDjRef = useRef(isDj);
   const onEndedRef = useRef(onEnded);
@@ -160,6 +166,19 @@ export function SoundCloudPlayer({
           });
         });
       });
+      widget.bind(events.SEEK, () => {
+        const pending = pendingSeekRef.current;
+        const current = playbackRef.current;
+        if (
+          !active ||
+          !pending ||
+          pending.revision !== commandRevisionRef.current ||
+          pending.trackId !== current.track?.id ||
+          pending.trackId !== loadedTrackIdRef.current
+        ) return;
+        pendingSeekRef.current = null;
+        current.playing ? widget.play() : widget.pause();
+      });
       widget.bind(events.FINISH, () => {
         if (
           active &&
@@ -183,6 +202,8 @@ export function SoundCloudPlayer({
       aliveRef.current = false;
       loadingTrackRef.current = false;
       loadedTrackIdRef.current = null;
+      pendingSeekRef.current = null;
+      commandRevisionRef.current += 1;
       // Do not call widget.unbind() here. React has already detached the iframe
       // by the time passive cleanup runs, and the SoundCloud SDK then tries to
       // postMessage() through a null contentWindow.
@@ -196,6 +217,8 @@ export function SoundCloudPlayer({
     if (!ready || !widget || !track?.permalinkUrl) return;
     if (loadedTrackIdRef.current !== track.id) {
       loadingTrackRef.current = true;
+      pendingSeekRef.current = null;
+      commandRevisionRef.current += 1;
       setReady(false);
       widget.load(track.permalinkUrl, widgetOptions(() => {
         if (!aliveRef.current) return;
@@ -206,8 +229,30 @@ export function SoundCloudPlayer({
       return;
     }
     if (loadingTrackRef.current) return;
-    widget.seekTo(targetPosition(playback) * 1000);
-    playback.playing ? widget.play() : widget.pause();
+    const revision = ++commandRevisionRef.current;
+    const position = targetPosition(playback);
+    widget.getPosition((currentPositionMs) => {
+      if (
+        !aliveRef.current ||
+        loadingTrackRef.current ||
+        revision !== commandRevisionRef.current ||
+        loadedTrackIdRef.current !== track.id
+      ) return;
+
+      const currentPosition = currentPositionMs / 1000;
+      if (Math.abs(currentPosition - position) > 2.5) {
+        // Widget commands cross the iframe through asynchronous postMessage.
+        // Wait for SEEK before playing so a late seek cannot pause a track that
+        // already started. Near the beginning, skip the unnecessary seek.
+        pendingSeekRef.current = { trackId: track.id, revision };
+        if (!playback.playing) widget.pause();
+        widget.seekTo(position * 1000);
+        return;
+      }
+
+      pendingSeekRef.current = null;
+      playback.playing ? widget.play() : widget.pause();
+    });
   }, [ready, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
@@ -233,14 +278,6 @@ export function SoundCloudPlayer({
             duration: durationMs / 1000
           });
         });
-        if (current.playing && Math.abs(currentTime - targetPosition(current)) > 2.5) {
-          widget.seekTo(targetPosition(current) * 1000);
-        }
-      });
-      widget.isPaused((paused) => {
-        if (!aliveRef.current || loadingTrackRef.current || playbackRef.current.track?.id !== trackId) return;
-        if (current.playing && paused) widget.play();
-        if (!current.playing && !paused) widget.pause();
       });
     }, 750);
     return () => window.clearInterval(timer);

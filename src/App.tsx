@@ -973,8 +973,7 @@ function NowPlaying({
   const webPlaybackAllowed = playbackPreference !== "spotify-desktop" && playbackPreference !== "apple";
   const keepSpotifyWebMounted = spotifyReady && webPlaybackAllowed && (
     effectiveProvider === "spotify" ||
-    (!track && spotifyWebStarted) ||
-    (playbackPreference === "spotify-web" && spotifyWebStarted)
+    (!track && spotifyWebStarted)
   );
 
   useEffect(() => {
