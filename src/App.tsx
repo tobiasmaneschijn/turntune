@@ -12,6 +12,7 @@ import {
   Minimize2,
   Search,
   Settings,
+  Shield,
   Trash2,
   ThumbsDown,
   Volume2
@@ -20,6 +21,7 @@ import { Avatar } from "./components/Avatar";
 import { ProfilePage } from "./components/ProfilePage";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
+import { UserSettingsDialog } from "./components/UserSettingsDialog";
 import {
   CopyIcon,
   MessageIcon,
@@ -47,13 +49,12 @@ import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
+import { readPlaybackPreference, savePlaybackPreference, type PlaybackPreference } from "./playback-settings";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
 type SearchProvider = Provider;
-type PlaybackPreference = "source" | "spotify-web" | "spotify-desktop" | "apple";
 
 const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
-const PLAYBACK_PROVIDER_STORAGE_KEY = "soundspin-playback-provider";
 
 function randomId() {
   return crypto.randomUUID();
@@ -118,13 +119,6 @@ function readSearchProvider(): SearchProvider {
     : "youtube";
 }
 
-function readPlaybackPreference(): PlaybackPreference {
-  const preference = localStorage.getItem(PLAYBACK_PROVIDER_STORAGE_KEY);
-  return preference === "spotify-web" || preference === "spotify-desktop" || preference === "apple"
-    ? preference
-    : "source";
-}
-
 function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
   return track.provider === "youtube"
     ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`
@@ -150,7 +144,8 @@ export function App() {
   const [roomPassword, setRoomPassword] = useState("");
   const [roomPasswordRequired, setRoomPasswordRequired] = useState(false);
   const [roomJoinError, setRoomJoinError] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [auth, setAuth] = useState<{
     loading: boolean;
@@ -365,7 +360,8 @@ export function App() {
     setRoomPassword("");
     setRoomPasswordRequired(false);
     setRoomJoinError("");
-    setSettingsOpen(false);
+    setRoomSettingsOpen(false);
+    setUserSettingsOpen(false);
     history.pushState({}, "", "/");
     setRoomId(null);
   };
@@ -494,8 +490,9 @@ export function App() {
         </div>
         <div className="header-actions">
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
+          <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
-            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} title="Room settings"><Settings /></Button>
+            <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>
           )}
           <Button
             variant="outline"
@@ -539,6 +536,8 @@ export function App() {
             accessToken={auth.session?.access_token}
             compact={compactPlayer}
             onToggleCompact={() => setCompactPlayer((compact) => !compact)}
+            settingsOpen={userSettingsOpen}
+            onCloseSettings={() => setUserSettingsOpen(false)}
           />
         </div>
         <RoomChat
@@ -548,12 +547,12 @@ export function App() {
           onOpenProfile={openProfile}
         />
       </section>
-      {settingsOpen && auth.session && (
+      {roomSettingsOpen && auth.session && (
         <RoomSettingsDialog
           snapshot={snapshot}
           currentUserId={profile.id}
           accessToken={auth.session.access_token}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setRoomSettingsOpen(false)}
           onNotice={setNotice}
         />
       )}
@@ -779,7 +778,9 @@ function NowPlaying({
   currentUserId,
   accessToken,
   compact,
-  onToggleCompact
+  onToggleCompact,
+  settingsOpen,
+  onCloseSettings
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
@@ -788,11 +789,14 @@ function NowPlaying({
   accessToken?: string;
   compact: boolean;
   onToggleCompact: () => void;
+  settingsOpen: boolean;
+  onCloseSettings: () => void;
 }) {
   const playback = snapshot.room.playback;
   const track = playback.track;
   const [volume, setVolume] = useState(80);
   const [playbackPreference, setPlaybackPreference] = useState<PlaybackPreference>(readPlaybackPreference);
+  const [spotifyWebStarted, setSpotifyWebStarted] = useState(false);
   const [connections, setConnections] = useState({
     loaded: false,
     spotifyConfigured: false,
@@ -845,9 +849,21 @@ function NowPlaying({
 
   const changePlaybackPreference = (next: PlaybackPreference) => {
     setPlaybackPreference(next);
-    localStorage.setItem(PLAYBACK_PROVIDER_STORAGE_KEY, next);
-    if (next.startsWith("spotify") && !connections.spotifyConnected) connectSpotify();
+    savePlaybackPreference(next);
   };
+
+  const disconnectSpotify = useCallback(() => {
+    if (!accessToken) return;
+    void fetch("/api/spotify/connection", {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }).then((response) => {
+      if (!response.ok) throw new Error("Could not disconnect Spotify.");
+      setConnections((current) => ({ ...current, spotifyConnected: false }));
+    }).catch((error) => {
+      setPlayerStatus((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not disconnect Spotify." }));
+    });
+  }, [accessToken]);
 
   const update = (playing: boolean) => {
     const position = playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
@@ -874,13 +890,27 @@ function NowPlaying({
     : undefined);
   const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;
   const effectiveMapping = preferredMapping || (track
-    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
+    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl }
     : undefined);
+  const previewArtwork = effectiveMapping?.artworkUrl || (track ? trackArtworkUrl(track) : undefined);
   const providerFallback = Boolean(track && preferredProvider !== effectiveProvider);
   const spotifyReady = Boolean(accessToken && connections.spotifyConnected);
+  const webPlaybackAllowed = playbackPreference !== "spotify-desktop" && playbackPreference !== "apple";
+  const keepSpotifyWebMounted = spotifyReady && webPlaybackAllowed && (
+    effectiveProvider === "spotify" ||
+    (!track && spotifyWebStarted) ||
+    (playbackPreference === "spotify-web" && spotifyWebStarted)
+  );
+
+  useEffect(() => {
+    if (!webPlaybackAllowed) setSpotifyWebStarted(false);
+    else if (effectiveProvider === "spotify") setSpotifyWebStarted(true);
+    else if (track && playbackPreference !== "spotify-web") setSpotifyWebStarted(false);
+  }, [effectiveProvider, playbackPreference, track?.id, webPlaybackAllowed]);
 
   return (
-    <section className={`now-playing panel ${compact ? "compact" : ""}`}>
+    <>
+      <section className={`now-playing panel ${compact ? "compact" : ""}`}>
       <div className="now-playing-heading">
         <div className="section-kicker">NOW PLAYING</div>
         <button type="button" onClick={onToggleCompact} title={compact ? "Expand player" : "Use compact player"}>
@@ -888,23 +918,41 @@ function NowPlaying({
           <span>{compact ? "Expand" : "Compact"}</span>
         </button>
       </div>
+      {keepSpotifyWebMounted && (
+        <SpotifyPlayer
+          playback={playback}
+          mapping={effectiveProvider === "spotify" ? effectiveMapping : undefined}
+          mode="web"
+          isDj={isDj}
+          volume={volume}
+          accessToken={accessToken!}
+          onEnded={handleEnded}
+          onStatus={setPlayerStatus}
+          onConnectionLost={loadConnections}
+        />
+      )}
       {track ? (
         <>
           <div className="track-stage">
             <TrackArtwork track={track} />
+            {effectiveProvider === "spotify" && previewArtwork && (
+              <img className="album-art-preview" src={previewArtwork} alt={`${track.title} album artwork`} />
+            )}
             {effectiveProvider === "spotify" && effectiveMapping ? (
               spotifyReady ? (
-                <SpotifyPlayer
-                  playback={playback}
-                  mapping={effectiveMapping}
-                  mode={playbackPreference === "spotify-desktop" ? "desktop" : "web"}
-                  isDj={isDj}
-                  volume={volume}
-                  accessToken={accessToken!}
-                  onEnded={handleEnded}
-                  onStatus={setPlayerStatus}
-                  onConnectionLost={loadConnections}
-                />
+                keepSpotifyWebMounted ? null : (
+                  <SpotifyPlayer
+                    playback={playback}
+                    mapping={effectiveMapping}
+                    mode={playbackPreference === "spotify-desktop" ? "desktop" : "web"}
+                    isDj={isDj}
+                    volume={volume}
+                    accessToken={accessToken!}
+                    onEnded={handleEnded}
+                    onStatus={setPlayerStatus}
+                    onConnectionLost={loadConnections}
+                  />
+                )
               ) : (
                 <div className="provider-player-shell spotify-player-shell">
                   <strong>Connect Spotify to listen</strong>
@@ -992,16 +1040,7 @@ function NowPlaying({
                     ? "Moderator controls available"
                     : "Synced with the current DJ"}
             </div>
-            <label className="playback-provider-control">
-              <span>Listen with</span>
-              <select value={playbackPreference} onChange={(event) => changePlaybackPreference(event.target.value as PlaybackPreference)}>
-                <option value="source">Room source</option>
-                <option value="spotify-web" disabled={connections.loaded && !connections.spotifyConfigured}>Spotify · SoundSpin</option>
-                <option value="spotify-desktop" disabled={connections.loaded && !connections.spotifyConfigured}>Spotify · Desktop</option>
-                <option value="apple" disabled={connections.loaded && !connections.appleConfigured}>Apple Music</option>
-              </select>
-              {providerFallback && <small>No {providerLabel(preferredProvider)} match · using {providerLabel(effectiveProvider!)}</small>}
-            </label>
+            {providerFallback && <small className="provider-fallback">No {providerLabel(preferredProvider)} match · using {providerLabel(effectiveProvider!)}</small>}
             <label className="volume-control">
               <Volume2 size={14} />
               <input
@@ -1023,7 +1062,19 @@ function NowPlaying({
           <p>Add a track from any configured provider to start the radio.</p>
         </div>
       )}
-    </section>
+      </section>
+      {settingsOpen && (
+        <UserSettingsDialog
+          preference={playbackPreference}
+          connections={connections}
+          canConnectSpotify={Boolean(accessToken)}
+          onPreferenceChange={changePlaybackPreference}
+          onConnectSpotify={connectSpotify}
+          onDisconnectSpotify={disconnectSpotify}
+          onClose={onCloseSettings}
+        />
+      )}
+    </>
   );
 }
 

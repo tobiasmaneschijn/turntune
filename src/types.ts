@@ -45,6 +45,7 @@ export interface Track {
 export interface ProviderTrackMapping {
   providerId: string;
   permalinkUrl?: string;
+  artworkUrl?: string;
   storefront?: string;
 }
 

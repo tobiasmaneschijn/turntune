@@ -17,6 +17,7 @@ function mapping(track: CatalogTrack): ProviderTrackMapping {
   return {
     providerId: track.id,
     permalinkUrl: track.permalinkUrl,
+    artworkUrl: track.thumbnail,
     storefront: track.storefront
   };
 }
@@ -24,7 +25,8 @@ function mapping(track: CatalogTrack): ProviderTrackMapping {
 function sourceMapping(track: TrackInput): ProviderTrackMapping {
   return {
     providerId: track.providerId,
-    permalinkUrl: track.permalinkUrl
+    permalinkUrl: track.permalinkUrl,
+    artworkUrl: track.artworkUrl
   };
 }
 

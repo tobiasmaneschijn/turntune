@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { Music2 } from "lucide-react";
 import type { Playback, ProviderTrackMapping } from "../types";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import type { PlayerStatus } from "./YouTubePlayer";
 
 interface SpotifySdkState {
@@ -70,6 +73,28 @@ async function api<T>(path: string, accessToken: string, init?: RequestInit) {
   return payload;
 }
 
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function transferSpotifyPlayback(accessToken: string, deviceId: string) {
+  let lastError: unknown;
+  for (const delay of [0, 250, 750, 1_500]) {
+    if (delay) await wait(delay);
+    try {
+      await api("/api/spotify/playback", accessToken, {
+        method: "POST",
+        body: JSON.stringify({ action: "transfer", deviceId })
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!/device not found/i.test(error instanceof Error ? error.message : "")) throw error;
+    }
+  }
+  throw lastError;
+}
+
 function targetPositionMs(playback: Playback) {
   return Math.max(0, Math.floor((
     playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0)
@@ -88,7 +113,7 @@ export function SpotifyPlayer({
   onConnectionLost
 }: {
   playback: Playback;
-  mapping: ProviderTrackMapping;
+  mapping?: ProviderTrackMapping;
   mode: "web" | "desktop";
   isDj: boolean;
   volume: number;
@@ -105,9 +130,11 @@ export function SpotifyPlayer({
   const [deviceId, setDeviceId] = useState("");
   const [error, setError] = useState("");
   const [activationNeeded, setActivationNeeded] = useState(false);
+  const [activationDismissed, setActivationDismissed] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [activationRevision, setActivationRevision] = useState(0);
   const track = playback.track;
-  const spotifyUri = `spotify:track:${mapping.providerId}`;
+  const spotifyUri = mapping ? `spotify:track:${mapping.providerId}` : "";
 
   useEffect(() => {
     let alive = true;
@@ -158,10 +185,23 @@ export function SpotifyPlayer({
       player.addListener("ready", ((payload: { device_id: string }) => {
         if (!alive) return;
         deviceIdRef.current = payload.device_id;
-        setDeviceId(payload.device_id);
+        void transferSpotifyPlayback(accessToken, payload.device_id)
+          .then(() => {
+            if (!alive || deviceIdRef.current !== payload.device_id) return;
+            setError("");
+            setDeviceId(payload.device_id);
+          })
+          .catch((cause) => {
+            if (!alive) return;
+            setError(cause instanceof Error ? cause.message : "Could not activate the SoundSpin Spotify device.");
+          });
       }) as (payload: never) => void);
       player.addListener("not_ready", (() => {
-        if (alive) setError("The SoundSpin Spotify player went offline.");
+        if (alive) {
+          deviceIdRef.current = "";
+          setDeviceId("");
+          setError("The SoundSpin Spotify player went offline.");
+        }
       }) as (payload: never) => void);
       player.addListener("authentication_error", ((payload: { message: string }) => {
         if (alive) {
@@ -173,9 +213,14 @@ export function SpotifyPlayer({
         if (alive) setError(payload.message || "Spotify Premium is required.");
       }) as (payload: never) => void);
       player.addListener("autoplay_failed", (() => {
-        if (alive) setActivationNeeded(true);
+        if (alive) {
+          setActivationNeeded(true);
+          setActivationDismissed(false);
+        }
       }) as (payload: never) => void);
-      return player.connect();
+      return player.connect().then((connected) => {
+        if (!connected) throw new Error("Spotify could not connect the SoundSpin Web Player.");
+      });
     }).catch((cause) => {
       if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Spotify.");
     });
@@ -195,30 +240,51 @@ export function SpotifyPlayer({
       void api("/api/spotify/playback", accessToken, {
         method: "POST",
         body: JSON.stringify({ action: "volume", deviceId, volumePercent: volume })
+      }).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Could not set Spotify volume.");
       });
     }
   }, [mode, volume, deviceId, accessToken]);
 
   useEffect(() => {
-    if (!track || !deviceId) return;
+    if (!deviceId) return;
+    if (!track || !mapping) {
+      const signature = `idle:${deviceId}:${track?.id || "empty"}`;
+      if (commandRef.current === signature) return;
+      commandRef.current = signature;
+      void api("/api/spotify/playback", accessToken, {
+        method: "POST",
+        body: JSON.stringify({ action: "pause", deviceId })
+      }).catch((cause) => {
+        if (!/no active device|device not found/i.test(cause instanceof Error ? cause.message : "")) {
+          setError(cause instanceof Error ? cause.message : "Could not pause Spotify playback.");
+        }
+      });
+      return;
+    }
     const signature = `${track.id}:${playback.playing}:${playback.position}:${playback.updatedAt}:${deviceId}`;
     if (commandRef.current === signature) return;
     commandRef.current = signature;
     const command = playback.playing
       ? { action: "play", deviceId, spotifyUri, positionMs: targetPositionMs(playback) }
       : { action: "pause", deviceId };
-    void api("/api/spotify/playback", accessToken, {
+    const sendCommand = () => api("/api/spotify/playback", accessToken, {
       method: "POST",
       body: JSON.stringify(command)
+    });
+    void sendCommand().catch(async (cause) => {
+      if (mode !== "web" || !/device not found/i.test(cause instanceof Error ? cause.message : "")) throw cause;
+      await transferSpotifyPlayback(accessToken, deviceId);
+      return sendCommand();
     }).then(() => setError("")).catch((cause) => {
       const message = cause instanceof Error ? cause.message : "Spotify playback failed.";
       setError(message);
       if (/connect spotify/i.test(message)) onConnectionLost(message);
     });
-  }, [track?.id, playback.playing, playback.position, playback.updatedAt, deviceId, spotifyUri, accessToken, onConnectionLost, activationRevision]);
+  }, [track?.id, mapping?.providerId, playback.playing, playback.position, playback.updatedAt, deviceId, spotifyUri, accessToken, onConnectionLost, activationRevision, mode]);
 
   useEffect(() => {
-    if (!track) return;
+    if (!track || !mapping) return;
     let alive = true;
     const update = async () => {
       try {
@@ -268,19 +334,51 @@ export function SpotifyPlayer({
     };
   }, [track?.id, track?.durationMs, mode, accessToken, deviceId, spotifyUri, playback.playing, isDj, onEnded, onStatus]);
 
+  const activateSpotify = () => {
+    const player = playerRef.current;
+    if (!player) return;
+    setActivating(true);
+    setError("");
+    void player.activateElement().then(() => {
+      setActivationNeeded(false);
+      setActivationDismissed(false);
+      commandRef.current = "";
+      setActivationRevision((revision) => revision + 1);
+    }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Spotify playback could not be enabled.");
+    }).finally(() => setActivating(false));
+  };
+
+  if (!error && !activationNeeded) return null;
+
   return (
-    <div className="provider-player-shell spotify-player-shell">
-      <strong>{mode === "web" ? "Spotify in SoundSpin" : "Spotify Connect"}</strong>
-      {activationNeeded && mode === "web" && (
-        <button type="button" onClick={() => {
-          void playerRef.current?.activateElement().then(() => {
-            setActivationNeeded(false);
-            commandRef.current = "";
-            setActivationRevision((revision) => revision + 1);
-          });
-        }}>Enable Spotify playback</button>
+    <>
+      {error && (
+        <div className="spotify-playback-overlay error"><small>{error}</small></div>
       )}
-      <small>{error || (deviceId ? "Connected and following the room" : "Finding your Spotify device…")}</small>
-    </div>
+      {activationNeeded && mode === "web" && !activationDismissed && (
+        <Dialog open onOpenChange={(open) => { if (!open) setActivationDismissed(true); }}>
+          <DialogContent className="spotify-activation-dialog" showCloseButton={false}>
+            <div className="spotify-activation-icon"><Music2 /></div>
+            <DialogHeader className="spotify-activation-copy">
+              <DialogTitle>Enable Spotify playback</DialogTitle>
+              <DialogDescription>
+                Spotify needs one click before SoundSpin can play audio in this browser. You only need to do this when the browser blocks autoplay.
+              </DialogDescription>
+            </DialogHeader>
+            {error && <div className="dialog-error" role="alert">{error}</div>}
+            <DialogFooter className="spotify-activation-actions">
+              <Button type="button" variant="outline" onClick={() => setActivationDismissed(true)}>Not now</Button>
+              <Button type="button" onClick={activateSpotify} disabled={activating}>{activating ? "Enabling…" : "Enable playback"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {activationNeeded && mode === "web" && activationDismissed && (
+        <div className="spotify-playback-overlay">
+          <button type="button" onClick={() => setActivationDismissed(false)}>Enable Spotify playback</button>
+        </div>
+      )}
+    </>
   );
 }

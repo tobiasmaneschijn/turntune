@@ -173,7 +173,7 @@ const appleMusicResolveSchema = z.object({
 });
 
 const spotifyPlaybackSchema = z.object({
-  action: z.enum(["play", "pause", "resume", "seek", "volume"]),
+  action: z.enum(["transfer", "play", "pause", "resume", "seek", "volume"]),
   deviceId: z.string().min(1).max(200).optional(),
   spotifyUri: z.string().regex(/^spotify:track:[A-Za-z0-9]{22}$/).optional(),
   positionMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).optional(),
@@ -181,6 +181,9 @@ const spotifyPlaybackSchema = z.object({
 }).superRefine((value, context) => {
   if (value.action === "play" && !value.spotifyUri) {
     context.addIssue({ code: "custom", path: ["spotifyUri"], message: "A Spotify track is required." });
+  }
+  if (value.action === "transfer" && !value.deviceId) {
+    context.addIssue({ code: "custom", path: ["deviceId"], message: "A Spotify device is required." });
   }
   if (value.action === "volume" && value.volumePercent === undefined) {
     context.addIssue({ code: "custom", path: ["volumePercent"], message: "A volume level is required." });
@@ -327,7 +330,10 @@ function consumeProviderSearchLimit(request: express.Request) {
 }
 
 function spotifyRedirectUri(request: express.Request) {
-  return process.env.SPOTIFY_REDIRECT_URI || `${request.protocol}://${request.get("host")}/api/spotify/callback`;
+  if (process.env.SPOTIFY_REDIRECT_URI) return process.env.SPOTIFY_REDIRECT_URI;
+  const host = request.get("host") || "127.0.0.1:5173";
+  const spotifySafeHost = host.replace(/^localhost(?=:|$)/i, "127.0.0.1");
+  return `${request.protocol}://${spotifySafeHost}/api/spotify/callback`;
 }
 
 async function spotifyForUser<T>(userId: string, operation: (accessToken: string) => Promise<T>) {
@@ -1326,6 +1332,12 @@ app.post("/api/spotify/playback", express.json(), async (request, response) => {
   const device = deviceId ? `?${new URLSearchParams({ device_id: deviceId })}` : "";
   try {
     await spotifyForUser(userId, async (token) => {
+      if (action === "transfer") {
+        return spotifyApi.request(token, "/me/player", {
+          method: "PUT",
+          body: JSON.stringify({ device_ids: [deviceId], play: false })
+        });
+      }
       if (action === "play") {
         return spotifyApi.request(token, `/me/player/play${device}`, {
           method: "PUT",

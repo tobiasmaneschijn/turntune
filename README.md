@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The web app is served by Vite and proxies its
+Open `http://127.0.0.1:5173`. The web app is served by Vite and proxies its
 Socket.IO connection to the API on port 3000.
 
 Without Supabase environment variables, local development uses the original
@@ -55,7 +55,7 @@ only a legacy/local fallback.
    production branch.
 3. In **Authentication → URL Configuration**, set the site URL to your
    production SoundSpin URL.
-4. Add `http://localhost:5173/**` as a redirect URL for local development.
+4. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
 5. Configure a custom SMTP provider before inviting the group. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
 6. Set the following environment variables:
@@ -71,7 +71,7 @@ SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
 SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=http://localhost:5173/api/spotify/callback
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:5173/api/spotify/callback
 SPOTIFY_MARKET=US
 PROVIDER_TOKEN_ENCRYPTION_KEY=generate-a-long-random-secret
 APPLE_MUSIC_TEAM_ID=your-apple-developer-team-id
@@ -172,7 +172,10 @@ SoundSpin tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
 
 Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
-configured. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
+configured. Spotify does not accept `localhost`: use the explicit loopback
+address `http://127.0.0.1:5173/api/spotify/callback` for local development, and
+open SoundSpin at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
+domain in production. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
 cryptographically secure random generator; changing it invalidates stored
 Spotify refresh tokens. Apple Music requires a MusicKit media identifier and
 private key. The private key accepts escaped `\n` line breaks in environment

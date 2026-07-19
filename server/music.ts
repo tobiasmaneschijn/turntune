@@ -3,6 +3,7 @@ import type { Provider } from "./types.js";
 export interface ProviderTrackMapping {
   providerId: string;
   permalinkUrl?: string;
+  artworkUrl?: string;
   storefront?: string;
 }
 
