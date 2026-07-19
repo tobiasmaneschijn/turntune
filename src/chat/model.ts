@@ -151,6 +151,7 @@ export function startsNewDay(message: ChatMessage, previous?: ChatMessage): bool
 }
 
 export function shouldShowMessageHeader(message: ChatMessage, previous?: ChatMessage): boolean {
+  if (message.replyTo) return true
   if (!previous || previous.user.id !== message.user.id) return true
   const minutesSincePrevious =
     (new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime()) / 60_000

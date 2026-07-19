@@ -1,4 +1,4 @@
-import { ArrowDown, ImagePlus, Images, Reply, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Plus, Reply, Send, Smile, X } from 'lucide-react'
 import type { Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -281,13 +281,13 @@ export const RealtimeChat = ({
   return (
     <div className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
       {/* Messages */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={containerRef} className="chat-message-scroll flex-1 overflow-y-auto p-4 space-y-4">
         {allMessages.length === 0 ? (
           <div className="text-center text-sm text-muted-foreground">
             No messages yet. Start the conversation!
           </div>
         ) : null}
-        <div className="space-y-1">
+        <div className="chat-message-list space-y-1">
           {allMessages.map((message, index) => {
             const previousMessage = index > 0 ? allMessages[index - 1] : undefined
             const beginsNewDay = startsNewDay(message, previousMessage)
@@ -403,7 +403,11 @@ export const RealtimeChat = ({
       )}
 
       {composerError && <p className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
-      <form onSubmit={handleSendMessage} className="chat-composer" autoComplete="off">
+      <form
+        onSubmit={handleSendMessage}
+        className={cn('chat-composer', { 'chat-composer-replying': Boolean(replyingTo) })}
+        autoComplete="off"
+      >
         <input
           ref={fileInputRef}
           className="hidden"
@@ -433,61 +437,68 @@ export const RealtimeChat = ({
             </Button>
           </div>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={!isConnected}
-          aria-label="Add emoji"
-          onClick={() => { setShowGiphy(false); setShowEmoji((current) => !current) }}
-        >
-          <Smile className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={!isConnected || uploading}
-          aria-label="Upload image"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <ImagePlus className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={!isConnected || !giphyKey}
-          aria-label={giphyKey ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
-          title={giphyKey ? 'Add GIF' : 'Set VITE_GIPHY_API_KEY to enable GIFs'}
-          onClick={toggleGiphy}
-        >
-          <Images className="size-4" />
-        </Button>
-        <Input
-          ref={messageInputRef}
-          className={cn('chat-composer-input')}
-          type="text"
-          autoComplete="off"
-          autoCorrect="off"
-          aria-autocomplete="none"
-          data-form-type="other"
-          value={newMessage}
-          maxLength={500}
-          onChange={(e) => setNewMessage(e.target.value)}
-          onPaste={(event) => void pasteMedia(event)}
-          placeholder={uploading ? 'Uploading image…' : 'Type or paste an image…'}
-          disabled={!isConnected || uploading}
-        />
-        <Button
-          className="chat-send-button"
-          type="submit"
-          size="icon"
-          disabled={!isConnected || !newMessage.trim()}
-        >
-          <span>Send</span>
-          <Send className="size-4" />
-        </Button>
+        <div className="chat-composer-bar">
+          <Button
+            className="chat-composer-add"
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={!isConnected || uploading}
+            aria-label="Upload image"
+            title="Upload image"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Plus className="size-5" />
+          </Button>
+          <Input
+            ref={messageInputRef}
+            className="chat-composer-input"
+            type="text"
+            autoComplete="off"
+            autoCorrect="off"
+            aria-autocomplete="none"
+            data-form-type="other"
+            value={newMessage}
+            maxLength={500}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onPaste={(event) => void pasteMedia(event)}
+            placeholder={uploading ? 'Uploading image…' : `Message #${roomName.replace(/^soundspin:/, '')}`}
+            disabled={!isConnected || uploading}
+          />
+          <Button
+            className="chat-composer-gif"
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={!isConnected || !giphyKey}
+            aria-label={giphyKey ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
+            title={giphyKey ? 'Add GIF' : 'Set VITE_GIPHY_API_KEY to enable GIFs'}
+            onClick={toggleGiphy}
+          >
+            <span>GIF</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={!isConnected}
+            aria-label="Add emoji"
+            title="Add emoji"
+            onClick={() => { setShowGiphy(false); setShowEmoji((current) => !current) }}
+          >
+            <Smile className="size-[18px]" />
+          </Button>
+          <Button
+            className="chat-send-button"
+            type="submit"
+            size="icon"
+            disabled={!isConnected || !newMessage.trim()}
+            aria-label="Send message"
+            title="Send message"
+          >
+            <Send className="size-4" />
+          </Button>
+        </div>
       </form>
     </div>
   )

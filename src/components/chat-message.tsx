@@ -41,12 +41,27 @@ export const ChatMessageItem = ({
     <div
       id={`chat-message-${message.id}`}
       tabIndex={-1}
-      className={cn('chat-message-item', { 'chat-message-grouped': !showHeader })}
+      className={cn('chat-message-item', {
+        'chat-message-grouped': !showHeader,
+        'chat-message-own': isOwnMessage,
+        'chat-message-has-reply': Boolean(reply),
+      })}
     >
+      {reply && (
+        <button
+          type="button"
+          className="chat-message-reply"
+          onClick={() => onJumpToMessage(reply.id)}
+        >
+          <Reply size={12} />
+          <strong>{reply.user.name}</strong>
+          <span>{getMessagePreview(reply)}</span>
+        </button>
+      )}
       <div className="chat-message-avatar">
         {showHeader && (
           <button type="button" title={`Open ${message.user.name}'s profile`} onClick={() => onOpenProfile?.(message.user.id)}>
-            <Avatar user={message.user} size={30} />
+            <Avatar user={message.user} size={36} />
           </button>
         )}
       </div>
@@ -108,17 +123,6 @@ export const ChatMessageItem = ({
               })}
             </time>
           </div>
-        )}
-        {reply && (
-          <button
-            type="button"
-            className="chat-message-reply"
-            onClick={() => onJumpToMessage(reply.id)}
-          >
-            <Reply size={12} />
-            <strong>@{reply.user.name}</strong>
-            <span>{getMessagePreview(reply)}</span>
-          </button>
         )}
         <div className="chat-message-body">
           {message.mediaUrl && (
