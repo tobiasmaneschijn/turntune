@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import {
+  applyChatUserProfiles,
   applyReactionEvents,
   createReplySnapshot,
   getMessagePreview,
@@ -48,6 +49,7 @@ interface RealtimeChatProps {
   messages?: ChatMessage[]
   onOpenProfile?: (userId: string) => void
   adminUserIds?: string[]
+  roomUsers?: User[]
 }
 
 /**
@@ -63,6 +65,7 @@ export const RealtimeChat = ({
   onSend,
   onOpenProfile,
   adminUserIds = [],
+  roomUsers = [],
   messages: initialMessages = [],
 }: RealtimeChatProps) => {
   const { containerRef, scrollToBottom, isNearBottom } = useChatScroll()
@@ -115,9 +118,13 @@ export const RealtimeChat = ({
     () => mergeChatMessages(initialMessages, realtimeMessages),
     [initialMessages, realtimeMessages]
   )
+  const profiledMessages = useMemo(
+    () => applyChatUserProfiles(baseMessages, roomUsers),
+    [baseMessages, roomUsers]
+  )
   const allMessages = useMemo(
-    () => applyReactionEvents(baseMessages, reactionEvents),
-    [baseMessages, reactionEvents]
+    () => applyReactionEvents(profiledMessages, reactionEvents),
+    [profiledMessages, reactionEvents]
   )
 
   useEffect(() => {

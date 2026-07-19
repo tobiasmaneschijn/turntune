@@ -45,7 +45,11 @@ reload; the UI shows that distinction explicitly.
 
 When a room opens, `loadChatHistory` fetches the newest 200 messages, reverses
 them into chronological order, maps database names to the UI model, and loads
-the reactions embedded under each message.
+the reactions embedded under each message. Message content and the display name
+at send time remain immutable snapshots, but avatars are resolved from each
+author's current `soundspin_profiles` row. Trusted live room profiles are then
+overlaid on the visible timeline so an avatar change updates messages that are
+already on screen.
 
 ### Reply loading detail
 

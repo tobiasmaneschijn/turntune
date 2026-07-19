@@ -1761,6 +1761,7 @@ function RoomChat({
           onSend={persistMessage}
           onOpenProfile={onOpenProfile}
           adminUserIds={adminUserIds}
+          roomUsers={snapshot.users}
         />
       </div>
     </aside>

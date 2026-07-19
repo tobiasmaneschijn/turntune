@@ -1,6 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { ChatMessage, ChatMessageType } from '@/chat/model'
+import {
+  applyChatUserProfiles,
+  type ChatMessage,
+  type ChatMessageType,
+  type ChatUserProfile,
+} from '@/chat/model'
 import type { User } from '@/types'
 
 export const CHAT_HISTORY_LIMIT = 200
@@ -51,21 +56,27 @@ export async function loadChatHistory(
   const history = ([...(data || [])] as unknown as ChatHistoryRow[]).reverse()
   const rowsById = new Map(history.map((row) => [row.id, row]))
   const userIds = [...new Set(history.map((row) => row.user_id))]
-  const adminUserIds = new Set<string>()
+  const currentProfiles: ChatUserProfile[] = []
 
   if (userIds.length > 0) {
     const { data: profiles, error: profileError } = await client
       .from('soundspin_profiles')
-      .select('user_id, is_app_admin')
+      .select('user_id, is_app_admin, avatar_key, avatar_url')
       .in('user_id', userIds)
 
     if (profileError) throw profileError
     for (const profile of profiles || []) {
-      if (profile.is_app_admin) adminUserIds.add(profile.user_id)
+      currentProfiles.push({
+        id: profile.user_id,
+        avatarSeed: profile.user_id,
+        avatarKey: profile.avatar_key,
+        avatarUrl: profile.avatar_url || undefined,
+        isAppAdmin: profile.is_app_admin,
+      })
     }
   }
 
-  return history.map((row) => {
+  const messages = history.map((row) => {
     const reply = row.reply_to_id ? rowsById.get(row.reply_to_id) : undefined
     return {
       id: row.id,
@@ -77,7 +88,6 @@ export async function loadChatHistory(
         id: row.user_id,
         name: row.user_name,
         avatarSeed: row.avatar_seed,
-        isAppAdmin: adminUserIds.has(row.user_id),
       },
       replyTo: reply ? {
         id: reply.id,
@@ -87,7 +97,6 @@ export async function loadChatHistory(
         user: {
           id: reply.user_id,
           name: reply.user_name,
-          isAppAdmin: adminUserIds.has(reply.user_id),
         },
       } : undefined,
       reactions: (row.soundspin_message_reactions || []).map((reaction) => ({
@@ -97,6 +106,8 @@ export async function loadChatHistory(
       createdAt: row.created_at,
     }
   })
+
+  return applyChatUserProfiles(messages, currentProfiles)
 }
 
 export async function saveChatMessage(

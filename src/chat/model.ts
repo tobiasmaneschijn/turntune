@@ -45,6 +45,11 @@ export interface ReactionGroup {
   hasReacted: boolean
 }
 
+export type ChatUserProfile = Pick<
+  User,
+  'id' | 'avatarSeed' | 'avatarKey' | 'avatarUrl' | 'isAppAdmin'
+>
+
 const reactionKey = (reaction: ChatReaction) => `${reaction.userId}\u0000${reaction.emoji}`
 
 export function createReplySnapshot(message: ChatMessage): ChatReply {
@@ -79,6 +84,42 @@ export function mergeChatMessages(
   return [...messagesById.values()].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt)
   )
+}
+
+/**
+ * Messages keep their original text and display name, while avatars and
+ * trusted admin flair follow the author's current profile.
+ */
+export function applyChatUserProfiles(
+  messages: ChatMessage[],
+  profiles: ChatUserProfile[]
+): ChatMessage[] {
+  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]))
+
+  return messages.map((message) => {
+    const profile = profilesById.get(message.user.id)
+    const replyProfile = message.replyTo
+      ? profilesById.get(message.replyTo.user.id)
+      : undefined
+
+    return {
+      ...message,
+      user: profile ? {
+        ...message.user,
+        avatarSeed: profile.avatarSeed,
+        avatarKey: profile.avatarKey,
+        avatarUrl: profile.avatarUrl,
+        isAppAdmin: profile.isAppAdmin,
+      } : message.user,
+      replyTo: message.replyTo ? {
+        ...message.replyTo,
+        user: replyProfile ? {
+          ...message.replyTo.user,
+          isAppAdmin: replyProfile.isAppAdmin,
+        } : message.replyTo.user,
+      } : undefined,
+    }
+  })
 }
 
 /** Applies transient Broadcast events on top of the last durable reaction set. */
