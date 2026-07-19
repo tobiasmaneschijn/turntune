@@ -1254,19 +1254,24 @@ function RoomChat({
     let active = true;
     void client
       .from("soundspin_messages")
-      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at, reply_to_id, reply_to:soundspin_messages!soundspin_messages_reply_same_room_fk(id, content, message_type, media_url, user_id, user_name), soundspin_message_reactions(emoji, user_id)")
+      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at, reply_to_id, soundspin_message_reactions(emoji, user_id)")
       .eq("room_slug", snapshot.room.id)
       .order("created_at", { ascending: false })
       .limit(200)
       .then(({ data, error: loadError }) => {
         if (!active) return;
         if (loadError) {
-          setError("Chat history is unavailable until the realtime-chat migration is deployed.");
+          setError("Chat history could not be loaded. Please refresh and try again.");
           return;
         }
+        const history = (data || []).reverse();
+        const messagesById = new Map(history.map((message) => [message.id, message]));
+        setError("");
         setMessages(
-          (data || []).reverse().map((message) => {
-            const reply = Array.isArray(message.reply_to) ? message.reply_to[0] : message.reply_to;
+          history.map((message) => {
+            const reply = message.reply_to_id
+              ? messagesById.get(message.reply_to_id)
+              : undefined;
             return ({
               id: message.id,
               content: message.content,
