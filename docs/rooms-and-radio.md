@@ -129,6 +129,12 @@ The browser connects Socket.IO and emits `room:join`. The server then:
 Listener count is the number of distinct connected user IDs, not the number of
 tabs or sockets.
 
+A join is transactional with respect to presence. Rejoining the same room on an
+already connected socket refreshes that presence without scheduling disconnect
+grace. When switching rooms, the server keeps the old membership until the new
+room has passed authentication, access checks, and loading. This prevents a
+temporary database/auth failure from making an active tab look disconnected.
+
 ## DJ rotation
 
 `djQueueUserIds` behaves as a ring. `advanceRadio` checks at most one complete

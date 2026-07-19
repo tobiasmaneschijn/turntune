@@ -302,7 +302,11 @@ export function App() {
     const onConnectError = (error: Error) => setNotice(error.message);
     // Snapshots are personalized by the server: next.room.queue is ours only.
     // Never infer or cache another DJ's upcoming tracks in the client.
-    const onSnapshot = (next: RoomSnapshot) => setSnapshot(next);
+    const onSnapshot = (next: RoomSnapshot) => {
+      // A failed cross-room join leaves the previous server membership intact.
+      // Ignore any late snapshot from that room while this page targets another.
+      if (next.room.id === roomId) setSnapshot(next);
+    };
     const onXp = (event: { amount: number; message: string }) => {
       setNotice(`+${event.amount} XP · ${event.message}`);
       setProfileRefresh((revision) => revision + 1);

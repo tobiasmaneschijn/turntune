@@ -378,15 +378,19 @@ io.on("connection", (socket) => {
     const parsed = joinSchema.safeParse(payload);
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid room or profile." });
 
-    for (const joinedRoom of socket.rooms) {
-      if (joinedRoom !== socket.id) await socket.leave(joinedRoom);
-    }
-    await leaveCurrentRoom(socket.id);
     const { roomId, roomName, password } = parsed.data;
     let user: User = {
       ...parsed.data.user,
       id: authEnabled ? socket.data.authUserId : parsed.data.user.id
     };
+    const previousRoomId = socketRooms.get(socket.id);
+
+    // Auth refreshes and profile updates can cause the browser to re-emit join
+    // on an already connected socket. Do not turn that harmless refresh into a
+    // disconnect grace period. Keeping the existing presence until validation
+    // succeeds also prevents a transient Supabase error from evicting an active
+    // DJ one minute later.
+    if (previousRoomId === roomId) cancelDjEviction(roomId, user.id);
 
     try {
       if (authEnabled) {
@@ -423,6 +427,15 @@ io.on("connection", (socket) => {
         delete room.vibe.votes[room.playback.track.addedBy.id];
       }
       await store.recordRoomMember(roomId, user.id);
+
+      // Switch rooms only after the destination has been authorized and loaded.
+      // A same-room join is an idempotent presence/profile refresh.
+      if (previousRoomId && previousRoomId !== roomId) {
+        await leaveCurrentRoom(socket.id);
+      }
+      for (const joinedRoom of socket.rooms) {
+        if (joinedRoom !== socket.id && joinedRoom !== roomId) await socket.leave(joinedRoom);
+      }
 
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
