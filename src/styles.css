@@ -1025,6 +1025,121 @@ button { letter-spacing: inherit; }
 .profile-error-card { border-color: var(--border); border-radius: var(--radius-xl); background: var(--card); color: var(--muted-foreground); }
 .profile-toast { border-color: color-mix(in oklch, var(--destructive), transparent 70%); border-radius: var(--radius-lg); background: color-mix(in oklch, var(--destructive), var(--background) 80%); }
 
+.profile-theme-afterglow {
+  --primary: oklch(.78 .16 48);
+  --primary-foreground: oklch(.17 .035 35);
+  --ring: oklch(.78 .16 48);
+  --card: oklch(.155 .022 25);
+  --secondary: oklch(.22 .035 28);
+}
+.profile-theme-deep-space {
+  --primary: oklch(.77 .15 285);
+  --primary-foreground: oklch(.15 .035 285);
+  --ring: oklch(.77 .15 285);
+  --card: oklch(.15 .025 285);
+  --secondary: oklch(.21 .04 285);
+}
+.profile-theme-laser-lime {
+  --primary: oklch(.9 .21 130);
+  --primary-foreground: oklch(.14 .04 135);
+  --ring: oklch(.9 .21 130);
+  --card: oklch(.145 .025 145);
+  --secondary: oklch(.2 .04 145);
+}
+.profile-theme-afterglow .profile-hero { background: linear-gradient(135deg, color-mix(in oklch, var(--card), var(--primary) 8%), var(--card)); }
+.profile-theme-deep-space .profile-hero { background: radial-gradient(circle at 12% 0%, color-mix(in oklch, var(--primary), transparent 86%), transparent 35%), var(--card); }
+.profile-theme-laser-lime .profile-hero { background: linear-gradient(115deg, color-mix(in oklch, var(--primary), transparent 94%), var(--card) 55%); }
+.profile-badge-line { margin-bottom: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.profile-badge-line .featured-achievement { border-color: color-mix(in oklch, var(--primary), transparent 62%); color: var(--primary); }
+.profile-badge-line .featured-achievement svg { width: 12px; height: 12px; }
+.profile-card-icon { width: 20px; height: 20px; color: var(--muted-foreground); }
+.signature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.signature-track { min-width: 0; min-height: 226px; padding: 10px; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--secondary); display: flex; flex-direction: column; }
+.signature-slot-label { padding: 4px 5px 10px; color: var(--muted-foreground); font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.signature-track > img,
+.signature-artwork { width: 100%; aspect-ratio: 1.6; min-height: 0; border-radius: var(--radius-lg); object-fit: cover; background: var(--background); display: grid; place-items: center; color: var(--muted-foreground); }
+.signature-artwork.spotify { color: #1ed760; }
+.signature-artwork.youtube { color: #ff5757; }
+.signature-artwork.apple { color: #fa607d; }
+.signature-artwork.soundcloud { color: #ff7a32; }
+.signature-copy { min-width: 0; padding: 10px 4px 5px; display: flex; flex-direction: column; gap: 3px; }
+.signature-copy strong,
+.signature-copy small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.signature-copy strong { font-size: 12px; }
+.signature-copy small { color: var(--muted-foreground); font-size: 10px; }
+.signature-actions { margin-top: auto; padding: 2px 2px 0; display: flex; align-items: center; gap: 5px; }
+.signature-actions a,
+.signature-actions button { height: 25px; padding: 0 7px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; }
+.signature-actions a:hover,
+.signature-actions button:hover { background: var(--background); color: var(--foreground); }
+.signature-actions svg { width: 12px; height: 12px; }
+.signature-actions .signature-remove { width: 25px; padding: 0; margin-left: auto; }
+.signature-empty-button { flex: 1; padding: 12px; border: 1px dashed var(--input); border-radius: var(--radius-lg); background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; text-align: center; cursor: pointer; }
+.signature-empty-button:hover { border-color: color-mix(in oklch, var(--primary), transparent 50%); background: color-mix(in oklch, var(--primary), transparent 95%); }
+.signature-empty-button > span { width: 34px; height: 34px; border-radius: 50%; background: var(--background); color: var(--primary); display: grid; place-items: center; }
+.signature-empty-button svg { width: 15px; }
+.signature-empty-button strong { font-size: 11px; }
+.signature-empty-button small { max-width: 150px; color: var(--muted-foreground); font-size: 9px; line-height: 1.4; }
+.signature-empty-copy { flex: 1; color: var(--muted-foreground); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-size: 10px; }
+.signature-search-panel { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--secondary); }
+.signature-search-heading { margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.signature-search-heading > div { display: flex; flex-direction: column; gap: 3px; }
+.signature-search-heading strong { font-size: 12px; }
+.signature-search-heading small { color: var(--muted-foreground); font-size: 10px; }
+.signature-search-form { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
+.signature-search-form > svg { width: 16px; color: var(--muted-foreground); }
+.signature-search-form [data-slot="input"] { background: var(--background); }
+.signature-search-form select { height: 36px; padding: 0 28px 0 10px; border: 1px solid var(--input); border-radius: var(--radius-lg); outline: 0; background: var(--background); color: var(--foreground); font-size: 11px; }
+.signature-search-error { margin: 10px 0 0; color: #fca5a5; font-size: 10px; }
+.signature-results { max-height: 245px; margin-top: 10px; overflow-y: auto; display: grid; gap: 4px; }
+.signature-results > button { width: 100%; padding: 7px; border: 0; border-radius: var(--radius-lg); background: transparent; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.signature-results > button:hover { background: var(--background); }
+.signature-results > button > img,
+.signature-results > button > span:first-child { width: 38px; height: 38px; border-radius: var(--radius-md); object-fit: cover; background: var(--card); display: grid; place-items: center; }
+.signature-results > button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.signature-results strong,
+.signature-results small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.signature-results strong { font-size: 11px; }
+.signature-results small { color: var(--muted-foreground); font-size: 9px; }
+.signature-results > button > span:last-child { color: var(--primary); font-size: 10px; font-weight: 600; }
+.highlight-grid { display: grid; grid-template-columns: .65fr .65fr 1.7fr; gap: 8px; }
+.highlight-grid > div { min-width: 0; min-height: 92px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--secondary); display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.highlight-grid > div > span { color: var(--primary); }
+.highlight-grid svg { width: 15px; height: 15px; }
+.highlight-grid strong { overflow: hidden; font-size: 17px; white-space: nowrap; text-overflow: ellipsis; }
+.highlight-grid small { color: var(--muted-foreground); font-size: 9px; }
+.highlight-grid .crowd-favorite strong { font-size: 12px; }
+.theme-card [data-slot="card-title"],
+.achievement-card [data-slot="card-title"] { display: flex; align-items: center; gap: 7px; }
+.theme-card [data-slot="card-title"] svg,
+.achievement-card [data-slot="card-title"] svg { width: 15px; color: var(--primary); }
+.theme-collection,
+.achievement-collection { display: grid; gap: 6px; }
+.theme-collection > button,
+.achievement-collection > button { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: transparent; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; text-align: left; cursor: pointer; }
+.theme-collection > button:hover:not(:disabled),
+.achievement-collection > button:hover:not(:disabled) { background: var(--secondary); }
+.theme-collection > button.selected,
+.achievement-collection > button.selected { border-color: color-mix(in oklch, var(--primary), transparent 50%); background: color-mix(in oklch, var(--primary), transparent 94%); }
+.theme-collection > button.locked,
+.achievement-collection > button.locked { opacity: .48; }
+.theme-collection > button:disabled,
+.achievement-collection > button:disabled { cursor: default; }
+.theme-collection i { width: 34px; height: 34px; border-radius: var(--radius-md); background: linear-gradient(135deg, #d8ff57, #568d2f); }
+.theme-collection .theme-swatch-afterglow i { background: linear-gradient(135deg, #ffb347, #d94b70); }
+.theme-collection .theme-swatch-deep-space i { background: linear-gradient(135deg, #7766ff, #1b1c46); }
+.theme-collection .theme-swatch-laser-lime i { background: linear-gradient(135deg, #eaff62, #00a85a); }
+.theme-collection button > span,
+.achievement-collection button > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.theme-collection strong,
+.achievement-collection strong { font-size: 10px; }
+.theme-collection small,
+.achievement-collection small { overflow: hidden; color: var(--muted-foreground); font-size: 8px; line-height: 1.35; text-overflow: ellipsis; }
+.theme-collection button > svg,
+.achievement-collection button > svg { width: 13px; color: var(--primary); }
+.achievement-collection button > span:first-child { width: 32px; height: 32px; border-radius: 50%; background: var(--secondary); color: var(--primary); display: grid; place-items: center; font-size: 15px; }
+.achievement-collection button > span:first-child svg { width: 13px; }
+
 .settings-grid { gap: 16px; }
 .settings-fields { display: grid; gap: 14px; }
 .password-settings,
@@ -1051,6 +1166,7 @@ button { letter-spacing: inherit; }
   .auth-intro h1 { font-size: clamp(36px, 9vw, 52px); }
   .room-card-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .profile-columns { grid-template-columns: 1fr; }
+  .profile-side-column { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 }
 
 @media (max-width: 600px) {
@@ -1072,6 +1188,13 @@ button { letter-spacing: inherit; }
   .profile-identity > div { justify-content: center; }
   .profile-stats { width: 100%; grid-template-columns: repeat(3, 1fr); }
   .avatar-collection { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .profile-side-column { grid-template-columns: 1fr; }
+  .signature-grid,
+  .highlight-grid { grid-template-columns: 1fr; }
+  .signature-track { min-height: 0; }
+  .signature-search-form { grid-template-columns: auto minmax(0, 1fr); }
+  .signature-search-form select,
+  .signature-search-form [data-slot="button"] { grid-column: span 1; }
   .user-settings-layout { min-height: 0; grid-template-columns: 1fr; }
   .settings-tabs { flex-direction: row; }
   .settings-tabs button { justify-content: center; }

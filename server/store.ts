@@ -10,8 +10,12 @@ import type {
   RoomRole,
   MusicProviderConnection,
   SoundSpinProfile,
-  SoundSpinUnlock
+  SoundSpinProfileHighlights,
+  SoundSpinUnlock,
+  Track
 } from "./types.js";
+
+const PROFILE_COLUMNS = "user_id, display_name, bio, avatar_key, theme_key, featured_badge_key, signature_tracks, xp, songs_liked, created_at, updated_at";
 
 interface Database {
   rooms: Record<string, Room>;
@@ -425,7 +429,7 @@ export class Store {
         { user_id: userId, display_name: displayName, updated_at: new Date().toISOString() },
         { onConflict: "user_id" }
       )
-      .select("user_id, display_name, bio, avatar_key, xp, songs_liked, created_at, updated_at")
+      .select(PROFILE_COLUMNS)
       .single();
     if (error) throw new Error(`Could not load profile: ${error.message}`);
     return data as SoundSpinProfile;
@@ -435,7 +439,7 @@ export class Store {
     if (!this.supabase) return null;
     const { data, error } = await this.supabase
       .from("soundspin_profiles")
-      .select("user_id, display_name, bio, avatar_key, xp, songs_liked, created_at, updated_at")
+      .select(PROFILE_COLUMNS)
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw new Error(`Could not load profile: ${error.message}`);
@@ -452,49 +456,93 @@ export class Store {
     return (data || []) as SoundSpinUnlock[];
   }
 
+  async getProfileHighlights(userId: string): Promise<SoundSpinProfileHighlights> {
+    const empty = {
+      rooms_played: 0,
+      favorite_track_title: null,
+      favorite_track_artist: null,
+      favorite_track_wins: 0
+    };
+    if (!this.supabase) return empty;
+    const { data, error } = await this.supabase
+      .from("soundspin_profile_highlights")
+      .select("rooms_played, favorite_track_title, favorite_track_artist, favorite_track_wins")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw new Error(`Could not load profile highlights: ${error.message}`);
+    return data ? data as SoundSpinProfileHighlights : empty;
+  }
+
   async updateProfile(
     userId: string,
-    update: { displayName?: string; bio?: string; avatarKey?: string }
+    update: {
+      displayName?: string;
+      bio?: string;
+      avatarKey?: string;
+      themeKey?: string;
+      featuredBadgeKey?: string;
+      signatureTracks?: SoundSpinProfile["signature_tracks"];
+    }
   ) {
     if (!this.supabase) return null;
+    const supabase = this.supabase;
     const current = await this.getProfile(userId);
     if (!current) throw new Error("Profile not found.");
 
-    if (update.avatarKey && update.avatarKey !== current.avatar_key) {
-      const { data: unlock, error } = await this.supabase
+    const validateUnlock = async (
+      key: string,
+      kind: SoundSpinUnlock["kind"],
+      missingMessage: string
+    ) => {
+      const { data: unlock, error } = await supabase
         .from("soundspin_unlocks")
         .select("key, required_level")
-        .eq("key", update.avatarKey)
-        .eq("kind", "avatar")
+        .eq("key", key)
+        .eq("kind", kind)
         .maybeSingle();
-      if (error) throw new Error(`Could not validate avatar: ${error.message}`);
-      if (!unlock) throw new Error("That avatar does not exist.");
+      if (error) throw new Error(`Could not validate ${kind}: ${error.message}`);
+      if (!unlock) throw new Error(missingMessage);
       if (levelForXp(current.xp) < unlock.required_level) {
-        throw new Error(`Reach level ${unlock.required_level} to use that avatar.`);
+        throw new Error(`Reach level ${unlock.required_level} to use that ${kind}.`);
       }
+    };
+
+    if (update.avatarKey && update.avatarKey !== current.avatar_key) {
+      await validateUnlock(update.avatarKey, "avatar", "That avatar does not exist.");
+    }
+    if (update.themeKey && update.themeKey !== current.theme_key) {
+      await validateUnlock(update.themeKey, "theme", "That theme does not exist.");
+    }
+    if (update.featuredBadgeKey && update.featuredBadgeKey !== current.featured_badge_key) {
+      await validateUnlock(update.featuredBadgeKey, "badge", "That achievement does not exist.");
     }
 
-    const values: Record<string, string> = { updated_at: new Date().toISOString() };
+    const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (update.displayName !== undefined) values.display_name = update.displayName;
     if (update.bio !== undefined) values.bio = update.bio;
     if (update.avatarKey !== undefined) values.avatar_key = update.avatarKey;
+    if (update.themeKey !== undefined) values.theme_key = update.themeKey;
+    if (update.featuredBadgeKey !== undefined) values.featured_badge_key = update.featuredBadgeKey;
+    if (update.signatureTracks !== undefined) values.signature_tracks = update.signatureTracks;
 
-    const { data, error } = await this.supabase
+    const { data, error } = await supabase
       .from("soundspin_profiles")
       .update(values)
       .eq("user_id", userId)
-      .select("user_id, display_name, bio, avatar_key, xp, songs_liked, created_at, updated_at")
+      .select(PROFILE_COLUMNS)
       .single();
     if (error) throw new Error(`Could not update profile: ${error.message}`);
     return data as SoundSpinProfile;
   }
 
-  async awardTrackLikedXp(recipientUserId: string, roomSlug: string, trackId: string) {
+  async awardTrackLikedXp(recipientUserId: string, roomSlug: string, track: Pick<Track, "id" | "title" | "artist">) {
     if (!this.supabase) return false;
     const { error } = await this.supabase.from("soundspin_xp_events").insert({
       recipient_user_id: recipientUserId,
       room_slug: roomSlug,
-      track_id: trackId,
+      track_id: track.id,
+      track_title: track.title,
+      track_artist: track.artist || null,
       reason: "track_liked",
       amount: TRACK_LIKED_XP
     });

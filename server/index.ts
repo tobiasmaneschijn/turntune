@@ -202,7 +202,23 @@ const soundCloudResolveSchema = z.object({
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
   bio: z.string().trim().max(160).optional(),
-  avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional()
+  avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
+  themeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
+  featuredBadgeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
+  signatureTracks: z.array(z.object({
+    slot: z.enum(["anthem", "obsession", "guilty-pleasure"]),
+    provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
+    providerId: z.string().min(1).max(200),
+    title: z.string().trim().min(1).max(120),
+    artist: z.string().trim().min(1).max(120).optional(),
+    artworkUrl: z.string().url().max(2048).refine((url) => url.startsWith("https://"), "Artwork must use HTTPS.").optional(),
+    permalinkUrl: z.string().url().max(2048).optional()
+  })).max(3).superRefine((tracks, context) => {
+    const slots = tracks.map((track) => track.slot);
+    if (new Set(slots).size !== slots.length) {
+      context.addIssue({ code: "custom", message: "Each signature track needs a unique slot." });
+    }
+  }).optional()
 }).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.");
 
 const roomCreateSchema = z.object({
@@ -830,7 +846,7 @@ io.on("connection", (socket) => {
         awardedXp = await store.awardTrackLikedXp(
           track.addedBy.id,
           membership.room.id,
-          track.id
+          track
         );
       } catch (error) {
         console.error(error);
@@ -865,12 +881,13 @@ app.get("/api/profiles/:userId", async (request, response) => {
   const userId = z.string().uuid().safeParse(request.params.userId);
   if (!userId.success) return response.status(400).json({ error: "Invalid profile." });
   try {
-    const [profile, unlocks] = await Promise.all([
+    const [profile, unlocks, highlights] = await Promise.all([
       store.getProfile(userId.data),
-      store.getUnlocks()
+      store.getUnlocks(),
+      store.getProfileHighlights(userId.data)
     ]);
     if (!profile) return response.status(404).json({ error: "Profile not found." });
-    response.json({ profile, unlocks });
+    response.json({ profile, unlocks, highlights });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Could not load profile."
