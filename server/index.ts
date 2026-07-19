@@ -8,6 +8,7 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
 import { TRACK_LIKED_XP } from "./progression.js";
+import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import {
   advanceRadio,
   canJoinDjQueue,
@@ -29,6 +30,10 @@ const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
+const soundCloudApi = new SoundCloudApi(
+  process.env.SOUNDCLOUD_CLIENT_ID,
+  process.env.SOUNDCLOUD_CLIENT_SECRET
+);
 const authEnabled = Boolean(
   supabaseUrl &&
   supabasePublishableKey &&
@@ -50,6 +55,11 @@ const youtubeSearchCache = new Map<string, {
   results: YouTubeSearchResult[];
 }>();
 const youtubeSearchLimits = new Map<string, { count: number; resetAt: number }>();
+const soundCloudSearchCache = new Map<string, {
+  expiresAt: number;
+  results: SoundCloudSearchResult[];
+}>();
+const soundCloudSearchLimits = new Map<string, { count: number; resetAt: number }>();
 
 interface YouTubeSearchResult {
   id: string;
@@ -73,9 +83,29 @@ const joinSchema = z.object({
 });
 
 const trackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple"]),
+  provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
   providerId: z.string().min(1).max(200),
-  title: z.string().trim().min(1).max(120)
+  title: z.string().trim().min(1).max(120),
+  artist: z.string().trim().min(1).max(120).optional(),
+  artworkUrl: z.string().url().max(2048).optional(),
+  permalinkUrl: z.string().url().max(2048).optional(),
+  durationMs: z.number().int().positive().max(60 * 60 * 24 * 1000).optional()
+}).superRefine((track, context) => {
+  if (track.artworkUrl && !track.artworkUrl.startsWith("https://")) {
+    context.addIssue({ code: "custom", path: ["artworkUrl"], message: "Artwork must use HTTPS." });
+  }
+  if (track.provider !== "soundcloud") return;
+  if (!/^soundcloud:tracks:\d+$/.test(track.providerId)) {
+    context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid SoundCloud track URN." });
+  }
+  if (!track.permalinkUrl) {
+    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A SoundCloud permalink is required." });
+    return;
+  }
+  const hostname = new URL(track.permalinkUrl).hostname.toLowerCase();
+  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
+    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "Invalid SoundCloud permalink." });
+  }
 });
 
 const playbackSchema = z.object({
@@ -102,6 +132,8 @@ const vibeVoteSchema = z.object({
 const youtubeSearchSchema = z.object({
   q: z.string().trim().min(2).max(100)
 });
+
+const soundCloudSearchSchema = youtubeSearchSchema;
 
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
@@ -511,7 +543,7 @@ io.on("connection", (socket) => {
     if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
       return reply?.({ ok: false, error: "Join the DJ queue before adding tracks." });
     }
-    if (parsed.data.provider !== "youtube") {
+    if (!(["youtube", "soundcloud"] as const).includes(parsed.data.provider as "youtube" | "soundcloud")) {
       return reply?.({ ok: false, error: "That provider is not enabled yet." });
     }
     if (
@@ -907,6 +939,52 @@ app.get("/api/youtube/search", async (request, response) => {
     console.error("YouTube search failed", error);
     response.status(502).json({
       error: error instanceof Error ? error.message : "YouTube search failed."
+    });
+  }
+});
+
+app.get("/api/soundcloud/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!soundCloudApi.configured) {
+    return response.status(503).json({ error: "SoundCloud search is not configured yet." });
+  }
+
+  const parsed = soundCloudSearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  }
+
+  const now = Date.now();
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const currentLimit = soundCloudSearchLimits.get(rateKey);
+  const limit = !currentLimit || currentLimit.resetAt <= now
+    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+    : currentLimit;
+  if (limit.count >= 30) {
+    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
+  }
+  limit.count += 1;
+  soundCloudSearchLimits.set(rateKey, limit);
+
+  const cacheKey = parsed.data.q.toLocaleLowerCase();
+  const cached = soundCloudSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return response.json({ results: cached.results });
+  }
+
+  try {
+    const results = await soundCloudApi.searchTracks(parsed.data.q);
+    soundCloudSearchCache.set(cacheKey, {
+      expiresAt: now + 5 * 60 * 1000,
+      results
+    });
+    response.json({ results });
+  } catch (error) {
+    console.error("SoundCloud search failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "SoundCloud search failed."
     });
   }
 });

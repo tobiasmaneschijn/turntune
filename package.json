@@ -9,7 +9,9 @@
     "dev:web": "vite",
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "node dist-server/index.js",
+    "test": "npm run test:radio && npm run test:soundcloud",
     "test:radio": "tsx --test server/radio.test.ts",
+    "test:soundcloud": "tsx --test server/soundcloud.test.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {

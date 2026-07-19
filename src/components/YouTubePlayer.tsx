@@ -31,7 +31,7 @@ interface YouTubePlayerApi {
   destroy(): void;
 }
 
-export interface YouTubePlayerStatus {
+export interface PlayerStatus {
   ready: boolean;
   buffering: boolean;
   currentTime: number;
@@ -71,7 +71,7 @@ export function YouTubePlayer({
   isDj: boolean;
   volume: number;
   onEnded: () => void;
-  onStatus: (status: YouTubePlayerStatus) => void;
+  onStatus: (status: PlayerStatus) => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerApi | null>(null);

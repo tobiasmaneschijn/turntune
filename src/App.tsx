@@ -29,7 +29,8 @@ import {
   SkipIcon,
   UsersIcon
 } from "./components/Icons";
-import { YouTubePlayer, type YouTubePlayerStatus } from "./components/YouTubePlayer";
+import { SoundCloudPlayer } from "./components/SoundCloudPlayer";
+import { YouTubePlayer, type PlayerStatus } from "./components/YouTubePlayer";
 import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
@@ -44,7 +45,7 @@ import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
-import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
+import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
 function randomId() {
   return crypto.randomUUID();
@@ -93,6 +94,26 @@ function youtubeId(value: string) {
     if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
   }
   return null;
+}
+
+function providerLabel(provider: Provider) {
+  if (provider === "soundcloud") return "SoundCloud";
+  if (provider === "spotify") return "Spotify";
+  if (provider === "apple") return "Apple Music";
+  return "YouTube";
+}
+
+function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
+  return track.provider === "youtube"
+    ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`
+    : track.artworkUrl;
+}
+
+function TrackArtwork({ track, compact = false }: { track: Track; compact?: boolean }) {
+  const artwork = trackArtworkUrl(track);
+  return artwork
+    ? <img src={compact && track.provider === "youtube" ? artwork.replace("hqdefault", "default") : artwork} alt="" />
+    : <span className={`provider-artwork ${track.provider}`}>{track.provider === "soundcloud" ? "SC" : "♪"}</span>;
 }
 
 export function App() {
@@ -743,7 +764,7 @@ function NowPlaying({
   const track = playback.track;
   const [volume, setVolume] = useState(80);
   const [seekPreview, setSeekPreview] = useState<number | null>(null);
-  const [playerStatus, setPlayerStatus] = useState<YouTubePlayerStatus>({
+  const [playerStatus, setPlayerStatus] = useState<PlayerStatus>({
     ready: false,
     buffering: false,
     currentTime: 0,
@@ -778,22 +799,36 @@ function NowPlaying({
       {track ? (
         <>
           <div className="track-stage">
-            <img src={`https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`} alt="" />
-            <YouTubePlayer
-              playback={playback}
-              isDj={isDj}
-              volume={volume}
-              // The track ID lets the server reject duplicate/stale ended events.
-              onEnded={() => socket.emit("queue:next", { trackId: track.id })}
-              onStatus={setPlayerStatus}
-            />
+            <TrackArtwork track={track} />
+            {track.provider === "soundcloud" ? (
+              <SoundCloudPlayer
+                playback={playback}
+                isDj={isDj}
+                volume={volume}
+                onEnded={() => socket.emit("queue:next", { trackId: track.id })}
+                onStatus={setPlayerStatus}
+              />
+            ) : (
+              <YouTubePlayer
+                playback={playback}
+                isDj={isDj}
+                volume={volume}
+                // The track ID lets the server reject duplicate/stale ended events.
+                onEnded={() => socket.emit("queue:next", { trackId: track.id })}
+                onStatus={setPlayerStatus}
+              />
+            )}
             <div className="record-ring ring-one" />
             <div className="record-ring ring-two" />
           </div>
           <div className="current-track">
             <div>
               <h2>{track.title}</h2>
-              <p>Added by {track.addedBy.name} · YouTube</p>
+              <p>
+                {track.artist ? `${track.artist} · ` : ""}Added by {track.addedBy.name} · {track.provider === "soundcloud" && track.permalinkUrl ? (
+                  <a href={track.permalinkUrl} target="_blank" rel="noreferrer">SoundCloud</a>
+                ) : providerLabel(track.provider)}
+              </p>
             </div>
             <div className="player-controls">
               <button disabled={!canControlPlayback} className="round-button primary" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
@@ -849,19 +884,22 @@ function NowPlaying({
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
           <h2>The room is quiet</h2>
-          <p>Add a YouTube track to start the radio.</p>
+          <p>Add a YouTube or SoundCloud track to start the radio.</p>
         </div>
       )}
     </section>
   );
 }
 
-interface YouTubeSearchResult {
+interface ProviderSearchResult {
+  provider: "youtube" | "soundcloud";
   id: string;
   title: string;
-  channel: string;
-  thumbnail: string;
+  artist: string;
+  thumbnail?: string;
   duration?: string;
+  durationMs?: number;
+  permalinkUrl?: string;
 }
 
 function MusicRail({
@@ -876,9 +914,9 @@ function MusicRail({
   setNotice: (message: string) => void;
 }) {
   const [tab, setTab] = useState<"history" | "search" | "queue">("queue");
-  const [provider, setProvider] = useState<"youtube" | "spotify" | "apple" | "soundcloud">("youtube");
+  const [provider, setProvider] = useState<Provider>("youtube");
   const [query, setQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<YouTubeSearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<ProviderSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [addingResultId, setAddingResultId] = useState("");
@@ -894,6 +932,35 @@ function MusicRail({
     snapshot.room.djRoleUserIds.includes(currentUserId);
   const currentDj = snapshot.djUsers.find((user) => user.id === snapshot.room.djUserId);
   const upcomingDjs = snapshot.room.djQueueUserIds.filter((userId) => userId !== snapshot.room.djUserId);
+
+  const enqueueTrack = (track: {
+    provider: "youtube" | "soundcloud";
+    providerId: string;
+    title: string;
+    artist?: string;
+    artworkUrl?: string;
+    permalinkUrl?: string;
+    durationMs?: number;
+  }) => {
+    socket.emit(
+      "queue:add",
+      track,
+      (result: { ok: boolean; error?: string; started?: boolean; position?: number }) => {
+        setAddingResultId("");
+        if (!result.ok) return setNotice(result.error || "Could not add track");
+        setNotice(
+          result.started
+            ? "Started playing"
+            : `Added to your private queue${result.position ? ` · #${result.position}` : ""}`
+        );
+        setUrl("");
+        setTitle("");
+        setAdding(false);
+        setManualOpen(false);
+        setTab("queue");
+      }
+    );
+  };
 
   const toggleDjQueue = () => {
     socket.emit(joinedDjQueue ? "dj:leave" : "dj:join", undefined, (result: { ok: boolean; error?: string }) => {
@@ -922,24 +989,7 @@ function MusicRail({
       }
     }
 
-    socket.emit(
-      "queue:add",
-      { provider: "youtube", providerId, title: resolvedTitle || "YouTube track" },
-      (result: { ok: boolean; error?: string; started?: boolean; position?: number }) => {
-        setAddingResultId("");
-        if (!result.ok) return setNotice(result.error || "Could not add track");
-        setNotice(
-          result.started
-            ? "Started playing"
-            : `Added to your private queue${result.position ? ` · #${result.position}` : ""}`
-        );
-        setUrl("");
-        setTitle("");
-        setAdding(false);
-        setManualOpen(false);
-        setTab("queue");
-      }
-    );
+    enqueueTrack({ provider: "youtube", providerId, title: resolvedTitle || "YouTube track" });
   };
 
   const add = (event: FormEvent) => {
@@ -948,10 +998,19 @@ function MusicRail({
   };
 
   const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
-    void addTrack(track.providerId, track.title);
+    if (track.provider !== "youtube" && track.provider !== "soundcloud") return;
+    enqueueTrack({
+      provider: track.provider,
+      providerId: track.providerId,
+      title: track.title,
+      artist: track.artist,
+      artworkUrl: track.artworkUrl,
+      permalinkUrl: track.permalinkUrl,
+      durationMs: track.durationMs
+    });
   };
 
-  const searchYouTube = async (event: FormEvent) => {
+  const searchProvider = async (event: FormEvent) => {
     event.preventDefault();
     const searchQuery = query.trim();
     if (searchQuery.length < 2) return setSearchError("Enter at least 2 characters.");
@@ -959,26 +1018,41 @@ function MusicRail({
     setSearching(true);
     setSearchError("");
     try {
-      const response = await fetch(`/api/youtube/search?q=${encodeURIComponent(searchQuery)}`, {
+      if (provider !== "youtube" && provider !== "soundcloud") {
+        throw new Error("That provider is not enabled yet.");
+      }
+      const response = await fetch(`/api/${provider}/search?q=${encodeURIComponent(searchQuery)}`, {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
       });
       const payload = await response.json() as {
-        results?: YouTubeSearchResult[];
+        results?: Array<ProviderSearchResult & { channel?: string }>;
         error?: string;
       };
-      if (!response.ok) throw new Error(payload.error || "Could not search YouTube.");
-      setSearchResults(payload.results || []);
+      if (!response.ok) throw new Error(payload.error || `Could not search ${providerLabel(provider)}.`);
+      setSearchResults((payload.results || []).map((result) => ({
+        ...result,
+        provider,
+        artist: result.artist || result.channel || providerLabel(provider)
+      })));
     } catch (error) {
       setSearchResults([]);
-      setSearchError(error instanceof Error ? error.message : "Could not search YouTube.");
+      setSearchError(error instanceof Error ? error.message : `Could not search ${providerLabel(provider)}.`);
     } finally {
       setSearching(false);
     }
   };
 
-  const addSearchResult = (result: YouTubeSearchResult) => {
+  const addSearchResult = (result: ProviderSearchResult) => {
     setAddingResultId(result.id);
-    void addTrack(result.id, result.title);
+    enqueueTrack({
+      provider: result.provider,
+      providerId: result.id,
+      title: result.title,
+      artist: result.artist,
+      artworkUrl: result.thumbnail,
+      permalinkUrl: result.permalinkUrl,
+      durationMs: result.durationMs
+    });
   };
 
   const queueAction = (
@@ -1044,12 +1118,12 @@ function MusicRail({
             <span>SEARCH MUSIC</span>
             <small>{joinedDjQueue ? "Add results to your private queue" : "Join the DJ queue to add music"}</small>
           </div>
-          <form className="provider-search-form" onSubmit={searchYouTube}>
+          <form className="provider-search-form" onSubmit={searchProvider}>
             <Search size={16} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search YouTube"
+              placeholder={`Search ${providerLabel(provider)}`}
               autoFocus
             />
             {query && (
@@ -1069,15 +1143,19 @@ function MusicRail({
             <span className="provider-divider" />
             <select
               value={provider}
-              onChange={(event) => setProvider(event.target.value as typeof provider)}
+              onChange={(event) => {
+                setProvider(event.target.value as Provider);
+                setSearchResults([]);
+                setSearchError("");
+              }}
               aria-label="Music provider"
             >
               <option value="youtube">YouTube</option>
               <option value="spotify" disabled>Spotify · Soon</option>
               <option value="apple" disabled>Apple Music · Soon</option>
-              <option value="soundcloud" disabled>SoundCloud · Soon</option>
+              <option value="soundcloud">SoundCloud</option>
             </select>
-            <button type="submit" className="search-submit" disabled={searching || provider !== "youtube"}>
+            <button type="submit" className="search-submit" disabled={searching || (provider !== "youtube" && provider !== "soundcloud")}>
               {searching ? "…" : "Go"}
             </button>
           </form>
@@ -1085,20 +1163,22 @@ function MusicRail({
           <div className="search-result-list">
             {searchError && <div className="rail-search-state error">{searchError}</div>}
             {!searchError && searching && (
-              <div className="rail-search-state"><div className="equalizer"><i /><i /><i /><i /></div><span>Searching YouTube…</span></div>
+              <div className="rail-search-state"><div className="equalizer"><i /><i /><i /><i /></div><span>Searching {providerLabel(provider)}…</span></div>
             )}
             {!searchError && !searching && searchResults.map((result) => (
               (() => {
                 const queued =
-                  snapshot.room.playback.track?.providerId === result.id ||
-                  snapshot.room.queue.some((track) => track.providerId === result.id);
+                  (snapshot.room.playback.track?.provider === result.provider && snapshot.room.playback.track.providerId === result.id) ||
+                  snapshot.room.queue.some((track) => track.provider === result.provider && track.providerId === result.id);
                 return (
                   <div className="search-result-row" key={result.id}>
-                    <span className="search-provider-mark">▶</span>
-                    <img src={result.thumbnail} alt="" />
+                    <span className={`search-provider-mark ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : "▶"}</span>
+                    {result.thumbnail
+                      ? <img src={result.thumbnail} alt="" />
+                      : <span className={`provider-artwork search-artwork ${result.provider}`}>SC</span>}
                     <span className="search-result-copy">
                       <strong>{result.title}</strong>
-                      <small>{result.channel}{result.duration ? ` · ${result.duration}` : ""}</small>
+                      <small>{result.artist}{result.duration ? ` · ${result.duration}` : ""}</small>
                     </span>
                     <button
                       type="button"
@@ -1116,12 +1196,12 @@ function MusicRail({
             {!searchError && !searching && !searchResults.length && (
               <div className="rail-search-state">
                 <Search size={22} />
-                <span>Search YouTube for a song, artist, or video.</span>
+                <span>Search {providerLabel(provider)} for a song or artist.</span>
               </div>
             )}
           </div>
 
-          <div className={`manual-add ${manualOpen ? "open" : ""}`}>
+          {provider === "youtube" && <div className={`manual-add ${manualOpen ? "open" : ""}`}>
             <button className="manual-add-heading" type="button" onClick={() => setManualOpen((open) => !open)}>
               <span>ADD BY URL</span>
               <small>YouTube URL or video ID <ChevronDown size={13} /></small>
@@ -1142,7 +1222,7 @@ function MusicRail({
                 <button type="submit"><PlusIcon size={14} /> Add manually</button>
               </form>
             )}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1155,7 +1235,7 @@ function MusicRail({
           <div className="rail-track-list">
             {snapshot.room.history.map((track, index) => (
               <div className="rail-track-row" key={`${track.id}-${index}`}>
-                <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
+                <TrackArtwork track={track} compact />
                 <span className="rail-track-copy">
                   <strong>{track.title}</strong>
                   <small>Added by {track.addedBy.name}</small>
@@ -1214,7 +1294,7 @@ function MusicRail({
                 <span className="queue-drag-handle" title="Drag to reorder your queue">
                   <GripVertical size={14} />
                 </span>
-                <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
+                <TrackArtwork track={track} compact />
                 <span className="rail-track-copy">
                   <strong>{track.title}</strong>
                   <small>#{index + 1} · only visible to you</small>

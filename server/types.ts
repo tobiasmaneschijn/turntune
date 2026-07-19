@@ -1,4 +1,4 @@
-export type Provider = "youtube" | "spotify" | "apple";
+export type Provider = "youtube" | "spotify" | "apple" | "soundcloud";
 
 export interface User {
   id: string;
@@ -31,6 +31,10 @@ export interface Track {
   provider: Provider;
   providerId: string;
   title: string;
+  artist?: string;
+  artworkUrl?: string;
+  permalinkUrl?: string;
+  durationMs?: number;
   addedBy: User;
   addedAt: number;
 }

@@ -60,7 +60,9 @@ and durable grace scheduling before horizontally scaling the server.
 | `src/types.ts` | Client mirror of the safe snapshot types. It intentionally has no `djQueues` map. |
 | `src/App.tsx` | Socket lifecycle, room screen, personalized snapshot consumption, player controls, and DJ queue UI. |
 | `src/components/RoomSettingsDialog.tsx` | Room metadata, DJ access mode, moderator, and DJ-role controls. |
-| `src/components/youtube-player.tsx` | YouTube playback synchronization and natural track-ended reporting. |
+| `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
+| `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
+| `server/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
 | `supabase/migrations/20260716213000_initial_soundspin.sql` | Base room table and initial security. |
 | `supabase/migrations/20260716220542_room_directory.sql` | Directory metadata, memberships, favorites, and settings. |
 | `supabase/migrations/20260719151147_add_dj_role.sql` | Adds the room-level DJ role. |
@@ -254,6 +256,7 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `PUT /api/rooms/:slug/favorite` | Add or remove the current user's favorite. |
 | `PATCH /api/rooms/:slug` | Owner/moderator changes name, visibility, password, or DJ access mode. |
 | `GET /api/youtube/search` | Authenticated, cached server-side YouTube search; the API key stays secret. |
+| `GET /api/soundcloud/search` | Authenticated, cached server-side SoundCloud search; client credentials and OAuth tokens stay secret. |
 
 Room role changes use Socket.IO because connected clients need an immediate
 snapshot. Room metadata changes use HTTP and explicitly broadcast after the

@@ -1,6 +1,6 @@
 # SoundSpin
 
-A private, self-hosted shared radio for teams. SoundSpin synchronizes YouTube
+A private, self-hosted shared radio for teams. SoundSpin synchronizes YouTube and SoundCloud
 playback across a room and includes round-robin DJ turns, real-time chat, presence,
 and generated avatars.
 
@@ -17,6 +17,7 @@ and generated avatars.
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
 - Supabase-backed room ownership and storage
+- YouTube and SoundCloud search and synchronized playback
 - Provider-neutral track model for future Spotify and Apple Music adapters
 - Single-container deployment for Dokploy
 
@@ -67,6 +68,8 @@ SUPABASE_SECRET_KEY=your-secret-key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
 GIPHY_API_KEY=your-giphy-api-key
 YOUTUBE_API_KEY=your-youtube-data-api-key
+SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
+SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 VITE_GIPHY_API_KEY=your-giphy-api-key
@@ -118,6 +121,13 @@ YouTube keyword search requires a YouTube Data API v3 key in
 Dokploy's environment settings in production. The browser calls SoundSpin's
 authenticated search endpoint; the key is never returned to the client.
 
+SoundCloud search requires the `client_id` and `client_secret` from a registered
+SoundCloud application in `SOUNDCLOUD_CLIENT_ID` and
+`SOUNDCLOUD_CLIENT_SECRET`. SoundSpin exchanges them server-side for a cached
+client-credentials token; neither the credentials nor the token are returned to
+the browser. Playback uses SoundCloud's official embedded widget and is limited
+to public tracks SoundCloud reports as playable.
+
 ## Production
 
 ```bash
@@ -147,11 +157,11 @@ them.
 The shared `Track` model stores `provider` and `providerId` separately. Tracks
 waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
 currently playing track remain visible to the room.
-YouTube is the only enabled adapter in this MVP. Spotify and Apple Music can
-later be added as player adapters without changing room, queue, chat, or
-persistence concepts.
+YouTube and SoundCloud are enabled adapters. Spotify and Apple Music can later
+be added as player adapters without changing room, queue, chat, or persistence
+concepts.
 
 Important: SoundSpin coordinates playback but does not grant rights to music.
-YouTube embeds remain subject to YouTube availability, ads, account rules, and
-terms. Spotify and Apple Music integrations will require their respective
+YouTube and SoundCloud embeds remain subject to each provider's availability,
+account rules, geographic restrictions, and terms. Spotify and Apple Music integrations will require their respective
 developer credentials and user playback entitlements.
