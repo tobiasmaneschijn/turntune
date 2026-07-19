@@ -2,8 +2,8 @@ import { lazy, Suspense, useMemo, useState } from 'react'
 import { Reply, SmilePlus, X } from 'lucide-react'
 import type { Theme } from 'emoji-picker-react'
 
+import { getMessagePreview, groupReactions, type ChatMessage } from '@/chat/model'
 import { cn } from '@/lib/utils'
-import type { ChatMessage } from '@/hooks/use-realtime-chat'
 import { Avatar } from '@/components/Avatar'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
@@ -31,16 +31,11 @@ export const ChatMessageItem = ({
   onJumpToMessage,
 }: ChatMessageItemProps) => {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
-  const reactionGroups = useMemo(() => {
-    const groups = new Map<string, { count: number; hasReacted: boolean }>()
-    for (const reaction of message.reactions || []) {
-      const group = groups.get(reaction.emoji) || { count: 0, hasReacted: false }
-      group.count += 1
-      group.hasReacted ||= reaction.userId === currentUserId
-      groups.set(reaction.emoji, group)
-    }
-    return [...groups.entries()]
-  }, [currentUserId, message.reactions])
+  const reply = message.replyTo
+  const reactionGroups = useMemo(
+    () => groupReactions(message.reactions, currentUserId),
+    [currentUserId, message.reactions]
+  )
 
   return (
     <div
@@ -58,7 +53,12 @@ export const ChatMessageItem = ({
       <div className="chat-message-content">
         <div className="chat-message-actions" aria-label="Message actions">
           {QUICK_REACTIONS.map((emoji) => (
-            <button key={emoji} type="button" title={`React with ${emoji}`} onClick={() => onReact(message, emoji)}>
+            <button
+              key={emoji}
+              type="button"
+              title={`React with ${emoji}`}
+              onClick={() => onReact(message, emoji)}
+            >
               {emoji}
             </button>
           ))}
@@ -76,7 +76,11 @@ export const ChatMessageItem = ({
         </div>
         {showReactionPicker && (
           <div className="chat-reaction-picker">
-            <button type="button" aria-label="Close reactions" onClick={() => setShowReactionPicker(false)}>
+            <button
+              type="button"
+              aria-label="Close reactions"
+              onClick={() => setShowReactionPicker(false)}
+            >
               <X size={14} />
             </button>
             <Suspense fallback={<div className="chat-reaction-picker-loading">Loading emoji…</div>}>
@@ -105,15 +109,15 @@ export const ChatMessageItem = ({
             </time>
           </div>
         )}
-        {message.replyTo && (
+        {reply && (
           <button
             type="button"
             className="chat-message-reply"
-            onClick={() => onJumpToMessage(message.replyTo!.id)}
+            onClick={() => onJumpToMessage(reply.id)}
           >
             <Reply size={12} />
-            <strong>@{message.replyTo.user.name}</strong>
-            <span>{message.replyTo.content || (message.replyTo.type === 'gif' ? 'GIF' : 'Image')}</span>
+            <strong>@{reply.user.name}</strong>
+            <span>{getMessagePreview(reply)}</span>
           </button>
         )}
         <div className="chat-message-body">

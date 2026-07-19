@@ -10,7 +10,7 @@ and generated avatars.
 - DJ-controlled synchronized YouTube playback
 - Collaborative queue
 - Real-time room chat
-- Supabase Realtime Broadcast chat with persisted message history
+- Supabase Realtime Broadcast chat with persisted history, replies, and reactions
 - Deterministic, privacy-friendly avatars
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
@@ -82,10 +82,13 @@ migration.
 Chat is delivered through Supabase Realtime Broadcast. Message history is
 stored in `soundspin_messages` and created by the
 `20260716214500_realtime_chat.sql` migration. Socket.IO remains responsible for
-synchronized playback and listener presence.
+synchronized playback and listener presence. Replies and reactions are added by
+`20260719130616_chat_replies_and_reactions.sql`. See
+[`docs/chat.md`](docs/chat.md) for the data flow, code map, schema notes, and
+troubleshooting guide.
 
 Profiles and progression are created by
-`20260716213923_profiles_and_progression.sql`. Every account receives a public
+`20260716220100_profiles_and_progression.sql`. Every account receives a public
 SoundSpin profile and a level-based avatar collection. The server awards 10 XP
 once per played track instance when the first eligible listener likes it;
 unique XP events and server-side avatar validation prevent duplicate awards or

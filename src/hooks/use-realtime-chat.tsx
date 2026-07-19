@@ -1,53 +1,21 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
+
+import {
+  coalesceReactionEvent,
+  type ChatMedia,
+  type ChatMessage,
+  type ChatReactionEvent,
+  type ChatReply,
+} from '@/chat/model'
+import type { User } from '@/types'
 
 interface UseRealtimeChatProps {
   client: SupabaseClient
   roomName: string
-  user: {
-    id: string
-    name: string
-    avatarSeed: string
-    avatarKey?: string
-  }
-}
-
-export interface ChatMessage {
-  id: string
-  content: string
-  type: 'text' | 'image' | 'gif'
-  mediaUrl?: string
-  storagePath?: string
-  user: {
-    id: string
-    name: string
-    avatarSeed: string
-    avatarKey?: string
-  }
-  replyTo?: ChatReply
-  reactions?: ChatReaction[]
-  createdAt: string
-}
-
-export interface ChatReply {
-  id: string
-  content: string
-  type: ChatMessage['type']
-  mediaUrl?: string
-  user: Pick<ChatMessage['user'], 'id' | 'name'>
-}
-
-export interface ChatReaction {
-  emoji: string
-  userId: string
-}
-
-export interface ChatReactionEvent extends ChatReaction {
-  id: string
-  messageId: string
-  action: 'add' | 'remove'
+  user: User
 }
 
 const EVENT_MESSAGE_TYPE = 'message'
@@ -55,45 +23,42 @@ const EVENT_REACTION_TYPE = 'reaction'
 
 export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [channel, setChannel] = useState<RealtimeChannel | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
     const newChannel = client.channel(roomName)
+    channelRef.current = newChannel
+    setMessages([])
+    setReactionEvents([])
+    setIsConnected(false)
 
     newChannel
       .on('broadcast', { event: EVENT_MESSAGE_TYPE }, (payload) => {
         setMessages((current) => [...current, payload.payload as ChatMessage])
       })
       .on('broadcast', { event: EVENT_REACTION_TYPE }, (payload) => {
-        setReactionEvents((current) => [...current, payload.payload as ChatReactionEvent])
+        const event = payload.payload as ChatReactionEvent
+        setReactionEvents((current) => coalesceReactionEvent(current, event))
       })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          setIsConnected(true)
-        } else {
-          setIsConnected(false)
-        }
+      .subscribe((status) => {
+        setIsConnected(status === 'SUBSCRIBED')
       })
-
-    setChannel(newChannel)
 
     return () => {
-      client.removeChannel(newChannel)
+      channelRef.current = null
+      void client.removeChannel(newChannel)
     }
   }, [client, roomName])
 
   const sendMessage = useCallback(
     async (
       content: string,
-      media?: {
-        type: 'image' | 'gif'
-        mediaUrl: string
-        storagePath?: string
-      },
+      media?: ChatMedia,
       replyTo?: ChatReply
     ) => {
+      const channel = channelRef.current
       if (!channel || !isConnected) return null
 
       const message: ChatMessage = {
@@ -108,7 +73,8 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
         createdAt: new Date().toISOString(),
       }
 
-      // Update local state immediately for the sender
+      // Broadcast does not echo to the sender by default, so add the message
+      // locally before sending it to the other room members.
       setMessages((current) => [...current, message])
 
       await channel.send({
@@ -118,25 +84,26 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
       })
       return message
     },
-    [channel, isConnected, user]
+    [isConnected, user]
   )
 
   const broadcastReaction = useCallback(
     async (event: Omit<ChatReactionEvent, 'id'>) => {
+      const channel = channelRef.current
       if (!channel || !isConnected) return
 
       const reactionEvent: ChatReactionEvent = {
         ...event,
         id: crypto.randomUUID(),
       }
-      setReactionEvents((current) => [...current, reactionEvent])
+      setReactionEvents((current) => coalesceReactionEvent(current, reactionEvent))
       await channel.send({
         type: 'broadcast',
         event: EVENT_REACTION_TYPE,
         payload: reactionEvent,
       })
     },
-    [channel, isConnected]
+    [isConnected]
   )
 
   return { messages, sendMessage, broadcastReaction, reactionEvents, isConnected }

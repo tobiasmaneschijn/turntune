@@ -36,7 +36,8 @@ import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
 import { UpdatePasswordForm } from "./components/update-password-form";
 import { RealtimeChat } from "./components/realtime-chat";
-import type { ChatMessage as RealtimeChatMessage } from "./hooks/use-realtime-chat";
+import type { ChatMessage } from "./chat/model";
+import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
@@ -1247,81 +1248,37 @@ function RoomChat({
   client: SupabaseClient;
   onOpenProfile: (userId: string) => void;
 }) {
-  const [messages, setMessages] = useState<RealtimeChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    void client
-      .from("soundspin_messages")
-      .select("id, content, message_type, media_url, storage_path, user_id, user_name, avatar_seed, created_at, reply_to_id, soundspin_message_reactions(emoji, user_id)")
-      .eq("room_slug", snapshot.room.id)
-      .order("created_at", { ascending: false })
-      .limit(200)
-      .then(({ data, error: loadError }) => {
+
+    void (async () => {
+      try {
+        const history = await loadChatHistory(client, snapshot.room.id);
         if (!active) return;
-        if (loadError) {
-          setError("Chat history could not be loaded. Please refresh and try again.");
-          return;
-        }
-        const history = (data || []).reverse();
-        const messagesById = new Map(history.map((message) => [message.id, message]));
+        setMessages(history);
         setError("");
-        setMessages(
-          history.map((message) => {
-            const reply = message.reply_to_id
-              ? messagesById.get(message.reply_to_id)
-              : undefined;
-            return ({
-              id: message.id,
-              content: message.content,
-              type: message.message_type,
-              mediaUrl: message.media_url || undefined,
-              storagePath: message.storage_path || undefined,
-              user: {
-                id: message.user_id,
-                name: message.user_name,
-                avatarSeed: message.avatar_seed
-              },
-              replyTo: reply ? {
-                id: reply.id,
-                content: reply.content,
-                type: reply.message_type,
-                mediaUrl: reply.media_url || undefined,
-                user: {
-                  id: reply.user_id,
-                  name: reply.user_name
-                }
-              } : undefined,
-              reactions: (message.soundspin_message_reactions || []).map((reaction) => ({
-                emoji: reaction.emoji,
-                userId: reaction.user_id
-              })),
-              createdAt: message.created_at
-            })
-          })
-        );
-      });
+      } catch {
+        if (active) {
+          setError("Chat history could not be loaded. Please refresh and try again.");
+        }
+      }
+    })();
+
     return () => {
       active = false;
     };
   }, [client, snapshot.room.id]);
 
-  const persistMessage = async (message: RealtimeChatMessage) => {
-    const { error: insertError } = await client.from("soundspin_messages").insert({
-      id: message.id,
-      room_slug: snapshot.room.id,
-      user_id: currentUser.id,
-      user_name: currentUser.name,
-      avatar_seed: currentUser.avatarSeed,
-      content: message.content,
-      message_type: message.type,
-      media_url: message.mediaUrl || null,
-      storage_path: message.storagePath || null,
-      reply_to_id: message.replyTo?.id || null,
-      created_at: message.createdAt
-    });
-    if (insertError) setError("The message was sent live but could not be saved to history.");
+  const persistMessage = async (message: ChatMessage) => {
+    try {
+      await saveChatMessage(client, snapshot.room.id, currentUser, message);
+      setError("");
+    } catch {
+      setError("The message was sent live but could not be saved to history.");
+    }
   };
 
   return (

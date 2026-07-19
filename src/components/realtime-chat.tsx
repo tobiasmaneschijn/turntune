@@ -3,27 +3,39 @@ import type { Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import {
+  applyReactionEvents,
+  createReplySnapshot,
+  getMessagePreview,
+  mergeChatMessages,
+  shouldShowMessageHeader,
+  startsNewDay,
+  type ChatMessage,
+  type ChatReply,
+} from '@/chat/model'
+import {
+  CHAT_IMAGE_ACCEPT,
+  createChatStoragePath,
+  fetchGiphyGifs,
+  readPastedChatMedia,
+  validateChatImage,
+  type GiphyGif,
+} from '@/chat/media'
+import { persistReactionChange } from '@/chat/persistence'
 import { cn } from '@/lib/utils'
 import { ChatMessageItem } from '@/components/chat-message'
 import { useChatScroll } from '@/hooks/use-chat-scroll'
-import {
-  useRealtimeChat,
-  type ChatMessage,
-  type ChatReply,
-} from '@/hooks/use-realtime-chat'
+import { useRealtimeChat } from '@/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import type { User } from '@/types'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
 
 interface RealtimeChatProps {
   client: SupabaseClient
   roomName: string
-  user: {
-    id: string
-    name: string
-    avatarSeed: string
-  }
+  user: User
   onMessage?: (messages: ChatMessage[]) => void
   onSend?: (message: ChatMessage) => Promise<void> | void
   messages?: ChatMessage[]
@@ -31,12 +43,9 @@ interface RealtimeChatProps {
 }
 
 /**
- * Realtime chat component
- * @param roomName - The name of the room to join. Each room is a unique chat.
- * @param username - The username of the user
- * @param onMessage - The callback function to handle the messages. Useful if you want to store the messages in a database.
- * @param messages - The messages to display in the chat. Useful if you want to display messages from a database.
- * @returns The chat component
+ * Interactive room chat. `useRealtimeChat` handles low-latency Broadcast
+ * delivery; the parent supplies durable history and an `onSend` persistence
+ * callback. See `docs/chat.md` for the complete data flow.
  */
 export const RealtimeChat = ({
   client,
@@ -65,8 +74,8 @@ export const RealtimeChat = ({
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
   const [giphyQuery, setGiphyQuery] = useState('')
-  const [gifs, setGifs] = useState<Array<{ id: string; title: string; url: string; preview: string }>>([])
-  const [mediaError, setMediaError] = useState('')
+  const [gifs, setGifs] = useState<GiphyGif[]>([])
+  const [composerError, setComposerError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -91,34 +100,14 @@ export const RealtimeChat = ({
       })
   }, [giphyKey])
 
-  // Merge realtime messages with initial messages
-  const baseMessages = useMemo(() => {
-    const mergedMessages = [...initialMessages, ...realtimeMessages]
-    // Remove duplicates based on message id
-    const uniqueMessages = mergedMessages.filter(
-      (message, index, self) => index === self.findIndex((m) => m.id === message.id)
-    )
-    // Sort by creation date
-    const sortedMessages = uniqueMessages.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-
-    return sortedMessages
-  }, [initialMessages, realtimeMessages])
-
-  const allMessages = useMemo(() => baseMessages.map((message) => {
-    const reactions = [...(message.reactions || [])]
-    for (const event of reactionEvents) {
-      if (event.messageId !== message.id) continue
-      const reactionIndex = reactions.findIndex(
-        (reaction) => reaction.userId === event.userId && reaction.emoji === event.emoji
-      )
-      if (event.action === 'add' && reactionIndex === -1) {
-        reactions.push({ userId: event.userId, emoji: event.emoji })
-      } else if (event.action === 'remove' && reactionIndex >= 0) {
-        reactions.splice(reactionIndex, 1)
-      }
-    }
-    return { ...message, reactions }
-  }), [baseMessages, reactionEvents])
+  const baseMessages = useMemo(
+    () => mergeChatMessages(initialMessages, realtimeMessages),
+    [initialMessages, realtimeMessages]
+  )
+  const allMessages = useMemo(
+    () => applyReactionEvents(baseMessages, reactionEvents),
+    [baseMessages, reactionEvents]
+  )
 
   useEffect(() => {
     if (onMessage) {
@@ -188,13 +177,7 @@ export const RealtimeChat = ({
   )
 
   const selectReply = useCallback((message: ChatMessage) => {
-    setReplyingTo({
-      id: message.id,
-      content: message.content,
-      type: message.type,
-      mediaUrl: message.mediaUrl,
-      user: { id: message.user.id, name: message.user.name },
-    })
+    setReplyingTo(createReplySnapshot(message))
     setShowEmoji(false)
     setShowGiphy(false)
     requestAnimationFrame(() => messageInputRef.current?.focus())
@@ -215,114 +198,75 @@ export const RealtimeChat = ({
     const hasReacted = (message.reactions || []).some(
       (reaction) => reaction.userId === user.id && reaction.emoji === emoji
     )
-    const query = client.from('soundspin_message_reactions')
-    const { error } = hasReacted
-      ? await query.delete().eq('message_id', message.id).eq('user_id', user.id).eq('emoji', emoji)
-      : await query.insert({ message_id: message.id, user_id: user.id, emoji })
+    const action = hasReacted ? 'remove' : 'add'
 
-    if (error) {
-      setMediaError('Could not update that reaction. The chat migration may still need to be deployed.')
-    } else {
-      setMediaError('')
+    try {
+      await persistReactionChange(client, {
+        action,
+        messageId: message.id,
+        userId: user.id,
+        emoji,
+      })
+      setComposerError('')
       await broadcastReaction({
         messageId: message.id,
         userId: user.id,
         emoji,
-        action: hasReacted ? 'remove' : 'add',
+        action,
       })
+    } catch {
+      setComposerError('Could not update that reaction. Please try again.')
+    } finally {
+      pendingReactionsRef.current.delete(key)
     }
-    pendingReactionsRef.current.delete(key)
   }, [broadcastReaction, client, isConnected, user.id])
 
   const uploadImage = async (file: File) => {
-    setMediaError('')
-    if (!file.type.startsWith('image/')) return setMediaError('Please choose an image file.')
-    if (file.size > 6 * 1024 * 1024) return setMediaError('Images must be 6 MB or smaller.')
+    setComposerError('')
+    const validationError = validateChatImage(file)
+    if (validationError) return setComposerError(validationError)
 
     setUploading(true)
-    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-    const safeRoom = roomName.replace(/[^a-zA-Z0-9-]/g, '-')
-    const storagePath = `${user.id}/${safeRoom}/${crypto.randomUUID()}.${extension}`
-    const { error } = await client.storage.from('chat-media').upload(storagePath, file, {
-      contentType: file.type,
-      cacheControl: '3600',
-      upsert: false,
-    })
-    setUploading(false)
-    if (error) return setMediaError(error.message)
+    const storagePath = createChatStoragePath(user.id, roomName, file)
+    try {
+      const { error } = await client.storage.from('chat-media').upload(storagePath, file, {
+        contentType: file.type,
+        cacheControl: '3600',
+        upsert: false,
+      })
+      if (error) return setComposerError(error.message)
 
-    const { data } = client.storage.from('chat-media').getPublicUrl(storagePath)
-    await sendMediaMessage('image', data.publicUrl, file.name, storagePath)
+      const { data } = client.storage.from('chat-media').getPublicUrl(storagePath)
+      await sendMediaMessage('image', data.publicUrl, file.name, storagePath)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const pasteMedia = async (event: React.ClipboardEvent<HTMLInputElement>) => {
-    const imageItem = Array.from(event.clipboardData.items).find(
-      (item) => item.kind === 'file' && item.type.startsWith('image/')
-    )
-    const imageFile = imageItem?.getAsFile()
-    if (imageFile) {
-      event.preventDefault()
-      await uploadImage(imageFile)
-      return
-    }
+    const pastedMedia = readPastedChatMedia(event.clipboardData)
+    if (!pastedMedia) return
 
-    const html = event.clipboardData.getData('text/html')
-    const htmlImageUrl = html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]
-    const plainText = event.clipboardData.getData('text/plain').trim()
-    const candidate = htmlImageUrl || plainText
-
-    try {
-      const url = new URL(candidate)
-      const isImageUrl =
-        url.protocol === 'https:' &&
-        (
-          /\.(avif|gif|jpe?g|png|webp)(?:$|[?#])/i.test(url.href) ||
-          /(^|\.)giphy\.com$|(^|\.)giphy\.media$/i.test(url.hostname)
-        )
-
-      if (isImageUrl) {
-        event.preventDefault()
-        const isGif = /\.gif(?:$|[?#])/i.test(url.href) || /giphy/i.test(url.hostname)
-        await sendMediaMessage(isGif ? 'gif' : 'image', url.href, isGif ? 'Pasted GIF' : 'Pasted image')
-      }
-    } catch {
-      // Clipboard text is not an image URL, so let the browser paste it normally.
+    event.preventDefault()
+    if (pastedMedia.kind === 'file') {
+      await uploadImage(pastedMedia.file)
+    } else {
+      await sendMediaMessage(
+        pastedMedia.media.type,
+        pastedMedia.media.mediaUrl,
+        pastedMedia.media.content
+      )
     }
   }
 
   const loadGifs = async (query = '') => {
     if (!giphyKey) return
-    setMediaError('')
-    const endpoint = query.trim() ? 'search' : 'trending'
-    const params = new URLSearchParams({
-      api_key: giphyKey,
-      limit: '18',
-      rating: 'pg',
-      bundle: 'messaging_non_clips',
-    })
-    if (query.trim()) params.set('q', query.trim())
+    setComposerError('')
 
     try {
-      const response = await fetch(`https://api.giphy.com/v1/gifs/${endpoint}?${params}`)
-      if (!response.ok) throw new Error('Could not load GIFs.')
-      const payload = await response.json() as {
-        data: Array<{
-          id: string
-          title: string
-          images: {
-            fixed_width: { url: string }
-            fixed_width_small?: { url: string }
-          }
-        }>
-      }
-      setGifs(payload.data.map((gif) => ({
-        id: gif.id,
-        title: gif.title,
-        url: gif.images.fixed_width.url,
-        preview: gif.images.fixed_width_small?.url || gif.images.fixed_width.url,
-      })))
+      setGifs(await fetchGiphyGifs(giphyKey, query))
     } catch (error) {
-      setMediaError(error instanceof Error ? error.message : 'Could not load GIFs.')
+      setComposerError(error instanceof Error ? error.message : 'Could not load GIFs.')
     }
   }
 
@@ -345,25 +289,16 @@ export const RealtimeChat = ({
         ) : null}
         <div className="space-y-1">
           {allMessages.map((message, index) => {
-            const prevMessage = index > 0 ? allMessages[index - 1] : null
-            const startsNewDay =
-              !prevMessage ||
-              new Date(prevMessage.createdAt).toDateString() !==
-                new Date(message.createdAt).toDateString()
-            const minutesSincePrevious = prevMessage
-              ? (new Date(message.createdAt).getTime() - new Date(prevMessage.createdAt).getTime()) / 60000
-              : Number.POSITIVE_INFINITY
-            const showHeader =
-              !prevMessage ||
-              prevMessage.user.id !== message.user.id ||
-              minutesSincePrevious > 5
+            const previousMessage = index > 0 ? allMessages[index - 1] : undefined
+            const beginsNewDay = startsNewDay(message, previousMessage)
+            const showHeader = shouldShowMessageHeader(message, previousMessage)
 
             return (
               <div
                 key={message.id}
                 className="animate-in fade-in slide-in-from-bottom-4 duration-300"
               >
-                {startsNewDay && (
+                {beginsNewDay && (
                   <div className="chat-date-divider">
                     <span>
                       {new Date(message.createdAt).toLocaleDateString(undefined, {
@@ -467,13 +402,13 @@ export const RealtimeChat = ({
         </div>
       )}
 
-      {mediaError && <p className="px-4 pt-2 text-xs text-red-400">{mediaError}</p>}
+      {composerError && <p className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
       <form onSubmit={handleSendMessage} className="chat-composer" autoComplete="off">
         <input
           ref={fileInputRef}
           className="hidden"
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
+          accept={CHAT_IMAGE_ACCEPT}
           onChange={(event) => {
             const file = event.target.files?.[0]
             if (file) void uploadImage(file)
@@ -485,7 +420,7 @@ export const RealtimeChat = ({
             <Reply className="size-3.5" />
             <div>
               <span>Replying to <strong>@{replyingTo.user.name}</strong></span>
-              <small>{replyingTo.content || (replyingTo.type === 'gif' ? 'GIF' : 'Image')}</small>
+              <small>{getMessagePreview(replyingTo)}</small>
             </div>
             <Button
               type="button"
