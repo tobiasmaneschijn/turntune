@@ -61,8 +61,8 @@ export function SignUpForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">Thank you for signing up!</CardTitle>
-            <CardDescription>Check your email to confirm</CardDescription>
+            <CardTitle className="text-xl">Check your email</CardTitle>
+            <CardDescription>We sent you a confirmation link.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
@@ -74,8 +74,8 @@ export function SignUpForm({
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">Sign up</CardTitle>
-            <CardDescription>Create a new account</CardDescription>
+            <CardTitle className="text-xl">Create an account</CardTitle>
+            <CardDescription>Save your rooms, profile, and listening progress.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignUp}>
@@ -85,7 +85,7 @@ export function SignUpForm({
                   <Input
                     id="email"
                     type="email"
-                    placeholder="m@example.com"
+                    placeholder="you@example.com"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -105,7 +105,7 @@ export function SignUpForm({
                 </div>
                 <div className="grid gap-2">
                   <div className="flex items-center">
-                    <Label htmlFor="repeat-password">Repeat Password</Label>
+                    <Label htmlFor="repeat-password">Confirm password</Label>
                   </div>
                   <Input
                     id="repeat-password"
@@ -117,14 +117,12 @@ export function SignUpForm({
                 </div>
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Creating an account...' : 'Sign up'}
+                  {isLoading ? 'Creating account…' : 'Create account'}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">
                 Already have an account?{' '}
-                <button type="button" className="underline underline-offset-4" onClick={() => onNavigate('/login')}>
-                  Login
-                </button>
+                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>Sign in</Button>
               </div>
             </form>
           </CardContent>

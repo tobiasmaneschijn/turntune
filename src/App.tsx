@@ -36,6 +36,11 @@ import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
 import { UpdatePasswordForm } from "./components/update-password-form";
 import { RealtimeChat } from "./components/realtime-chat";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
+import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
 import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
@@ -406,12 +411,14 @@ export function App() {
   if (roomJoinError && !snapshot) {
     return (
       <main className="room-access-screen">
-        <div className="room-access-error panel">
-          <Logo />
-          <h1>Couldn’t join this room</h1>
-          <p>{roomJoinError}</p>
-          <button onClick={goHome}>Back to rooms</button>
-        </div>
+        <Card className="room-access-error">
+          <CardHeader>
+            <Logo />
+            <CardTitle>Couldn’t join this room</CardTitle>
+            <CardDescription>{roomJoinError}</CardDescription>
+          </CardHeader>
+          <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
+        </Card>
       </main>
     );
   }
@@ -425,21 +432,22 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="header-home-logo" onClick={goHome} title="Back to rooms"><Logo /></button>
+        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms"><Logo /></Button>
         <div className="room-heading">
-          <span className="live-dot" />
           <div>
             <strong>{snapshot.room.name}</strong>
-            <small>{snapshot.users.length} listening now</small>
+            <small><span className="live-dot" /> {snapshot.users.length} listening</small>
           </div>
         </div>
         <div className="header-actions">
-          <button className="icon-button" onClick={goHome} title="Room directory"><House size={16} /><span>Rooms</span></button>
+          <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
-            <button className="icon-button" onClick={() => setSettingsOpen(true)} title="Room settings"><Settings size={16} /></button>
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} title="Room settings"><Settings /></Button>
           )}
-          <button
-            className="icon-button invite-button"
+          <Button
+            variant="outline"
+            size="sm"
+            className="invite-button"
             onClick={() => {
               void navigator.clipboard.writeText(location.href);
               setNotice("Invite link copied");
@@ -448,14 +456,14 @@ export function App() {
           >
             <CopyIcon size={17} />
             <span>Invite</span>
-          </button>
-          <button className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
-            <Avatar user={profile} size={38} />
-          </button>
+          </Button>
+          <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
+            <Avatar user={profile} size={30} />
+          </Button>
           {auth.enabled && (
-            <button className="sign-out" onClick={() => void auth.client?.auth.signOut()}>
+            <Button variant="ghost" size="sm" className="sign-out" onClick={() => void auth.client?.auth.signOut()}>
               Sign out
-            </button>
+            </Button>
           )}
         </div>
       </header>
@@ -524,14 +532,12 @@ function AuthScreen({ client }: { client: SupabaseClient }) {
 
   return (
     <main className="welcome auth-welcome">
-      <div className="welcome-glow glow-one" />
-      <div className="welcome-glow glow-two" />
-      <nav><Logo /><span>Your room will be waiting.</span></nav>
+      <nav><Logo /><span>Shared listening, kept simple.</span></nav>
       <section className="auth-content">
-        <div>
-          <div className="eyebrow"><span /> WELCOME TO SOUNDSPIN</div>
-          <h1>Sign in.<br /><em>Stay in sync.</em></h1>
-          <p>Your rooms, profile, and queue follow you. SoundSpin keeps your session active until you choose to sign out.</p>
+        <div className="auth-intro">
+          <Badge variant="outline">SOUNDSPIN</Badge>
+          <h1>Listen together,<br />wherever you are.</h1>
+          <p>Shared rooms, one queue, and playback that stays in sync.</p>
         </div>
         {form}
       </section>
@@ -548,14 +554,12 @@ function PasswordRecoveryScreen({
 }) {
   return (
     <main className="welcome auth-welcome">
-      <div className="welcome-glow glow-one" />
-      <div className="welcome-glow glow-two" />
       <nav><Logo /><span>Secure your account.</span></nav>
       <section className="auth-content">
-        <div>
-          <div className="eyebrow"><span /> ACCOUNT RECOVERY</div>
-          <h1>Fresh start.<br /><em>Same rooms.</em></h1>
-          <p>Choose a new password and you'll return to SoundSpin with your rooms and profile intact.</p>
+        <div className="auth-intro">
+          <Badge variant="outline">ACCOUNT RECOVERY</Badge>
+          <h1>Choose a new password.</h1>
+          <p>Your rooms and profile will be ready when you return.</p>
         </div>
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
@@ -591,28 +595,32 @@ function Welcome({
 
   return (
     <main className="welcome">
-      <div className="welcome-glow glow-one" />
-      <div className="welcome-glow glow-two" />
       <nav><Logo /><span>Music is better together.</span></nav>
       <section className="welcome-content">
-        <div className="eyebrow"><span /> YOUR TEAM'S SHARED RADIO</div>
-        <h1>One room.<br /><em>Everyone in sync.</em></h1>
-        <p>Drop a track, share the link, and turn the workday into something worth listening to.</p>
-        <form className="welcome-card" onSubmit={submit}>
-          <label>
-            Your display name
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Alex" maxLength={32} autoFocus />
-          </label>
+        <div className="welcome-copy">
+          <Badge variant="outline">SHARED LISTENING</Badge>
+          <h1>One room.<br />One shared queue.</h1>
+          <p>Add a track, invite your people, and stay in sync.</p>
+        </div>
+        <Card className="welcome-card">
+          <CardHeader><CardTitle>{joining ? "Join the room" : "Start a room"}</CardTitle><CardDescription>{joining ? "Choose the name others will see." : "Set up a place to listen together."}</CardDescription></CardHeader>
+          <CardContent>
+          <form className="grid gap-4" onSubmit={submit}>
+          <div className="grid gap-2">
+            <Label htmlFor="welcome-name">Display name</Label>
+            <Input id="welcome-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex" maxLength={32} autoFocus />
+          </div>
           {!joining && (
-            <label>
-              Name your room
-              <input value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="Friday Focus" maxLength={48} />
-            </label>
+            <div className="grid gap-2">
+              <Label htmlFor="welcome-room">Room name</Label>
+              <Input id="welcome-room" value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="Friday focus" maxLength={48} />
+            </div>
           )}
-          <button type="submit">{joining ? "Join the room" : "Start listening"} <span>→</span></button>
-        </form>
+            <Button type="submit" size="lg">{joining ? "Join room" : "Start listening"}</Button>
+          </form>
+          </CardContent>
+        </Card>
       </section>
-      <footer>Built for teams who work better with a soundtrack.</footer>
     </main>
   );
 }
@@ -653,7 +661,6 @@ function VibeMeter({
     : 0;
   const currentVote = vibe?.votes[currentUserId];
   const addedByCurrentUser = track?.addedBy.id === currentUserId;
-  const litMarkers = votes.length ? Math.round(((score + 1) / 2) * 8) : 4;
   const label =
     !votes.length ? "Be the first" :
     score >= .55 ? "Electric" :
@@ -689,31 +696,11 @@ function VibeMeter({
           <ThumbsDown size={16} />
           <span>Not my vibe</span>
         </button>
-        <div className="vibe-dial">
-          <div className="vibe-lights" aria-hidden="true">
-            {Array.from({ length: 9 }, (_, index) => {
-              const radians = Math.PI + (index / 8) * Math.PI;
-              return (
-                <i
-                  key={index}
-                  className={index <= litMarkers ? "lit" : ""}
-                  style={{
-                    left: `${50 + Math.cos(radians) * 43}%`,
-                    top: `${91 + Math.sin(radians) * 75}%`
-                  }}
-                />
-              );
-            })}
-          </div>
-          <div className="vibe-arc" />
-          <span className="vibe-low">LOW</span>
-          <span className="vibe-high">HIGH</span>
-          <div
-            className="vibe-needle"
-            style={{ transform: `translateX(-50%) rotate(${score * 68}deg)` }}
-          />
-          <div className="vibe-hub" />
+        <div className="vibe-summary">
           <strong>{label}</strong>
+          <div className="vibe-score" aria-hidden="true">
+            <i style={{ width: `${Math.max(4, ((score + 1) / 2) * 100)}%` }} />
+          </div>
         </div>
         <button
           type="button"

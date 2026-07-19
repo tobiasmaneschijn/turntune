@@ -1,6 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Globe2, Heart, LockKeyhole, Plus, Radio, Users, X } from "lucide-react";
+import { ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
 import type { RoomDirectoryEntry, User } from "../types";
 
 interface RoomLobbyProps {
@@ -23,6 +37,15 @@ async function api<T>(path: string, accessToken: string, init?: RequestInit) {
   const payload = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "Something went wrong.");
   return payload;
+}
+
+function Brand() {
+  return (
+    <div className="logo" aria-label="SoundSpin">
+      <span className="logo-mark"><i /><i /><i /></span>
+      <span>SoundSpin</span>
+    </div>
+  );
 }
 
 export function RoomLobby({
@@ -77,53 +100,57 @@ export function RoomLobby({
 
   return (
     <main className="room-lobby">
-      <div className="lobby-glow lobby-glow-one" />
-      <div className="lobby-glow lobby-glow-two" />
       <header className="lobby-header">
-        <div className="logo">
-          <span className="logo-mark"><i /><i /><i /></span>
-          <span>SoundSpin</span>
-        </div>
+        <Brand />
         <div className="lobby-header-actions">
-          <button className="lobby-profile" onClick={onOpenProfile}>
-            <Avatar user={currentUser} size={38} />
-            <span><strong>{currentUser.name}</strong><small>View profile</small></span>
-          </button>
-          <button className="sign-out" onClick={onSignOut}>Sign out</button>
+          <Button variant="ghost" className="lobby-profile h-10 px-2" onClick={onOpenProfile}>
+            <Avatar user={currentUser} size={28} />
+            <span><strong>{currentUser.name}</strong><small>Profile</small></span>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onSignOut} className="text-muted-foreground">
+            <LogOut /> Sign out
+          </Button>
         </div>
       </header>
 
       <div className="lobby-shell">
         <section className="lobby-hero">
           <div>
-            <span className="section-kicker">YOUR SHARED RADIOS</span>
-            <h1>Where are we<br /><em>listening today?</em></h1>
-            <p>Jump back into a favorite or discover a room that is live right now.</p>
+            <p className="section-kicker">ROOMS</p>
+            <h1>Listen together.</h1>
+            <p>Rejoin a favorite room or see what is playing now.</p>
           </div>
-          <button className="create-room-button" onClick={() => setCreating(true)}>
-            <Plus size={18} /> Create a room
-          </button>
+          <Button size="lg" onClick={() => setCreating(true)}>
+            <Plus /> New room
+          </Button>
         </section>
 
-        {error && <div className="lobby-error">{error}<button onClick={() => setError("")}><X size={14} /></button></div>}
+        {error && (
+          <div className="lobby-error" role="alert">
+            <span>{error}</span>
+            <Button variant="ghost" size="icon-xs" onClick={() => setError("")}><X /></Button>
+          </div>
+        )}
 
         {loading ? (
-          <div className="lobby-loading"><div className="equalizer"><i /><i /><i /><i /></div><span>Finding rooms…</span></div>
+          <div className="lobby-loading"><div className="equalizer"><i /><i /><i /><i /></div><span>Loading rooms…</span></div>
         ) : (
           <div className="lobby-sections">
-            <RoomSection
-              title="Favorites"
-              subtitle="Your rooms, one click away"
-              rooms={favorites}
-              empty="Favorite a room and it will stay close at hand."
-              onEnter={enter}
-              onFavorite={toggleFavorite}
-            />
+            {favorites.length > 0 && (
+              <RoomSection
+                title="Favorites"
+                subtitle="Your saved rooms"
+                rooms={favorites}
+                empty=""
+                onEnter={enter}
+                onFavorite={toggleFavorite}
+              />
+            )}
             <RoomSection
               title="Public rooms"
-              subtitle={`${publicRooms.length} room${publicRooms.length === 1 ? "" : "s"} open to everyone`}
+              subtitle={`${publicRooms.length} available`}
               rooms={publicRooms}
-              empty="No public rooms yet. Create the first one."
+              empty="No public rooms yet. Create one to get started."
               onEnter={enter}
               onFavorite={toggleFavorite}
             />
@@ -168,33 +195,40 @@ function RoomSection({
     <section className="room-directory-section">
       <div className="directory-heading">
         <div><h2>{title}</h2><p>{subtitle}</p></div>
-        <Radio size={18} />
       </div>
       {rooms.length ? (
         <div className="room-card-grid">
           {rooms.map((room) => (
-            <article className="room-card" key={room.slug}>
-              <button
-                className={`favorite-room ${room.isFavorite ? "active" : ""}`}
-                onClick={() => void onFavorite(room)}
-                title={room.isFavorite ? "Remove from favorites" : "Add to favorites"}
-              >
-                <Heart size={16} fill={room.isFavorite ? "currentColor" : "none"} />
-              </button>
-              <button className="room-card-main" onClick={() => onEnter(room)}>
-                <span className="room-card-art"><Radio size={25} /></span>
-                <span className="room-card-copy">
-                  <span className="room-card-badges">
-                    {room.passwordProtected && <i><LockKeyhole size={10} /> Protected</i>}
-                    {room.role === "owner" && <i className="role-badge">Owner</i>}
-                    {room.role === "moderator" && <i className="role-badge">Moderator</i>}
-                  </span>
-                  <strong>{room.name}</strong>
-                  <small><Users size={12} /> {room.listenerCount} listening</small>
-                </span>
-                <span className="enter-room">Join <b>→</b></span>
-              </button>
-            </article>
+            <Card className="room-card" size="sm" key={room.slug}>
+              <CardHeader className="room-card-header">
+                <span className="room-card-art"><Radio /></span>
+                <div className="min-w-0">
+                  <CardTitle className="truncate">{room.name}</CardTitle>
+                  <CardDescription className="mt-1 flex items-center gap-1.5">
+                    <Users className="size-3.5" /> {room.listenerCount} listening
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className={room.isFavorite ? "text-primary" : "text-muted-foreground"}
+                  onClick={() => void onFavorite(room)}
+                  title={room.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <Heart fill={room.isFavorite ? "currentColor" : "none"} />
+                </Button>
+              </CardHeader>
+              <CardContent className="room-card-content">
+                <div className="room-card-badges">
+                  {room.passwordProtected && <Badge variant="outline"><LockKeyhole /> Protected</Badge>}
+                  {room.role === "owner" && <Badge variant="secondary">Owner</Badge>}
+                  {room.role === "moderator" && <Badge variant="secondary">Moderator</Badge>}
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => onEnter(room)}>
+                  Join <ArrowRight />
+                </Button>
+              </CardContent>
+            </Card>
           ))}
         </div>
       ) : <div className="empty-room-section">{empty}</div>}
@@ -235,22 +269,58 @@ function CreateRoomDialog({
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form className="room-dialog" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
-        <button type="button" className="dialog-close" onClick={onClose}><X size={17} /></button>
-        <span className="section-kicker">NEW ROOM</span>
-        <h2>Start a shared radio</h2>
-        <p>You will be the owner. You can rename it and appoint moderators later.</p>
-        <label>Room name<input autoFocus required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} placeholder="Vinterradio" /></label>
-        <label>Password <small>Optional</small><input type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Leave empty for no password" /></label>
-        <label className="switch-row">
-          <span><Globe2 size={16} /><span><strong>Public room</strong><small>Show this room in the public directory</small></span></span>
-          <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-        </label>
-        {error && <div className="dialog-error">{error}</div>}
-        <button className="dialog-submit" disabled={saving || !name.trim()}>{saving ? "Creating…" : "Create room"}</button>
-      </form>
-    </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent>
+        <form className="grid gap-5" autoComplete="off" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>Create a room</DialogTitle>
+            <DialogDescription>Start a shared queue. You can change access and moderators later.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="room-name">Room name</Label>
+              <Input
+                id="room-name"
+                name="soundspin-room-name"
+                autoFocus
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                required
+                maxLength={48}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Friday focus"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="room-password">Password <span className="font-normal text-muted-foreground">Optional</span></Label>
+              <Input
+                id="room-password"
+                name="soundspin-new-room-password"
+                type="password"
+                autoComplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                maxLength={128}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="No password"
+              />
+            </div>
+            <div className="switch-row">
+              <span><Globe2 /><span><strong>Public room</strong><small>Show in the room directory</small></span></span>
+              <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
+            </div>
+          </div>
+          {error && <div className="dialog-error" role="alert">{error}</div>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Creating…" : "Create room"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -267,17 +337,25 @@ export function PasswordDialog({
 }) {
   const [password, setPassword] = useState("");
   return (
-    <div className="dialog-backdrop">
-      <form className="room-dialog password-dialog" onSubmit={(event) => { event.preventDefault(); onSubmit(password); }}>
-        <button type="button" className="dialog-close" onClick={onClose}><X size={17} /></button>
-        <span className="password-dialog-icon"><LockKeyhole size={24} /></span>
-        <span className="section-kicker">PROTECTED ROOM</span>
-        <h2>{roomName}</h2>
-        <p>Enter the room password to join the listening session.</p>
-        <label>Password<input autoFocus required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-        {error && <div className="dialog-error">{error}</div>}
-        <button className="dialog-submit" disabled={!password}>Unlock room</button>
-      </form>
-    </div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <form className="grid gap-5" onSubmit={(event) => { event.preventDefault(); onSubmit(password); }}>
+          <DialogHeader>
+            <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><LockKeyhole className="size-4" /></div>
+            <DialogTitle>{roomName}</DialogTitle>
+            <DialogDescription>This room is protected. Enter its password to join.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="join-password">Password</Label>
+            <Input id="join-password" autoFocus required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} />
+          </div>
+          {error && <div className="dialog-error" role="alert">{error}</div>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={!password}>Join room</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,6 +1,13 @@
 import { FormEvent, useState } from "react";
 import { Crown, Globe2, LockKeyhole, Shield, UserPlus, X } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
 import { socket } from "../socket";
 import type { RoomSnapshot } from "../types";
 
@@ -57,59 +64,68 @@ export function RoomSettingsDialog({
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form className="room-dialog room-settings-dialog" onSubmit={save} onMouseDown={(event) => event.stopPropagation()}>
-        <button type="button" className="dialog-close" onClick={onClose}><X size={17} /></button>
-        <span className="section-kicker">ROOM SETTINGS</span>
-        <h2>Make this room yours</h2>
-        <p>Owners and moderators can tune the room details. Only the owner can manage moderators.</p>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-3xl">
+        <form className="grid gap-5" autoComplete="off" onSubmit={save}>
+          <DialogHeader>
+            <DialogTitle>Room settings</DialogTitle>
+            <DialogDescription>Manage the room details, access, and moderation team.</DialogDescription>
+          </DialogHeader>
 
-        <div className="settings-grid">
-          <div className="settings-fields">
-            <label>Room name<input required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} /></label>
-            <label className="switch-row">
-              <span><Globe2 size={16} /><span><strong>Public room</strong><small>Listed publicly; invite links still work when off</small></span></span>
-              <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-            </label>
-            <div className="password-settings">
-              <span><LockKeyhole size={15} /> Password</span>
-              <div className="segmented-control">
-                <button type="button" className={passwordMode === "unchanged" ? "active" : ""} onClick={() => setPasswordMode("unchanged")}>Keep</button>
-                <button type="button" className={passwordMode === "replace" ? "active" : ""} onClick={() => setPasswordMode("replace")}>{snapshot.room.passwordProtected ? "Change" : "Add"}</button>
-                {snapshot.room.passwordProtected && <button type="button" className={passwordMode === "remove" ? "active" : ""} onClick={() => setPasswordMode("remove")}>Remove</button>}
+          <div className="settings-grid">
+            <div className="settings-fields">
+              <div className="grid gap-2">
+                <Label htmlFor="settings-name">Room name</Label>
+                <Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} />
               </div>
-              {passwordMode === "replace" && <input required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New room password" />}
+              <div className="switch-row">
+                <span><Globe2 /><span><strong>Public room</strong><small>List this room in the directory</small></span></span>
+                <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
+              </div>
+              <Card size="sm" className="password-settings">
+                <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle><CardDescription>Control who can enter with an invite link.</CardDescription></CardHeader>
+                <CardContent className="grid gap-3">
+                  <div className="segmented-control">
+                    <Button type="button" size="sm" className={passwordMode === "unchanged" ? "segmented-active" : ""} variant={passwordMode === "unchanged" ? "secondary" : "ghost"} onClick={() => setPasswordMode("unchanged")}>Keep</Button>
+                    <Button type="button" size="sm" className={passwordMode === "replace" ? "segmented-active" : ""} variant={passwordMode === "replace" ? "secondary" : "ghost"} onClick={() => setPasswordMode("replace")}>{snapshot.room.passwordProtected ? "Change" : "Add"}</Button>
+                    {snapshot.room.passwordProtected && <Button type="button" size="sm" className={passwordMode === "remove" ? "segmented-active segmented-destructive" : ""} variant={passwordMode === "remove" ? "destructive" : "ghost"} onClick={() => setPasswordMode("remove")}>Remove</Button>}
+                  </div>
+                  {passwordMode === "replace" && <Input name="soundspin-new-settings-password" autoComplete="new-password" data-1p-ignore data-lpignore="true" required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New room password" />}
+                </CardContent>
+              </Card>
             </div>
+
+            {isOwner && (
+              <Card size="sm" className="moderator-settings">
+                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Moderators</CardTitle><CardDescription>Moderators can manage the room and queue.</CardDescription></CardHeader>
+                <CardContent className="moderator-list">
+                  {snapshot.users.map((user) => {
+                    const owner = user.id === snapshot.room.ownerUserId;
+                    const moderator = snapshot.room.moderatorUserIds.includes(user.id);
+                    return (
+                      <div key={user.id}>
+                        <Avatar user={user} size={28} />
+                        <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : "Listener"}</small></span>
+                        {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setModerator(user.id, !moderator)}>
+                            {moderator ? <X /> : <UserPlus />}{moderator ? "Remove" : "Promote"}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
-          {isOwner && (
-            <section className="moderator-settings">
-              <div><Shield size={15} /><span><strong>Moderators</strong><small>Promote people currently listening</small></span></div>
-              <div className="moderator-list">
-                {snapshot.users.map((user) => {
-                  const owner = user.id === snapshot.room.ownerUserId;
-                  const moderator = snapshot.room.moderatorUserIds.includes(user.id);
-                  return (
-                    <div key={user.id}>
-                      <Avatar user={user} size={30} />
-                      <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : "Listener"}</small></span>
-                      {owner ? <Crown size={15} className="owner-crown" /> : (
-                        <button type="button" onClick={() => setModerator(user.id, !moderator)}>
-                          {moderator ? <X size={14} /> : <UserPlus size={14} />}
-                          {moderator ? "Remove" : "Promote"}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-        </div>
-
-        {error && <div className="dialog-error">{error}</div>}
-        <button className="dialog-submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save room settings"}</button>
-      </form>
-    </div>
+          {error && <div className="dialog-error" role="alert">{error}</div>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

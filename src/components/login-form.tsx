@@ -48,8 +48,8 @@ export function LoginForm({
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">Login</CardTitle>
-          <CardDescription>Enter your email below to login to your account</CardDescription>
+          <CardTitle className="text-xl">Welcome back</CardTitle>
+          <CardDescription>Sign in to open your rooms and profile.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin}>
@@ -59,7 +59,7 @@ export function LoginForm({
                 <Input
                   id="email"
                   type="email"
-                  placeholder="m@example.com"
+                  placeholder="you@example.com"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -86,14 +86,12 @@ export function LoginForm({
               </div>
               {error && <p className="text-sm text-red-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Logging in...' : 'Login'}
+                {isLoading ? 'Signing in…' : 'Sign in'}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{' '}
-              <button type="button" className="underline underline-offset-4" onClick={() => onNavigate('/sign-up')}>
-                Sign up
-              </button>
+              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/sign-up')}>Create one</Button>
             </div>
           </form>
         </CardContent>
