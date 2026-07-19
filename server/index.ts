@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { createServer } from "node:http";
-import { verifyCredentials } from "@supabase/server/core";
+import { createAdminClient, verifyCredentials } from "@supabase/server/core";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
@@ -14,6 +14,11 @@ import { AppleMusicApi } from "./apple-music.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
 import { SpotifyAccounts } from "./spotify-accounts.js";
 import { SpotifyApi } from "./spotify.js";
+import {
+  invitePasswordMatches,
+  inviteSignupSchema,
+  SignupAttemptLimiter
+} from "./invite-signup.js";
 import {
   advanceRadio,
   canJoinDjQueue,
@@ -34,6 +39,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
+const signupInvitePassword = process.env.SIGNUP_INVITE_PASSWORD;
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const soundCloudApi = new SoundCloudApi(
   process.env.SOUNDCLOUD_CLIENT_ID,
@@ -49,6 +55,7 @@ const authEnabled = Boolean(
   supabaseJwksUrl &&
   store.usesSupabase
 );
+const signupAdmin = authEnabled && signupInvitePassword ? createAdminClient() : null;
 
 // Live coordination is process-local. `roomUsers` is socket presence, while
 // `roomDjUsers` also keeps a disconnected DJ's display data during the grace
@@ -71,6 +78,7 @@ const soundCloudSearchLimits = new Map<string, { count: number; resetAt: number 
 const spotifySearchCache = new Map<string, { expiresAt: number; results: Awaited<ReturnType<SpotifyApi["searchTracks"]>> }>();
 const appleMusicSearchCache = new Map<string, { expiresAt: number; results: Awaited<ReturnType<AppleMusicApi["searchTracks"]>> }>();
 const providerSearchLimits = new Map<string, { count: number; resetAt: number }>();
+const signupAttemptLimiter = new SignupAttemptLimiter(10, 15 * 60 * 1000);
 const spotifyOauthStates = new Map<string, {
   userId: string;
   returnTo: string;
@@ -203,6 +211,7 @@ const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
   bio: z.string().trim().max(160).optional(),
   avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
+  customAvatarPath: z.string().regex(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|gif)$/).optional(),
   themeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
   featuredBadgeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
   signatureTracks: z.array(z.object({
@@ -219,7 +228,8 @@ const profileUpdateSchema = z.object({
       context.addIssue({ code: "custom", message: "Each signature track needs a unique slot." });
     }
   }).optional()
-}).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.");
+}).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.")
+  .refine((value) => !(value.avatarKey && value.customAvatarPath), "Choose an unlocked avatar or a custom upload, not both.");
 
 const roomCreateSchema = z.object({
   name: z.string().trim().min(1).max(48),
@@ -373,6 +383,44 @@ async function getApiUserId(request: express.Request) {
   );
   return error ? null : data.userClaims?.id || null;
 }
+
+app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  if (!signupAdmin || !signupInvitePassword) {
+    return response.status(503).json({ error: "Invite-only signup is not configured." });
+  }
+
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  if (!signupAttemptLimiter.consume(rateKey)) {
+    return response.status(429).json({ error: "Too many signup attempts. Try again later." });
+  }
+
+  const parsed = inviteSignupSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter a valid email, password, and invite password." });
+  }
+  if (!invitePasswordMatches(parsed.data.invitePassword, signupInvitePassword)) {
+    return response.status(403).json({ error: "The invite password is incorrect." });
+  }
+
+  try {
+    const { error } = await signupAdmin.auth.admin.createUser({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      email_confirm: true
+    });
+    if (error) {
+      return response.status(400).json({
+        error: "Could not create the account. Try signing in if this email is already registered."
+      });
+    }
+  } catch {
+    return response.status(502).json({ error: "The account service is unavailable. Try again later." });
+  }
+
+  signupAttemptLimiter.reset(rateKey);
+  return response.status(201).json({ ok: true });
+});
 
 function createRoom(id: string, ownerUserId: string, name?: string): Room {
   return {
@@ -536,6 +584,7 @@ io.on("connection", (socket) => {
             ...user,
             name: soundspinProfile.display_name,
             avatarKey: soundspinProfile.avatar_key,
+            avatarUrl: soundspinProfile.avatar_url || undefined,
             isAppAdmin: soundspinProfile.is_app_admin
           };
         }

@@ -6,6 +6,7 @@ import {
   Disc3,
   ExternalLink,
   Headphones,
+  ImageUp,
   LockKeyhole,
   Music2,
   Palette,
@@ -23,6 +24,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { levelProgress } from "../progression";
+import { getSupabaseClient } from "../supabase";
 import type {
   ProfileSignatureTrack,
   Provider,
@@ -45,6 +47,14 @@ const EMPTY_HIGHLIGHTS: SoundSpinProfileHighlights = {
   favorite_track_artist: null,
   favorite_track_wins: 0
 };
+
+const AVATAR_MIME_EXTENSIONS = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+  ["image/gif", "gif"]
+]);
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
 interface ProviderSearchResult {
   id: string;
@@ -86,6 +96,7 @@ export function ProfilePage({
   const [bio, setBio] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [error, setError] = useState("");
   const [editingSlot, setEditingSlot] = useState<SignatureTrackSlot | null>(null);
   const [searchProvider, setSearchProvider] = useState<Provider>("youtube");
@@ -127,6 +138,7 @@ export function ProfilePage({
     displayName?: string;
     bio?: string;
     avatarKey?: string;
+    customAvatarPath?: string;
     themeKey?: string;
     featuredBadgeKey?: string;
     signatureTracks?: ProfileSignatureTrack[];
@@ -207,6 +219,50 @@ export function ProfilePage({
     await updateProfile({ signatureTracks: profile.signature_tracks.filter((track) => track.slot !== slot) });
   };
 
+  const deleteAvatarObject = async (path: string) => {
+    const client = await getSupabaseClient();
+    if (client) await client.storage.from("profile-avatars").remove([path]);
+  };
+
+  const uploadAvatar = async (file: File) => {
+    const extension = AVATAR_MIME_EXTENSIONS.get(file.type);
+    if (!extension) return setError("Choose a PNG, JPEG, WebP, or GIF image.");
+    if (file.size > AVATAR_MAX_BYTES) return setError("Avatar images must be 5 MB or smaller.");
+
+    setUploadingAvatar(true);
+    setError("");
+    const oldPath = profile?.avatar_path;
+    let newPath = "";
+    try {
+      const client = await getSupabaseClient();
+      if (!client) throw new Error("Avatar uploads require a signed-in SoundSpin account.");
+      newPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await client.storage.from("profile-avatars").upload(newPath, file, {
+        cacheControl: "31536000",
+        contentType: file.type,
+        upsert: false
+      });
+      if (uploadError) throw new Error(uploadError.message);
+      if (!(await updateProfile({ customAvatarPath: newPath }))) {
+        await deleteAvatarObject(newPath);
+        return;
+      }
+      if (oldPath && oldPath !== newPath) await deleteAvatarObject(oldPath);
+    } catch (uploadError) {
+      if (newPath) await deleteAvatarObject(newPath);
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload your avatar.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const chooseUnlockedAvatar = async (avatarKey: string) => {
+    const oldPath = profile?.avatar_path;
+    if (await updateProfile({ avatarKey })) {
+      if (oldPath) await deleteAvatarObject(oldPath);
+    }
+  };
+
   if (loading) return <main className="profile-page"><div className="profile-loading">Loading profile…</div></main>;
 
   if (!profile) {
@@ -228,6 +284,7 @@ export function ProfilePage({
     name: profile.display_name,
     avatarSeed: profile.user_id,
     avatarKey: profile.avatar_key,
+    avatarUrl: profile.avatar_url || undefined,
     isAppAdmin: profile.is_app_admin
   };
   const avatarUnlocks = unlocks.filter((unlock) => unlock.kind === "avatar");
@@ -374,18 +431,38 @@ export function ProfilePage({
             <Card className="profile-card collection-card">
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
-                  <div><CardTitle>Avatars</CardTitle><CardDescription>Unlock new identities as you level up.</CardDescription></div>
+                  <div><CardTitle>Avatars</CardTitle><CardDescription>Upload your own image or choose an identity you have unlocked.</CardDescription></div>
                   <Badge variant="outline">{unlockedAvatars} / {avatarUnlocks.length}</Badge>
                 </div>
               </CardHeader>
               <CardContent>
+                {isOwnProfile && (
+                  <div className={`avatar-upload ${profile.avatar_url ? "has-custom-avatar" : ""}`}>
+                    <Avatar user={profileUser} size={56} />
+                    <span><strong>{profile.avatar_url ? "Custom avatar" : "Make it yours"}</strong><small>PNG, JPEG, WebP, or animated GIF · up to 5 MB</small></span>
+                    <label htmlFor="avatar-upload-input" aria-disabled={uploadingAvatar || saving}>
+                      <ImageUp /> {uploadingAvatar ? "Uploading…" : profile.avatar_url ? "Replace" : "Upload image"}
+                    </label>
+                    <input
+                      id="avatar-upload-input"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      disabled={uploadingAvatar || saving}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) void uploadAvatar(file);
+                      }}
+                    />
+                  </div>
+                )}
                 <div className="avatar-collection">
                   {avatarUnlocks.map((unlock) => {
                     const unlocked = progression.level >= unlock.required_level;
-                    const selected = profile.avatar_key === unlock.key;
+                    const selected = !profile.avatar_url && profile.avatar_key === unlock.key;
                     return (
-                      <button type="button" key={unlock.key} className={`${unlocked ? "unlocked" : "locked"} ${selected ? "selected" : ""}`} disabled={!isOwnProfile || !unlocked || saving} title={!unlocked ? `Unlocks at level ${unlock.required_level}` : selected ? "Currently equipped" : `Use ${unlock.name}`} onClick={() => void updateProfile({ avatarKey: unlock.key })}>
-                        <Avatar user={{ ...profileUser, avatarKey: unlock.key }} size={48} />
+                      <button type="button" key={unlock.key} className={`${unlocked ? "unlocked" : "locked"} ${selected ? "selected" : ""}`} disabled={!isOwnProfile || !unlocked || saving || uploadingAvatar} title={!unlocked ? `Unlocks at level ${unlock.required_level}` : selected ? "Currently equipped" : `Use ${unlock.name}`} onClick={() => void chooseUnlockedAvatar(unlock.key)}>
+                        <Avatar user={{ ...profileUser, avatarKey: unlock.key, avatarUrl: undefined }} size={48} />
                         <strong>{unlock.name}</strong>
                         <span>{selected ? <><Check /> Equipped</> : unlocked ? "Unlocked" : <><LockKeyhole /> Level {unlock.required_level}</>}</span>
                       </button>

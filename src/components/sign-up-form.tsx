@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -14,17 +13,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function SignUpForm({
-  client,
   onNavigate,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
-  client: SupabaseClient
   onNavigate: (path: string) => void
 }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
+  const [invitePassword, setInvitePassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -40,14 +38,13 @@ export function SignUpForm({
     setIsLoading(true)
 
     try {
-      const { error } = await client.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${location.origin}/`,
-        },
+      const response = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, invitePassword }),
       })
-      if (error) throw error
+      const result = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Could not create the account')
       setSuccess(true)
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')
@@ -61,14 +58,16 @@ export function SignUpForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Check your email</CardTitle>
-            <CardDescription>We sent you a confirmation link.</CardDescription>
+            <CardTitle className="text-xl">Account created</CardTitle>
+            <CardDescription>Your SoundSpin account is ready.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              You&apos;ve successfully signed up. Please check your email to confirm your account
-              before signing in.
+              Sign in with the email and password you just chose.
             </p>
+            <Button type="button" className="mt-4 w-full" onClick={() => onNavigate('/login')}>
+              Sign in
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -86,6 +85,7 @@ export function SignUpForm({
                     id="email"
                     type="email"
                     placeholder="you@example.com"
+                    autoComplete="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -98,6 +98,8 @@ export function SignUpForm({
                   <Input
                     id="password"
                     type="password"
+                    autoComplete="new-password"
+                    minLength={6}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -110,10 +112,26 @@ export function SignUpForm({
                   <Input
                     id="repeat-password"
                     type="password"
+                    autoComplete="new-password"
+                    minLength={6}
                     required
                     value={repeatPassword}
                     onChange={(e) => setRepeatPassword(e.target.value)}
                   />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="invite-password">Invite password</Label>
+                  <Input
+                    id="invite-password"
+                    type="password"
+                    autoComplete="off"
+                    required
+                    value={invitePassword}
+                    onChange={(e) => setInvitePassword(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Ask the person who invited you for the shared password.
+                  </p>
                 </div>
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>

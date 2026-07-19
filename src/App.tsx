@@ -270,6 +270,7 @@ export function App() {
           name: payload.profile.display_name,
           avatarSeed: payload.profile.user_id,
           avatarKey: payload.profile.avatar_key,
+          avatarUrl: payload.profile.avatar_url || undefined,
           isAppAdmin: payload.profile.is_app_admin
         };
         if (active) {
@@ -364,7 +365,7 @@ export function App() {
       socket.off("room:snapshot", onSnapshot);
       socket.off("profile:xp", onXp);
     };
-  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, profile.isAppAdmin, auth.loading, auth.enabled, auth.session?.access_token]);
+  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, profile.avatarUrl, profile.isAppAdmin, auth.loading, auth.enabled, auth.session?.access_token]);
 
   const openRoom = (id: string, password?: string) => {
     setSnapshot(null);
@@ -444,6 +445,7 @@ export function App() {
             name: updated.display_name,
             avatarSeed: updated.user_id,
             avatarKey: updated.avatar_key,
+            avatarUrl: updated.avatar_url || undefined,
             isAppAdmin: updated.is_app_admin
           };
           localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
@@ -618,7 +620,7 @@ function AuthScreen({ client }: { client: SupabaseClient }) {
   };
 
   const form = path === "/sign-up"
-    ? <SignUpForm client={client} onNavigate={navigate} className="w-full" />
+    ? <SignUpForm onNavigate={navigate} className="w-full" />
     : path === "/forgot-password"
       ? <ForgotPasswordForm client={client} onNavigate={navigate} className="w-full" />
       : <LoginForm client={client} onNavigate={navigate} className="w-full" />;

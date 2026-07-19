@@ -15,7 +15,7 @@ import type {
   Track
 } from "./types.js";
 
-const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, theme_key, featured_badge_key, signature_tracks, xp, songs_liked, created_at, updated_at";
+const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, avatar_url, avatar_path, theme_key, featured_badge_key, signature_tracks, xp, songs_liked, created_at, updated_at";
 
 interface Database {
   rooms: Record<string, Room>;
@@ -479,6 +479,7 @@ export class Store {
       displayName?: string;
       bio?: string;
       avatarKey?: string;
+      customAvatarPath?: string;
       themeKey?: string;
       featuredBadgeKey?: string;
       signatureTracks?: SoundSpinProfile["signature_tracks"];
@@ -517,10 +518,30 @@ export class Store {
       await validateUnlock(update.featuredBadgeKey, "badge", "That achievement does not exist.");
     }
 
+    let customAvatarUrl: string | undefined;
+    if (update.customAvatarPath !== undefined) {
+      const [folder, fileName, extra] = update.customAvatarPath.split("/");
+      if (folder !== userId || !fileName || extra) throw new Error("That avatar upload is not yours.");
+      const { data: objects, error } = await supabase.storage
+        .from("profile-avatars")
+        .list(userId, { search: fileName, limit: 10 });
+      if (error) throw new Error(`Could not validate avatar upload: ${error.message}`);
+      if (!objects?.some((object) => object.name === fileName)) throw new Error("That avatar upload was not found.");
+      customAvatarUrl = supabase.storage.from("profile-avatars").getPublicUrl(update.customAvatarPath).data.publicUrl;
+    }
+
     const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (update.displayName !== undefined) values.display_name = update.displayName;
     if (update.bio !== undefined) values.bio = update.bio;
-    if (update.avatarKey !== undefined) values.avatar_key = update.avatarKey;
+    if (update.avatarKey !== undefined) {
+      values.avatar_key = update.avatarKey;
+      values.avatar_url = null;
+      values.avatar_path = null;
+    }
+    if (update.customAvatarPath !== undefined) {
+      values.avatar_url = customAvatarUrl;
+      values.avatar_path = update.customAvatarPath;
+    }
     if (update.themeKey !== undefined) values.theme_key = update.themeKey;
     if (update.featuredBadgeKey !== undefined) values.featured_badge_key = update.featuredBadgeKey;
     if (update.signatureTracks !== undefined) values.signature_tracks = update.signatureTracks;

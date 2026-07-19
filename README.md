@@ -53,18 +53,23 @@ only a legacy/local fallback.
 2. Apply every migration in `supabase/migrations` in timestamp order, or enable
    the Supabase GitHub integration to apply them automatically from the
    production branch.
-3. In **Authentication → URL Configuration**, set the site URL to your
+3. In **Authentication → General Configuration**, turn off **Allow new users
+   to sign up**. SoundSpin creates users through its invite-protected server
+   endpoint; leaving public signup enabled would let callers bypass the invite
+   password by calling Supabase Auth directly.
+4. In **Authentication → URL Configuration**, set the site URL to your
    production SoundSpin URL.
-4. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
-5. Configure a custom SMTP provider before inviting the group. Supabase's
+5. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
+6. Configure a custom SMTP provider for password-reset emails. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
-6. Set the following environment variables:
+7. Set the following environment variables:
 
 ```dotenv
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_SECRET_KEY=your-secret-key
 SUPABASE_JWKS_URL=https://your-project.supabase.co/auth/v1/.well-known/jwks.json
+SIGNUP_INVITE_PASSWORD=replace-with-a-long-random-invite-password
 GIPHY_API_KEY=your-giphy-api-key
 YOUTUBE_API_KEY=your-youtube-data-api-key
 SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
@@ -85,6 +90,13 @@ VITE_GIPHY_API_KEY=your-giphy-api-key
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
 `SUPABASE_SECRET_KEY` must only be available to the SoundSpin server.
+`SIGNUP_INVITE_PASSWORD` must also remain server-only. Use a long, randomly
+generated value and share it only with people you want to invite. If it is not
+set, the signup endpoint fails closed and no accounts can be created through
+SoundSpin.
+Invite-created accounts are auto-confirmed because Supabase's admin create-user
+API does not send confirmation emails. The invite password is therefore the
+signup gate; email ownership is not separately verified during registration.
 The `VITE_` variables configure the local Vite client. In production, the
 client can also receive the same public values from SoundSpin's runtime config
 endpoint, so Dokploy does not need to bake them into the frontend bundle.

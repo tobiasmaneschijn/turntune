@@ -5,6 +5,7 @@ export interface User {
   name: string;
   avatarSeed: string;
   avatarKey?: string;
+  avatarUrl?: string;
   isAppAdmin?: boolean;
 }
 
@@ -14,6 +15,8 @@ export interface SoundSpinProfile {
   is_app_admin: boolean;
   bio: string;
   avatar_key: string;
+  avatar_url: string | null;
+  avatar_path: string | null;
   theme_key: string;
   featured_badge_key: string;
   signature_tracks: ProfileSignatureTrack[];
@@ -47,7 +50,7 @@ export interface SoundSpinUnlock {
   kind: "avatar" | "theme" | "badge";
   name: string;
   required_level: number;
-  metadata: { glyph?: string; gradient?: string; description?: string };
+  metadata: { glyph?: string; gradient?: string; imageUrl?: string; description?: string };
 }
 
 export interface Track {

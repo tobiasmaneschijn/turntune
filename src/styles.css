@@ -146,7 +146,9 @@ button { color: inherit; }
 .sign-out { border: 0; background: transparent; color: #777984; padding: 4px; font-size: 11px; cursor: pointer; }
 .sign-out:hover { color: #d7d7dc; }
 .icon-button { border: 1px solid var(--line); background: #121318; border-radius: 8px; padding: 8px 12px; display: flex; gap: 7px; align-items: center; cursor: pointer; font-size: 13px; }
-.avatar { border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: white; flex: 0 0 auto; box-shadow: inset 0 0 0 2px rgba(255,255,255,.12); }
+.avatar { position: relative; overflow: hidden; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: white; flex: 0 0 auto; box-shadow: inset 0 0 0 2px rgba(255,255,255,.12); }
+.avatar > img { width: 100%; height: 100%; position: absolute; inset: 0; z-index: 1; object-fit: cover; }
+.avatar-initials { position: relative; z-index: 0; }
 .room-layout { height: calc(100vh - 72px); padding: 14px; display: grid; grid-template-areas: "rail player chat"; grid-template-columns: 300px minmax(360px, 1fr) minmax(420px, 1.1fr); gap: 14px; overflow: hidden; }
 .room-layout.compact-player-layout { grid-template-columns: 320px 340px minmax(520px, 1fr); }
 .player-column { grid-area: player; min-width: 0; min-height: 0; }
@@ -1010,6 +1012,16 @@ button { letter-spacing: inherit; }
 .level-progress { height: 6px; background: var(--secondary); }
 .level-progress i { background: var(--primary); box-shadow: none; }
 .avatar-collection { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 8px; }
+.avatar-upload { margin-bottom: 12px; padding: 12px; border: 1px dashed var(--input); border-radius: var(--radius-xl); background: var(--secondary); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.avatar-upload > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.avatar-upload strong { font-size: 12px; }
+.avatar-upload small { color: var(--muted-foreground); font-size: 9px; }
+.avatar-upload > label { height: 34px; padding: 0 11px; border: 1px solid var(--input); border-radius: var(--radius-lg); background: var(--background); display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; cursor: pointer; }
+.avatar-upload > label:hover { border-color: color-mix(in oklch, var(--primary), transparent 45%); }
+.avatar-upload > label[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+.avatar-upload > label svg { width: 14px; color: var(--primary); }
+.avatar-upload > input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.avatar-upload.has-custom-avatar { border-style: solid; border-color: color-mix(in oklch, var(--primary), transparent 68%); }
 .avatar-collection > button { min-height: 112px; padding: 12px 8px; border-color: var(--border); border-radius: var(--radius-lg); background: transparent; }
 .avatar-collection > button.unlocked:hover:not(:disabled) { border-color: var(--input); background: var(--secondary); transform: none; }
 .avatar-collection > button.selected { border-color: color-mix(in oklch, var(--primary), transparent 50%); background: color-mix(in oklch, var(--primary), transparent 92%); }
@@ -1192,6 +1204,8 @@ button { letter-spacing: inherit; }
   .profile-identity > div { justify-content: center; }
   .profile-stats { width: 100%; grid-template-columns: repeat(3, 1fr); }
   .avatar-collection { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .avatar-upload { grid-template-columns: auto minmax(0, 1fr); }
+  .avatar-upload > label { grid-column: 1 / -1; justify-content: center; }
   .profile-side-column { grid-template-columns: 1fr; }
   .signature-grid,
   .highlight-grid { grid-template-columns: 1fr; }
