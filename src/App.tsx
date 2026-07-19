@@ -1479,7 +1479,7 @@ function MusicRail({
             >
               <option value="youtube">YouTube</option>
               <option value="spotify">Spotify</option>
-              <option value="apple">Apple Music</option>
+              <option disabled value="apple">Apple Music (Coming Soon)</option>
               <option value="soundcloud">SoundCloud</option>
             </select>
             <button type="submit" className="search-submit" disabled={searching}>
