@@ -226,7 +226,8 @@ export function ProfilePage({
     id: profile.user_id,
     name: profile.display_name,
     avatarSeed: profile.user_id,
-    avatarKey: profile.avatar_key
+    avatarKey: profile.avatar_key,
+    isAppAdmin: profile.is_app_admin
   };
   const avatarUnlocks = unlocks.filter((unlock) => unlock.kind === "avatar");
   const themeUnlocks = unlocks.filter((unlock) => unlock.kind === "theme");
@@ -256,7 +257,10 @@ export function ProfilePage({
               {featuredBadge && <Badge className="featured-achievement" variant="outline"><Award /> {featuredBadge.name}</Badge>}
               <span className="text-xs text-muted-foreground">Listener since {new Date(profile.created_at).toLocaleDateString(undefined, { month: "short", year: "numeric" })}</span>
             </div>
-            <h1>{profile.display_name}</h1>
+            <h1>
+              {profile.display_name}
+              {profile.is_app_admin && <span className="profile-dev-flair" title="SoundSpin developer">[DEV]</span>}
+            </h1>
             <p>{profile.bio || (isOwnProfile ? "Add a short bio to tell other listeners about yourself." : "No bio yet.")}</p>
           </div>
           <div className="profile-stats">

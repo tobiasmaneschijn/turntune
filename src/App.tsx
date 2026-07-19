@@ -90,12 +90,12 @@ function readProfile(): User {
   const stored = localStorage.getItem("soundspin-profile");
   if (stored) {
     try {
-      return { avatarKey: "pulse", ...(JSON.parse(stored) as User) };
+      return { avatarKey: "pulse", isAppAdmin: false, ...(JSON.parse(stored) as User) };
     } catch {
       // Create a fresh profile below.
     }
   }
-  return { id: randomId(), name: "", avatarSeed: randomId(), avatarKey: "pulse" };
+  return { id: randomId(), name: "", avatarSeed: randomId(), avatarKey: "pulse", isAppAdmin: false };
 }
 
 function youtubeId(value: string) {
@@ -239,7 +239,8 @@ export function App() {
       id: authUser.id,
       name: String(authUser.user_metadata.display_name || authUser.email?.split("@")[0] || ""),
       avatarSeed: authUser.id,
-      avatarKey: "pulse"
+      avatarKey: "pulse",
+      isAppAdmin: false
     };
     localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
     setProfile(nextProfile);
@@ -268,7 +269,8 @@ export function App() {
           id: payload.profile.user_id,
           name: payload.profile.display_name,
           avatarSeed: payload.profile.user_id,
-          avatarKey: payload.profile.avatar_key
+          avatarKey: payload.profile.avatar_key,
+          isAppAdmin: payload.profile.is_app_admin
         };
         if (active) {
           localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
@@ -362,7 +364,7 @@ export function App() {
       socket.off("room:snapshot", onSnapshot);
       socket.off("profile:xp", onXp);
     };
-  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, auth.loading, auth.enabled, auth.session?.access_token]);
+  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, profile.isAppAdmin, auth.loading, auth.enabled, auth.session?.access_token]);
 
   const openRoom = (id: string, password?: string) => {
     setSnapshot(null);
@@ -441,7 +443,8 @@ export function App() {
             id: updated.user_id,
             name: updated.display_name,
             avatarSeed: updated.user_id,
-            avatarKey: updated.avatar_key
+            avatarKey: updated.avatar_key,
+            isAppAdmin: updated.is_app_admin
           };
           localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
           setProfile(nextProfile);

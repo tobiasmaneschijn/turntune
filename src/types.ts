@@ -5,11 +5,13 @@ export interface User {
   name: string;
   avatarSeed: string;
   avatarKey?: string;
+  isAppAdmin?: boolean;
 }
 
 export interface SoundSpinProfile {
   user_id: string;
   display_name: string;
+  is_app_admin: boolean;
   bio: string;
   avatar_key: string;
   theme_key: string;

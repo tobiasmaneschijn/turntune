@@ -15,7 +15,7 @@ import type {
   Track
 } from "./types.js";
 
-const PROFILE_COLUMNS = "user_id, display_name, bio, avatar_key, theme_key, featured_badge_key, signature_tracks, xp, songs_liked, created_at, updated_at";
+const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, theme_key, featured_badge_key, signature_tracks, xp, songs_liked, created_at, updated_at";
 
 interface Database {
   rooms: Record<string, Room>;

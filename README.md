@@ -117,6 +117,25 @@ once per played track instance when the first eligible listener likes it;
 unique XP events and server-side avatar validation prevent duplicate awards or
 unlock bypasses.
 
+Application admins are marked on `soundspin_profiles` by the
+`is_app_admin` column. Assign or remove the marker only from the Supabase
+Dashboard SQL editor or another trusted server context:
+
+```sql
+update public.soundspin_profiles
+set is_app_admin = true, updated_at = now()
+where user_id = 'USER_UUID';
+
+-- To remove it later:
+update public.soundspin_profiles
+set is_app_admin = false, updated_at = now()
+where user_id = 'USER_UUID';
+```
+
+Marked profiles show a `[DEV]` flair beside their display name. The marker is
+not editable through the profile API and currently identifies the account; it
+does not grant room moderation or database permissions.
+
 Emoji support works without additional configuration. Uploaded chat images are
 stored in the public `chat-media` Supabase Storage bucket created by
 `20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a

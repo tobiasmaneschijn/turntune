@@ -1052,6 +1052,7 @@ button { letter-spacing: inherit; }
 .profile-badge-line { margin-bottom: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .profile-badge-line .featured-achievement { border-color: color-mix(in oklch, var(--primary), transparent 62%); color: var(--primary); }
 .profile-badge-line .featured-achievement svg { width: 12px; height: 12px; }
+.profile-dev-flair { margin-left: 10px; color: var(--primary); font-size: 0.42em; font-weight: 850; letter-spacing: 0.08em; vertical-align: 0.28em; white-space: nowrap; }
 .profile-card-icon { width: 20px; height: 20px; color: var(--muted-foreground); }
 .signature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .signature-track { min-width: 0; min-height: 226px; padding: 10px; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--secondary); display: flex; flex-direction: column; }

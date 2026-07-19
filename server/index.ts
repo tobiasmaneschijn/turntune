@@ -535,7 +535,8 @@ io.on("connection", (socket) => {
           user = {
             ...user,
             name: soundspinProfile.display_name,
-            avatarKey: soundspinProfile.avatar_key
+            avatarKey: soundspinProfile.avatar_key,
+            isAppAdmin: soundspinProfile.is_app_admin
           };
         }
       }
