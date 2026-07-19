@@ -127,7 +127,9 @@ The browser connects Socket.IO and emits `room:join`. The server then:
    personalized snapshots.
 
 Listener count is the number of distinct connected user IDs, not the number of
-tabs or sockets.
+tabs or sockets. `roomUsers` remains socket-based internally, but `uniqueUsers`
+projects it into one entry per account before snapshots or directory counts are
+created.
 
 A join is transactional with respect to presence. Rejoining the same room on an
 already connected socket refreshes that presence without scheduling disconnect

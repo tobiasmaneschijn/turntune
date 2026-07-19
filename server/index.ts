@@ -8,6 +8,7 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
 import { TRACK_LIKED_XP } from "./progression.js";
+import { uniqueUsers } from "./presence.js";
 import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import {
   advanceRadio,
@@ -263,7 +264,8 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
 function snapshot(room: Room, userId: string): RoomSnapshot {
   return {
     room: roomForListener(room, userId),
-    users: [...(roomUsers.get(room.id)?.values() || [])],
+    // Presence is socket-based internally, but listeners are unique accounts.
+    users: uniqueUsers(roomUsers.get(room.id)?.values() || []),
     djUsers: [...(roomDjUsers.get(room.id)?.values() || [])]
       .filter((user) => room.djQueueUserIds.includes(user.id)),
     serverTime: Date.now()
@@ -763,7 +765,7 @@ app.get("/api/rooms", async (request, response) => {
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   try {
     const listenerCounts = Object.fromEntries(
-      [...roomUsers.entries()].map(([slug, users]) => [slug, new Set([...users.values()].map((user) => user.id)).size])
+      [...roomUsers.entries()].map(([slug, users]) => [slug, uniqueUsers(users.values()).length])
     );
     const rooms = await store.listRooms(userId, listenerCounts);
     response.json({ rooms });

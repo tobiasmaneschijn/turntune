@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { advanceRadio, GracePeriodRegistry, normalizeRadioState, roomForListener } from "./radio.js";
+import { uniqueUsers } from "./presence.js";
 import type { Room, Track, User } from "./types.js";
 
 const alice: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
@@ -49,6 +50,13 @@ test("listener snapshots contain only their own private queue", () => {
   assert.deepEqual(aliceRoom.queue.map((item) => item.id), ["alice-1", "alice-2"]);
   assert.equal(serialized.includes("bob-1"), false);
   assert.equal("djQueues" in aliceRoom, false);
+});
+
+test("counts one listener per account even with multiple sockets", () => {
+  const updatedAlice = { ...alice, name: "Alice Updated" };
+  const listeners = uniqueUsers([alice, bob, updatedAlice]);
+  assert.deepEqual(listeners.map((user) => user.id), [alice.id, bob.id]);
+  assert.equal(listeners.find((user) => user.id === alice.id)?.name, "Alice Updated");
 });
 
 test("migrates a legacy shared queue into private queues", () => {
