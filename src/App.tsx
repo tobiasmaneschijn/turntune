@@ -3,7 +3,6 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Check,
   ChevronDown,
-  ChevronsUp,
   Clock3,
   GripVertical,
   Heart,
@@ -428,6 +427,9 @@ export function App() {
   }
 
   const isDj = snapshot.room.djUserId === profile.id;
+  const canControlPlayback = isDj ||
+    snapshot.room.ownerUserId === profile.id ||
+    snapshot.room.moderatorUserIds.includes(profile.id);
 
   return (
     <main className="app-shell">
@@ -473,7 +475,6 @@ export function App() {
       <section className={`room-layout ${compactPlayer ? "compact-player-layout" : ""}`}>
         <MusicRail
           snapshot={snapshot}
-          isDj={isDj}
           currentUserId={profile.id}
           accessToken={auth.session?.access_token}
           setNotice={setNotice}
@@ -482,6 +483,7 @@ export function App() {
           <NowPlaying
             snapshot={snapshot}
             isDj={isDj}
+            canControlPlayback={canControlPlayback}
             currentUserId={profile.id}
             compact={compactPlayer}
             onToggleCompact={() => setCompactPlayer((compact) => !compact)}
@@ -721,12 +723,14 @@ function VibeMeter({
 function NowPlaying({
   snapshot,
   isDj,
+  canControlPlayback,
   currentUserId,
   compact,
   onToggleCompact
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
+  canControlPlayback: boolean;
   currentUserId: string;
   compact: boolean;
   onToggleCompact: () => void;
@@ -752,7 +756,7 @@ function NowPlaying({
   };
 
   const commitSeek = () => {
-    if (!isDj || seekPreview === null) return;
+    if (!canControlPlayback || seekPreview === null) return;
     socket.emit("playback:update", { playing: playback.playing, position: seekPreview });
   };
 
@@ -775,7 +779,7 @@ function NowPlaying({
               playback={playback}
               isDj={isDj}
               volume={volume}
-              onEnded={() => socket.emit("queue:next")}
+              onEnded={() => socket.emit("queue:next", { trackId: track.id })}
               onStatus={setPlayerStatus}
             />
             <div className="record-ring ring-one" />
@@ -787,10 +791,10 @@ function NowPlaying({
               <p>Added by {track.addedBy.name} · YouTube</p>
             </div>
             <div className="player-controls">
-              <button disabled={!isDj} className="round-button primary" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
+              <button disabled={!canControlPlayback} className="round-button primary" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
                 {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
               </button>
-              <button disabled={!isDj} className="round-button" onClick={() => socket.emit("queue:next")} aria-label="Next track">
+              <button disabled={!canControlPlayback} className="round-button" onClick={() => socket.emit("queue:next", { trackId: track.id })} aria-label="Next track">
                 <SkipIcon size={20} />
               </button>
             </div>
@@ -803,7 +807,7 @@ function NowPlaying({
               max={Math.max(playerStatus.duration, 1)}
               step={1}
               value={Math.min(shownPosition, Math.max(playerStatus.duration, 1))}
-              disabled={!isDj || !playerStatus.duration}
+              disabled={!canControlPlayback || !playerStatus.duration}
               aria-label="Playback position"
               onChange={(event) => setSeekPreview(Number(event.target.value))}
               onPointerUp={commitSeek}
@@ -817,8 +821,10 @@ function NowPlaying({
               {playerStatus.buffering
                 ? "Buffering…"
                 : isDj
-                  ? "You're the DJ"
-                  : "Synced with the DJ"}
+                  ? "Your turn on the decks"
+                  : canControlPlayback
+                    ? "Moderator controls available"
+                    : "Synced with the current DJ"}
             </div>
             <label className="volume-control">
               <Volume2 size={14} />
@@ -855,13 +861,11 @@ interface YouTubeSearchResult {
 
 function MusicRail({
   snapshot,
-  isDj,
   currentUserId,
   accessToken,
   setNotice
 }: {
   snapshot: RoomSnapshot;
-  isDj: boolean;
   currentUserId: string;
   accessToken?: string;
   setNotice: (message: string) => void;
@@ -878,6 +882,21 @@ function MusicRail({
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
+  const joinedDjQueue = snapshot.room.djQueueUserIds.includes(currentUserId);
+  const canJoinDjQueue = snapshot.room.settings.djAccess !== "roles" ||
+    snapshot.room.ownerUserId === currentUserId ||
+    snapshot.room.moderatorUserIds.includes(currentUserId) ||
+    snapshot.room.djRoleUserIds.includes(currentUserId);
+  const currentDj = snapshot.users.find((user) => user.id === snapshot.room.djUserId);
+  const upcomingDjs = snapshot.room.djQueueUserIds.filter((userId) => userId !== snapshot.room.djUserId);
+
+  const toggleDjQueue = () => {
+    socket.emit(joinedDjQueue ? "dj:leave" : "dj:join", undefined, (result: { ok: boolean; error?: string }) => {
+      setNotice(result.ok
+        ? joinedDjQueue ? "Left the DJ queue" : "Joined the DJ queue"
+        : result.error || "Could not update the DJ queue.");
+    });
+  };
 
   const addTrack = async (trackUrl: string, trackTitle?: string) => {
     const providerId = youtubeId(trackUrl);
@@ -907,7 +926,7 @@ function MusicRail({
         setNotice(
           result.started
             ? "Started playing"
-            : `Added to the shared queue${result.position ? ` · #${result.position}` : ""}`
+            : `Added to your private queue${result.position ? ` · #${result.position}` : ""}`
         );
         setUrl("");
         setTitle("");
@@ -958,7 +977,7 @@ function MusicRail({
   };
 
   const queueAction = (
-    event: "queue:remove" | "queue:play-next",
+    event: "queue:remove",
     trackId: string,
     successMessage: string
   ) => {
@@ -976,9 +995,30 @@ function MusicRail({
   return (
     <aside className="music-rail panel">
       <div className="music-rail-heading">
-        <span>MUSIC</span>
-        <strong>Shared by everyone</strong>
+        <span>RADIO</span>
+        <strong>One song per DJ</strong>
       </div>
+
+      <section className="dj-lineup" aria-label="DJ queue">
+        <div className="dj-lineup-heading">
+          <div><span>DJ QUEUE</span><small>{snapshot.room.settings.djAccess === "roles" ? "Role restricted" : "Open to everyone"}</small></div>
+          <button type="button" className={joinedDjQueue ? "joined" : ""} disabled={!joinedDjQueue && !canJoinDjQueue} onClick={toggleDjQueue}>
+            {joinedDjQueue ? "Leave" : canJoinDjQueue ? "Join as DJ" : "DJ role required"}
+          </button>
+        </div>
+        <div className="dj-lineup-current">
+          {currentDj ? <><Avatar user={currentDj} size={30} /><span><small>ON AIR</small><strong>{currentDj.id === currentUserId ? "You" : currentDj.name}</strong></span></> : <span><small>ON AIR</small><strong>Waiting for a queued song</strong></span>}
+        </div>
+        {!!upcomingDjs.length && (
+          <div className="dj-lineup-next">
+            <small>UP NEXT</small>
+            {upcomingDjs.map((userId, index) => {
+              const user = snapshot.users.find((candidate) => candidate.id === userId);
+              return user ? <span key={userId} title={`${index + 1}. ${user.name}`}><i>{index + 1}</i><Avatar user={user} size={24} /></span> : null;
+            })}
+          </div>
+        )}
+      </section>
 
       <div className="music-tabs" role="tablist" aria-label="Music tools">
         <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
@@ -997,7 +1037,7 @@ function MusicRail({
         <div className="rail-pane search-pane">
           <div className="rail-pane-title">
             <span>SEARCH MUSIC</span>
-            <small>Add results to the shared queue</small>
+            <small>{joinedDjQueue ? "Add results to your private queue" : "Join the DJ queue to add music"}</small>
           </div>
           <form className="provider-search-form" onSubmit={searchYouTube}>
             <Search size={16} />
@@ -1058,8 +1098,8 @@ function MusicRail({
                     <button
                       type="button"
                       className={queued ? "added" : ""}
-                      title={queued ? "Already in the room" : "Add to shared queue"}
-                      disabled={queued || addingResultId === result.id}
+                      title={queued ? "Already in your queue or playing" : joinedDjQueue ? "Add to your queue" : "Join the DJ queue first"}
+                      disabled={!joinedDjQueue || queued || addingResultId === result.id}
                       onClick={() => addSearchResult(result)}
                     >
                       {queued ? <Check size={15} /> : addingResultId === result.id ? "…" : <PlusIcon size={15} />}
@@ -1115,7 +1155,7 @@ function MusicRail({
                   <strong>{track.title}</strong>
                   <small>Added by {track.addedBy.name}</small>
                 </span>
-                <button title="Add to queue again" onClick={() => addAgain(track)}>
+                <button disabled={!joinedDjQueue} title={joinedDjQueue ? "Add to your queue again" : "Join the DJ queue first"} onClick={() => addAgain(track)}>
                   <PlusIcon size={14} />
                 </button>
               </div>
@@ -1131,10 +1171,10 @@ function MusicRail({
         <div className="rail-pane">
           <div className="rail-pane-title queue-title">
             <div>
-              <span>SHARED QUEUE</span>
-              <small>Anyone can add tracks</small>
+              <span>MY QUEUE</span>
+              <small>Private · other listeners cannot see these tracks</small>
             </div>
-            <button className="rail-add-button" onClick={() => { setAdding(!adding); setTab("queue"); }}>
+            <button className="rail-add-button" disabled={!joinedDjQueue} title={joinedDjQueue ? "Add a track" : "Join the DJ queue first"} onClick={() => { setAdding(!adding); setTab("queue"); }}>
               <PlusIcon size={14} /> Add
             </button>
           </div>
@@ -1147,75 +1187,49 @@ function MusicRail({
           )}
           <div className="rail-track-list">
             {snapshot.room.queue.map((track, index) => {
-              const canRemove = isDj || track.addedBy.id === currentUserId;
               return (
               <div
                 className={`rail-track-row queue-track ${draggedTrackId === track.id ? "dragging" : ""}`}
                 key={track.id}
-                draggable={isDj}
-                role={isDj ? "button" : undefined}
-                tabIndex={isDj ? 0 : undefined}
-                title={isDj ? "Play this track now" : `Queue position ${index + 1}`}
-                onClick={() => {
-                  if (isDj) socket.emit("queue:play", track.id);
-                }}
-                onKeyDown={(event) => {
-                  if (isDj && (event.key === "Enter" || event.key === " ")) {
-                    event.preventDefault();
-                    socket.emit("queue:play", track.id);
-                  }
-                }}
+                draggable
+                title={`Your queue position ${index + 1}`}
                 onDragStart={() => setDraggedTrackId(track.id)}
                 onDragEnd={() => setDraggedTrackId("")}
                 onDragOver={(event) => {
-                  if (isDj) event.preventDefault();
+                  event.preventDefault();
                 }}
                 onDrop={(event) => {
                   event.preventDefault();
-                  if (isDj && draggedTrackId && draggedTrackId !== track.id) {
+                  if (draggedTrackId && draggedTrackId !== track.id) {
                     moveQueueTrack(draggedTrackId, index);
                   }
                   setDraggedTrackId("");
                 }}
               >
-                <span className="queue-drag-handle" title={isDj ? "Drag to reorder" : `Queue position ${index + 1}`}>
-                  {isDj ? <GripVertical size={14} /> : String(index + 1).padStart(2, "0")}
+                <span className="queue-drag-handle" title="Drag to reorder your queue">
+                  <GripVertical size={14} />
                 </span>
                 <img src={`https://i.ytimg.com/vi/${track.providerId}/default.jpg`} alt="" />
                 <span className="rail-track-copy">
                   <strong>{track.title}</strong>
-                  <small>#{index + 1} · {track.addedBy.name}</small>
+                  <small>#{index + 1} · only visible to you</small>
                 </span>
                 <span className="queue-track-actions">
-                  {isDj && index > 0 && (
-                    <button
-                      type="button"
-                      title="Play next"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        queueAction("queue:play-next", track.id, "Moved to play next");
-                      }}
-                    >
-                      <ChevronsUp size={14} />
-                    </button>
-                  )}
-                  {canRemove && (
-                    <button
-                      type="button"
-                      title="Remove from queue"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        queueAction("queue:remove", track.id, "Removed from queue");
-                      }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    title="Remove from your queue"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      queueAction("queue:remove", track.id, "Removed from your queue");
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </span>
               </div>
             )})}
             {!snapshot.room.queue.length && (
-              <div className="rail-empty"><ListMusic size={22} /><p>The shared queue is empty.</p></div>
+              <div className="rail-empty"><ListMusic size={22} /><p>{joinedDjQueue ? "Your queue is empty. Add a song for your next turn." : "Join the DJ queue to line up your own music."}</p></div>
             )}
           </div>
         </div>

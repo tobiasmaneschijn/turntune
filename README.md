@@ -1,14 +1,15 @@
 # SoundSpin
 
 A private, self-hosted shared radio for teams. SoundSpin synchronizes YouTube
-playback across a room and includes a shared queue, real-time chat, presence,
+playback across a room and includes round-robin DJ turns, real-time chat, presence,
 and generated avatars.
 
 ## Features
 
 - Shareable room links
-- DJ-controlled synchronized YouTube playback
-- Collaborative queue
+- Round-robin DJ lineup with one song per turn
+- Private per-DJ music queues
+- Room-level DJ access: open to everyone or restricted to DJ roles and moderators
 - Real-time room chat
 - Supabase Realtime Broadcast chat with persisted history, replies, and reactions
 - Deterministic, privacy-friendly avatars
@@ -132,7 +133,9 @@ them.
 
 ## Playback providers
 
-The shared `Track` model stores `provider` and `providerId` separately.
+The shared `Track` model stores `provider` and `providerId` separately. Tracks
+waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
+currently playing track remain visible to the room.
 YouTube is the only enabled adapter in this MVP. Spotify and Apple Music can
 later be added as player adapters without changing room, queue, chat, or
 persistence concepts.

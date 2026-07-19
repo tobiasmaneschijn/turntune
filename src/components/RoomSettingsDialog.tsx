@@ -26,6 +26,7 @@ export function RoomSettingsDialog({
 }) {
   const [name, setName] = useState(snapshot.room.name);
   const [isPublic, setIsPublic] = useState(snapshot.room.isPublic);
+  const [djAccess, setDjAccess] = useState<"everyone" | "roles">(snapshot.room.settings.djAccess || "everyone");
   const [passwordMode, setPasswordMode] = useState<"unchanged" | "replace" | "remove">("unchanged");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -36,7 +37,7 @@ export function RoomSettingsDialog({
     event.preventDefault();
     setSaving(true);
     setError("");
-    const body: { name: string; isPublic: boolean; password?: string | null } = { name, isPublic };
+    const body: { name: string; isPublic: boolean; djAccess: "everyone" | "roles"; password?: string | null } = { name, isPublic, djAccess };
     if (passwordMode === "replace") body.password = password;
     if (passwordMode === "remove") body.password = null;
     try {
@@ -63,6 +64,13 @@ export function RoomSettingsDialog({
     });
   };
 
+  const setDjRole = (userId: string, dj: boolean) => {
+    socket.emit("room:dj-role:set", { userId, dj }, (result: { ok: boolean; error?: string }) => {
+      if (!result.ok) setError(result.error || "Could not update DJ role.");
+      else onNotice(dj ? "DJ role added" : "DJ role removed");
+    });
+  };
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-3xl">
@@ -82,6 +90,18 @@ export function RoomSettingsDialog({
                 <span><Globe2 /><span><strong>Public room</strong><small>List this room in the directory</small></span></span>
                 <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
               </div>
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Who can join the DJ queue?</CardTitle>
+                  <CardDescription>Choose whether listeners can take turns freely or need a room role.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="segmented-control">
+                    <Button type="button" size="sm" className={djAccess === "everyone" ? "segmented-active" : ""} variant={djAccess === "everyone" ? "secondary" : "ghost"} onClick={() => setDjAccess("everyone")}>Everyone</Button>
+                    <Button type="button" size="sm" className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role + moderators</Button>
+                  </div>
+                </CardContent>
+              </Card>
               <Card size="sm" className="password-settings">
                 <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle><CardDescription>Control who can enter with an invite link.</CardDescription></CardHeader>
                 <CardContent className="grid gap-3">
@@ -97,19 +117,27 @@ export function RoomSettingsDialog({
 
             {isOwner && (
               <Card size="sm" className="moderator-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Moderators</CardTitle><CardDescription>Moderators can manage the room and queue.</CardDescription></CardHeader>
+                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle><CardDescription>Moderators manage the room. DJ-role listeners can join a restricted DJ queue.</CardDescription></CardHeader>
                 <CardContent className="moderator-list">
                   {snapshot.users.map((user) => {
                     const owner = user.id === snapshot.room.ownerUserId;
                     const moderator = snapshot.room.moderatorUserIds.includes(user.id);
+                    const dj = snapshot.room.djRoleUserIds.includes(user.id);
                     return (
                       <div key={user.id}>
                         <Avatar user={user} size={28} />
-                        <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : "Listener"}</small></span>
+                        <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small></span>
                         {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setModerator(user.id, !moderator)}>
-                            {moderator ? <X /> : <UserPlus />}{moderator ? "Remove" : "Promote"}
-                          </Button>
+                          <span className="room-role-actions">
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setModerator(user.id, !moderator)}>
+                              {moderator ? <X /> : <UserPlus />}{moderator ? "Remove mod" : "Moderator"}
+                            </Button>
+                            {!moderator && (
+                              <Button type="button" variant="ghost" size="sm" onClick={() => setDjRole(user.id, !dj)}>
+                                {dj ? <X /> : <UserPlus />}{dj ? "Remove DJ" : "DJ role"}
+                              </Button>
+                            )}
+                          </span>
                         )}
                       </div>
                     );

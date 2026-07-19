@@ -243,10 +243,24 @@ button { color: inherit; }
 .queue-copy small { color: var(--muted-foreground); font-size: 11px; }
 .empty-list { text-align: center; color: #676973; font-size: 13px; padding: 28px; }
 
-.music-rail { grid-area: rail; min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto 1fr; background: rgba(14,15,19,.94); }
+.music-rail { grid-area: rail; min-width: 0; height: 100%; min-height: 0; display: grid; grid-template-rows: auto auto auto 1fr; background: rgba(14,15,19,.94); }
 .music-rail-heading { padding: 15px 17px 12px; display: flex; justify-content: space-between; align-items: baseline; }
 .music-rail-heading > span { color: #777984; font-size: 10px; font-weight: 800; letter-spacing: 2px; }
 .music-rail-heading strong { color: #777984; font-size: 10px; font-weight: 500; }
+.dj-lineup { margin: 0 12px 12px; padding: 10px; border: 1px solid rgba(190,92,255,.22); border-radius: 10px; background: linear-gradient(145deg, rgba(190,92,255,.1), rgba(190,92,255,.025)); display: grid; gap: 9px; }
+.dj-lineup-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dj-lineup-heading > div, .dj-lineup-current > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dj-lineup-heading span, .dj-lineup-current small, .dj-lineup-next > small { color: #aa7ec4; font-size: 8px; font-weight: 800; letter-spacing: 1.1px; }
+.dj-lineup-heading small { color: #666874; font-size: 8px; }
+.dj-lineup-heading button { padding: 6px 8px; border: 1px solid rgba(190,92,255,.34); border-radius: 6px; background: #1b1420; color: #d5a8f0; font-size: 8px; font-weight: 800; cursor: pointer; }
+.dj-lineup-heading button.joined { border-color: var(--line); background: transparent; color: #858791; }
+.dj-lineup-heading button:disabled, .rail-add-button:disabled { opacity: .48; cursor: not-allowed; }
+.dj-lineup-current { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.dj-lineup-current strong { overflow: hidden; color: #e5e1e8; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.dj-lineup-next { display: flex; align-items: center; gap: 6px; }
+.dj-lineup-next > small { margin-right: 2px; }
+.dj-lineup-next > span { position: relative; display: inline-flex; }
+.dj-lineup-next > span > i { position: absolute; right: -3px; bottom: -3px; z-index: 1; width: 13px; height: 13px; border-radius: 50%; background: #be5cff; color: white; display: grid; place-items: center; font-size: 7px; font-style: normal; font-weight: 800; }
 .music-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .music-tabs button { position: relative; border: 0; border-right: 1px solid var(--line); background: transparent; color: #777984; padding: 11px 5px 10px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 10px; font-weight: 700; cursor: pointer; }
 .music-tabs button:last-child { border-right: 0; }
@@ -939,6 +953,7 @@ button { letter-spacing: inherit; }
 .moderator-list { padding-top: 0; }
 .moderator-list > div { border-color: var(--border); }
 .moderator-list button { border: 0; background: transparent; color: var(--muted-foreground); font-size: 11px; }
+.moderator-list .room-role-actions { display: flex; flex-direction: column; align-items: stretch; gap: 2px; }
 
 @media (max-width: 1100px) and (min-width: 901px) {
   .room-layout { grid-template-columns: 250px minmax(330px, 1fr) minmax(340px, .9fr); }

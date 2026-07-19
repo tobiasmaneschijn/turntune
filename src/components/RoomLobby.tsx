@@ -223,6 +223,7 @@ function RoomSection({
                   {room.passwordProtected && <Badge variant="outline"><LockKeyhole /> Protected</Badge>}
                   {room.role === "owner" && <Badge variant="secondary">Owner</Badge>}
                   {room.role === "moderator" && <Badge variant="secondary">Moderator</Badge>}
+                  {room.role === "dj" && <Badge variant="secondary">DJ role</Badge>}
                 </div>
                 <Button variant="secondary" size="sm" onClick={() => onEnter(room)}>
                   Join <ArrowRight />

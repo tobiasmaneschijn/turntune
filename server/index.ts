@@ -8,6 +8,14 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
 import { TRACK_LIKED_XP } from "./progression.js";
+import {
+  advanceRadio,
+  canJoinDjQueue,
+  normalizeRadioState,
+  privateQueue,
+  removeDj,
+  roomForListener
+} from "./radio.js";
 import type { Room, RoomSnapshot, Track, User } from "./types.js";
 
 const port = Number(process.env.PORT || 3000);
@@ -75,6 +83,10 @@ const queueMoveSchema = queueTrackSchema.extend({
   toIndex: z.number().int().min(0).max(999)
 });
 
+const queueNextSchema = z.object({
+  trackId: z.string().uuid()
+});
+
 const vibeVoteSchema = z.object({
   value: z.union([z.literal(-1), z.literal(0), z.literal(1)])
 });
@@ -98,7 +110,8 @@ const roomCreateSchema = z.object({
 const roomSettingsSchema = z.object({
   name: z.string().trim().min(1).max(48).optional(),
   isPublic: z.boolean().optional(),
-  password: z.union([z.string().max(128), z.null()]).optional()
+  password: z.union([z.string().max(128), z.null()]).optional(),
+  djAccess: z.enum(["everyone", "roles"]).optional()
 }).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
@@ -106,6 +119,11 @@ const favoriteSchema = z.object({ favorite: z.boolean() });
 const moderatorSchema = z.object({
   userId: z.string().uuid(),
   moderator: z.boolean()
+});
+
+const djRoleSchema = z.object({
+  userId: z.string().uuid(),
+  dj: z.boolean()
 });
 
 function roomSlug(name: string) {
@@ -178,11 +196,13 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
     name: name || id.replaceAll("-", " "),
     ownerUserId,
     moderatorUserIds: [],
+    djRoleUserIds: [],
     isPublic: true,
     passwordProtected: false,
-    settings: {},
+    settings: { djAccess: "everyone" },
     djUserId: null,
-    queue: [],
+    djQueueUserIds: [],
+    djQueues: {},
     history: [],
     playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
     vibe: null,
@@ -190,16 +210,24 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
   };
 }
 
-function snapshot(room: Room): RoomSnapshot {
+function snapshot(room: Room, userId: string): RoomSnapshot {
   return {
-    room,
+    room: roomForListener(room, userId),
     users: [...(roomUsers.get(room.id)?.values() || [])],
     serverTime: Date.now()
   };
 }
 
 function broadcast(room: Room) {
-  io.to(room.id).emit("room:snapshot", snapshot(room));
+  for (const [socketId, user] of roomUsers.get(room.id) || []) {
+    io.to(socketId).emit("room:snapshot", snapshot(room, user.id));
+  }
+}
+
+function canControlPlayback(room: Room, userId: string) {
+  return room.djUserId === userId ||
+    room.ownerUserId === userId ||
+    room.moderatorUserIds.includes(userId);
 }
 
 function getMembership(socketId: string) {
@@ -210,7 +238,7 @@ function getMembership(socketId: string) {
   return room && user ? { room, user } : null;
 }
 
-function leaveCurrentRoom(socketId: string) {
+async function leaveCurrentRoom(socketId: string) {
   const roomId = socketRooms.get(socketId);
   if (!roomId) return;
   socketRooms.delete(socketId);
@@ -219,9 +247,12 @@ function leaveCurrentRoom(socketId: string) {
   users?.delete(socketId);
   const room = store.getRoom(roomId);
   if (!room) return;
-  if (leavingUser?.id === room.djUserId) {
-    room.djUserId = users?.values().next().value?.id || null;
-    void store.saveRoom(room);
+  const stillConnected = leavingUser && [...(users?.values() || [])].some((user) => user.id === leavingUser.id);
+  if (leavingUser && !stillConnected) {
+    const wasCurrentDj = leavingUser.id === room.djUserId;
+    removeDj(room, leavingUser.id);
+    if (wasCurrentDj) advanceRadio(room);
+    await store.saveRoom(room);
   }
   if (users?.size === 0) roomUsers.delete(roomId);
   broadcast(room);
@@ -249,7 +280,7 @@ io.on("connection", (socket) => {
     for (const joinedRoom of socket.rooms) {
       if (joinedRoom !== socket.id) await socket.leave(joinedRoom);
     }
-    leaveCurrentRoom(socket.id);
+    await leaveCurrentRoom(socket.id);
     const { roomId, roomName, password } = parsed.data;
     let user: User = {
       ...parsed.data.user,
@@ -282,20 +313,22 @@ io.on("connection", (socket) => {
       const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
       if (!room.ownerUserId) room.ownerUserId = user.id;
       if (!room.moderatorUserIds) room.moderatorUserIds = [];
+      normalizeRadioState(room);
       if (room.isPublic === undefined) room.isPublic = true;
       if (room.passwordProtected === undefined) room.passwordProtected = Boolean(access.passwordHash);
-      if (!room.settings) room.settings = {};
       if (!room.history) room.history = [];
       if (room.vibe === undefined) room.vibe = null;
       if (room.vibe && room.playback.track && room.vibe.trackId === room.playback.track.id) {
         delete room.vibe.votes[room.playback.track.addedBy.id];
       }
-      if (room.ownerUserId === user.id || !room.djUserId) room.djUserId = user.id;
       await store.recordRoomMember(roomId, user.id);
-      await store.saveRoom(room);
 
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
+      const onlineUserIds = new Set([...roomUsers.get(roomId)!.values()].map((roomUser) => roomUser.id));
+      room.djQueueUserIds = room.djQueueUserIds.filter((userId) => onlineUserIds.has(userId));
+      if (room.djUserId && !onlineUserIds.has(room.djUserId)) advanceRadio(room);
+      await store.saveRoom(room);
       socketRooms.set(socket.id, roomId);
       await socket.join(roomId);
       broadcast(room);
@@ -325,6 +358,12 @@ io.on("connection", (socket) => {
         parsed.data.userId,
         parsed.data.moderator
       );
+      if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
+        const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
+        removeDj(membership.room, parsed.data.userId);
+        if (wasCurrentDj) advanceRadio(membership.room);
+        await store.saveRoom(membership.room);
+      }
       broadcast(membership.room);
       reply?.({ ok: true });
     } catch (error) {
@@ -332,10 +371,70 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("room:dj-role:set", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = djRoleSchema.safeParse(payload);
+    if (!membership || !parsed.success) {
+      return reply?.({ ok: false, error: "Invalid DJ role change." });
+    }
+    try {
+      await store.setDjRole(
+        membership.room.id,
+        membership.user.id,
+        parsed.data.userId,
+        parsed.data.dj
+      );
+      if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
+        const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
+        removeDj(membership.room, parsed.data.userId);
+        if (wasCurrentDj) advanceRadio(membership.room);
+        await store.saveRoom(membership.room);
+      }
+      broadcast(membership.room);
+      reply?.({ ok: true });
+    } catch (error) {
+      reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not update DJ role." });
+    }
+  });
+
+  socket.on("dj:join", async (_payload, reply) => {
+    const membership = getMembership(socket.id);
+    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
+    if (!canJoinDjQueue(membership.room, membership.user.id)) {
+      return reply?.({ ok: false, error: "This room requires a DJ role or moderator access." });
+    }
+    if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
+      const currentDjIndex = membership.room.djUserId
+        ? membership.room.djQueueUserIds.indexOf(membership.room.djUserId)
+        : -1;
+      if (currentDjIndex >= 0) membership.room.djQueueUserIds.splice(currentDjIndex, 0, membership.user.id);
+      else membership.room.djQueueUserIds.push(membership.user.id);
+    }
+    privateQueue(membership.room, membership.user.id);
+    if (!membership.room.playback.track) advanceRadio(membership.room);
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("dj:leave", async (_payload, reply) => {
+    const membership = getMembership(socket.id);
+    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
+    const wasCurrentDj = membership.room.djUserId === membership.user.id;
+    removeDj(membership.room, membership.user.id);
+    if (wasCurrentDj) advanceRadio(membership.room);
+    await store.saveRoom(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
   socket.on("queue:add", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = trackSchema.safeParse(payload);
     if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid track." });
+    if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
+      return reply?.({ ok: false, error: "Join the DJ queue before adding tracks." });
+    }
     if (parsed.data.provider !== "youtube") {
       return reply?.({ ok: false, error: "That provider is not enabled yet." });
     }
@@ -345,7 +444,8 @@ io.on("connection", (socket) => {
     ) {
       return reply?.({ ok: false, error: "That track is already playing." });
     }
-    const duplicateIndex = membership.room.queue.findIndex(
+    const queue = privateQueue(membership.room, membership.user.id);
+    const duplicateIndex = queue.findIndex(
       (track) =>
         track.provider === parsed.data.provider &&
         track.providerId === parsed.data.providerId
@@ -362,26 +462,15 @@ io.on("connection", (socket) => {
       addedBy: membership.user,
       addedAt: Date.now()
     };
-    membership.room.queue.push(track);
+    queue.push(track);
     const startedPlaying = !membership.room.playback.track;
-    if (startedPlaying) {
-      membership.room.playback = {
-        track: membership.room.queue.shift()!,
-        playing: false,
-        position: 0,
-        updatedAt: Date.now()
-      };
-      membership.room.vibe = {
-        trackId: track.id,
-        votes: {}
-      };
-    }
+    if (startedPlaying) advanceRadio(membership.room);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({
       ok: true,
       started: startedPlaying,
-      position: startedPlaying ? 0 : membership.room.queue.length
+      position: startedPlaying ? 0 : queue.length
     });
   });
 
@@ -391,17 +480,10 @@ io.on("connection", (socket) => {
     if (!membership || !parsed.success) {
       return reply?.({ ok: false, error: "Invalid queue item." });
     }
-    const index = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    const queue = privateQueue(membership.room, membership.user.id);
+    const index = queue.findIndex((track) => track.id === parsed.data.trackId);
     if (index < 0) return reply?.({ ok: false, error: "Track not found." });
-    const track = membership.room.queue[index];
-    const canRemove =
-      track.addedBy.id === membership.user.id ||
-      membership.room.djUserId === membership.user.id ||
-      membership.room.ownerUserId === membership.user.id;
-    if (!canRemove) {
-      return reply?.({ ok: false, error: "You can only remove tracks you added." });
-    }
-    membership.room.queue.splice(index, 1);
+    queue.splice(index, 1);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
@@ -410,14 +492,13 @@ io.on("connection", (socket) => {
   socket.on("queue:play-next", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueTrackSchema.safeParse(payload);
-    if (!membership || membership.room.djUserId !== membership.user.id) {
-      return reply?.({ ok: false, error: "Only the DJ can change the queue order." });
-    }
+    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue item." });
-    const index = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    const queue = privateQueue(membership.room, membership.user.id);
+    const index = queue.findIndex((track) => track.id === parsed.data.trackId);
     if (index < 0) return reply?.({ ok: false, error: "Track not found." });
-    const [track] = membership.room.queue.splice(index, 1);
-    membership.room.queue.unshift(track);
+    const [track] = queue.splice(index, 1);
+    queue.unshift(track);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
@@ -426,51 +507,29 @@ io.on("connection", (socket) => {
   socket.on("queue:move", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueMoveSchema.safeParse(payload);
-    if (!membership || membership.room.djUserId !== membership.user.id) {
-      return reply?.({ ok: false, error: "Only the DJ can reorder the queue." });
-    }
+    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue move." });
-    const fromIndex = membership.room.queue.findIndex((track) => track.id === parsed.data.trackId);
+    const queue = privateQueue(membership.room, membership.user.id);
+    const fromIndex = queue.findIndex((track) => track.id === parsed.data.trackId);
     if (fromIndex < 0) return reply?.({ ok: false, error: "Track not found." });
-    const [track] = membership.room.queue.splice(fromIndex, 1);
-    const toIndex = Math.min(parsed.data.toIndex, membership.room.queue.length);
-    membership.room.queue.splice(toIndex, 0, track);
+    const [track] = queue.splice(fromIndex, 1);
+    const toIndex = Math.min(parsed.data.toIndex, queue.length);
+    queue.splice(toIndex, 0, track);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
   });
 
-  socket.on("queue:play", async (trackId, reply) => {
+  socket.on("queue:next", async (payload, reply) => {
     const membership = getMembership(socket.id);
-    if (!membership || membership.room.djUserId !== membership.user.id) {
-      return reply?.({ ok: false, error: "Only the DJ can change tracks." });
+    const parsed = queueNextSchema.safeParse(payload);
+    if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
+      return reply?.({ ok: false, error: "Only the current DJ or a room moderator can skip tracks." });
     }
-    const index = membership.room.queue.findIndex((track) => track.id === trackId);
-    if (index < 0) return reply?.({ ok: false, error: "Track not found." });
-    const [track] = membership.room.queue.splice(index, 1);
-    if (membership.room.playback.track) {
-      membership.room.history.unshift(membership.room.playback.track);
-      membership.room.history = membership.room.history.slice(0, 100);
+    if (!parsed.success || membership.room.playback.track?.id !== parsed.data.trackId) {
+      return reply?.({ ok: false, error: "That track has already ended." });
     }
-    membership.room.playback = { track, playing: true, position: 0, updatedAt: Date.now() };
-    membership.room.vibe = { trackId: track.id, votes: {} };
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  socket.on("queue:next", async (_payload, reply) => {
-    const membership = getMembership(socket.id);
-    if (!membership || membership.room.djUserId !== membership.user.id) {
-      return reply?.({ ok: false, error: "Only the DJ can skip tracks." });
-    }
-    const track = membership.room.queue.shift() || null;
-    if (membership.room.playback.track) {
-      membership.room.history.unshift(membership.room.playback.track);
-      membership.room.history = membership.room.history.slice(0, 100);
-    }
-    membership.room.playback = { track, playing: Boolean(track), position: 0, updatedAt: Date.now() };
-    membership.room.vibe = track ? { trackId: track.id, votes: {} } : null;
+    advanceRadio(membership.room);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
     reply?.({ ok: true });
@@ -479,8 +538,8 @@ io.on("connection", (socket) => {
   socket.on("playback:update", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = playbackSchema.safeParse(payload);
-    if (!membership || membership.room.djUserId !== membership.user.id) {
-      return reply?.({ ok: false, error: "Only the DJ controls playback." });
+    if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
+      return reply?.({ ok: false, error: "Only the current DJ or a room moderator controls playback." });
     }
     if (!parsed.success || !membership.room.playback.track) {
       return reply?.({ ok: false, error: "Invalid playback update." });
@@ -540,7 +599,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("disconnect", () => leaveCurrentRoom(socket.id));
+  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id); });
 });
 
 app.get("/api/health", (_request, response) => {
@@ -630,10 +689,19 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
     const room = await store.updateRoomSettings(slug.data, userId, {
       name: parsed.data.name,
       isPublic: parsed.data.isPublic,
-      passwordHash: parsed.data.password === undefined ? undefined : hashRoomPassword(parsed.data.password)
+      passwordHash: parsed.data.password === undefined ? undefined : hashRoomPassword(parsed.data.password),
+      djAccess: parsed.data.djAccess
     });
-    if (room) broadcast(room);
-    response.json({ room });
+    if (room) {
+      if (room.settings.djAccess === "roles") {
+        const previousDj = room.djUserId;
+        room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) => canJoinDjQueue(room, djUserId));
+        if (previousDj && !room.djQueueUserIds.includes(previousDj)) advanceRadio(room);
+        await store.saveRoom(room);
+      }
+      broadcast(room);
+    }
+    response.json({ room: room ? { id: room.id, name: room.name } : null });
   } catch (error) {
     response.status(403).json({ error: error instanceof Error ? error.message : "Could not update room." });
   }

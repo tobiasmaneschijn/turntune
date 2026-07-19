@@ -4,6 +4,7 @@ import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { levelForXp, TRACK_LIKED_XP } from "./progression.js";
 import type {
+  DjAccess,
   Room,
   RoomDirectoryEntry,
   RoomRole,
@@ -70,18 +71,19 @@ export class Store {
       throw new Error(`Could not load room: ${error.message}`);
     }
     if (!data) return undefined;
-    const { data: moderators, error: moderatorError } = await this.supabase
+    const { data: roomRoles, error: roomRoleError } = await this.supabase
       .from("soundspin_room_members")
-      .select("user_id")
+      .select("user_id, role")
       .eq("room_slug", id)
-      .eq("role", "moderator");
-    if (moderatorError) throw new Error(`Could not load room moderators: ${moderatorError.message}`);
+      .in("role", ["moderator", "dj"]);
+    if (roomRoleError) throw new Error(`Could not load room roles: ${roomRoleError.message}`);
 
     const room = {
       ...(data.state as Room),
       name: data.name,
       ownerUserId: data.owner_id,
-      moderatorUserIds: (moderators || []).map((member) => member.user_id),
+      moderatorUserIds: (roomRoles || []).filter((member) => member.role === "moderator").map((member) => member.user_id),
+      djRoleUserIds: (roomRoles || []).filter((member) => member.role === "dj").map((member) => member.user_id),
       isPublic: data.is_public,
       passwordProtected: Boolean(data.password_hash),
       settings: data.settings || {}
@@ -205,7 +207,7 @@ export class Store {
   async updateRoomSettings(
     roomSlug: string,
     userId: string,
-    update: { name?: string; isPublic?: boolean; passwordHash?: string | null }
+    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess }
   ) {
     if (!this.supabase) {
       const room = this.getRoom(roomSlug);
@@ -215,6 +217,7 @@ export class Store {
       if (update.name !== undefined) room.name = update.name;
       if (update.isPublic !== undefined) room.isPublic = update.isPublic;
       if (update.passwordHash !== undefined) room.passwordProtected = Boolean(update.passwordHash);
+      if (update.djAccess !== undefined) room.settings.djAccess = update.djAccess;
       await this.saveRoom(room);
       return room;
     }
@@ -229,15 +232,19 @@ export class Store {
       throw new Error("Only the owner or a moderator can change room settings.");
     }
 
-    const values: Record<string, string | boolean | null> = { updated_at: new Date().toISOString() };
+    const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (update.name !== undefined) values.name = update.name;
     if (update.isPublic !== undefined) values.is_public = update.isPublic;
     if (update.passwordHash !== undefined) values.password_hash = update.passwordHash;
+    if (update.djAccess !== undefined) {
+      const cachedSettings = this.getRoom(roomSlug)?.settings || {};
+      values.settings = { ...cachedSettings, djAccess: update.djAccess };
+    }
     const { data, error } = await this.supabase
       .from("soundspin_rooms")
       .update(values)
       .eq("slug", roomSlug)
-      .select("name, is_public, password_hash")
+      .select("name, is_public, password_hash, settings")
       .single();
     if (error) throw new Error(`Could not update room: ${error.message}`);
 
@@ -246,13 +253,24 @@ export class Store {
       room.name = data.name;
       room.isPublic = data.is_public;
       room.passwordProtected = Boolean(data.password_hash);
+      room.settings = data.settings || {};
       await this.saveRoom(room);
     }
     return room;
   }
 
   async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean) {
-    if (!this.supabase) return;
+    if (!this.supabase) {
+      const room = this.getRoom(roomSlug);
+      if (!room || room.ownerUserId !== ownerUserId) throw new Error("Only the room owner can manage moderators.");
+      if (targetUserId === ownerUserId) throw new Error("The owner already has full room access.");
+      room.moderatorUserIds = moderator
+        ? [...new Set([...room.moderatorUserIds, targetUserId])]
+        : room.moderatorUserIds.filter((id) => id !== targetUserId);
+      if (moderator) room.djRoleUserIds = room.djRoleUserIds.filter((id) => id !== targetUserId);
+      await this.saveRoom(room);
+      return;
+    }
     const { data: room, error: roomError } = await this.supabase
       .from("soundspin_rooms")
       .select("owner_id")
@@ -276,6 +294,51 @@ export class Store {
       cached.moderatorUserIds = moderator
         ? [...new Set([...(cached.moderatorUserIds || []), targetUserId])]
         : (cached.moderatorUserIds || []).filter((id) => id !== targetUserId);
+      if (moderator) cached.djRoleUserIds = (cached.djRoleUserIds || []).filter((id) => id !== targetUserId);
+      await this.saveRoom(cached);
+    }
+  }
+
+  async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean) {
+    if (!this.supabase) {
+      const room = this.getRoom(roomSlug);
+      if (!room || room.ownerUserId !== ownerUserId) throw new Error("Only the room owner can manage DJ roles.");
+      if (targetUserId === ownerUserId) throw new Error("The owner can always join the DJ queue.");
+      if (room.moderatorUserIds.includes(targetUserId)) throw new Error("Moderators can already join the DJ queue.");
+      room.djRoleUserIds = dj
+        ? [...new Set([...room.djRoleUserIds, targetUserId])]
+        : room.djRoleUserIds.filter((id) => id !== targetUserId);
+      await this.saveRoom(room);
+      return;
+    }
+
+    const { data: room, error: roomError } = await this.supabase
+      .from("soundspin_rooms")
+      .select("owner_id")
+      .eq("slug", roomSlug)
+      .single();
+    if (roomError) throw new Error(`Could not load room owner: ${roomError.message}`);
+    if (room.owner_id !== ownerUserId) throw new Error("Only the room owner can manage DJ roles.");
+    if (targetUserId === ownerUserId) throw new Error("The owner can always join the DJ queue.");
+
+    const cached = this.getRoom(roomSlug);
+    if (cached?.moderatorUserIds.includes(targetUserId)) {
+      throw new Error("Moderators can already join the DJ queue.");
+    }
+    const { error } = await this.supabase.from("soundspin_room_members").upsert(
+      {
+        room_slug: roomSlug,
+        user_id: targetUserId,
+        role: dj ? "dj" : "member",
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "room_slug,user_id" }
+    );
+    if (error) throw new Error(`Could not update DJ role: ${error.message}`);
+    if (cached) {
+      cached.djRoleUserIds = dj
+        ? [...new Set([...(cached.djRoleUserIds || []), targetUserId])]
+        : (cached.djRoleUserIds || []).filter((id) => id !== targetUserId);
       await this.saveRoom(cached);
     }
   }

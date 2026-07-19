@@ -47,23 +47,39 @@ export interface VibeState {
   votes: Record<string, -1 | 1>;
 }
 
+export type DjAccess = "everyone" | "roles";
+
+export interface RoomSettings {
+  djAccess?: DjAccess;
+  [key: string]: unknown;
+}
+
 export interface Room {
   id: string;
   name: string;
   ownerUserId: string;
   moderatorUserIds: string[];
+  djRoleUserIds: string[];
   isPublic: boolean;
   passwordProtected: boolean;
-  settings: Record<string, unknown>;
+  settings: RoomSettings;
   djUserId: string | null;
-  queue: Track[];
+  djQueueUserIds: string[];
+  djQueues: Record<string, Track[]>;
+  /** Legacy shared queue, consumed once by normalizeRadioState. */
+  queue?: Track[];
   history: Track[];
   playback: Playback;
   vibe: VibeState | null;
   createdAt: number;
 }
 
-export type RoomRole = "owner" | "moderator" | "member";
+export type RoomRole = "owner" | "moderator" | "dj" | "member";
+
+export type SnapshotRoom = Omit<Room, "djQueues" | "queue"> & {
+  /** The requesting listener's private queue. */
+  queue: Track[];
+};
 
 export interface RoomDirectoryEntry {
   slug: string;
@@ -79,7 +95,7 @@ export interface RoomDirectoryEntry {
 }
 
 export interface RoomSnapshot {
-  room: Room;
+  room: SnapshotRoom;
   users: User[];
   serverTime: number;
 }

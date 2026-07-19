@@ -47,15 +47,25 @@ export interface VibeState {
   votes: Record<string, -1 | 1>;
 }
 
+export type DjAccess = "everyone" | "roles";
+
+export interface RoomSettings {
+  djAccess?: DjAccess;
+  [key: string]: unknown;
+}
+
 export interface Room {
   id: string;
   name: string;
   ownerUserId: string;
   moderatorUserIds: string[];
+  djRoleUserIds: string[];
   isPublic: boolean;
   passwordProtected: boolean;
-  settings: Record<string, unknown>;
+  settings: RoomSettings;
   djUserId: string | null;
+  djQueueUserIds: string[];
+  /** Only the signed-in listener's queue is included in snapshots. */
   queue: Track[];
   history: Track[];
   playback: Playback;
@@ -63,7 +73,7 @@ export interface Room {
   createdAt: number;
 }
 
-export type RoomRole = "owner" | "moderator" | "member";
+export type RoomRole = "owner" | "moderator" | "dj" | "member";
 
 export interface RoomDirectoryEntry {
   slug: string;
