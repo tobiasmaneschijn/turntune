@@ -8,12 +8,14 @@ import type {
   Room,
   RoomDirectoryEntry,
   RoomRole,
+  MusicProviderConnection,
   SoundSpinProfile,
   SoundSpinUnlock
 } from "./types.js";
 
 interface Database {
   rooms: Record<string, Room>;
+  musicConnections?: Record<string, MusicProviderConnection>;
 }
 
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");
@@ -49,6 +51,71 @@ export class Store {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await this.persistFile();
     }
+  }
+
+  private musicConnectionKey(userId: string, provider: "spotify") {
+    return `${userId}:${provider}`;
+  }
+
+  async getMusicConnection(userId: string, provider: "spotify") {
+    if (!this.supabase) {
+      return this.data.musicConnections?.[this.musicConnectionKey(userId, provider)] || null;
+    }
+    const { data, error } = await this.supabase
+      .from("soundspin_music_connections")
+      .select("user_id, provider, refresh_token_ciphertext, scopes, metadata, created_at, updated_at")
+      .eq("user_id", userId)
+      .eq("provider", provider)
+      .maybeSingle();
+    if (error) throw new Error(`Could not load ${provider} connection: ${error.message}`);
+    return data ? {
+      userId: data.user_id,
+      provider: data.provider,
+      refreshTokenCiphertext: data.refresh_token_ciphertext,
+      scopes: data.scopes || [],
+      metadata: data.metadata || {},
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    } as MusicProviderConnection : null;
+  }
+
+  async saveMusicConnection(connection: Omit<MusicProviderConnection, "createdAt" | "updatedAt">) {
+    const now = new Date().toISOString();
+    if (!this.supabase) {
+      this.data.musicConnections ||= {};
+      const key = this.musicConnectionKey(connection.userId, connection.provider);
+      const current = this.data.musicConnections[key];
+      this.data.musicConnections[key] = {
+        ...connection,
+        createdAt: current?.createdAt || now,
+        updatedAt: now
+      };
+      await this.persistFile();
+      return;
+    }
+    const { error } = await this.supabase.from("soundspin_music_connections").upsert({
+      user_id: connection.userId,
+      provider: connection.provider,
+      refresh_token_ciphertext: connection.refreshTokenCiphertext,
+      scopes: connection.scopes,
+      metadata: connection.metadata,
+      updated_at: now
+    }, { onConflict: "user_id,provider" });
+    if (error) throw new Error(`Could not save ${connection.provider} connection: ${error.message}`);
+  }
+
+  async deleteMusicConnection(userId: string, provider: "spotify") {
+    if (!this.supabase) {
+      delete this.data.musicConnections?.[this.musicConnectionKey(userId, provider)];
+      await this.persistFile();
+      return;
+    }
+    const { error } = await this.supabase
+      .from("soundspin_music_connections")
+      .delete()
+      .eq("user_id", userId)
+      .eq("provider", provider);
+    if (error) throw new Error(`Could not disconnect ${provider}: ${error.message}`);
   }
 
   getRoom(id: string) {

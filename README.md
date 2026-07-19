@@ -1,8 +1,8 @@
 # SoundSpin
 
-A private, self-hosted shared radio for teams. SoundSpin synchronizes YouTube and SoundCloud
-playback across a room and includes round-robin DJ turns, real-time chat, presence,
-and generated avatars.
+A private, self-hosted shared radio for teams. SoundSpin synchronizes playback
+across a room, lets each listener use their preferred configured music service,
+and includes round-robin DJ turns, real-time chat, presence, and generated avatars.
 
 ## Features
 
@@ -17,8 +17,8 @@ and generated avatars.
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
 - Supabase-backed room ownership and storage
-- YouTube and SoundCloud search and synchronized playback
-- Provider-neutral track model for future Spotify and Apple Music adapters
+- YouTube, SoundCloud, Spotify, and Apple Music catalog search
+- Provider-neutral tracks with per-listener synchronized playback
 - Single-container deployment for Dokploy
 
 ## Local development
@@ -50,10 +50,9 @@ only a legacy/local fallback.
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open the SQL editor and run
-   `supabase/migrations/20260716213000_initial_soundspin.sql`, or enable the
-   Supabase GitHub integration to apply it automatically from the production
-   branch.
+2. Apply every migration in `supabase/migrations` in timestamp order, or enable
+   the Supabase GitHub integration to apply them automatically from the
+   production branch.
 3. In **Authentication → URL Configuration**, set the site URL to your
    production SoundSpin URL.
 4. Add `http://localhost:5173/**` as a redirect URL for local development.
@@ -70,6 +69,15 @@ GIPHY_API_KEY=your-giphy-api-key
 YOUTUBE_API_KEY=your-youtube-data-api-key
 SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
 SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
+SPOTIFY_CLIENT_ID=your-spotify-client-id
+SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
+SPOTIFY_REDIRECT_URI=http://localhost:5173/api/spotify/callback
+SPOTIFY_MARKET=US
+PROVIDER_TOKEN_ENCRYPTION_KEY=generate-a-long-random-secret
+APPLE_MUSIC_TEAM_ID=your-apple-developer-team-id
+APPLE_MUSIC_KEY_ID=your-music-key-id
+APPLE_MUSIC_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+APPLE_MUSIC_STOREFRONT=us
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 VITE_GIPHY_API_KEY=your-giphy-api-key
@@ -154,14 +162,22 @@ them.
 
 ## Playback providers
 
-The shared `Track` model stores `provider` and `providerId` separately. Tracks
-waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
+The shared `Track` model stores a source provider plus ISRC-first provider
+mappings. Tracks waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
 currently playing track remain visible to the room.
-YouTube and SoundCloud are enabled adapters. Spotify and Apple Music can later
-be added as player adapters without changing room, queue, chat, or persistence
-concepts.
+YouTube and SoundCloud play through their embedded players. A listener can link
+Spotify and choose either the SoundSpin Web Playback device or their Spotify
+Desktop/Connect device. Apple Music listeners authorize MusicKit in the player.
+SoundSpin tries to resolve the same recording across catalogs by ISRC, then by
+normalized title, artist, and duration when no ISRC is available.
+
+Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
+configured. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
+cryptographically secure random generator; changing it invalidates stored
+Spotify refresh tokens. Apple Music requires a MusicKit media identifier and
+private key. The private key accepts escaped `\n` line breaks in environment
+configuration.
 
 Important: SoundSpin coordinates playback but does not grant rights to music.
-YouTube and SoundCloud embeds remain subject to each provider's availability,
-account rules, geographic restrictions, and terms. Spotify and Apple Music integrations will require their respective
-developer credentials and user playback entitlements.
+Every adapter remains subject to its provider's availability, account rules,
+geographic restrictions, developer terms, and user playback entitlements.

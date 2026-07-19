@@ -27,7 +27,7 @@ the user, and joining the lineup does not make the user immediately current.
 
 ```mermaid
 flowchart LR
-  Browser["React browser\nprivate queue UI + YouTube player"]
+  Browser["React browser\nprivate queue UI + per-user provider player"]
   Server["Node + Socket.IO\nauthoritative room and radio state"]
   Store["Store\nlive cache + ordered writes"]
   Database["Supabase Postgres\nrooms, roles, favorites"]
@@ -62,7 +62,12 @@ and durable grace scheduling before horizontally scaling the server.
 | `src/components/RoomSettingsDialog.tsx` | Room metadata, DJ access mode, moderator, and DJ-role controls. |
 | `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
 | `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
+| `src/components/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
+| `src/components/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
 | `server/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
+| `server/spotify.ts` | Spotify catalog, OAuth token exchange, and Web API requests. |
+| `server/apple-music.ts` | Apple developer-token signing and catalog access. |
+| `server/provider-mappings.ts` | ISRC-first and confidence-scored cross-provider recording resolution. |
 | `supabase/migrations/20260716213000_initial_soundspin.sql` | Base room table and initial security. |
 | `supabase/migrations/20260716220542_room_directory.sql` | Directory metadata, memberships, favorites, and settings. |
 | `supabase/migrations/20260719151147_add_dj_role.sql` | Adds the room-level DJ role. |
@@ -201,9 +206,11 @@ The room stores a playback checkpoint:
 position at updatedAt + elapsed wall-clock time (when playing)
 ```
 
-Clients use the checkpoint to seek their embedded player into sync. Only the
-current DJ's `YouTubePlayer` reports a natural end. The current DJ, owner, and
-moderators may pause, seek, or skip.
+Clients use the checkpoint to seek their selected provider player into sync.
+Each listener may use the room source, Spotify in SoundSpin, Spotify Desktop,
+or Apple Music. Provider mappings are stored with the track; missing mappings
+fall back to the source provider. Only the current DJ's active adapter reports
+a natural end. The current DJ, owner, and moderators may pause, seek, or skip.
 
 `queue:next` must include the current track UUID. The server advances only when
 that UUID still matches `playback.track.id`. This makes ended/skip commands
@@ -266,6 +273,13 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `GET /api/youtube/search` | Authenticated, cached server-side YouTube search; the API key stays secret. |
 | `GET /api/soundcloud/search` | Authenticated, cached server-side SoundCloud search; client credentials and OAuth tokens stay secret. |
 | `GET /api/soundcloud/resolve` | Authenticated SoundCloud URL resolution; only playable public tracks are returned. |
+| `GET /api/spotify/search`, `GET /api/spotify/resolve` | Spotify catalog search and URL/URI resolution. |
+| `GET /api/apple/search`, `GET /api/apple/resolve` | Storefront-aware Apple Music catalog search and URL resolution. |
+| `GET /api/music/connections` | Current listener's provider readiness without exposing credentials. |
+| `GET /api/spotify/connect`, `GET /api/spotify/callback` | Stateful Spotify authorization-code flow. |
+| `GET /api/spotify/devices` | Available Spotify Connect devices for the linked listener. |
+| `GET /api/spotify/playback`, `POST /api/spotify/playback` | Read or command the linked listener's playback. |
+| `GET /api/apple/token` | Short-lived Apple developer token used to configure MusicKit. |
 
 Room role changes use Socket.IO because connected clients need an immediate
 snapshot. Room metadata changes use HTTP and explicitly broadcast after the
@@ -285,6 +299,8 @@ Room data is split deliberately:
   slug, name, owner, visibility, password hash, and settings.
 - `soundspin_room_members` stores owner, moderator, DJ, and member roles.
 - `soundspin_room_favorites` stores each user's directory favorites.
+- `soundspin_music_connections` stores encrypted, server-only Spotify refresh
+  tokens. Browser roles have no grants or RLS policies for this table.
 
 On load, first-class columns and membership rows override duplicated fields in
 the JSON document. They are the authorization and directory source of truth.
@@ -389,6 +405,7 @@ Run these after room or radio changes:
 
 ```bash
 npm run test:radio
+npm run test:music
 npm run typecheck
 npm run build
 ```

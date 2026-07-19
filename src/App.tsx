@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Check,
@@ -30,6 +30,8 @@ import {
   UsersIcon
 } from "./components/Icons";
 import { SoundCloudPlayer } from "./components/SoundCloudPlayer";
+import { SpotifyPlayer } from "./components/SpotifyPlayer";
+import { AppleMusicPlayer } from "./components/AppleMusicPlayer";
 import { YouTubePlayer, type PlayerStatus } from "./components/YouTubePlayer";
 import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
@@ -47,9 +49,11 @@ import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
-type SearchProvider = "youtube" | "soundcloud";
+type SearchProvider = Provider;
+type PlaybackPreference = "source" | "spotify-web" | "spotify-desktop" | "apple";
 
 const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
+const PLAYBACK_PROVIDER_STORAGE_KEY = "soundspin-playback-provider";
 
 function randomId() {
   return crypto.randomUUID();
@@ -108,9 +112,17 @@ function providerLabel(provider: Provider) {
 }
 
 function readSearchProvider(): SearchProvider {
-  return localStorage.getItem(SEARCH_PROVIDER_STORAGE_KEY) === "soundcloud"
-    ? "soundcloud"
+  const provider = localStorage.getItem(SEARCH_PROVIDER_STORAGE_KEY);
+  return provider === "soundcloud" || provider === "spotify" || provider === "apple"
+    ? provider
     : "youtube";
+}
+
+function readPlaybackPreference(): PlaybackPreference {
+  const preference = localStorage.getItem(PLAYBACK_PROVIDER_STORAGE_KEY);
+  return preference === "spotify-web" || preference === "spotify-desktop" || preference === "apple"
+    ? preference
+    : "source";
 }
 
 function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
@@ -524,6 +536,7 @@ export function App() {
             isDj={isDj}
             canControlPlayback={canControlPlayback}
             currentUserId={profile.id}
+            accessToken={auth.session?.access_token}
             compact={compactPlayer}
             onToggleCompact={() => setCompactPlayer((compact) => !compact)}
           />
@@ -764,6 +777,7 @@ function NowPlaying({
   isDj,
   canControlPlayback,
   currentUserId,
+  accessToken,
   compact,
   onToggleCompact
 }: {
@@ -771,12 +785,20 @@ function NowPlaying({
   isDj: boolean;
   canControlPlayback: boolean;
   currentUserId: string;
+  accessToken?: string;
   compact: boolean;
   onToggleCompact: () => void;
 }) {
   const playback = snapshot.room.playback;
   const track = playback.track;
   const [volume, setVolume] = useState(80);
+  const [playbackPreference, setPlaybackPreference] = useState<PlaybackPreference>(readPlaybackPreference);
+  const [connections, setConnections] = useState({
+    loaded: false,
+    spotifyConfigured: false,
+    spotifyConnected: false,
+    appleConfigured: false
+  });
   const [seekPreview, setSeekPreview] = useState<number | null>(null);
   const [playerStatus, setPlayerStatus] = useState<PlayerStatus>({
     ready: false,
@@ -789,6 +811,44 @@ function NowPlaying({
     setSeekPreview(null);
   }, [playback.updatedAt, playback.track?.id]);
 
+  const loadConnections = useCallback(() => {
+    if (!accessToken) return;
+    void fetch("/api/music/connections", { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then(async (response) => {
+        const payload = await response.json() as {
+          spotify?: { configured?: boolean; connected?: boolean };
+          apple?: { configured?: boolean };
+        };
+        if (!response.ok) throw new Error("Could not load music connections.");
+        setConnections({
+          loaded: true,
+          spotifyConfigured: Boolean(payload.spotify?.configured),
+          spotifyConnected: Boolean(payload.spotify?.connected),
+          appleConfigured: Boolean(payload.apple?.configured)
+        });
+      })
+      .catch(() => setConnections((current) => ({ ...current, loaded: true })));
+  }, [accessToken]);
+
+  useEffect(loadConnections, [loadConnections]);
+
+  const connectSpotify = useCallback(() => {
+    if (!accessToken) return;
+    void fetch(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }).then(async (response) => {
+      const payload = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !payload.url) throw new Error(payload.error || "Could not connect Spotify.");
+      location.assign(payload.url);
+    }).catch((error) => setPlayerStatus((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not connect Spotify." })));
+  }, [accessToken]);
+
+  const changePlaybackPreference = (next: PlaybackPreference) => {
+    setPlaybackPreference(next);
+    localStorage.setItem(PLAYBACK_PROVIDER_STORAGE_KEY, next);
+    if (next.startsWith("spotify") && !connections.spotifyConnected) connectSpotify();
+  };
+
   const update = (playing: boolean) => {
     const position = playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
     socket.emit("playback:update", { playing, position });
@@ -799,7 +859,25 @@ function NowPlaying({
     socket.emit("playback:update", { playing: playback.playing, position: seekPreview });
   };
 
+  const handleEnded = useCallback(() => {
+    if (track) socket.emit("queue:next", { trackId: track.id });
+  }, [track?.id]);
+
   const shownPosition = seekPreview ?? playerStatus.currentTime;
+  const preferredProvider: Provider = playbackPreference.startsWith("spotify")
+    ? "spotify"
+    : playbackPreference === "apple"
+      ? "apple"
+      : track?.provider || "youtube";
+  const preferredMapping = track?.mappings?.[preferredProvider] || (track?.provider === preferredProvider
+    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
+    : undefined);
+  const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;
+  const effectiveMapping = preferredMapping || (track
+    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
+    : undefined);
+  const providerFallback = Boolean(track && preferredProvider !== effectiveProvider);
+  const spotifyReady = Boolean(accessToken && connections.spotifyConnected);
 
   return (
     <section className={`now-playing panel ${compact ? "compact" : ""}`}>
@@ -814,23 +892,57 @@ function NowPlaying({
         <>
           <div className="track-stage">
             <TrackArtwork track={track} />
-            {track.provider === "soundcloud" ? (
+            {effectiveProvider === "spotify" && effectiveMapping ? (
+              spotifyReady ? (
+                <SpotifyPlayer
+                  playback={playback}
+                  mapping={effectiveMapping}
+                  mode={playbackPreference === "spotify-desktop" ? "desktop" : "web"}
+                  isDj={isDj}
+                  volume={volume}
+                  accessToken={accessToken!}
+                  onEnded={handleEnded}
+                  onStatus={setPlayerStatus}
+                  onConnectionLost={loadConnections}
+                />
+              ) : (
+                <div className="provider-player-shell spotify-player-shell">
+                  <strong>Connect Spotify to listen</strong>
+                  <button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>Connect Spotify</button>
+                </div>
+              )
+            ) : effectiveProvider === "apple" && effectiveMapping && accessToken ? (
+              <AppleMusicPlayer
+                playback={playback}
+                mapping={effectiveMapping}
+                isDj={isDj}
+                volume={volume}
+                accessToken={accessToken}
+                onEnded={handleEnded}
+                onStatus={setPlayerStatus}
+              />
+            ) : effectiveProvider === "soundcloud" ? (
               <SoundCloudPlayer
                 playback={playback}
                 isDj={isDj}
                 volume={volume}
-                onEnded={() => socket.emit("queue:next", { trackId: track.id })}
+                onEnded={handleEnded}
                 onStatus={setPlayerStatus}
               />
-            ) : (
+            ) : effectiveProvider === "youtube" ? (
               <YouTubePlayer
                 playback={playback}
                 isDj={isDj}
                 volume={volume}
                 // The track ID lets the server reject duplicate/stale ended events.
-                onEnded={() => socket.emit("queue:next", { trackId: track.id })}
+                onEnded={handleEnded}
                 onStatus={setPlayerStatus}
               />
+            ) : (
+              <div className="provider-player-shell">
+                <strong>No playable version is available</strong>
+                <small>Choose another playback provider.</small>
+              </div>
             )}
             <div className="record-ring ring-one" />
             <div className="record-ring ring-two" />
@@ -839,8 +951,8 @@ function NowPlaying({
             <div>
               <h2>{track.title}</h2>
               <p>
-                {track.artist ? `${track.artist} · ` : ""}Added by {track.addedBy.name} · {track.provider === "soundcloud" && track.permalinkUrl ? (
-                  <a href={track.permalinkUrl} target="_blank" rel="noreferrer">SoundCloud</a>
+                {track.artist ? `${track.artist} · ` : ""}Added by {track.addedBy.name} · {track.permalinkUrl ? (
+                  <a href={track.permalinkUrl} target="_blank" rel="noreferrer">{providerLabel(track.provider)}</a>
                 ) : providerLabel(track.provider)}
               </p>
             </div>
@@ -880,6 +992,16 @@ function NowPlaying({
                     ? "Moderator controls available"
                     : "Synced with the current DJ"}
             </div>
+            <label className="playback-provider-control">
+              <span>Listen with</span>
+              <select value={playbackPreference} onChange={(event) => changePlaybackPreference(event.target.value as PlaybackPreference)}>
+                <option value="source">Room source</option>
+                <option value="spotify-web" disabled={connections.loaded && !connections.spotifyConfigured}>Spotify · SoundSpin</option>
+                <option value="spotify-desktop" disabled={connections.loaded && !connections.spotifyConfigured}>Spotify · Desktop</option>
+                <option value="apple" disabled={connections.loaded && !connections.appleConfigured}>Apple Music</option>
+              </select>
+              {providerFallback && <small>No {providerLabel(preferredProvider)} match · using {providerLabel(effectiveProvider!)}</small>}
+            </label>
             <label className="volume-control">
               <Volume2 size={14} />
               <input
@@ -898,7 +1020,7 @@ function NowPlaying({
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
           <h2>The room is quiet</h2>
-          <p>Add a YouTube or SoundCloud track to start the radio.</p>
+          <p>Add a track from any configured provider to start the radio.</p>
         </div>
       )}
     </section>
@@ -949,7 +1071,7 @@ function MusicRail({
   const upcomingDjs = snapshot.room.djQueueUserIds.filter((userId) => userId !== snapshot.room.djUserId);
 
   const enqueueTrack = (track: {
-    provider: "youtube" | "soundcloud";
+    provider: Provider;
     providerId: string;
     title: string;
     artist?: string;
@@ -1015,10 +1137,10 @@ function MusicRail({
     }
 
     const trackUrl = url.trim();
-    if (!trackUrl) return setNotice("Please enter a SoundCloud track URL");
+    if (!trackUrl) return setNotice(`Please enter a ${providerLabel(provider)} track URL`);
     setResolvingUrl(true);
     try {
-      const response = await fetch(`/api/soundcloud/resolve?url=${encodeURIComponent(trackUrl)}`, {
+      const response = await fetch(`/api/${provider}/resolve?url=${encodeURIComponent(trackUrl)}`, {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
       });
       const payload = await response.json() as {
@@ -1026,10 +1148,10 @@ function MusicRail({
         error?: string;
       };
       if (!response.ok || !payload.result) {
-        throw new Error(payload.error || "Could not resolve that SoundCloud URL.");
+        throw new Error(payload.error || `Could not resolve that ${providerLabel(provider)} URL.`);
       }
       enqueueTrack({
-        provider: "soundcloud",
+        provider,
         providerId: payload.result.id,
         title: title.trim() || payload.result.title,
         artist: payload.result.artist,
@@ -1038,14 +1160,13 @@ function MusicRail({
         durationMs: payload.result.durationMs
       });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not resolve that SoundCloud URL.");
+      setNotice(error instanceof Error ? error.message : `Could not resolve that ${providerLabel(provider)} URL.`);
     } finally {
       setResolvingUrl(false);
     }
   };
 
   const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
-    if (track.provider !== "youtube" && track.provider !== "soundcloud") return;
     enqueueTrack({
       provider: track.provider,
       providerId: track.providerId,
@@ -1065,9 +1186,6 @@ function MusicRail({
     setSearching(true);
     setSearchError("");
     try {
-      if (provider !== "youtube" && provider !== "soundcloud") {
-        throw new Error("That provider is not enabled yet.");
-      }
       const response = await fetch(`/api/${provider}/search?q=${encodeURIComponent(searchQuery)}`, {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
       });
@@ -1191,7 +1309,10 @@ function MusicRail({
             <select
               value={provider}
               onChange={(event) => {
-                const nextProvider: SearchProvider = event.target.value === "soundcloud" ? "soundcloud" : "youtube";
+                const value = event.target.value;
+                const nextProvider: SearchProvider = value === "soundcloud" || value === "spotify" || value === "apple"
+                  ? value
+                  : "youtube";
                 setProvider(nextProvider);
                 localStorage.setItem(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
                 setSearchResults([]);
@@ -1200,11 +1321,11 @@ function MusicRail({
               aria-label="Music provider"
             >
               <option value="youtube">YouTube</option>
-              <option value="spotify" disabled>Spotify · Soon</option>
-              <option value="apple" disabled>Apple Music · Soon</option>
+              <option value="spotify">Spotify</option>
+              <option value="apple">Apple Music</option>
               <option value="soundcloud">SoundCloud</option>
             </select>
-            <button type="submit" className="search-submit" disabled={searching || (provider !== "youtube" && provider !== "soundcloud")}>
+            <button type="submit" className="search-submit" disabled={searching}>
               {searching ? "…" : "Go"}
             </button>
           </form>
@@ -1221,10 +1342,10 @@ function MusicRail({
                   snapshot.room.queue.some((track) => track.provider === result.provider && track.providerId === result.id);
                 return (
                   <div className="search-result-row" key={result.id}>
-                    <span className={`search-provider-mark ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : "▶"}</span>
+                    <span className={`search-provider-mark ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : result.provider === "spotify" ? "S" : result.provider === "apple" ? "A" : "▶"}</span>
                     {result.thumbnail
                       ? <img src={result.thumbnail} alt="" />
-                      : <span className={`provider-artwork search-artwork ${result.provider}`}>SC</span>}
+                      : <span className={`provider-artwork search-artwork ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : providerLabel(result.provider).slice(0, 1)}</span>}
                     <span className="search-result-copy">
                       <strong>{result.title}</strong>
                       <small>{result.artist}{result.duration ? ` · ${result.duration}` : ""}</small>
@@ -1253,14 +1374,20 @@ function MusicRail({
           <div className={`manual-add ${manualOpen ? "open" : ""}`}>
             <button className="manual-add-heading" type="button" onClick={() => setManualOpen((open) => !open)}>
               <span>ADD BY URL</span>
-              <small>{provider === "youtube" ? "YouTube URL or video ID" : "SoundCloud track URL"} <ChevronDown size={13} /></small>
+              <small>{provider === "youtube" ? "YouTube URL or video ID" : `${providerLabel(provider)} track URL`} <ChevronDown size={13} /></small>
             </button>
             {manualOpen && (
               <form className="rail-manual-add" onSubmit={add}>
                 <input
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
-                  placeholder={provider === "youtube" ? "youtube.com/watch?v=…" : "soundcloud.com/artist/track"}
+                  placeholder={provider === "youtube"
+                    ? "youtube.com/watch?v=…"
+                    : provider === "spotify"
+                      ? "open.spotify.com/track/…"
+                      : provider === "apple"
+                        ? "music.apple.com/…"
+                        : "soundcloud.com/artist/track"}
                   autoFocus
                 />
                 <input

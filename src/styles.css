@@ -325,6 +325,22 @@ button { color: inherit; }
 .search-result-row:hover { background: rgba(255,255,255,.025); }
 .search-provider-mark { width: 14px; height: 14px; margin-top: 4px; display: grid; place-items: center; border-radius: 4px; background: #ff0033; color: white; font-size: 6px; }
 .search-provider-mark.soundcloud { background: #ff5500; font-size: 6px; font-weight: 900; }
+.search-provider-mark.spotify { background: #1ed760; color: #07130a; font-size: 8px; font-weight: 900; }
+.search-provider-mark.apple { background: linear-gradient(135deg, #fa2d48, #8a35dc); font-size: 8px; font-weight: 900; }
+.provider-artwork.spotify { background: linear-gradient(135deg, #1ed760, #0b8f3c); color: #07130a; }
+.provider-artwork.apple { background: linear-gradient(135deg, #fa2d48, #8a35dc); }
+
+.provider-player-shell { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(8,9,11,.82); color: #f6f6f7; text-align: center; }
+.provider-player-shell strong { font-size: 17px; }
+.provider-player-shell small { max-width: 340px; color: #aaaeb7; font-size: 11px; line-height: 1.45; }
+.provider-player-shell button { border: 0; border-radius: 8px; padding: 9px 14px; background: var(--lime); color: #11120b; font-size: 11px; font-weight: 800; cursor: pointer; }
+.provider-player-shell button:disabled { opacity: .45; cursor: default; }
+.spotify-player-shell { background: radial-gradient(circle at 50% 38%, rgba(30,215,96,.18), rgba(8,9,11,.94) 55%); }
+.apple-player-shell { background: radial-gradient(circle at 50% 38%, rgba(250,45,72,.2), rgba(8,9,11,.94) 55%); }
+
+.playback-provider-control { min-width: 140px; display: flex; flex-direction: column; gap: 3px; color: #757781; font-size: 9px; }
+.playback-provider-control select { max-width: 170px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; background: #17181d; color: #d9dade; font-size: 10px; }
+.playback-provider-control small { max-width: 190px; color: #bca466; line-height: 1.25; }
 .search-result-row > img { width: 48px; height: 48px; border-radius: 5px; object-fit: cover; }
 .search-result-row > .search-artwork { width: 48px; height: 48px; font-size: 11px; }
 .search-result-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }

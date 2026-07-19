@@ -28,6 +28,8 @@ export interface SoundSpinUnlock {
 
 export interface Track {
   id: string;
+  canonicalId?: string;
+  isrc?: string;
   provider: Provider;
   providerId: string;
   title: string;
@@ -35,8 +37,25 @@ export interface Track {
   artworkUrl?: string;
   permalinkUrl?: string;
   durationMs?: number;
+  mappings?: Partial<Record<Provider, ProviderTrackMapping>>;
   addedBy: User;
   addedAt: number;
+}
+
+export interface ProviderTrackMapping {
+  providerId: string;
+  permalinkUrl?: string;
+  storefront?: string;
+}
+
+export interface MusicProviderConnection {
+  userId: string;
+  provider: "spotify";
+  refreshTokenCiphertext: string;
+  scopes: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Playback {
