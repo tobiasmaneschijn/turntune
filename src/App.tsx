@@ -10,6 +10,7 @@ import {
   ListMusic,
   Maximize2,
   Minimize2,
+  RefreshCw,
   Search,
   Settings,
   Shield,
@@ -854,6 +855,7 @@ function NowPlaying({
     currentTime: 0,
     duration: 0
   });
+  const [syncRevision, setSyncRevision] = useState(0);
   const [playbackError, setPlaybackError] = useState("");
 
   useEffect(() => {
@@ -925,6 +927,11 @@ function NowPlaying({
   const commitSeek = () => {
     if (!canControlPlayback || seekPreview === null) return;
     socket.emit("playback:update", { playing: playback.playing, position: seekPreview });
+  };
+
+  const syncPlayback = () => {
+    window.dispatchEvent(new Event("soundspin:playback-sync"));
+    setSyncRevision((revision) => revision + 1);
   };
 
   const handleEnded = useCallback(() => {
@@ -1046,6 +1053,7 @@ function NowPlaying({
             ) : effectiveProvider === "apple" && effectiveMapping && accessToken ? (
               <AppleMusicPlayer
                 playback={playback}
+                syncRevision={syncRevision}
                 mapping={effectiveMapping}
                 isDj={isDj}
                 volume={volume}
@@ -1057,6 +1065,7 @@ function NowPlaying({
             ) : effectiveProvider === "soundcloud" ? (
               <SoundCloudPlayer
                 playback={playback}
+                syncRevision={syncRevision}
                 isDj={isDj}
                 volume={volume}
                 onEnded={handleEnded}
@@ -1065,6 +1074,7 @@ function NowPlaying({
             ) : effectiveProvider === "youtube" ? (
               <YouTubePlayer
                 playback={playback}
+                syncRevision={syncRevision}
                 isDj={isDj}
                 volume={volume}
                 // The track ID lets the server reject duplicate/stale ended events.
@@ -1092,6 +1102,9 @@ function NowPlaying({
             <div className="player-controls">
               <button disabled={!canControlPlayback} className="round-button primary" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
                 {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
+              </button>
+              <button className="round-button" onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room">
+                <RefreshCw size={19} />
               </button>
               <button disabled={!canControlPlayback} className="round-button" onClick={() => socket.emit("queue:next", { trackId: track.id })} aria-label="Next track">
                 <SkipIcon size={20} />

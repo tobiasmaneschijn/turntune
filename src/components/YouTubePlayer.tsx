@@ -62,12 +62,14 @@ function targetPosition(playback: Playback) {
 
 export function YouTubePlayer({
   playback,
+  syncRevision,
   isDj,
   volume,
   onEnded,
   onStatus
 }: {
   playback: Playback;
+  syncRevision: number;
   isDj: boolean;
   volume: number;
   onEnded: () => void;
@@ -128,7 +130,7 @@ export function YouTubePlayer({
       player.seekTo(position, true);
       playback.playing ? player.playVideo() : player.pauseVideo();
     }
-  }, [ready, playback.track?.id, playback.playing, playback.position, playback.updatedAt]);
+  }, [ready, playback.track?.id, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
     if (!ready || !playerRef.current) return;

@@ -19,6 +19,7 @@ interface SpotifySdkPlayer {
   removeListener(event?: string): boolean;
   getCurrentState(): Promise<SpotifySdkState | null>;
   setVolume(volume: number): Promise<void>;
+  pause(): Promise<void>;
   activateElement(): Promise<void>;
 }
 
@@ -36,6 +37,10 @@ declare global {
 }
 
 let spotifySdkPromise: Promise<NonNullable<Window["Spotify"]>> | null = null;
+let spotifyWebPlayerSingleton: SpotifySdkPlayer | null = null;
+let spotifyWebDeviceIdSingleton = "";
+let spotifyWebOwner: object | null = null;
+let spotifyWebPauseTimer: number | undefined;
 
 function loadSpotifySdk() {
   if (window.Spotify) return Promise.resolve(window.Spotify);
@@ -56,6 +61,17 @@ function loadSpotifySdk() {
     }
   });
   return spotifySdkPromise;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    if (spotifyWebPauseTimer !== undefined) window.clearTimeout(spotifyWebPauseTimer);
+    spotifyWebPlayerSingleton?.removeListener();
+    spotifyWebPlayerSingleton?.disconnect();
+    spotifyWebPlayerSingleton = null;
+    spotifyWebDeviceIdSingleton = "";
+    spotifyWebOwner = null;
+  });
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -158,6 +174,82 @@ export function SpotifyPlayer({
   }, [error, onError]);
 
   useEffect(() => {
+    const syncPlayback = () => {
+      const currentPlayback = playbackRef.current;
+      const currentMapping = mappingRef.current;
+      if (!currentPlayback.track || !currentMapping) return;
+      const currentTrack = currentPlayback.track;
+      commandRef.current = "";
+      const syncDevice = async (currentDeviceId: string) => {
+        const positionMs = targetPositionMs(currentPlayback);
+        if (currentPlayback.playing) {
+          await api("/api/spotify/playback", accessToken, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "play",
+              deviceId: currentDeviceId,
+              spotifyUri: `spotify:track:${currentMapping.providerId}`,
+              positionMs
+            })
+          });
+        } else {
+          await api("/api/spotify/playback", accessToken, {
+            method: "POST",
+            body: JSON.stringify({ action: "seek", deviceId: currentDeviceId, positionMs })
+          });
+          await api("/api/spotify/playback", accessToken, {
+            method: "POST",
+            body: JSON.stringify({ action: "pause", deviceId: currentDeviceId })
+          });
+        }
+        commandRef.current = `${currentTrack.id}:${currentPlayback.playing}:${currentPlayback.position}:${currentPlayback.updatedAt}:${currentDeviceId}`;
+        setActivationRevision((revision) => revision + 1);
+        setError("");
+      };
+      const handleFailure = (cause: unknown) => {
+        const message = cause instanceof Error ? cause.message : "Could not sync Spotify playback.";
+        setError(message);
+        if (mode === "web" && isDeviceUnavailable(cause)) recoverWebPlayerRef.current();
+      };
+      if (mode === "desktop") {
+        const currentDeviceId = deviceIdRef.current;
+        if (!currentDeviceId) {
+          setError("Open the selected Spotify device, then sync again.");
+          return;
+        }
+        void syncDevice(currentDeviceId).catch(handleFailure);
+        return;
+      }
+      const player = playerRef.current;
+      if (!player) {
+        recoverWebPlayerRef.current();
+        return;
+      }
+      // This call is intentionally made directly inside the click-dispatched
+      // event so browsers count Sync as a playback activation gesture.
+      void player.activateElement().then(async () => {
+        setActivationNeeded(false);
+        setActivationDismissed(false);
+        const currentDeviceId = deviceIdRef.current;
+        if (!currentDeviceId) {
+          recoverWebPlayerRef.current();
+          return;
+        }
+        await transferSpotifyPlayback(accessToken, currentDeviceId);
+        await syncDevice(currentDeviceId);
+      }).catch((cause) => {
+        handleFailure(cause);
+        if (!isDeviceUnavailable(cause)) {
+          setActivationNeeded(true);
+          setActivationDismissed(false);
+        }
+      });
+    };
+    window.addEventListener("soundspin:playback-sync", syncPlayback);
+    return () => window.removeEventListener("soundspin:playback-sync", syncPlayback);
+  }, [mode, accessToken]);
+
+  useEffect(() => {
     let alive = true;
     let cleanupWebPlayer = () => undefined;
     setError("");
@@ -188,13 +280,20 @@ export function SpotifyPlayer({
       return () => { alive = false; };
     }
 
+    const webOwner = {};
+    spotifyWebOwner = webOwner;
+    if (spotifyWebPauseTimer !== undefined) {
+      window.clearTimeout(spotifyWebPauseTimer);
+      spotifyWebPauseTimer = undefined;
+    }
+
     void loadSpotifySdk().then((sdk) => {
       if (!alive) return;
       let reconnectTimer: number | undefined;
       let readyWatchdog: number | undefined;
       let reconnectAttempts = 0;
       let reconnecting = false;
-      const player = new sdk.Player({
+      const player = spotifyWebPlayerSingleton || new sdk.Player({
         name: "SoundSpin Web Player",
         volume: volume / 100,
         getOAuthToken: (callback) => {
@@ -207,6 +306,8 @@ export function SpotifyPlayer({
             });
         }
       });
+      spotifyWebPlayerSingleton = player;
+      player.removeListener();
       playerRef.current = player;
       const scheduleReconnect = (immediate = false) => {
         if (!alive || reconnecting || reconnectTimer !== undefined) return;
@@ -217,6 +318,9 @@ export function SpotifyPlayer({
           if (!alive) return;
           reconnecting = true;
           player.disconnect();
+          spotifyWebDeviceIdSingleton = "";
+          deviceIdRef.current = "";
+          setDeviceId("");
           void wait(250).then(async () => {
             if (!alive) return;
             const connected = await player.connect();
@@ -252,6 +356,7 @@ export function SpotifyPlayer({
         reconnectAttempts = 0;
         const wasReconnecting = hasBeenReadyRef.current;
         hasBeenReadyRef.current = true;
+        spotifyWebDeviceIdSingleton = payload.device_id;
         deviceIdRef.current = payload.device_id;
         const currentPlayback = playbackRef.current;
         const activateDevice = currentPlayback.track && mappingRef.current
@@ -276,6 +381,7 @@ export function SpotifyPlayer({
       player.addListener("not_ready", (() => {
         if (alive) {
           deviceIdRef.current = "";
+          spotifyWebDeviceIdSingleton = "";
           setDeviceId("");
           scheduleReconnect();
         }
@@ -326,6 +432,13 @@ export function SpotifyPlayer({
         document.removeEventListener("visibilitychange", wakePlayer);
       };
 
+      if (spotifyWebDeviceIdSingleton) {
+        deviceIdRef.current = spotifyWebDeviceIdSingleton;
+        setDeviceId(spotifyWebDeviceIdSingleton);
+        setError("");
+        return;
+      }
+
       return player.connect().then((connected) => {
         if (!connected) {
           scheduleReconnect();
@@ -339,8 +452,17 @@ export function SpotifyPlayer({
       alive = false;
       cleanupWebPlayer();
       recoverWebPlayerRef.current = () => undefined;
-      playerRef.current?.removeListener();
-      playerRef.current?.disconnect();
+      if (spotifyWebOwner === webOwner) {
+        spotifyWebOwner = null;
+        playerRef.current?.removeListener();
+        spotifyWebPauseTimer = window.setTimeout(() => {
+          spotifyWebPauseTimer = undefined;
+          if (spotifyWebOwner) return;
+          void spotifyWebPlayerSingleton?.pause().catch(() => {
+            // The SDK can already be paused or briefly unavailable during navigation.
+          });
+        }, 100);
+      }
       playerRef.current = null;
       deviceIdRef.current = "";
     };

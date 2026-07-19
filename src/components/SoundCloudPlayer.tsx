@@ -93,12 +93,14 @@ function widgetUrl(permalinkUrl: string) {
 
 export function SoundCloudPlayer({
   playback,
+  syncRevision,
   isDj,
   volume,
   onEnded,
   onStatus
 }: {
   playback: Playback;
+  syncRevision: number;
   isDj: boolean;
   volume: number;
   onEnded: () => void;
@@ -206,7 +208,7 @@ export function SoundCloudPlayer({
     if (loadingTrackRef.current) return;
     widget.seekTo(targetPosition(playback) * 1000);
     playback.playing ? widget.play() : widget.pause();
-  }, [ready, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt]);
+  }, [ready, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
     if (ready && !loadingTrackRef.current) widgetRef.current?.setVolume(volume);

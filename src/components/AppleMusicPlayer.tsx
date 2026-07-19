@@ -76,6 +76,7 @@ function reportAppleAuthorization(authorized: boolean) {
 
 export function AppleMusicPlayer({
   playback,
+  syncRevision,
   mapping,
   isDj,
   volume,
@@ -85,6 +86,7 @@ export function AppleMusicPlayer({
   onError
 }: {
   playback: Playback;
+  syncRevision: number;
   mapping: ProviderTrackMapping;
   isDj: boolean;
   volume: number;
@@ -141,7 +143,7 @@ export function AppleMusicPlayer({
   useEffect(() => {
     const music = musicRef.current;
     if (!music || !track || !authorized) return;
-    const signature = `${track.id}:${playback.playing}:${playback.position}:${playback.updatedAt}`;
+    const signature = `${track.id}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}`;
     if (commandRef.current === signature) return;
     commandRef.current = signature;
     let alive = true;
@@ -162,7 +164,7 @@ export function AppleMusicPlayer({
       }
     })();
     return () => { alive = false; };
-  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized]);
+  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, syncRevision]);
 
   useEffect(() => {
     if (!track || !authorized) return;
