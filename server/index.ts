@@ -11,6 +11,7 @@ import { TRACK_LIKED_XP } from "./progression.js";
 import {
   advanceRadio,
   canJoinDjQueue,
+  GracePeriodRegistry,
   normalizeRadioState,
   privateQueue,
   removeDj,
@@ -36,7 +37,10 @@ const authEnabled = Boolean(
   store.usesSupabase
 );
 const roomUsers = new Map<string, Map<string, User>>();
+const roomDjUsers = new Map<string, Map<string, User>>();
 const socketRooms = new Map<string, string>();
+const DJ_DISCONNECT_GRACE_MS = 60_000;
+const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const youtubeSearchCache = new Map<string, {
   expiresAt: number;
   results: YouTubeSearchResult[];
@@ -214,6 +218,8 @@ function snapshot(room: Room, userId: string): RoomSnapshot {
   return {
     room: roomForListener(room, userId),
     users: [...(roomUsers.get(room.id)?.values() || [])],
+    djUsers: [...(roomDjUsers.get(room.id)?.values() || [])]
+      .filter((user) => room.djQueueUserIds.includes(user.id)),
     serverTime: Date.now()
   };
 }
@@ -228,6 +234,52 @@ function canControlPlayback(room: Room, userId: string) {
   return room.djUserId === userId ||
     room.ownerUserId === userId ||
     room.moderatorUserIds.includes(userId);
+}
+
+function djEvictionKey(roomId: string, userId: string) {
+  return `${roomId}:${userId}`;
+}
+
+function rememberDjUser(roomId: string, user: User) {
+  if (!roomDjUsers.has(roomId)) roomDjUsers.set(roomId, new Map());
+  roomDjUsers.get(roomId)!.set(user.id, user);
+}
+
+function forgetDjUser(roomId: string, userId: string) {
+  const users = roomDjUsers.get(roomId);
+  users?.delete(userId);
+  if (users?.size === 0) roomDjUsers.delete(roomId);
+}
+
+function cancelDjEviction(roomId: string, userId: string) {
+  djEvictions.cancel(djEvictionKey(roomId, userId));
+}
+
+function hasPendingDjEviction(roomId: string, userId: string) {
+  return djEvictions.has(djEvictionKey(roomId, userId));
+}
+
+function scheduleDjEviction(room: Room, user: User) {
+  if (!room.djQueueUserIds.includes(user.id)) return;
+  const key = djEvictionKey(room.id, user.id);
+  if (djEvictions.has(key)) return;
+  rememberDjUser(room.id, user);
+
+  djEvictions.schedule(key, () => {
+    void (async () => {
+      const currentRoom = store.getRoom(room.id);
+      const reconnected = [...(roomUsers.get(room.id)?.values() || [])]
+        .some((roomUser) => roomUser.id === user.id);
+      if (!currentRoom || reconnected) return;
+
+      const wasCurrentDj = currentRoom.djUserId === user.id;
+      removeDj(currentRoom, user.id);
+      forgetDjUser(currentRoom.id, user.id);
+      if (wasCurrentDj) advanceRadio(currentRoom);
+      await store.saveRoom(currentRoom);
+      broadcast(currentRoom);
+    })().catch(console.error);
+  });
 }
 
 function getMembership(socketId: string) {
@@ -249,10 +301,7 @@ async function leaveCurrentRoom(socketId: string) {
   if (!room) return;
   const stillConnected = leavingUser && [...(users?.values() || [])].some((user) => user.id === leavingUser.id);
   if (leavingUser && !stillConnected) {
-    const wasCurrentDj = leavingUser.id === room.djUserId;
-    removeDj(room, leavingUser.id);
-    if (wasCurrentDj) advanceRadio(room);
-    await store.saveRoom(room);
+    scheduleDjEviction(room, leavingUser);
   }
   if (users?.size === 0) roomUsers.delete(roomId);
   broadcast(room);
@@ -325,9 +374,13 @@ io.on("connection", (socket) => {
 
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
+      cancelDjEviction(roomId, user.id);
       const onlineUserIds = new Set([...roomUsers.get(roomId)!.values()].map((roomUser) => roomUser.id));
-      room.djQueueUserIds = room.djQueueUserIds.filter((userId) => onlineUserIds.has(userId));
-      if (room.djUserId && !onlineUserIds.has(room.djUserId)) advanceRadio(room);
+      room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) =>
+        onlineUserIds.has(djUserId) || hasPendingDjEviction(roomId, djUserId)
+      );
+      if (room.djQueueUserIds.includes(user.id)) rememberDjUser(roomId, user);
+      if (room.djUserId && !room.djQueueUserIds.includes(room.djUserId)) advanceRadio(room);
       await store.saveRoom(room);
       socketRooms.set(socket.id, roomId);
       await socket.join(roomId);
@@ -360,7 +413,9 @@ io.on("connection", (socket) => {
       );
       if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
         const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
+        cancelDjEviction(membership.room.id, parsed.data.userId);
         removeDj(membership.room, parsed.data.userId);
+        forgetDjUser(membership.room.id, parsed.data.userId);
         if (wasCurrentDj) advanceRadio(membership.room);
         await store.saveRoom(membership.room);
       }
@@ -386,7 +441,9 @@ io.on("connection", (socket) => {
       );
       if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
         const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
+        cancelDjEviction(membership.room.id, parsed.data.userId);
         removeDj(membership.room, parsed.data.userId);
+        forgetDjUser(membership.room.id, parsed.data.userId);
         if (wasCurrentDj) advanceRadio(membership.room);
         await store.saveRoom(membership.room);
       }
@@ -410,6 +467,7 @@ io.on("connection", (socket) => {
       if (currentDjIndex >= 0) membership.room.djQueueUserIds.splice(currentDjIndex, 0, membership.user.id);
       else membership.room.djQueueUserIds.push(membership.user.id);
     }
+    rememberDjUser(membership.room.id, membership.user);
     privateQueue(membership.room, membership.user.id);
     if (!membership.room.playback.track) advanceRadio(membership.room);
     await store.saveRoom(membership.room);
@@ -421,7 +479,9 @@ io.on("connection", (socket) => {
     const membership = getMembership(socket.id);
     if (!membership) return reply?.({ ok: false, error: "Join a room first." });
     const wasCurrentDj = membership.room.djUserId === membership.user.id;
+    cancelDjEviction(membership.room.id, membership.user.id);
     removeDj(membership.room, membership.user.id);
+    forgetDjUser(membership.room.id, membership.user.id);
     if (wasCurrentDj) advanceRadio(membership.room);
     await store.saveRoom(membership.room);
     broadcast(membership.room);
@@ -695,7 +755,12 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
     if (room) {
       if (room.settings.djAccess === "roles") {
         const previousDj = room.djUserId;
+        const previousDjQueue = [...room.djQueueUserIds];
         room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) => canJoinDjQueue(room, djUserId));
+        for (const removedUserId of previousDjQueue.filter((djUserId) => !room.djQueueUserIds.includes(djUserId))) {
+          cancelDjEviction(room.id, removedUserId);
+          forgetDjUser(room.id, removedUserId);
+        }
         if (previousDj && !room.djQueueUserIds.includes(previousDj)) advanceRadio(room);
         await store.saveRoom(room);
       }

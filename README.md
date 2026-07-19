@@ -9,6 +9,7 @@ and generated avatars.
 - Shareable room links
 - Round-robin DJ lineup with one song per turn
 - Private per-DJ music queues
+- One-minute reconnect grace period before an offline DJ is removed and skipped
 - Room-level DJ access: open to everyone or restricted to DJ roles and moderators
 - Real-time room chat
 - Supabase Realtime Broadcast chat with persisted history, replies, and reactions

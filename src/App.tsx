@@ -887,7 +887,7 @@ function MusicRail({
     snapshot.room.ownerUserId === currentUserId ||
     snapshot.room.moderatorUserIds.includes(currentUserId) ||
     snapshot.room.djRoleUserIds.includes(currentUserId);
-  const currentDj = snapshot.users.find((user) => user.id === snapshot.room.djUserId);
+  const currentDj = snapshot.djUsers.find((user) => user.id === snapshot.room.djUserId);
   const upcomingDjs = snapshot.room.djQueueUserIds.filter((userId) => userId !== snapshot.room.djUserId);
 
   const toggleDjQueue = () => {
@@ -1013,7 +1013,7 @@ function MusicRail({
           <div className="dj-lineup-next">
             <small>UP NEXT</small>
             {upcomingDjs.map((userId, index) => {
-              const user = snapshot.users.find((candidate) => candidate.id === userId);
+              const user = snapshot.djUsers.find((candidate) => candidate.id === userId);
               return user ? <span key={userId} title={`${index + 1}. ${user.name}`}><i>{index + 1}</i><Avatar user={user} size={24} /></span> : null;
             })}
           </div>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceRadio, normalizeRadioState, roomForListener } from "./radio.js";
+import { advanceRadio, GracePeriodRegistry, normalizeRadioState, roomForListener } from "./radio.js";
 import type { Room, Track, User } from "./types.js";
 
 const alice: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
@@ -60,4 +60,25 @@ test("migrates a legacy shared queue into private queues", () => {
   assert.deepEqual(state.djQueues[alice.id].map((item) => item.id), ["alice-old"]);
   assert.deepEqual(state.djQueues[bob.id].map((item) => item.id), ["bob-old"]);
   assert.equal(state.queue, undefined);
+});
+
+test("cancels a pending disconnect eviction when the DJ reconnects", async () => {
+  const grace = new GracePeriodRegistry(15);
+  let expired = false;
+  grace.schedule("room:alice", () => { expired = true; });
+  assert.equal(grace.has("room:alice"), true);
+  grace.cancel("room:alice");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(expired, false);
+  assert.equal(grace.has("room:alice"), false);
+});
+
+test("expires a disconnected DJ after the grace period", async () => {
+  const grace = new GracePeriodRegistry(15);
+  let expirations = 0;
+  grace.schedule("room:bob", () => { expirations += 1; });
+  grace.schedule("room:bob", () => { expirations += 1; });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(expirations, 1);
+  assert.equal(grace.has("room:bob"), false);
 });

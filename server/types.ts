@@ -97,5 +97,6 @@ export interface RoomDirectoryEntry {
 export interface RoomSnapshot {
   room: SnapshotRoom;
   users: User[];
+  djUsers: User[];
   serverTime: number;
 }

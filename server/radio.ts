@@ -1,5 +1,30 @@
 import type { Room, SnapshotRoom, Track } from "./types.js";
 
+export class GracePeriodRegistry {
+  private timers = new Map<string, NodeJS.Timeout>();
+
+  constructor(private readonly delayMs: number) {}
+
+  schedule(key: string, onExpire: () => void) {
+    if (this.timers.has(key)) return;
+    const timer = setTimeout(() => {
+      this.timers.delete(key);
+      onExpire();
+    }, this.delayMs);
+    this.timers.set(key, timer);
+  }
+
+  cancel(key: string) {
+    const timer = this.timers.get(key);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(key);
+  }
+
+  has(key: string) {
+    return this.timers.has(key);
+  }
+}
+
 export function normalizeRadioState(room: Room) {
   room.settings ||= {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
