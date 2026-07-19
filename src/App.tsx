@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Check,
@@ -49,7 +49,7 @@ import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
-import { readPlaybackPreference, savePlaybackPreference, type PlaybackPreference } from "./playback-settings";
+import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
 type SearchProvider = Provider;
@@ -58,6 +58,12 @@ const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
 
 function randomId() {
   return crypto.randomUUID();
+}
+
+function showSystemNotification(title: string, body: string) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const notification = new Notification(title, { body });
+  window.setTimeout(() => notification.close(), 7_000);
 }
 
 function slugify(value: string) {
@@ -133,6 +139,8 @@ function TrackArtwork({ track, compact = false }: { track: Track; compact?: bool
 }
 
 export function App() {
+  const [userSettings, setUserSettings] = useState<SoundSpinUserSettings>(readUserSettings);
+  const compactPlayer = userSettings.playback.compactPlayer;
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
@@ -140,13 +148,13 @@ export function App() {
   const [profileRefresh, setProfileRefresh] = useState(0);
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
-  const [compactPlayer, setCompactPlayer] = useState(false);
   const [roomPassword, setRoomPassword] = useState("");
   const [roomPasswordRequired, setRoomPasswordRequired] = useState(false);
   const [roomJoinError, setRoomJoinError] = useState("");
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const previousDjUserIdRef = useRef<string | null>(null);
   const [auth, setAuth] = useState<{
     loading: boolean;
     client: SupabaseClient | null;
@@ -154,6 +162,28 @@ export function App() {
     enabled: boolean;
     recovery: boolean;
   }>({ loading: true, client: null, session: null, enabled: false, recovery: false });
+
+  const changeUserSettings = useCallback((next: SoundSpinUserSettings) => {
+    setUserSettings(next);
+    saveUserSettings(next);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("reduced-motion", userSettings.appearance.reducedMotion);
+    document.documentElement.style.setProperty("--artwork-blur", `${userSettings.appearance.artworkBlur}px`);
+  }, [userSettings.appearance.artworkBlur, userSettings.appearance.reducedMotion]);
+
+  useEffect(() => {
+    const djUserId = snapshot?.room.djUserId || null;
+    if (
+      djUserId === profile.id &&
+      previousDjUserIdRef.current !== profile.id &&
+      userSettings.notifications.djTurn
+    ) {
+      showSystemNotification("You’re on deck", "Your SoundSpin DJ turn has started.");
+    }
+    previousDjUserIdRef.current = djUserId;
+  }, [snapshot?.room.djUserId, profile.id, userSettings.notifications.djTurn]);
 
   useEffect(() => {
     let active = true;
@@ -535,9 +565,14 @@ export function App() {
             currentUserId={profile.id}
             accessToken={auth.session?.access_token}
             compact={compactPlayer}
-            onToggleCompact={() => setCompactPlayer((compact) => !compact)}
+            onToggleCompact={() => changeUserSettings({
+              ...userSettings,
+              playback: { ...userSettings.playback, compactPlayer: !compactPlayer }
+            })}
             settingsOpen={userSettingsOpen}
             onCloseSettings={() => setUserSettingsOpen(false)}
+            userSettings={userSettings}
+            onUserSettingsChange={changeUserSettings}
           />
         </div>
         <RoomChat
@@ -545,6 +580,7 @@ export function App() {
           currentUser={profile}
           client={auth.client!}
           onOpenProfile={openProfile}
+          notifications={userSettings.notifications}
         />
       </section>
       {roomSettingsOpen && auth.session && (
@@ -780,7 +816,9 @@ function NowPlaying({
   compact,
   onToggleCompact,
   settingsOpen,
-  onCloseSettings
+  onCloseSettings,
+  userSettings,
+  onUserSettingsChange
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
@@ -791,16 +829,22 @@ function NowPlaying({
   onToggleCompact: () => void;
   settingsOpen: boolean;
   onCloseSettings: () => void;
+  userSettings: SoundSpinUserSettings;
+  onUserSettingsChange: (settings: SoundSpinUserSettings) => void;
 }) {
   const playback = snapshot.room.playback;
   const track = playback.track;
-  const [volume, setVolume] = useState(80);
-  const [playbackPreference, setPlaybackPreference] = useState<PlaybackPreference>(readPlaybackPreference);
+  const volume = userSettings.playback.defaultVolume;
+  const playbackPreference = userSettings.playback.preference;
   const [spotifyWebStarted, setSpotifyWebStarted] = useState(false);
+  const [fallbackApprovedTrackId, setFallbackApprovedTrackId] = useState("");
+  const unavailableNotifiedTrackRef = useRef("");
+  const playbackErrorNotifiedRef = useRef("");
   const [connections, setConnections] = useState({
     loaded: false,
     spotifyConfigured: false,
     spotifyConnected: false,
+    spotifyProfile: null as { displayName: string; product?: string } | null,
     appleConfigured: false
   });
   const [seekPreview, setSeekPreview] = useState<number | null>(null);
@@ -810,17 +854,24 @@ function NowPlaying({
     currentTime: 0,
     duration: 0
   });
+  const [playbackError, setPlaybackError] = useState("");
 
   useEffect(() => {
     setSeekPreview(null);
   }, [playback.updatedAt, playback.track?.id]);
+
+  useEffect(() => {
+    setFallbackApprovedTrackId("");
+    setPlaybackError("");
+    playbackErrorNotifiedRef.current = "";
+  }, [playback.track?.id]);
 
   const loadConnections = useCallback(() => {
     if (!accessToken) return;
     void fetch("/api/music/connections", { headers: { Authorization: `Bearer ${accessToken}` } })
       .then(async (response) => {
         const payload = await response.json() as {
-          spotify?: { configured?: boolean; connected?: boolean };
+          spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
           apple?: { configured?: boolean };
         };
         if (!response.ok) throw new Error("Could not load music connections.");
@@ -828,6 +879,7 @@ function NowPlaying({
           loaded: true,
           spotifyConfigured: Boolean(payload.spotify?.configured),
           spotifyConnected: Boolean(payload.spotify?.connected),
+          spotifyProfile: payload.spotify?.profile || null,
           appleConfigured: Boolean(payload.apple?.configured)
         });
       })
@@ -835,6 +887,11 @@ function NowPlaying({
   }, [accessToken]);
 
   useEffect(loadConnections, [loadConnections]);
+
+  const handleSpotifyConnectionLost = useCallback((message: string) => {
+    loadConnections();
+    setPlaybackError(message);
+  }, [loadConnections]);
 
   const connectSpotify = useCallback(() => {
     if (!accessToken) return;
@@ -844,13 +901,8 @@ function NowPlaying({
       const payload = await response.json() as { url?: string; error?: string };
       if (!response.ok || !payload.url) throw new Error(payload.error || "Could not connect Spotify.");
       location.assign(payload.url);
-    }).catch((error) => setPlayerStatus((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not connect Spotify." })));
+    }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
   }, [accessToken]);
-
-  const changePlaybackPreference = (next: PlaybackPreference) => {
-    setPlaybackPreference(next);
-    savePlaybackPreference(next);
-  };
 
   const disconnectSpotify = useCallback(() => {
     if (!accessToken) return;
@@ -859,9 +911,9 @@ function NowPlaying({
       headers: { Authorization: `Bearer ${accessToken}` }
     }).then((response) => {
       if (!response.ok) throw new Error("Could not disconnect Spotify.");
-      setConnections((current) => ({ ...current, spotifyConnected: false }));
+      setConnections((current) => ({ ...current, spotifyConnected: false, spotifyProfile: null }));
     }).catch((error) => {
-      setPlayerStatus((current) => ({ ...current, error: error instanceof Error ? error.message : "Could not disconnect Spotify." }));
+      setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
     });
   }, [accessToken]);
 
@@ -894,6 +946,8 @@ function NowPlaying({
     : undefined);
   const previewArtwork = effectiveMapping?.artworkUrl || (track ? trackArtworkUrl(track) : undefined);
   const providerFallback = Boolean(track && preferredProvider !== effectiveProvider);
+  const fallbackNeedsApproval = providerFallback && userSettings.playback.fallback === "ask" && fallbackApprovedTrackId !== track?.id;
+  const fallbackIsSilent = providerFallback && userSettings.playback.fallback === "silent";
   const spotifyReady = Boolean(accessToken && connections.spotifyConnected);
   const webPlaybackAllowed = playbackPreference !== "spotify-desktop" && playbackPreference !== "apple";
   const keepSpotifyWebMounted = spotifyReady && webPlaybackAllowed && (
@@ -907,6 +961,19 @@ function NowPlaying({
     else if (effectiveProvider === "spotify") setSpotifyWebStarted(true);
     else if (track && playbackPreference !== "spotify-web") setSpotifyWebStarted(false);
   }, [effectiveProvider, playbackPreference, track?.id, webPlaybackAllowed]);
+
+  useEffect(() => {
+    if (!providerFallback || !track || !userSettings.notifications.unavailableTrack || unavailableNotifiedTrackRef.current === track.id) return;
+    unavailableNotifiedTrackRef.current = track.id;
+    showSystemNotification("Playback fallback needed", `${track.title} is not available on ${providerLabel(preferredProvider)}.`);
+  }, [providerFallback, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack]);
+
+  useEffect(() => {
+    const message = playbackError;
+    if (!message || !userSettings.notifications.playbackErrors || playbackErrorNotifiedRef.current === message) return;
+    playbackErrorNotifiedRef.current = message;
+    showSystemNotification("SoundSpin playback error", message);
+  }, [playbackError, userSettings.notifications.playbackErrors]);
 
   return (
     <>
@@ -926,9 +993,12 @@ function NowPlaying({
           isDj={isDj}
           volume={volume}
           accessToken={accessToken!}
+          preferredDeviceId={userSettings.playback.spotifyDeviceId}
+          resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
           onEnded={handleEnded}
           onStatus={setPlayerStatus}
-          onConnectionLost={loadConnections}
+          onConnectionLost={handleSpotifyConnectionLost}
+          onError={setPlaybackError}
         />
       )}
       {track ? (
@@ -938,7 +1008,18 @@ function NowPlaying({
             {effectiveProvider === "spotify" && previewArtwork && (
               <img className="album-art-preview" src={previewArtwork} alt={`${track.title} album artwork`} />
             )}
-            {effectiveProvider === "spotify" && effectiveMapping ? (
+            {fallbackNeedsApproval ? (
+              <div className="provider-player-shell fallback-player-shell">
+                <strong>Use the room source?</strong>
+                <small>No {providerLabel(preferredProvider)} match was found for this track.</small>
+                <button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</button>
+              </div>
+            ) : fallbackIsSilent ? (
+              <div className="provider-player-shell fallback-player-shell">
+                <strong>Track unavailable</strong>
+                <small>No {providerLabel(preferredProvider)} match was found. Local playback is paused for this track.</small>
+              </div>
+            ) : effectiveProvider === "spotify" && effectiveMapping ? (
               spotifyReady ? (
                 keepSpotifyWebMounted ? null : (
                   <SpotifyPlayer
@@ -948,9 +1029,12 @@ function NowPlaying({
                     isDj={isDj}
                     volume={volume}
                     accessToken={accessToken!}
+                    preferredDeviceId={userSettings.playback.spotifyDeviceId}
+                    resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
                     onEnded={handleEnded}
                     onStatus={setPlayerStatus}
-                    onConnectionLost={loadConnections}
+                    onConnectionLost={handleSpotifyConnectionLost}
+                    onError={setPlaybackError}
                   />
                 )
               ) : (
@@ -968,6 +1052,7 @@ function NowPlaying({
                 accessToken={accessToken}
                 onEnded={handleEnded}
                 onStatus={setPlayerStatus}
+                onError={setPlaybackError}
               />
             ) : effectiveProvider === "soundcloud" ? (
               <SoundCloudPlayer
@@ -1049,7 +1134,10 @@ function NowPlaying({
                 max={100}
                 value={volume}
                 aria-label="Volume"
-                onChange={(event) => setVolume(Number(event.target.value))}
+                onChange={(event) => onUserSettingsChange({
+                  ...userSettings,
+                  playback: { ...userSettings.playback, defaultVolume: Number(event.target.value) }
+                })}
               />
             </label>
           </div>
@@ -1065,10 +1153,10 @@ function NowPlaying({
       </section>
       {settingsOpen && (
         <UserSettingsDialog
-          preference={playbackPreference}
+          settings={userSettings}
           connections={connections}
-          canConnectSpotify={Boolean(accessToken)}
-          onPreferenceChange={changePlaybackPreference}
+          accessToken={accessToken}
+          onSettingsChange={onUserSettingsChange}
           onConnectSpotify={connectSpotify}
           onDisconnectSpotify={disconnectSpotify}
           onClose={onCloseSettings}
@@ -1554,15 +1642,18 @@ function RoomChat({
   snapshot,
   currentUser,
   client,
-  onOpenProfile
+  onOpenProfile,
+  notifications
 }: {
   snapshot: RoomSnapshot;
   currentUser: User;
   client: SupabaseClient;
   onOpenProfile: (userId: string) => void;
+  notifications: SoundSpinUserSettings["notifications"];
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
+  const seenMentionIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
@@ -1571,6 +1662,7 @@ function RoomChat({
       try {
         const history = await loadChatHistory(client, snapshot.room.id);
         if (!active) return;
+        history.forEach((message) => seenMentionIdsRef.current.add(message.id));
         setMessages(history);
         setError("");
       } catch {
@@ -1593,6 +1685,21 @@ function RoomChat({
       setError("The message was sent live but could not be saved to history.");
     }
   };
+
+  const handleMessages = useCallback((nextMessages: ChatMessage[]) => {
+    for (const message of nextMessages) {
+      if (seenMentionIdsRef.current.has(message.id)) continue;
+      seenMentionIdsRef.current.add(message.id);
+      if (
+        notifications.chatMentions &&
+        message.user.id !== currentUser.id &&
+        currentUser.name &&
+        message.content.toLocaleLowerCase().includes(`@${currentUser.name.toLocaleLowerCase()}`)
+      ) {
+        showSystemNotification(`${message.user.name} mentioned you`, message.content || "New room chat mention");
+      }
+    }
+  }, [currentUser.id, currentUser.name, notifications.chatMentions]);
 
   return (
     <aside className="chat panel">
@@ -1627,6 +1734,7 @@ function RoomChat({
           roomName={`soundspin:${snapshot.room.id}`}
           user={currentUser}
           messages={messages}
+          onMessage={handleMessages}
           onSend={persistMessage}
           onOpenProfile={onOpenProfile}
         />

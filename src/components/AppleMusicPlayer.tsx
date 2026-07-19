@@ -69,6 +69,11 @@ function targetPosition(playback: Playback) {
   return Math.max(0, playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0));
 }
 
+function reportAppleAuthorization(authorized: boolean) {
+  localStorage.setItem("soundspin-apple-authorized", String(authorized));
+  window.dispatchEvent(new Event("soundspin:apple-authorization"));
+}
+
 export function AppleMusicPlayer({
   playback,
   mapping,
@@ -76,7 +81,8 @@ export function AppleMusicPlayer({
   volume,
   accessToken,
   onEnded,
-  onStatus
+  onStatus,
+  onError
 }: {
   playback: Playback;
   mapping: ProviderTrackMapping;
@@ -85,6 +91,7 @@ export function AppleMusicPlayer({
   accessToken: string;
   onEnded: () => void;
   onStatus: (status: PlayerStatus) => void;
+  onError?: (message: string) => void;
 }) {
   const musicRef = useRef<MusicKitInstance | null>(null);
   const commandRef = useRef("");
@@ -97,11 +104,17 @@ export function AppleMusicPlayer({
   const track = playback.track;
 
   useEffect(() => {
+    if (error) onError?.(error);
+  }, [error, onError]);
+
+  useEffect(() => {
     let alive = true;
     void getMusicKit(accessToken).then((music) => {
       if (!alive) return;
       musicRef.current = music;
-      setAuthorized(Boolean(music.isAuthorized));
+      const isAuthorized = Boolean(music.isAuthorized);
+      setAuthorized(isAuthorized);
+      reportAppleAuthorization(isAuthorized);
       setReady(true);
     }).catch((cause) => {
       if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Apple Music.");
@@ -113,7 +126,10 @@ export function AppleMusicPlayer({
     const music = musicRef.current;
     if (!music) return;
     setError("");
-    void music.authorize().then(() => setAuthorized(true)).catch((cause) => {
+    void music.authorize().then(() => {
+      setAuthorized(true);
+      reportAppleAuthorization(true);
+    }).catch((cause) => {
       setError(cause instanceof Error ? cause.message : "Apple Music authorization failed.");
     });
   }, []);

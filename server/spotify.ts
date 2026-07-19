@@ -105,7 +105,7 @@ export class SpotifyApi {
       response_type: "code",
       redirect_uri: redirectUri,
       state,
-      scope: "streaming user-read-playback-state user-modify-playback-state"
+      scope: "streaming user-read-playback-state user-modify-playback-state user-read-private"
     });
     return `https://accounts.spotify.com/authorize?${params}`;
   }

@@ -1237,10 +1237,24 @@ app.get("/api/music/connections", async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   try {
+    const spotifyConnected = spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false;
+    let spotifyProfile: { displayName: string; product?: string } | null = null;
+    if (spotifyConnected) {
+      try {
+        const profile = await spotifyForUser(userId, (token) => spotifyApi.request<{
+          display_name?: string;
+          product?: string;
+        }>(token, "/me"));
+        spotifyProfile = { displayName: profile.display_name || "Spotify account", product: profile.product };
+      } catch {
+        // The saved connection remains useful even when profile metadata is temporarily unavailable.
+      }
+    }
     response.json({
       spotify: {
         configured: spotifyAccounts.configured,
-        connected: spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false
+        connected: spotifyConnected,
+        profile: spotifyProfile
       },
       apple: { configured: appleMusicApi.configured }
     });

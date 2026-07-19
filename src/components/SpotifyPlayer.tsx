@@ -108,9 +108,12 @@ export function SpotifyPlayer({
   isDj,
   volume,
   accessToken,
+  preferredDeviceId,
+  resumeAfterReconnect,
   onEnded,
   onStatus,
-  onConnectionLost
+  onConnectionLost,
+  onError
 }: {
   playback: Playback;
   mapping?: ProviderTrackMapping;
@@ -118,15 +121,21 @@ export function SpotifyPlayer({
   isDj: boolean;
   volume: number;
   accessToken: string;
+  preferredDeviceId?: string;
+  resumeAfterReconnect: boolean;
   onEnded: () => void;
   onStatus: (status: PlayerStatus) => void;
   onConnectionLost: (message: string) => void;
+  onError?: (message: string) => void;
 }) {
   const playerRef = useRef<SpotifySdkPlayer | null>(null);
   const deviceIdRef = useRef("");
   const commandRef = useRef("");
   const endedTrackRef = useRef("");
   const lastProgressRef = useRef(0);
+  const hasBeenReadyRef = useRef(false);
+  const suppressedReconnectRef = useRef("");
+  const playbackRef = useRef(playback);
   const [deviceId, setDeviceId] = useState("");
   const [error, setError] = useState("");
   const [activationNeeded, setActivationNeeded] = useState(false);
@@ -135,6 +144,11 @@ export function SpotifyPlayer({
   const [activationRevision, setActivationRevision] = useState(0);
   const track = playback.track;
   const spotifyUri = mapping ? `spotify:track:${mapping.providerId}` : "";
+  playbackRef.current = playback;
+
+  useEffect(() => {
+    if (error) onError?.(error);
+  }, [error, onError]);
 
   useEffect(() => {
     let alive = true;
@@ -147,7 +161,7 @@ export function SpotifyPlayer({
       ).then(({ devices = [] }) => {
         if (!alive) return;
         const available = devices.filter((device) => device.id && !device.is_restricted);
-        const saved = localStorage.getItem("soundspin-spotify-device-id");
+        const saved = preferredDeviceId ?? localStorage.getItem("soundspin-spotify-device-id");
         const selected = available.find((device) => device.id === saved) ||
           available.find((device) => device.is_active && device.type === "Computer") ||
           available.find((device) => device.is_active) ||
@@ -184,11 +198,18 @@ export function SpotifyPlayer({
       playerRef.current = player;
       player.addListener("ready", ((payload: { device_id: string }) => {
         if (!alive) return;
+        const reconnecting = hasBeenReadyRef.current;
+        hasBeenReadyRef.current = true;
         deviceIdRef.current = payload.device_id;
         void transferSpotifyPlayback(accessToken, payload.device_id)
           .then(() => {
             if (!alive || deviceIdRef.current !== payload.device_id) return;
             setError("");
+            const currentPlayback = playbackRef.current;
+            suppressedReconnectRef.current = reconnecting && !resumeAfterReconnect
+              ? `${currentPlayback.track?.id || "empty"}:${currentPlayback.updatedAt}`
+              : "";
+            commandRef.current = "";
             setDeviceId(payload.device_id);
           })
           .catch((cause) => {
@@ -231,7 +252,7 @@ export function SpotifyPlayer({
       playerRef.current = null;
       deviceIdRef.current = "";
     };
-  }, [mode, accessToken, onConnectionLost]);
+  }, [mode, accessToken, onConnectionLost, preferredDeviceId, resumeAfterReconnect]);
 
   useEffect(() => {
     if (mode === "web") {
@@ -248,6 +269,7 @@ export function SpotifyPlayer({
 
   useEffect(() => {
     if (!deviceId) return;
+    if (suppressedReconnectRef.current === `${track?.id || "empty"}:${playback.updatedAt}`) return;
     if (!track || !mapping) {
       const signature = `idle:${deviceId}:${track?.id || "empty"}`;
       if (commandRef.current === signature) return;
