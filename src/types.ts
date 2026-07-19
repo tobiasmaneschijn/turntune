@@ -63,7 +63,9 @@ export interface Room {
   isPublic: boolean;
   passwordProtected: boolean;
   settings: RoomSettings;
+  /** User on air; having a DJ role or joining the lineup does not imply this. */
   djUserId: string | null;
+  /** Rotation order, with the next candidate at index 0. */
   djQueueUserIds: string[];
   /** Only the signed-in listener's queue is included in snapshots. */
   queue: Track[];
@@ -89,8 +91,11 @@ export interface RoomDirectoryEntry {
 }
 
 export interface RoomSnapshot {
+  /** Personalized by the server: room.queue contains this recipient's tracks. */
   room: Room;
+  /** Currently connected listeners. */
   users: User[];
+  /** Joined DJ identities, retained during the one-minute disconnect grace. */
   djUsers: User[];
   serverTime: number;
 }

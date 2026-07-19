@@ -21,7 +21,10 @@ const dataFile = path.join(dataDir, "soundspin.json");
 const tempFile = path.join(dataDir, "soundspin.tmp.json");
 
 export class Store {
+  // The cache is the live room object graph used by Socket.IO handlers. Supabase
+  // is durable storage, not a replacement for the process's coordination state.
   private data: Database = { rooms: {} };
+  // Serialize writes so a slower save cannot overwrite a newer radio state.
   private writeChain: Promise<void> = Promise.resolve();
   private supabase: SupabaseClient | null = null;
 
@@ -78,6 +81,9 @@ export class Store {
       .in("role", ["moderator", "dj"]);
     if (roomRoleError) throw new Error(`Could not load room roles: ${roomRoleError.message}`);
 
+    // `state` holds the fast-changing radio document. First-class room columns
+    // and membership rows win over duplicated values in that JSON because they
+    // are the authorization/directory source of truth.
     const room = {
       ...(data.state as Room),
       name: data.name,
@@ -185,6 +191,7 @@ export class Store {
 
   async recordRoomMember(roomSlug: string, userId: string) {
     if (!this.supabase) return;
+    // Never downgrade an existing owner/moderator/DJ merely because they joined.
     const { error } = await this.supabase.from("soundspin_room_members").upsert(
       { room_slug: roomSlug, user_id: userId, role: "member", updated_at: new Date().toISOString() },
       { onConflict: "room_slug,user_id", ignoreDuplicates: true }
@@ -429,6 +436,10 @@ export class Store {
     throw new Error(`Could not award experience: ${error.message}`);
   }
 
+  /**
+   * Updates the live cache immediately, then persists saves in call order.
+   * Callers should await the returned chain before acknowledging a mutation.
+   */
   saveRoom(room: Room) {
     this.data.rooms[room.id] = room;
     this.writeChain = this.writeChain.then(async () => {

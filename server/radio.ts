@@ -5,6 +5,11 @@ export class GracePeriodRegistry {
 
   constructor(private readonly delayMs: number) {}
 
+  /**
+   * Starts at most one timer for a room/user pair. Socket.IO may report several
+   * disconnects for the same account (multiple tabs), so scheduling must be
+   * idempotent or an old timer could evict a DJ after they reconnect.
+   */
   schedule(key: string, onExpire: () => void) {
     if (this.timers.has(key)) return;
     const timer = setTimeout(() => {
@@ -25,6 +30,12 @@ export class GracePeriodRegistry {
   }
 }
 
+/**
+ * Repairs persisted room state at the server boundary.
+ *
+ * Room JSON can outlive several application versions. Keep compatibility and
+ * de-duplication here instead of spreading defensive checks across handlers.
+ */
 export function normalizeRadioState(room: Room) {
   room.settings ||= {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
@@ -68,6 +79,13 @@ export function archiveCurrentTrack(room: Room) {
   room.history = room.history.slice(0, 100);
 }
 
+/**
+ * Ends the current track and finds the next DJ with music.
+ *
+ * The lineup is a rotating ring. Moving a DJ from the front to the back before
+ * consuming a track guarantees one song per turn. Empty queues are skipped for
+ * this pass without removing their DJ, so adding music later restores their turn.
+ */
 export function advanceRadio(room: Room) {
   archiveCurrentTrack(room);
 
@@ -96,6 +114,11 @@ export function privateQueue(room: Room, userId: string): Track[] {
   return room.djQueues[userId];
 }
 
+/**
+ * Converts authoritative server state into one listener's safe room payload.
+ * This is the queue-privacy boundary: `djQueues` must never cross it. The
+ * snapshot's `queue` field is only the requesting listener's own queue.
+ */
 export function roomForListener(room: Room, userId: string): SnapshotRoom {
   const { djQueues: _privateQueues, queue: _legacyQueue, ...sharedRoom } = room;
   return { ...sharedRoom, queue: [...privateQueue(room, userId)] };

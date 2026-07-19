@@ -36,6 +36,10 @@ const authEnabled = Boolean(
   supabaseJwksUrl &&
   store.usesSupabase
 );
+
+// Live coordination is process-local. `roomUsers` is socket presence, while
+// `roomDjUsers` also keeps a disconnected DJ's display data during the grace
+// period. Durable room/radio state lives in Store/Supabase.
 const roomUsers = new Map<string, Map<string, User>>();
 const roomDjUsers = new Map<string, Map<string, User>>();
 const socketRooms = new Map<string, string>();
@@ -214,6 +218,7 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
   };
 }
 
+/** Build the personalized state sent to one listener. */
 function snapshot(room: Room, userId: string): RoomSnapshot {
   return {
     room: roomForListener(room, userId),
@@ -225,6 +230,8 @@ function snapshot(room: Room, userId: string): RoomSnapshot {
 }
 
 function broadcast(room: Room) {
+  // Do not replace this with io.to(room.id).emit(...). Queue privacy requires a
+  // separate snapshot for every recipient.
   for (const [socketId, user] of roomUsers.get(room.id) || []) {
     io.to(socketId).emit("room:snapshot", snapshot(room, user.id));
   }
@@ -268,6 +275,8 @@ function scheduleDjEviction(room: Room, user: User) {
   djEvictions.schedule(key, () => {
     void (async () => {
       const currentRoom = store.getRoom(room.id);
+      // Re-check presence at expiry. A reconnect cancels the usual timer, but
+      // this guard also protects against races between socket events.
       const reconnected = [...(roomUsers.get(room.id)?.values() || [])]
         .some((roomUser) => roomUser.id === user.id);
       if (!currentRoom || reconnected) return;
@@ -299,6 +308,8 @@ async function leaveCurrentRoom(socketId: string) {
   users?.delete(socketId);
   const room = store.getRoom(roomId);
   if (!room) return;
+  // Multiple tabs count as one listener. Start the one-minute DJ grace only
+  // after this account's final socket leaves; explicit `dj:leave` is immediate.
   const stillConnected = leavingUser && [...(users?.values() || [])].some((user) => user.id === leavingUser.id);
   if (leavingUser && !stillConnected) {
     scheduleDjEviction(room, leavingUser);
@@ -375,6 +386,8 @@ io.on("connection", (socket) => {
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
       cancelDjEviction(roomId, user.id);
+      // Grace timers are intentionally process-local. After a server restart,
+      // persisted lineup entries have no timer, so remove them unless online.
       const onlineUserIds = new Set([...roomUsers.get(roomId)!.values()].map((roomUser) => roomUser.id));
       room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) =>
         onlineUserIds.has(djUserId) || hasPendingDjEviction(roomId, djUserId)
@@ -461,6 +474,9 @@ io.on("connection", (socket) => {
       return reply?.({ ok: false, error: "This room requires a DJ role or moderator access." });
     }
     if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
+      // advanceRadio leaves the current DJ at the back of the ring. Inserting
+      // before them gives a newcomer a turn after the already-waiting DJs,
+      // rather than making the current DJ play again first.
       const currentDjIndex = membership.room.djUserId
         ? membership.room.djQueueUserIds.indexOf(membership.room.djUserId)
         : -1;
@@ -586,6 +602,8 @@ io.on("connection", (socket) => {
     if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
       return reply?.({ ok: false, error: "Only the current DJ or a room moderator can skip tracks." });
     }
+    // Track IDs make "ended" idempotent across retries and multiple tabs. A
+    // stale event must not advance the newly started song as well.
     if (!parsed.success || membership.room.playback.track?.id !== parsed.data.trackId) {
       return reply?.({ ok: false, error: "That track has already ended." });
     }

@@ -35,6 +35,16 @@ Socket.IO connection to the API on port 3000.
 Without Supabase environment variables, local development uses the original
 JSON store and local display-name identity. To test authentication and database
 persistence, copy `.env.example` to `.env` and add your Supabase project values.
+Production deployments are expected to keep Supabase enabled; the JSON store is
+only a legacy/local fallback.
+
+## Architecture documentation
+
+- [`docs/rooms-and-radio.md`](docs/rooms-and-radio.md) explains room state, DJ
+  roles, private queues, rotation, playback authority, disconnect grace,
+  Supabase persistence, invariants, and troubleshooting.
+- [`docs/chat.md`](docs/chat.md) explains realtime chat, durable history,
+  replies, reactions, media, and RLS.
 
 ## Supabase setup
 

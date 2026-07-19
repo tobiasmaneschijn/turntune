@@ -269,6 +269,8 @@ export function App() {
     };
     const onDisconnect = () => setConnected(false);
     const onConnectError = (error: Error) => setNotice(error.message);
+    // Snapshots are personalized by the server: next.room.queue is ours only.
+    // Never infer or cache another DJ's upcoming tracks in the client.
     const onSnapshot = (next: RoomSnapshot) => setSnapshot(next);
     const onXp = (event: { amount: number; message: string }) => {
       setNotice(`+${event.amount} XP · ${event.message}`);
@@ -426,6 +428,8 @@ export function App() {
     return <LoadingScreen label={notice || (connected ? "Tuning into the room…" : "Connecting…")} />;
   }
 
+  // Being allowed to DJ, joining the lineup, and currently being on air are
+  // separate states. Only the on-air browser reports a natural track end.
   const isDj = snapshot.room.djUserId === profile.id;
   const canControlPlayback = isDj ||
     snapshot.room.ownerUserId === profile.id ||
@@ -779,6 +783,7 @@ function NowPlaying({
               playback={playback}
               isDj={isDj}
               volume={volume}
+              // The track ID lets the server reject duplicate/stale ended events.
               onEnded={() => socket.emit("queue:next", { trackId: track.id })}
               onStatus={setPlayerStatus}
             />

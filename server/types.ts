@@ -63,8 +63,11 @@ export interface Room {
   isPublic: boolean;
   passwordProtected: boolean;
   settings: RoomSettings;
+  /** User currently on air. Normally matches playback.track.addedBy.id. */
   djUserId: string | null;
+  /** Rotating lineup. The next candidate is at index 0. */
   djQueueUserIds: string[];
+  /** Authoritative private queues. Server-only; never serialize this map. */
   djQueues: Record<string, Track[]>;
   /** Legacy shared queue, consumed once by normalizeRadioState. */
   queue?: Track[];
@@ -95,8 +98,11 @@ export interface RoomDirectoryEntry {
 }
 
 export interface RoomSnapshot {
+  /** Personalized room state; `room.queue` belongs to the recipient only. */
   room: SnapshotRoom;
+  /** Users with a live socket. Used for presence/listener count. */
   users: User[];
+  /** DJ identities, including disconnected DJs during their grace period. */
   djUsers: User[];
   serverTime: number;
 }
