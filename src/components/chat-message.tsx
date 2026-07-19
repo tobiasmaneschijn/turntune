@@ -1,10 +1,16 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Reply, SmilePlus, X } from 'lucide-react'
-import type { Theme } from 'emoji-picker-react'
+import type { SkinTones, Theme } from 'emoji-picker-react'
 
 import { getMessagePreview, groupReactions, type ChatMessage } from '@/chat/model'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
+import {
+  chatPickerEmojiStyle,
+  PlatformEmojiText,
+  readEmojiSkinTone,
+  saveEmojiSkinTone,
+} from '@/components/platform-emoji-text'
 
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
 const QUICK_REACTIONS = ['❤️', '😂', '😮']
@@ -31,6 +37,7 @@ export const ChatMessageItem = ({
   onJumpToMessage,
 }: ChatMessageItemProps) => {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
+  const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const reply = message.replyTo
   const reactionGroups = useMemo(
     () => groupReactions(message.reactions, currentUserId),
@@ -55,7 +62,7 @@ export const ChatMessageItem = ({
         >
           <Reply size={12} />
           <strong>{reply.user.name}</strong>
-          <span>{getMessagePreview(reply)}</span>
+          <PlatformEmojiText text={getMessagePreview(reply)} />
         </button>
       )}
       <div className="chat-message-avatar">
@@ -74,7 +81,7 @@ export const ChatMessageItem = ({
               title={`React with ${emoji}`}
               onClick={() => onReact(message, emoji)}
             >
-              {emoji}
+              <PlatformEmojiText text={emoji} />
             </button>
           ))}
           <button
@@ -104,8 +111,14 @@ export const ChatMessageItem = ({
                 width={300}
                 height={320}
                 lazyLoadEmojis
+                emojiStyle={chatPickerEmojiStyle}
+                defaultSkinTone={skinTone}
                 previewConfig={{ showPreview: false }}
                 searchPlaceholder="Find an emoji"
+                onSkinToneChange={(selectedSkinTone) => {
+                  setSkinTone(selectedSkinTone)
+                  saveEmojiSkinTone(selectedSkinTone)
+                }}
                 onEmojiClick={(emoji) => {
                   onReact(message, emoji.emoji)
                   setShowReactionPicker(false)
@@ -136,7 +149,7 @@ export const ChatMessageItem = ({
               />
             </a>
           )}
-          {message.content && message.type === 'text' && message.content}
+          {message.content && message.type === 'text' && <PlatformEmojiText text={message.content} />}
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
           )}
@@ -151,7 +164,7 @@ export const ChatMessageItem = ({
                 aria-label={`${emoji}, ${group.count} ${group.count === 1 ? 'reaction' : 'reactions'}`}
                 onClick={() => onReact(message, emoji)}
               >
-                <span>{emoji}</span>
+                <PlatformEmojiText text={emoji} />
                 <strong>{group.count}</strong>
               </button>
             ))}

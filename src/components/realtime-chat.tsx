@@ -1,5 +1,5 @@
 import { ArrowDown, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
-import type { Theme } from 'emoji-picker-react'
+import type { SkinTones, Theme } from 'emoji-picker-react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -24,6 +24,12 @@ import {
 import { persistReactionChange } from '@/chat/persistence'
 import { cn } from '@/lib/utils'
 import { ChatMessageItem } from '@/components/chat-message'
+import {
+  chatPickerEmojiStyle,
+  PlatformEmojiText,
+  readEmojiSkinTone,
+  saveEmojiSkinTone,
+} from '@/components/platform-emoji-text'
 import { useChatScroll } from '@/hooks/use-chat-scroll'
 import { useRealtimeChat } from '@/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
@@ -73,6 +79,7 @@ export const RealtimeChat = ({
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
+  const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const [giphyQuery, setGiphyQuery] = useState('')
   const [gifs, setGifs] = useState<GiphyGif[]>([])
   const [composerError, setComposerError] = useState('')
@@ -389,8 +396,14 @@ export const RealtimeChat = ({
                   width="100%"
                   height={390}
                   lazyLoadEmojis
+                  emojiStyle={chatPickerEmojiStyle}
+                  defaultSkinTone={skinTone}
                   previewConfig={{ showPreview: false }}
                   searchPlaceholder="Find the perfect emoji"
+                  onSkinToneChange={(selectedSkinTone) => {
+                    setSkinTone(selectedSkinTone)
+                    saveEmojiSkinTone(selectedSkinTone)
+                  }}
                   onEmojiClick={(emoji) => setNewMessage((current) => `${current}${emoji.emoji}`)}
                 />
               </Suspense>
@@ -465,7 +478,7 @@ export const RealtimeChat = ({
             <Reply className="size-3.5" />
             <div>
               <span>Replying to <strong>@{replyingTo.user.name}</strong></span>
-              <small>{getMessagePreview(replyingTo)}</small>
+              <small><PlatformEmojiText text={getMessagePreview(replyingTo)} /></small>
             </div>
             <Button
               type="button"

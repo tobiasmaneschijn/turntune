@@ -20,6 +20,7 @@ loads the durable database history when it enters a room.
 | `src/hooks/use-realtime-chat.tsx` | Supabase channel lifecycle and Broadcast send/receive behavior. It does not write chat tables. |
 | `src/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
 | `src/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
+| `src/components/platform-emoji-text.tsx` | Platform-aware emoji rendering and the persisted skin-tone preference. |
 | `src/App.tsx` (`RoomChat`) | Loads room history, supplies it to the chat component, and persists newly sent messages. |
 | `src/styles.css` | Chat layout and interaction styling under the `chat-*` selectors. |
 
@@ -99,6 +100,22 @@ it from the production branch.
 - GIF search uses GIPHY and is disabled when no public GIPHY key is available.
 - Pasted HTTPS image/GIF URLs are sent as media messages without copying the
   remote file into Storage.
+
+## Emoji rendering
+
+Standard emoji are stored and transported as Unicode, including flag regional
+indicator pairs and skin-tone modifier sequences. Do not replace them with
+image URLs in the message model or database.
+
+Rendering is platform-aware. Apple devices use their complete native emoji
+font. Other platforms use pinned Twemoji SVG assets through
+`PlatformEmojiText`, which avoids Windows flag and modifier-font gaps. The
+picker uses the matching artwork, and its selected skin tone is stored in
+`localStorage` under `soundspin:emoji-skin-tone`.
+
+The plain text composer remains Unicode so selection, copying, searching, and
+message length validation continue to work normally. The stable artwork is
+applied to sent messages, reply previews, quick reactions, and reaction chips.
 
 ## Troubleshooting
 
