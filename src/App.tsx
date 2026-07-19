@@ -949,7 +949,16 @@ function NowPlaying({
     : playbackPreference === "apple"
       ? "apple"
       : track?.provider || "youtube";
-  const preferredMapping = track?.mappings?.[preferredProvider] || (track?.provider === preferredProvider
+  const mappedPreferredTrack = track?.mappings?.[preferredProvider];
+  const trustedPreferredMapping = mappedPreferredTrack && (
+    preferredProvider !== "spotify" ||
+    track?.provider === "spotify" ||
+    mappedPreferredTrack.matchMethod === "isrc" ||
+    mappedPreferredTrack.matchMethod === "exact-metadata"
+  )
+    ? mappedPreferredTrack
+    : undefined;
+  const preferredMapping = trustedPreferredMapping || (track?.provider === preferredProvider
     ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
     : undefined);
   const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;

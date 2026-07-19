@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { AppleMusicApi } from "./apple-music.js";
-import { bestCatalogMatch, catalogMatchScore } from "./music.js";
+import {
+  bestCatalogMatch,
+  bestCertainCatalogMatch,
+  catalogMatchScore,
+  isCertainCatalogMatch
+} from "./music.js";
 import { SpotifyApi } from "./spotify.js";
 import { SpotifyAccounts } from "./spotify-accounts.js";
 import type { Store } from "./store.js";
@@ -16,6 +21,52 @@ test("catalog matching favors the same title, artist, and duration", () => {
   ];
   assert.ok(catalogMatchScore(candidates[1], source) > catalogMatchScore(candidates[0], source));
   assert.equal(bestCatalogMatch(candidates, source)?.id, "right");
+});
+
+test("certain catalog matching rejects a base track for a remix or edit", () => {
+  const baseTrack = {
+    provider: "spotify" as const,
+    id: "base",
+    title: "Midnight City",
+    artist: "M83",
+    durationMs: 244_000
+  };
+
+  assert.equal(isCertainCatalogMatch(baseTrack, {
+    title: "Midnight City (Eric Prydz Private Remix)",
+    artist: "M83",
+    durationMs: 244_100
+  }), false);
+  assert.equal(isCertainCatalogMatch(baseTrack, {
+    title: "M83 - Midnight City (Radio Edit)",
+    artist: "M83VEVO",
+    durationMs: 244_100
+  }), false);
+});
+
+test("certain catalog matching accepts only exact metadata with a close duration", () => {
+  const exact = {
+    provider: "spotify" as const,
+    id: "exact",
+    title: "Midnight City (Eric Prydz Remix)",
+    artist: "M83",
+    durationMs: 244_900
+  };
+  const wrongRemix = {
+    ...exact,
+    id: "wrong-remix",
+    title: "Midnight City (Someone Else Remix)"
+  };
+  const tooLong = { ...exact, id: "too-long", durationMs: 247_500 };
+  const source = {
+    title: "M83 - Midnight City (Eric Prydz Remix) [Official Audio]",
+    artist: "M83 - Topic",
+    durationMs: 244_000
+  };
+
+  assert.equal(bestCertainCatalogMatch([wrongRemix, tooLong, exact], source)?.id, "exact");
+  assert.equal(bestCertainCatalogMatch([wrongRemix, tooLong], source), undefined);
+  assert.equal(bestCertainCatalogMatch([exact], { ...source, durationMs: undefined }), undefined);
 });
 
 test("Spotify catalog adapter reuses its app token and maps tracks", async () => {

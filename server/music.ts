@@ -5,6 +5,7 @@ export interface ProviderTrackMapping {
   permalinkUrl?: string;
   artworkUrl?: string;
   storefront?: string;
+  matchMethod?: "source" | "isrc" | "exact-metadata" | "fuzzy";
 }
 
 export interface CatalogTrack {
@@ -40,6 +41,22 @@ export function normalizeTrackText(value: string) {
     .replace(/\b(official|music|video|audio|lyrics?|visuali[sz]er|hd|hq)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function normalizeTrackArtist(value: string) {
+  return normalizeTrackText(value)
+    // YouTube commonly exposes an official artist channel as "ArtistVEVO" or
+    // "Artist - Topic". These suffixes describe the channel, not the artist.
+    .replace(/(?:vevo|official|topic)$/g, "")
+    .trim();
+}
+
+function comparableTrackTitle(title: string, artist?: string) {
+  const normalizedTitle = normalizeTrackText(title);
+  const normalizedArtist = normalizeTrackArtist(artist || "");
+  return normalizedArtist && normalizedTitle.startsWith(`${normalizedArtist} `)
+    ? normalizedTitle.slice(normalizedArtist.length + 1).trim()
+    : normalizedTitle;
 }
 
 export function catalogMatchScore(
@@ -84,4 +101,37 @@ export function bestCatalogMatch(
     .map((candidate) => ({ candidate, score: catalogMatchScore(candidate, source) }))
     .filter(({ score }) => score >= minimumScore)
     .sort((left, right) => right.score - left.score)[0]?.candidate;
+}
+
+/**
+ * Cross-provider playback must not silently replace a remix, edit, live take,
+ * or cover with a similarly named Spotify recording. Without an ISRC, only an
+ * exact normalized title + artist and a near-identical duration is strong
+ * enough evidence to treat two catalog entries as the same recording.
+ */
+export function isCertainCatalogMatch(
+  candidate: CatalogTrack,
+  source: { title: string; artist?: string; durationMs?: number }
+) {
+  const sourceTitle = comparableTrackTitle(source.title, source.artist);
+  const candidateTitle = comparableTrackTitle(candidate.title, candidate.artist);
+  const sourceArtist = normalizeTrackArtist(source.artist || "");
+  const candidateArtist = normalizeTrackArtist(candidate.artist);
+
+  if (!sourceTitle || sourceTitle !== candidateTitle) return false;
+  if (!sourceArtist || sourceArtist !== candidateArtist) return false;
+  if (!source.durationMs || !candidate.durationMs) return false;
+  return Math.abs(source.durationMs - candidate.durationMs) <= 2_000;
+}
+
+export function bestCertainCatalogMatch(
+  candidates: CatalogTrack[],
+  source: { title: string; artist?: string; durationMs?: number }
+) {
+  return candidates
+    .filter((candidate) => isCertainCatalogMatch(candidate, source))
+    .sort((left, right) =>
+      Math.abs((left.durationMs || 0) - (source.durationMs || 0)) -
+      Math.abs((right.durationMs || 0) - (source.durationMs || 0))
+    )[0];
 }

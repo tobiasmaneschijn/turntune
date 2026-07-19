@@ -74,6 +74,7 @@ export interface ProviderTrackMapping {
   permalinkUrl?: string;
   artworkUrl?: string;
   storefront?: string;
+  matchMethod?: "source" | "isrc" | "exact-metadata" | "fuzzy";
 }
 
 export interface MusicProviderConnection {
