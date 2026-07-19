@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SoundCloudApi } from "./soundcloud.js";
 
-test("searchTracks authenticates once, filters blocked tracks, and maps stable URNs", async () => {
+test("search and URL resolution authenticate once and map playable tracks", async () => {
   const requests: Array<{ url: string; authorization?: string }> = [];
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -13,6 +13,20 @@ test("searchTracks authenticates once, filters blocked tracks, and maps stable U
       assert.match(authorization || "", /^Basic /);
       assert.equal(String(init?.body), "grant_type=client_credentials");
       return Response.json({ access_token: "app-token", refresh_token: "refresh-token", expires_in: 3600 });
+    }
+
+    if (url.startsWith("https://api.soundcloud.com/resolve?")) {
+      assert.equal(authorization, "OAuth app-token");
+      return Response.json({
+        kind: "track",
+        urn: "soundcloud:tracks:789",
+        title: "Resolved track",
+        duration: 210000,
+        permalink_url: "https://soundcloud.com/test/resolved-track",
+        access: "playable",
+        streamable: true,
+        user: { username: "Resolved uploader" }
+      });
     }
 
     assert.match(url, /^https:\/\/api\.soundcloud\.com\/tracks\?/);
@@ -43,6 +57,7 @@ test("searchTracks authenticates once, filters blocked tracks, and maps stable U
   const api = new SoundCloudApi("client-id", "client-secret", fetcher);
   const first = await api.searchTracks("test");
   const second = await api.searchTracks("another test");
+  const resolved = await api.resolveTrack("https://soundcloud.com/test/resolved-track");
 
   assert.deepEqual(first, [{
     provider: "soundcloud",
@@ -55,6 +70,9 @@ test("searchTracks authenticates once, filters blocked tracks, and maps stable U
     permalinkUrl: "https://soundcloud.com/test/playable-track"
   }]);
   assert.equal(second.length, 1);
+  assert.equal(resolved.id, "soundcloud:tracks:789");
+  assert.equal(resolved.artist, "Resolved uploader");
   assert.equal(requests.filter(({ url }) => url.includes("/oauth/token")).length, 1);
   assert.equal(requests.filter(({ url }) => url.includes("/tracks?")).length, 2);
+  assert.equal(requests.filter(({ url }) => url.includes("/resolve?")).length, 1);
 });

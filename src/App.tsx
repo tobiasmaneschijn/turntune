@@ -47,6 +47,10 @@ import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
+type SearchProvider = "youtube" | "soundcloud";
+
+const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
+
 function randomId() {
   return crypto.randomUUID();
 }
@@ -101,6 +105,12 @@ function providerLabel(provider: Provider) {
   if (provider === "spotify") return "Spotify";
   if (provider === "apple") return "Apple Music";
   return "YouTube";
+}
+
+function readSearchProvider(): SearchProvider {
+  return localStorage.getItem(SEARCH_PROVIDER_STORAGE_KEY) === "soundcloud"
+    ? "soundcloud"
+    : "youtube";
 }
 
 function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
@@ -892,7 +902,7 @@ function NowPlaying({
 }
 
 interface ProviderSearchResult {
-  provider: "youtube" | "soundcloud";
+  provider: SearchProvider;
   id: string;
   title: string;
   artist: string;
@@ -914,7 +924,7 @@ function MusicRail({
   setNotice: (message: string) => void;
 }) {
   const [tab, setTab] = useState<"history" | "search" | "queue">("queue");
-  const [provider, setProvider] = useState<Provider>("youtube");
+  const [provider, setProvider] = useState<SearchProvider>(readSearchProvider);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<ProviderSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -925,6 +935,7 @@ function MusicRail({
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
+  const [resolvingUrl, setResolvingUrl] = useState(false);
   const joinedDjQueue = snapshot.room.djQueueUserIds.includes(currentUserId);
   const canJoinDjQueue = snapshot.room.settings.djAccess !== "roles" ||
     snapshot.room.ownerUserId === currentUserId ||
@@ -992,9 +1003,41 @@ function MusicRail({
     enqueueTrack({ provider: "youtube", providerId, title: resolvedTitle || "YouTube track" });
   };
 
-  const add = (event: FormEvent) => {
+  const add = async (event: FormEvent) => {
     event.preventDefault();
-    void addTrack(url, title);
+    if (provider === "youtube") {
+      await addTrack(url, title);
+      return;
+    }
+
+    const trackUrl = url.trim();
+    if (!trackUrl) return setNotice("Please enter a SoundCloud track URL");
+    setResolvingUrl(true);
+    try {
+      const response = await fetch(`/api/soundcloud/resolve?url=${encodeURIComponent(trackUrl)}`, {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
+      });
+      const payload = await response.json() as {
+        result?: ProviderSearchResult;
+        error?: string;
+      };
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error || "Could not resolve that SoundCloud URL.");
+      }
+      enqueueTrack({
+        provider: "soundcloud",
+        providerId: payload.result.id,
+        title: title.trim() || payload.result.title,
+        artist: payload.result.artist,
+        artworkUrl: payload.result.thumbnail,
+        permalinkUrl: payload.result.permalinkUrl,
+        durationMs: payload.result.durationMs
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not resolve that SoundCloud URL.");
+    } finally {
+      setResolvingUrl(false);
+    }
   };
 
   const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
@@ -1144,7 +1187,9 @@ function MusicRail({
             <select
               value={provider}
               onChange={(event) => {
-                setProvider(event.target.value as Provider);
+                const nextProvider: SearchProvider = event.target.value === "soundcloud" ? "soundcloud" : "youtube";
+                setProvider(nextProvider);
+                localStorage.setItem(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
                 setSearchResults([]);
                 setSearchError("");
               }}
@@ -1201,17 +1246,17 @@ function MusicRail({
             )}
           </div>
 
-          {provider === "youtube" && <div className={`manual-add ${manualOpen ? "open" : ""}`}>
+          <div className={`manual-add ${manualOpen ? "open" : ""}`}>
             <button className="manual-add-heading" type="button" onClick={() => setManualOpen((open) => !open)}>
               <span>ADD BY URL</span>
-              <small>YouTube URL or video ID <ChevronDown size={13} /></small>
+              <small>{provider === "youtube" ? "YouTube URL or video ID" : "SoundCloud track URL"} <ChevronDown size={13} /></small>
             </button>
             {manualOpen && (
               <form className="rail-manual-add" onSubmit={add}>
                 <input
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
-                  placeholder="youtube.com/watch?v=…"
+                  placeholder={provider === "youtube" ? "youtube.com/watch?v=…" : "soundcloud.com/artist/track"}
                   autoFocus
                 />
                 <input
@@ -1219,10 +1264,10 @@ function MusicRail({
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Title (optional)"
                 />
-                <button type="submit"><PlusIcon size={14} /> Add manually</button>
+                <button type="submit" disabled={resolvingUrl}><PlusIcon size={14} /> {resolvingUrl ? "Resolving…" : "Add manually"}</button>
               </form>
             )}
-          </div>}
+          </div>
         </div>
       )}
 
@@ -1265,9 +1310,9 @@ function MusicRail({
           </div>
           {adding && (
             <form className="rail-quick-add" onSubmit={add}>
-              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Paste YouTube link" autoFocus />
+              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder={`Paste ${providerLabel(provider)} link`} autoFocus />
               <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title (optional)" />
-              <button type="submit">Add to queue</button>
+              <button type="submit" disabled={resolvingUrl}>{resolvingUrl ? "Resolving…" : `Add ${providerLabel(provider)} to queue`}</button>
             </form>
           )}
           <div className="rail-track-list">

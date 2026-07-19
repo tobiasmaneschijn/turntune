@@ -257,6 +257,7 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `PATCH /api/rooms/:slug` | Owner/moderator changes name, visibility, password, or DJ access mode. |
 | `GET /api/youtube/search` | Authenticated, cached server-side YouTube search; the API key stays secret. |
 | `GET /api/soundcloud/search` | Authenticated, cached server-side SoundCloud search; client credentials and OAuth tokens stay secret. |
+| `GET /api/soundcloud/resolve` | Authenticated SoundCloud URL resolution; only playable public tracks are returned. |
 
 Room role changes use Socket.IO because connected clients need an immediate
 snapshot. Room metadata changes use HTTP and explicitly broadcast after the

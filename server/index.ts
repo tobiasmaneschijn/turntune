@@ -135,6 +135,15 @@ const youtubeSearchSchema = z.object({
 
 const soundCloudSearchSchema = youtubeSearchSchema;
 
+const soundCloudResolveSchema = z.object({
+  url: z.string().trim().url().max(2048)
+}).superRefine((value, context) => {
+  const hostname = new URL(value.url).hostname.toLowerCase();
+  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
+    context.addIssue({ code: "custom", path: ["url"], message: "Enter a valid SoundCloud track URL." });
+  }
+});
+
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
   bio: z.string().trim().max(160).optional(),
@@ -985,6 +994,29 @@ app.get("/api/soundcloud/search", async (request, response) => {
     console.error("SoundCloud search failed", error);
     response.status(502).json({
       error: error instanceof Error ? error.message : "SoundCloud search failed."
+    });
+  }
+});
+
+app.get("/api/soundcloud/resolve", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!soundCloudApi.configured) {
+    return response.status(503).json({ error: "SoundCloud is not configured yet." });
+  }
+
+  const parsed = soundCloudResolveSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter a valid SoundCloud track URL." });
+  }
+
+  try {
+    response.json({ result: await soundCloudApi.resolveTrack(parsed.data.url) });
+  } catch (error) {
+    console.error("SoundCloud URL resolution failed", error);
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Could not resolve that SoundCloud URL."
     });
   }
 });

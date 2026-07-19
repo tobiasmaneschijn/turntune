@@ -16,6 +16,7 @@ interface SoundCloudToken {
 }
 
 interface SoundCloudTrack {
+  kind?: string;
   urn?: string;
   title?: string;
   artwork_url?: string | null;
@@ -60,6 +61,31 @@ function soundCloudError(payload: unknown, fallback: string) {
     errors?: Array<{ error_message?: string }>;
   };
   return value.error_description || value.message || value.errors?.[0]?.error_message || value.error || fallback;
+}
+
+function mapTrack(track: SoundCloudTrack): SoundCloudSearchResult | null {
+  if (
+    track.kind && track.kind !== "track" ||
+    !track.urn ||
+    !track.title ||
+    !track.permalink_url ||
+    track.access === "blocked" ||
+    track.streamable === false
+  ) {
+    return null;
+  }
+  return {
+    provider: "soundcloud",
+    id: track.urn,
+    title: track.title.slice(0, 120),
+    // SoundCloud attribution requires crediting the uploader. Prefer the
+    // account username even when publisher metadata names another artist.
+    artist: (track.user?.username || track.publisher_metadata?.artist || "SoundCloud creator").slice(0, 120),
+    thumbnail: track.artwork_url || track.user?.avatar_url || undefined,
+    duration: formatDuration(track.duration),
+    durationMs: track.duration,
+    permalinkUrl: track.permalink_url
+  };
 }
 
 /** Server-only SoundCloud API adapter for public catalog access. */
@@ -173,27 +199,20 @@ export class SoundCloudApi {
     }
 
     const tracks = Array.isArray(payload) ? payload : payload.collection || [];
-    return tracks
-      .filter((track): track is SoundCloudTrack & { urn: string; title: string; permalink_url: string } =>
-        Boolean(
-          track.urn &&
-          track.title &&
-          track.permalink_url &&
-          track.access !== "blocked" &&
-          track.streamable !== false
-        )
-      )
-      .map((track) => ({
-        provider: "soundcloud",
-        id: track.urn,
-        title: track.title.slice(0, 120),
-        // SoundCloud attribution requires crediting the uploader. Prefer the
-        // account username even when publisher metadata names another artist.
-        artist: (track.user?.username || track.publisher_metadata?.artist || "SoundCloud creator").slice(0, 120),
-        thumbnail: track.artwork_url || track.user?.avatar_url || undefined,
-        duration: formatDuration(track.duration),
-        durationMs: track.duration,
-        permalinkUrl: track.permalink_url
-      }));
+    return tracks.map(mapTrack).filter((track): track is SoundCloudSearchResult => Boolean(track));
+  }
+
+  async resolveTrack(permalinkUrl: string): Promise<SoundCloudSearchResult> {
+    const params = new URLSearchParams({ url: permalinkUrl });
+    const response = await this.apiGet(`https://api.soundcloud.com/resolve?${params}`);
+    const payload = await response.json() as SoundCloudTrack;
+    if (!response.ok) {
+      throw new Error(soundCloudError(payload, "Could not resolve that SoundCloud URL."));
+    }
+    const track = mapTrack(payload);
+    if (!track) {
+      throw new Error("That SoundCloud URL is not a playable public track.");
+    }
+    return track;
   }
 }
