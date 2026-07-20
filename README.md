@@ -121,12 +121,10 @@ synchronized playback and listener presence. Replies and reactions are added by
 [`docs/chat.md`](docs/chat.md) for the data flow, code map, schema notes, and
 troubleshooting guide.
 
-Profiles and progression are created by
-`20260716220100_profiles_and_progression.sql`. Every account receives a public
-SoundSpin profile and a level-based avatar collection. The server awards 10 XP
-once per played track instance when the first eligible listener likes it;
-unique XP events and server-side avatar validation prevent duplicate awards or
-unlock bypasses.
+Profiles are created by `20260716220100_profiles_and_progression.sql` and
+simplified by `20260720110538_simplify_profiles.sql`. Every account receives a
+public SoundSpin profile with a display name, bio, avatar, and theme. Available
+avatars and themes are validated server-side before a profile is updated.
 
 Application admins are marked on `soundspin_profiles` by the
 `is_app_admin` column. Assign or remove the marker only from the Supabase

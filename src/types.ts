@@ -18,39 +18,15 @@ export interface SoundSpinProfile {
   avatar_url: string | null;
   avatar_path: string | null;
   theme_key: string;
-  featured_badge_key: string;
-  signature_tracks: ProfileSignatureTrack[];
-  xp: number;
-  songs_liked: number;
   created_at: string;
   updated_at: string;
 }
 
-export type SignatureTrackSlot = "anthem" | "obsession" | "guilty-pleasure";
-
-export interface ProfileSignatureTrack {
-  slot: SignatureTrackSlot;
-  provider: Provider;
-  providerId: string;
-  title: string;
-  artist?: string;
-  artworkUrl?: string;
-  permalinkUrl?: string;
-}
-
-export interface SoundSpinProfileHighlights {
-  rooms_played: number;
-  favorite_track_title: string | null;
-  favorite_track_artist: string | null;
-  favorite_track_wins: number;
-}
-
-export interface SoundSpinUnlock {
+export interface SoundSpinProfileOption {
   key: string;
-  kind: "avatar" | "theme" | "badge";
+  kind: "avatar" | "theme";
   name: string;
-  required_level: number;
-  metadata: { glyph?: string; gradient?: string; imageUrl?: string; description?: string };
+  metadata: { gradient?: string; imageUrl?: string; description?: string };
 }
 
 export interface Track {

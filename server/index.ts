@@ -8,7 +8,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
-import { TRACK_LIKED_XP } from "./progression.js";
 import { uniqueUsers } from "./presence.js";
 import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import { AppleMusicApi } from "./apple-music.js";
@@ -219,22 +218,7 @@ const profileUpdateSchema = z.object({
   bio: z.string().trim().max(160).optional(),
   avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
   customAvatarPath: z.string().regex(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|gif)$/).optional(),
-  themeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
-  featuredBadgeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
-  signatureTracks: z.array(z.object({
-    slot: z.enum(["anthem", "obsession", "guilty-pleasure"]),
-    provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
-    providerId: z.string().min(1).max(200),
-    title: z.string().trim().min(1).max(120),
-    artist: z.string().trim().min(1).max(120).optional(),
-    artworkUrl: z.string().url().max(2048).refine((url) => url.startsWith("https://"), "Artwork must use HTTPS.").optional(),
-    permalinkUrl: z.string().url().max(2048).optional()
-  })).max(3).superRefine((tracks, context) => {
-    const slots = tracks.map((track) => track.slot);
-    if (new Set(slots).size !== slots.length) {
-      context.addIssue({ code: "custom", message: "Each signature track needs a unique slot." });
-    }
-  }).optional()
+  themeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional()
 }).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.")
   .refine((value) => !(value.avatarKey && value.customAvatarPath), "Choose an unlocked avatar or a custom upload, not both.");
 
@@ -913,30 +897,8 @@ io.on("connection", (socket) => {
     } else {
       membership.room.vibe.votes[membership.user.id] = parsed.data.value;
     }
-    let awardedXp = false;
-    if (parsed.data.value === 1) {
-      try {
-        awardedXp = await store.awardTrackLikedXp(
-          track.addedBy.id,
-          membership.room.id,
-          track
-        );
-      } catch (error) {
-        console.error(error);
-      }
-    }
     await store.saveRoom(membership.room);
     broadcast(membership.room);
-    if (awardedXp) {
-      for (const [socketId, roomUser] of roomUsers.get(membership.room.id) || []) {
-        if (roomUser.id === track.addedBy.id) {
-          io.to(socketId).emit("profile:xp", {
-            amount: TRACK_LIKED_XP,
-            message: `${membership.user.name} liked your track`
-          });
-        }
-      }
-    }
     reply?.({ ok: true });
   });
 
@@ -1125,13 +1087,12 @@ app.get("/api/profiles/:userId", async (request, response) => {
   const userId = z.string().uuid().safeParse(request.params.userId);
   if (!userId.success) return response.status(400).json({ error: "Invalid profile." });
   try {
-    const [profile, unlocks, highlights] = await Promise.all([
+    const [profile, options] = await Promise.all([
       store.getProfile(userId.data),
-      store.getUnlocks(),
-      store.getProfileHighlights(userId.data)
+      store.getProfileOptions()
     ]);
     if (!profile) return response.status(404).json({ error: "Profile not found." });
-    response.json({ profile, unlocks, highlights });
+    response.json({ profile, options });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? error.message : "Could not load profile."
