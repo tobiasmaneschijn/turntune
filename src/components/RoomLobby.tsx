@@ -24,6 +24,7 @@ interface RoomLobbyProps {
   onOpenProfile: () => void;
   onSignOut: () => void;
   feedbackButton: ReactNode;
+  adminButton?: ReactNode;
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -55,7 +56,8 @@ export function RoomLobby({
   onOpenRoom,
   onOpenProfile,
   onSignOut,
-  feedbackButton
+  feedbackButton,
+  adminButton
 }: RoomLobbyProps) {
   const [rooms, setRooms] = useState<RoomDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,6 +107,7 @@ export function RoomLobby({
       <header className="lobby-header">
         <Brand />
         <div className="lobby-header-actions">
+          {adminButton}
           {feedbackButton}
           <Button variant="ghost" className="lobby-profile h-10 px-2" onClick={onOpenProfile}>
             <Avatar user={currentUser} size={28} />

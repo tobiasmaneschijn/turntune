@@ -8,6 +8,7 @@ import {
   Heart,
   House,
   ListMusic,
+  LayoutDashboard,
   Maximize2,
   Minimize2,
   RefreshCw,
@@ -24,6 +25,7 @@ import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
 import { UserSettingsDialog } from "./components/UserSettingsDialog";
 import { FeedbackButton } from "./components/FeedbackDialog";
+import { AdminDashboard } from "./components/AdminDashboard";
 import {
   CopyIcon,
   MessageIcon,
@@ -87,6 +89,10 @@ function getProfilePageId() {
   return match?.[1] || null;
 }
 
+function getAdminPage() {
+  return location.pathname === "/admin";
+}
+
 function readProfile(): User {
   const stored = localStorage.getItem("soundspin-profile");
   if (stored) {
@@ -146,6 +152,7 @@ export function App() {
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
+  const [adminPage, setAdminPage] = useState(getAdminPage);
   const [profileReady, setProfileReady] = useState(false);
   const [profileRefresh, setProfileRefresh] = useState(0);
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
@@ -314,6 +321,7 @@ export function App() {
         return nextRoomId;
       });
       setProfilePageId(getProfilePageId());
+      setAdminPage(getAdminPage());
     };
     addEventListener("popstate", onPopState);
     return () => removeEventListener("popstate", onPopState);
@@ -397,6 +405,7 @@ export function App() {
     setRoomJoinError("");
     setRoomSettingsOpen(false);
     setUserSettingsOpen(false);
+    setAdminPage(false);
     history.pushState({}, "", "/");
     setRoomId(null);
   };
@@ -426,6 +435,50 @@ export function App() {
     setProfilePageId(userId);
   };
 
+  const openAdmin = () => {
+    socket.disconnect();
+    setSnapshot(null);
+    setRoomId(null);
+    setRoomPassword("");
+    setRoomPasswordRequired(false);
+    setRoomJoinError("");
+    history.pushState({ from: location.pathname }, "", "/admin");
+    setProfilePageId(null);
+    setAdminPage(true);
+  };
+
+  if (adminPage && auth.session && profile.isAppAdmin) {
+    return (
+      <AdminDashboard
+        accessToken={auth.session.access_token}
+        currentUser={profile}
+        onBack={() => {
+          history.pushState({}, "", "/");
+          setAdminPage(false);
+        }}
+        onOpenRoom={(slug) => {
+          setAdminPage(false);
+          openRoom(slug);
+        }}
+      />
+    );
+  }
+
+  if (adminPage && auth.session && !profile.isAppAdmin) {
+    return (
+      <main className="room-access-screen">
+        <Card className="room-access-error">
+          <CardHeader>
+            <Logo />
+            <CardTitle>Admin access required</CardTitle>
+            <CardDescription>This dashboard is only available to SoundSpin administrators.</CardDescription>
+          </CardHeader>
+          <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
+        </Card>
+      </main>
+    );
+  }
+
   if (profilePageId && auth.session) {
     return (
       <ProfilePage
@@ -452,6 +505,7 @@ export function App() {
           localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
           setProfile(nextProfile);
         }}
+        onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
       />
     );
   }
@@ -465,6 +519,7 @@ export function App() {
         onOpenProfile={() => openProfile(profile.id)}
         onSignOut={() => void auth.client?.auth.signOut()}
         feedbackButton={<FeedbackButton userId={profile.id} />}
+        adminButton={profile.isAppAdmin ? <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button> : null}
       />
     );
   }
@@ -528,6 +583,7 @@ export function App() {
         </div>
         <div className="header-actions">
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
+          {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
           <FeedbackButton userId={profile.id} roomSlug={snapshot.room.id} />
           <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (

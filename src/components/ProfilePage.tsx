@@ -8,6 +8,7 @@ import {
   Headphones,
   ImageUp,
   LockKeyhole,
+  LayoutDashboard,
   Music2,
   Palette,
   Search,
@@ -82,13 +83,15 @@ export function ProfilePage({
   accessToken,
   currentUser,
   onBack,
-  onOwnProfileUpdated
+  onOwnProfileUpdated,
+  onOpenAdmin
 }: {
   profileId: string;
   accessToken: string;
   currentUser: User;
   onBack: () => void;
   onOwnProfileUpdated: (profile: SoundSpinProfile) => void;
+  onOpenAdmin?: () => void;
 }) {
   const [profile, setProfile] = useState<SoundSpinProfile | null>(null);
   const [unlocks, setUnlocks] = useState<SoundSpinUnlock[]>([]);
@@ -301,7 +304,10 @@ export function ProfilePage({
         <div className="profile-header-inner">
           <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
           <div className="profile-wordmark" aria-label="SoundSpin"><span className="logo-mark"><i /><i /><i /></span>SoundSpin</div>
-          <div className="profile-header-actions"><FeedbackButton userId={currentUser.id} /></div>
+          <div className="profile-header-actions">
+            {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
+            <FeedbackButton userId={currentUser.id} />
+          </div>
         </div>
       </header>
 

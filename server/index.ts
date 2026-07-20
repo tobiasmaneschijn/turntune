@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { createServer } from "node:http";
 import { createAdminClient, verifyCredentials } from "@supabase/server/core";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
@@ -57,7 +58,8 @@ const authEnabled = Boolean(
   supabaseJwksUrl &&
   store.usesSupabase
 );
-const signupAdmin = authEnabled && signupInvitePassword ? createAdminClient() : null;
+const supabaseAdmin: SupabaseClient | null = authEnabled ? createAdminClient() : null;
+const signupAdmin = supabaseAdmin && signupInvitePassword ? supabaseAdmin : null;
 
 // Live coordination is process-local. `roomUsers` is socket presence, while
 // `roomDjUsers` also keeps a disconnected DJ's display data during the grace
@@ -261,6 +263,11 @@ const djRoleSchema = z.object({
   dj: z.boolean()
 });
 
+const feedbackStatusSchema = z.object({
+  status: z.enum(["new", "reviewing", "planned", "resolved", "closed"]),
+  adminNote: z.string().trim().max(2000).default("")
+});
+
 function roomSlug(name: string) {
   const base = name
     .toLowerCase()
@@ -387,6 +394,17 @@ async function getApiUserId(request: express.Request) {
     { auth: "user" }
   );
   return error ? null : data.userClaims?.id || null;
+}
+
+async function getApiAdminUserId(request: express.Request): Promise<
+  { ok: true; userId: string } |
+  { ok: false; error: string; status: 401 | 403 }
+> {
+  const userId = await getApiUserId(request);
+  if (!userId) return { ok: false, error: "Authentication required.", status: 401 };
+  const profile = await store.getProfile(userId);
+  if (!profile?.is_app_admin) return { ok: false, error: "Administrator access required.", status: 403 };
+  return { ok: true, userId };
 }
 
 app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
@@ -927,6 +945,174 @@ io.on("connection", (socket) => {
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
+});
+
+app.get("/api/admin/dashboard", async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  try {
+    const admin = await getApiAdminUserId(request);
+    if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
+    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
+
+    const activityStart = new Date();
+    activityStart.setUTCHours(0, 0, 0, 0);
+    activityStart.setUTCDate(activityStart.getUTCDate() - 13);
+    const activityStartIso = activityStart.toISOString();
+
+    const [
+      userCount,
+      roomCount,
+      feedbackCount,
+      openFeedbackCount,
+      messageCount,
+      feedbackResult,
+      roomResult,
+      recentUsers,
+      recentFeedback,
+      recentMessages
+    ] = await Promise.all([
+      supabaseAdmin.from("soundspin_profiles").select("*", { count: "exact", head: true }),
+      supabaseAdmin.from("soundspin_rooms").select("*", { count: "exact", head: true }),
+      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }),
+      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }).in("status", ["new", "reviewing", "planned"]),
+      supabaseAdmin.from("soundspin_messages").select("*", { count: "exact", head: true }),
+      supabaseAdmin
+        .from("soundspin_feedback")
+        .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, status, admin_note, created_at, updated_at")
+        .order("created_at", { ascending: false })
+        .limit(100),
+      supabaseAdmin
+        .from("soundspin_rooms")
+        .select("slug, name, owner_id, is_public, created_at, updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(50),
+      supabaseAdmin.from("soundspin_profiles").select("created_at").gte("created_at", activityStartIso),
+      supabaseAdmin.from("soundspin_feedback").select("created_at").gte("created_at", activityStartIso),
+      supabaseAdmin.from("soundspin_messages").select("created_at").gte("created_at", activityStartIso)
+    ]);
+
+    const queryError = [
+      userCount.error,
+      roomCount.error,
+      feedbackCount.error,
+      openFeedbackCount.error,
+      messageCount.error,
+      feedbackResult.error,
+      roomResult.error,
+      recentUsers.error,
+      recentFeedback.error,
+      recentMessages.error
+    ].find(Boolean);
+    if (queryError) throw queryError;
+
+    const feedback = feedbackResult.data || [];
+    const userIds = [...new Set(feedback.map((item) => item.user_id))];
+    const profileResult = userIds.length
+      ? await supabaseAdmin.from("soundspin_profiles").select("user_id, display_name, avatar_key, avatar_url").in("user_id", userIds)
+      : { data: [], error: null };
+    if (profileResult.error) throw profileResult.error;
+    const profiles = new Map((profileResult.data || []).map((item) => [item.user_id, item]));
+
+    const screenshotPaths = feedback.flatMap((item) => item.screenshot_paths || []);
+    const signedResult = screenshotPaths.length
+      ? await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrls(screenshotPaths, 15 * 60)
+      : { data: [], error: null };
+    if (signedResult.error) throw signedResult.error;
+    const signedUrls = new Map((signedResult.data || []).map((item) => [item.path, item.signedUrl]));
+
+    const activity = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(activityStart);
+      date.setUTCDate(activityStart.getUTCDate() + index);
+      return { date: date.toISOString().slice(0, 10), users: 0, feedback: 0, messages: 0 };
+    });
+    const activityByDate = new Map(activity.map((item) => [item.date, item]));
+    for (const item of recentUsers.data || []) {
+      const bucket = activityByDate.get(item.created_at.slice(0, 10));
+      if (bucket) bucket.users += 1;
+    }
+    for (const item of recentFeedback.data || []) {
+      const bucket = activityByDate.get(item.created_at.slice(0, 10));
+      if (bucket) bucket.feedback += 1;
+    }
+    for (const item of recentMessages.data || []) {
+      const bucket = activityByDate.get(item.created_at.slice(0, 10));
+      if (bucket) bucket.messages += 1;
+    }
+
+    response.json({
+      metrics: {
+        users: userCount.count || 0,
+        rooms: roomCount.count || 0,
+        feedback: feedbackCount.count || 0,
+        openFeedback: openFeedbackCount.count || 0,
+        messages: messageCount.count || 0
+      },
+      activity,
+      feedback: feedback.map((item) => ({
+        id: item.id,
+        userId: item.user_id,
+        userName: profiles.get(item.user_id)?.display_name || "Unknown listener",
+        userAvatarUrl: profiles.get(item.user_id)?.avatar_url || null,
+        message: item.message,
+        roomSlug: item.room_slug,
+        pagePath: item.page_path,
+        viewport: item.viewport,
+        status: item.status,
+        adminNote: item.admin_note,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+        screenshots: (item.screenshot_paths || []).map((path: string) => ({ path, url: signedUrls.get(path) || null }))
+      })),
+      rooms: (roomResult.data || []).map((room) => ({
+        slug: room.slug,
+        name: room.name,
+        isPublic: room.is_public,
+        listenerCount: uniqueUsers(roomUsers.get(room.slug)?.values() || []).length,
+        createdAt: room.created_at,
+        updatedAt: room.updated_at
+      }))
+    });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load admin data." });
+  }
+});
+
+app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), async (request, response) => {
+  response.set("Cache-Control", "no-store");
+  try {
+    const admin = await getApiAdminUserId(request);
+    if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
+    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
+
+    const feedbackId = z.string().uuid().safeParse(request.params.feedbackId);
+    const update = feedbackStatusSchema.safeParse(request.body);
+    if (!feedbackId.success || !update.success) {
+      return response.status(400).json({ error: update.success ? "Invalid feedback item." : update.error.issues[0]?.message });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("soundspin_feedback")
+      .update({
+        status: update.data.status,
+        admin_note: update.data.adminNote,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", feedbackId.data)
+      .select("id, status, admin_note, updated_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return response.status(404).json({ error: "Feedback item not found." });
+    response.json({
+      feedback: {
+        id: data.id,
+        status: data.status,
+        adminNote: data.admin_note,
+        updatedAt: data.updated_at
+      }
+    });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not update feedback." });
+  }
 });
 
 app.get("/api/profiles/:userId", async (request, response) => {
