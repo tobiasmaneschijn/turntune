@@ -518,7 +518,7 @@ export function App() {
         onOpenRoom={openRoom}
         onOpenProfile={() => openProfile(profile.id)}
         onSignOut={() => void auth.client?.auth.signOut()}
-        feedbackButton={<FeedbackButton userId={profile.id} />}
+        feedbackButton={<FeedbackButton userId={profile.id} diagnosticContext={{ surface: "room-directory" }} />}
         adminButton={profile.isAppAdmin ? <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button> : null}
       />
     );
@@ -584,7 +584,26 @@ export function App() {
         <div className="header-actions">
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
           {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-          <FeedbackButton userId={profile.id} roomSlug={snapshot.room.id} />
+          <FeedbackButton
+            userId={profile.id}
+            roomSlug={snapshot.room.id}
+            diagnosticContext={{
+              surface: "room",
+              roomRole: snapshot.room.ownerUserId === profile.id
+                ? "owner"
+                : snapshot.room.moderatorUserIds.includes(profile.id)
+                  ? "moderator"
+                  : snapshot.room.djUserId === profile.id || snapshot.room.djRoleUserIds.includes(profile.id)
+                    ? "dj"
+                    : "listener",
+              socketConnected: connected,
+              playbackProvider: snapshot.room.playback.track?.provider || null,
+              playbackState: snapshot.room.playback.track
+                ? snapshot.room.playback.playing ? "playing" : "paused"
+                : "idle",
+              preferredPlayback: userSettings.playback.preference
+            }}
+          />
           <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
             <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>

@@ -978,7 +978,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
       supabaseAdmin.from("soundspin_messages").select("*", { count: "exact", head: true }),
       supabaseAdmin
         .from("soundspin_feedback")
-        .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, status, admin_note, created_at, updated_at")
+        .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, category, impact, diagnostics, status, admin_note, created_at, updated_at")
         .order("created_at", { ascending: false })
         .limit(100),
       supabaseAdmin
@@ -1057,6 +1057,9 @@ app.get("/api/admin/dashboard", async (request, response) => {
         roomSlug: item.room_slug,
         pagePath: item.page_path,
         viewport: item.viewport,
+        category: item.category,
+        impact: item.impact,
+        diagnostics: item.diagnostics,
         status: item.status,
         adminNote: item.admin_note,
         createdAt: item.created_at,

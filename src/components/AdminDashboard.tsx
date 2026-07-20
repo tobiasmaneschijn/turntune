@@ -37,6 +37,9 @@ interface AdminFeedback {
   roomSlug: string | null;
   pagePath: string;
   viewport: { width?: number; height?: number };
+  category: "bug" | "idea" | "playback" | "chat" | "account" | "other";
+  impact: "minor" | "blocking" | "unusable";
+  diagnostics: Record<string, unknown>;
   status: FeedbackStatus;
   adminNote: string;
   createdAt: string;
@@ -70,6 +73,21 @@ const statusLabels: Record<FeedbackStatus, string> = {
   planned: "Planned",
   resolved: "Resolved",
   closed: "Closed"
+};
+
+const categoryLabels: Record<AdminFeedback["category"], string> = {
+  bug: "Bug",
+  idea: "Idea",
+  playback: "Playback",
+  chat: "Chat",
+  account: "Account",
+  other: "Other"
+};
+
+const impactLabels: Record<AdminFeedback["impact"], string> = {
+  minor: "Minor impact",
+  blocking: "Blocking",
+  unusable: "App unusable"
 };
 
 async function adminApi<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -141,7 +159,7 @@ export function AdminDashboard({
     return (data?.feedback || []).filter((item) => {
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
       if (!query) return true;
-      return [item.userName, item.message, item.roomSlug, item.pagePath]
+      return [item.userName, item.message, item.roomSlug, item.pagePath, item.category, item.impact]
         .some((value) => value?.toLowerCase().includes(query));
     });
   }, [data?.feedback, search, statusFilter]);
@@ -232,7 +250,7 @@ export function AdminDashboard({
                   <button type="button" key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}>
                     <span className={`feedback-status-dot ${item.status}`} />
                     <span className="admin-feedback-summary"><strong>{feedbackExcerpt(item)}</strong><small>{item.userName} · {formatDate(item.createdAt)}</small></span>
-                    {item.screenshots.length > 0 && <Badge variant="outline">{item.screenshots.length} img</Badge>}
+                    <Badge variant="outline">{categoryLabels[item.category]}</Badge>
                     <ChevronRight />
                   </button>
                 ))}
@@ -244,7 +262,12 @@ export function AdminDashboard({
               {selectedFeedback ? (
                 <>
                   <div className="admin-feedback-detail-header">
-                    <div><span className={`feedback-status-label ${selectedFeedback.status}`}>{statusLabels[selectedFeedback.status]}</span><span>#{selectedFeedback.id.slice(0, 8)}</span></div>
+                    <div>
+                      <span className={`feedback-status-label ${selectedFeedback.status}`}>{statusLabels[selectedFeedback.status]}</span>
+                      <span className={`feedback-impact-label ${selectedFeedback.impact}`}>{impactLabels[selectedFeedback.impact]}</span>
+                      <span>{categoryLabels[selectedFeedback.category]}</span>
+                      <span>#{selectedFeedback.id.slice(0, 8)}</span>
+                    </div>
                     <time>{formatDate(selectedFeedback.createdAt)}</time>
                   </div>
                   <div className="admin-feedback-author">
@@ -267,6 +290,14 @@ export function AdminDashboard({
                     <span><strong>Viewport</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : "Unknown"}</span>
                     <span><strong>Submitted</strong>{new Date(selectedFeedback.createdAt).toLocaleString()}</span>
                   </div>
+                  {Object.keys(selectedFeedback.diagnostics || {}).length > 0 ? (
+                    <details className="admin-feedback-diagnostics">
+                      <summary>Technical diagnostics</summary>
+                      <pre>{JSON.stringify(selectedFeedback.diagnostics, null, 2)}</pre>
+                    </details>
+                  ) : (
+                    <div className="admin-diagnostics-empty">Technical diagnostics were not included by the user.</div>
+                  )}
                   <div className="admin-feedback-workflow">
                     <div>
                       <Label htmlFor="admin-feedback-status">Status</Label>

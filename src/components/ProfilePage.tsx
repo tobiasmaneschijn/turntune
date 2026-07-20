@@ -306,7 +306,7 @@ export function ProfilePage({
           <div className="profile-wordmark" aria-label="SoundSpin"><span className="logo-mark"><i /><i /><i /></span>SoundSpin</div>
           <div className="profile-header-actions">
             {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-            <FeedbackButton userId={currentUser.id} />
+            <FeedbackButton userId={currentUser.id} diagnosticContext={{ surface: "profile" }} />
           </div>
         </div>
       </header>

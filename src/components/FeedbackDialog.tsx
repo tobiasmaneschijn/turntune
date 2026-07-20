@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, ImagePlus, Lightbulb, Paperclip, X } from "lucide-react";
+import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
+import { buildFeedbackDiagnostics, type FeedbackDiagnosticContext } from "../feedback-diagnostics";
 import { getSupabaseClient } from "../supabase";
 import { Button } from "./ui/button";
 import {
@@ -11,6 +12,7 @@ import {
   DialogTitle
 } from "./ui/dialog";
 import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 
 const MAX_SCREENSHOTS = 5;
@@ -30,9 +32,21 @@ function screenshotExtension(file: File) {
   return "jpg";
 }
 
-export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?: string }) {
+export function FeedbackButton({
+  userId,
+  roomSlug,
+  diagnosticContext
+}: {
+  userId: string;
+  roomSlug?: string;
+  diagnosticContext?: FeedbackDiagnosticContext;
+}) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [category, setCategory] = useState<"bug" | "idea" | "playback" | "chat" | "account" | "other">("bug");
+  const [impact, setImpact] = useState<"minor" | "blocking" | "unusable">("minor");
+  const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
+  const [diagnosticPreview, setDiagnosticPreview] = useState<Record<string, unknown>>({});
   const [screenshots, setScreenshots] = useState<ScreenshotAttachment[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -105,6 +119,8 @@ export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?
     attachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
     setScreenshots([]);
     setMessage("");
+    setCategory("bug");
+    setImpact("minor");
     setError("");
   };
 
@@ -143,8 +159,11 @@ export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?
         message: message.trim() || null,
         screenshot_paths: uploadedPaths,
         room_slug: roomSlug || null,
-        page_path: `${location.pathname}${location.search}`,
-        viewport: { width: window.innerWidth, height: window.innerHeight }
+        page_path: location.pathname,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        category,
+        impact,
+        diagnostics: includeDiagnostics ? diagnosticPreview : {}
       });
       if (insertError) throw insertError;
 
@@ -166,7 +185,13 @@ export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?
       <Button
         variant="ghost"
         size="icon"
-        onClick={() => { setSent(false); setOpen(true); }}
+        onClick={() => {
+          setSent(false);
+          setDiagnosticPreview(buildFeedbackDiagnostics(diagnosticContext || {
+            surface: roomSlug ? "room" : "room-directory"
+          }));
+          setOpen(true);
+        }}
         title="Send feedback"
         aria-label="Send feedback"
       >
@@ -190,6 +215,28 @@ export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?
                 <DialogTitle className="feedback-title"><Lightbulb /> Send feedback</DialogTitle>
                 <DialogDescription>Tell us what happened and attach anything that helps show it.</DialogDescription>
               </DialogHeader>
+
+              <div className="feedback-classification">
+                <div className="feedback-field">
+                  <Label htmlFor="feedback-category">Category</Label>
+                  <select id="feedback-category" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
+                    <option value="bug">Bug</option>
+                    <option value="idea">Idea</option>
+                    <option value="playback">Playback</option>
+                    <option value="chat">Chat</option>
+                    <option value="account">Account</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div className="feedback-field">
+                  <Label htmlFor="feedback-impact">Impact</Label>
+                  <select id="feedback-impact" value={impact} onChange={(event) => setImpact(event.target.value as typeof impact)}>
+                    <option value="minor">Minor</option>
+                    <option value="blocking">Blocking something</option>
+                    <option value="unusable">App unusable</option>
+                  </select>
+                </div>
+              </div>
 
               <div className="feedback-field">
                 <Label htmlFor="feedback-message">What would you like us to know?</Label>
@@ -257,6 +304,21 @@ export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?
                   </label>
                 )}
                 <small>PNG, JPEG, or WebP · 5 MB max per image</small>
+              </div>
+
+              <div className="feedback-diagnostics">
+                <div className="feedback-diagnostics-toggle">
+                  <span className="feedback-diagnostics-icon"><Info /></span>
+                  <span><strong>Include technical diagnostics</strong><small>Browser, device, app state, performance, and recent sanitized errors.</small></span>
+                  <Switch checked={includeDiagnostics} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
+                </div>
+                {includeDiagnostics && (
+                  <details>
+                    <summary>View included data</summary>
+                    <p>No cookies, tokens, query strings, clipboard text, chat history, or precise location are included.</p>
+                    <pre>{JSON.stringify(diagnosticPreview, null, 2)}</pre>
+                  </details>
+                )}
               </div>
 
               {error && <div className="dialog-error" role="alert">{error}</div>}
