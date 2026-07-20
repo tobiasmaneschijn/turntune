@@ -45,6 +45,7 @@ import {
 import { useChatScroll } from '@/hooks/use-chat-scroll'
 import { useRealtimeChat } from '@/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupInput } from '@/components/ui/input-group'
 import { Input } from '@/components/ui/input'
 import type { User } from '@/types'
 
@@ -414,7 +415,7 @@ export const RealtimeChat = ({
             unreadStartRef.current = null
           }}
         >
-          {unreadCount > 0 && <span>{unreadCount} new</span>}
+          <span>{unreadCount > 0 ? `${unreadCount} new` : 'Jump to latest'}</span>
           <ArrowDown className="size-4" />
         </button>
       )}
@@ -584,7 +585,7 @@ export const RealtimeChat = ({
             ))}
           </div>
         )}
-        <div className="chat-composer-bar">
+        <InputGroup className="chat-composer-bar">
           <Button
             className="chat-composer-add"
             type="button"
@@ -597,7 +598,7 @@ export const RealtimeChat = ({
           >
             <Plus className="size-5" />
           </Button>
-          <Input
+          <InputGroupInput
             ref={messageInputRef}
             className="chat-composer-input"
             type="text"
@@ -672,7 +673,7 @@ export const RealtimeChat = ({
           >
             <Send className="size-4" />
           </Button>
-        </div>
+        </InputGroup>
       </form>
     </div>
   )

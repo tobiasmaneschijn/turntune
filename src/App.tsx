@@ -9,6 +9,7 @@ import {
   House,
   ListMusic,
   LayoutDashboard,
+  LogOut,
   Maximize2,
   Minimize2,
   RefreshCw,
@@ -49,6 +50,8 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./components/ui/empty";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useGroupRef } from "./components/ui/resizable";
 import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { socket } from "./socket";
@@ -59,6 +62,29 @@ import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./ty
 type SearchProvider = Provider;
 
 const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
+const ROOM_LAYOUT_STORAGE_KEY = "soundspin-room-layout";
+
+type RoomPanelLayout = Record<"radio" | "player" | "chat", number>;
+
+function roomPanelPreset(compact: boolean): RoomPanelLayout {
+  return compact
+    ? { radio: 16.5, player: 22.5, chat: 61 }
+    : { radio: 16.5, player: 46.5, chat: 37 };
+}
+
+function readRoomPanelLayout(compact: boolean): RoomPanelLayout {
+  try {
+    const value = localStorage.getItem(`${ROOM_LAYOUT_STORAGE_KEY}:${compact ? "chat" : "player"}`);
+    if (!value) return roomPanelPreset(compact);
+    const parsed = JSON.parse(value) as Partial<RoomPanelLayout>;
+    if ([parsed.radio, parsed.player, parsed.chat].every((size) => typeof size === "number" && size > 0)) {
+      return parsed as RoomPanelLayout;
+    }
+  } catch {
+    // Fall back to the tuned presets if an old saved layout is invalid.
+  }
+  return roomPanelPreset(compact);
+}
 
 function randomId() {
   return crypto.randomUUID();
@@ -149,6 +175,9 @@ function TrackArtwork({ track, compact = false }: { track: Track; compact?: bool
 export function App() {
   const [userSettings, setUserSettings] = useState<SoundSpinUserSettings>(readUserSettings);
   const compactPlayer = userSettings.playback.compactPlayer;
+  const roomPanelGroupRef = useGroupRef();
+  const previousCompactPlayerRef = useRef(compactPlayer);
+  const [mobileRoomPane, setMobileRoomPane] = useState<"radio" | "player" | "chat">("player");
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
@@ -180,6 +209,12 @@ export function App() {
     document.documentElement.classList.toggle("reduced-motion", userSettings.appearance.reducedMotion);
     document.documentElement.style.setProperty("--artwork-blur", `${userSettings.appearance.artworkBlur}px`);
   }, [userSettings.appearance.artworkBlur, userSettings.appearance.reducedMotion]);
+
+  useEffect(() => {
+    if (previousCompactPlayerRef.current === compactPlayer) return;
+    previousCompactPlayerRef.current = compactPlayer;
+    roomPanelGroupRef.current?.setLayout(readRoomPanelLayout(compactPlayer));
+  }, [compactPlayer, roomPanelGroupRef]);
 
   useEffect(() => {
     const djUserId = snapshot?.room.djUserId || null;
@@ -571,11 +606,12 @@ export function App() {
         <div className="room-heading">
           <div>
             <strong>{snapshot.room.name}</strong>
-            <small><span className="live-dot" /> {snapshot.users.length} listening</small>
+            <small><span className="live-dot" /> {snapshot.users.length} {snapshot.users.length === 1 ? "listener" : "listeners"}</small>
           </div>
         </div>
         <div className="header-actions">
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
+          <div className="header-tool-group">
           {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
           <FeedbackButton
             userId={profile.id}
@@ -601,6 +637,7 @@ export function App() {
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
             <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>
           )}
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -618,8 +655,8 @@ export function App() {
             <Avatar user={profile} size={30} />
           </Button>
           {auth.enabled && (
-            <Button variant="ghost" size="sm" className="sign-out" onClick={() => void auth.client?.auth.signOut()}>
-              Sign out
+            <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={() => void auth.client?.auth.signOut()}>
+              <LogOut />
             </Button>
           )}
         </div>
@@ -628,37 +665,62 @@ export function App() {
       {notice && <div className="toast">{notice}</div>}
 
       <section className={`room-layout ${compactPlayer ? "compact-player-layout" : ""}`}>
-        <MusicRail
-          snapshot={snapshot}
-          currentUserId={profile.id}
-          accessToken={auth.session?.access_token}
-          setNotice={setNotice}
-        />
-        <div className="player-column">
-          <NowPlaying
-            snapshot={snapshot}
-            isDj={isDj}
-            canControlPlayback={canControlPlayback}
-            currentUserId={profile.id}
-            accessToken={auth.session?.access_token}
-            compact={compactPlayer}
-            onToggleCompact={() => changeUserSettings({
-              ...userSettings,
-              playback: { ...userSettings.playback, compactPlayer: !compactPlayer }
-            })}
-            settingsOpen={userSettingsOpen}
-            onCloseSettings={() => setUserSettingsOpen(false)}
-            userSettings={userSettings}
-            onUserSettingsChange={changeUserSettings}
-          />
-        </div>
-        <RoomChat
-          snapshot={snapshot}
-          currentUser={profile}
-          client={auth.client!}
-          onOpenProfile={openProfile}
-          notifications={userSettings.notifications}
-        />
+        <nav className="room-mobile-tabs" aria-label="Room panels">
+          <button className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
+          <button className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
+          <button className={mobileRoomPane === "chat" ? "active" : ""} onClick={() => setMobileRoomPane("chat")}><MessageIcon /> Chat</button>
+        </nav>
+        <ResizablePanelGroup
+          className="room-panels"
+          defaultLayout={readRoomPanelLayout(compactPlayer)}
+          groupRef={roomPanelGroupRef}
+          orientation="horizontal"
+          onLayoutChanged={(layout, meta) => {
+            if (meta.isUserInteraction) {
+              localStorage.setItem(`${ROOM_LAYOUT_STORAGE_KEY}:${compactPlayer ? "chat" : "player"}`, JSON.stringify(layout));
+            }
+          }}
+        >
+          <ResizablePanel className="room-panel room-panel-radio" id="radio" minSize="260px" maxSize="340px" data-active={mobileRoomPane === "radio"}>
+            <MusicRail
+              snapshot={snapshot}
+              currentUserId={profile.id}
+              accessToken={auth.session?.access_token}
+              setNotice={setNotice}
+            />
+          </ResizablePanel>
+          <ResizableHandle className="room-resize-handle" withHandle />
+          <ResizablePanel className="room-panel room-panel-player" id="player" minSize="340px" data-active={mobileRoomPane === "player"}>
+            <div className="player-column">
+              <NowPlaying
+                snapshot={snapshot}
+                isDj={isDj}
+                canControlPlayback={canControlPlayback}
+                currentUserId={profile.id}
+                accessToken={auth.session?.access_token}
+                compact={compactPlayer}
+                onToggleCompact={() => changeUserSettings({
+                  ...userSettings,
+                  playback: { ...userSettings.playback, compactPlayer: !compactPlayer }
+                })}
+                settingsOpen={userSettingsOpen}
+                onCloseSettings={() => setUserSettingsOpen(false)}
+                userSettings={userSettings}
+                onUserSettingsChange={changeUserSettings}
+              />
+            </div>
+          </ResizablePanel>
+          <ResizableHandle className="room-resize-handle" withHandle />
+          <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="380px" data-active={mobileRoomPane === "chat"}>
+            <RoomChat
+              snapshot={snapshot}
+              currentUser={profile}
+              client={auth.client!}
+              onOpenProfile={openProfile}
+              notifications={userSettings.notifications}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </section>
       {roomSettingsOpen && auth.session && (
         <RoomSettingsDialog
@@ -825,10 +887,15 @@ function VibeMeter({
   const score = eligibleListenerCount
     ? votes.reduce<number>((total, vote) => total + vote, 0) / eligibleListenerCount
     : 0;
+  const scorePercent = votes.length
+    ? Math.max(4, ((score + 1) / 2) * 100)
+    : 0;
   const currentVote = vibe?.votes[currentUserId];
   const addedByCurrentUser = track?.addedBy.id === currentUserId;
+  const positiveVotes = votes.filter((vote) => vote === 1).length;
+  const negativeVotes = votes.filter((vote) => vote === -1).length;
   const label =
-    !votes.length ? "Be the first" :
+    !votes.length ? (addedByCurrentUser ? "Waiting for votes" : "Be the first") :
     score >= .55 ? "Electric" :
     score >= .15 ? "Feeling it" :
     score <= -.55 ? "Not landing" :
@@ -843,14 +910,26 @@ function VibeMeter({
   return (
     <section className="vibe-meter" aria-label="Vibe meter for the current track">
       <div className="vibe-meter-heading">
-        <span>VIBE METER</span>
-        <small>
-          {addedByCurrentUser
-            ? "You added this track"
-            : `${votes.length} / ${eligibleListenerCount} voted`}
-        </small>
+        <span>Vibe meter</span>
+        <small>{votes.length} / {eligibleListenerCount} voted</small>
       </div>
-      <div className="vibe-meter-body">
+      {addedByCurrentUser ? (
+        <div className="vibe-owner-state">
+          <span className="vibe-owner-icon"><UsersIcon size={17} /></span>
+          <span className="vibe-owner-copy">
+            <strong>Listening for reactions</strong>
+            <small>You added this track, so only your listeners can vote.</small>
+          </span>
+          <span className="vibe-owner-results" aria-live="polite">
+            <strong>{label}</strong>
+            <span>{positiveVotes} love it / {negativeVotes} not my vibe</span>
+            <span className="vibe-score" aria-hidden="true">
+              <i style={{ width: `${scorePercent}%` }} />
+            </span>
+          </span>
+        </div>
+      ) : (
+        <div className="vibe-meter-body">
         <button
           type="button"
           className={currentVote === -1 ? "active negative" : ""}
@@ -865,7 +944,7 @@ function VibeMeter({
         <div className="vibe-summary">
           <strong>{label}</strong>
           <div className="vibe-score" aria-hidden="true">
-            <i style={{ width: `${Math.max(4, ((score + 1) / 2) * 100)}%` }} />
+            <i style={{ width: `${scorePercent}%` }} />
           </div>
         </div>
         <button
@@ -879,7 +958,8 @@ function VibeMeter({
           <Heart size={16} />
           <span>Love it</span>
         </button>
-      </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -1070,10 +1150,10 @@ function NowPlaying({
     <>
       <section className={`now-playing panel ${compact ? "compact" : ""}`}>
       <div className="now-playing-heading">
-        <div className="section-kicker">NOW PLAYING</div>
-        <button type="button" onClick={onToggleCompact} title={compact ? "Expand player" : "Use compact player"}>
+        <div className="section-kicker">Now playing</div>
+        <button type="button" onClick={onToggleCompact} title={compact ? "Focus the player" : "Give chat more room"}>
           {compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
-          <span>{compact ? "Expand" : "Compact"}</span>
+          <span>{compact ? "Focus player" : "Focus chat"}</span>
         </button>
       </div>
       {keepSpotifyWebMounted && (
@@ -1094,6 +1174,7 @@ function NowPlaying({
       )}
       {track ? (
         <>
+          <div className="now-playing-main">
           <div className="track-stage">
             <TrackArtwork track={track} />
             {effectiveProvider === "spotify" && previewArtwork && (
@@ -1174,6 +1255,7 @@ function NowPlaying({
             <div className="record-ring ring-one" />
             <div className="record-ring ring-two" />
           </div>
+          <div className="player-details">
           <div className="current-track">
             <div>
               <h2>{track.title}</h2>
@@ -1237,6 +1319,8 @@ function NowPlaying({
                 })}
               />
             </label>
+          </div>
+          </div>
           </div>
           <VibeMeter snapshot={snapshot} currentUserId={currentUserId} />
         </>
@@ -1475,8 +1559,7 @@ function MusicRail({
   return (
     <aside className="music-rail panel">
       <div className="music-rail-heading">
-        <span>RADIO</span>
-        <strong>One song per DJ</strong>
+        <span>Radio</span>
       </div>
 
       <section className="dj-lineup" aria-label="DJ queue">
@@ -1668,12 +1751,13 @@ function MusicRail({
         <div className="rail-pane">
           <div className="rail-pane-title queue-title">
             <div>
-              <span>MY QUEUE</span>
               <small>Private · other listeners cannot see these tracks</small>
             </div>
-            <button className="rail-add-button" disabled={!joinedDjQueue} title={joinedDjQueue ? "Add a track" : "Join the DJ queue first"} onClick={() => { setAdding(!adding); setTab("queue"); }}>
-              <PlusIcon size={14} /> Add
-            </button>
+            {snapshot.room.queue.length > 0 && (
+              <button className="rail-add-button" disabled={!joinedDjQueue} title={joinedDjQueue ? "Add a track" : "Join the DJ queue first"} onClick={() => { setAdding(!adding); setTab("queue"); }}>
+                <PlusIcon size={14} /> Add
+              </button>
+            )}
           </div>
           {adding && (
             <form className="rail-quick-add" onSubmit={add}>
@@ -1726,7 +1810,18 @@ function MusicRail({
               </div>
             )})}
             {!snapshot.room.queue.length && (
-              <div className="rail-empty"><ListMusic size={22} /><p>{joinedDjQueue ? "Your queue is empty. Add a song for your next turn." : "Join the DJ queue to line up your own music."}</p></div>
+              <Empty className="rail-empty rail-empty-action">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><ListMusic size={20} /></EmptyMedia>
+                  <EmptyTitle>{joinedDjQueue ? "Your queue is empty" : "Join the DJ queue"}</EmptyTitle>
+                  <EmptyDescription>{joinedDjQueue ? "Add one song for your next turn on the decks." : "Join the lineup before adding your own music."}</EmptyDescription>
+                </EmptyHeader>
+                {joinedDjQueue && (
+                  <EmptyContent>
+                    <Button size="sm" onClick={() => setAdding(true)}><PlusIcon /> Add a song</Button>
+                  </EmptyContent>
+                )}
+              </Empty>
             )}
           </div>
         </div>
