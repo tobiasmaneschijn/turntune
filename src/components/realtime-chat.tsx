@@ -110,9 +110,7 @@ export const RealtimeChat = ({
   const previousMessageCountRef = useRef(0)
   const initializedScrollRef = useRef(false)
   const unreadStartRef = useRef<number | null>(null)
-  const [giphyKey, setGiphyKey] = useState<string | undefined>(
-    import.meta.env.VITE_GIPHY_API_KEY || undefined
-  )
+  const [giphyConfigured, setGiphyConfigured] = useState(false)
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
   const roomMentionOptions = useMemo(
     () => buildRoomMentionOptions(roomUsers, user.id),
@@ -128,16 +126,15 @@ export const RealtimeChat = ({
   }, [mentionQuery, roomMentionOptions])
 
   useEffect(() => {
-    if (giphyKey) return
     void fetch('/api/config')
       .then((response) => response.json())
-      .then((config: { giphyKey?: string | null }) => {
-        if (config.giphyKey) setGiphyKey(config.giphyKey)
+      .then((config: { giphyConfigured?: boolean }) => {
+        setGiphyConfigured(Boolean(config.giphyConfigured))
       })
       .catch(() => {
         // GIF support remains disabled when runtime configuration is unavailable.
       })
-  }, [giphyKey])
+  }, [])
 
   const baseMessages = useMemo(
     () => mergeChatMessages(initialMessages, realtimeMessages),
@@ -334,11 +331,12 @@ export const RealtimeChat = ({
   }
 
   const loadGifs = async (query = '') => {
-    if (!giphyKey) return
+    if (!giphyConfigured) return
     setComposerError('')
 
     try {
-      setGifs(await fetchGiphyGifs(giphyKey, query))
+      const { data } = await client.auth.getSession()
+      setGifs(await fetchGiphyGifs(query, data.session?.access_token))
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : 'Could not load GIFs.')
     }
@@ -429,7 +427,7 @@ export const RealtimeChat = ({
               role="tab"
               aria-selected={showGiphy}
               className={showGiphy ? 'active' : undefined}
-              disabled={!giphyKey}
+              disabled={!giphyConfigured}
               onClick={() => {
                 setShowEmoji(false)
                 setShowGiphy(true)
@@ -646,9 +644,9 @@ export const RealtimeChat = ({
             type="button"
             variant="ghost"
             size="icon"
-            disabled={!isConnected || !giphyKey}
-            aria-label={giphyKey ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
-            title={giphyKey ? 'Add GIF' : 'Set VITE_GIPHY_API_KEY to enable GIFs'}
+            disabled={!isConnected || !giphyConfigured}
+            aria-label={giphyConfigured ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
+            title={giphyConfigured ? 'Add GIF' : 'Set GIPHY_API_KEY to enable GIFs'}
             onClick={toggleGiphy}
           >
             <span>GIF</span>

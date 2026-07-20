@@ -14,6 +14,7 @@ import { AppleMusicApi } from "./apple-music.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
 import { SpotifyAccounts } from "./spotify-accounts.js";
 import { SpotifyApi } from "./spotify.js";
+import { GiphyApi } from "./giphy.js";
 import {
   invitePasswordMatches,
   inviteSignupSchema,
@@ -46,6 +47,7 @@ const soundCloudApi = new SoundCloudApi(
   process.env.SOUNDCLOUD_CLIENT_SECRET
 );
 const spotifyApi = new SpotifyApi();
+const giphyApi = new GiphyApi();
 const appleMusicApi = new AppleMusicApi();
 const spotifyAccounts = new SpotifyAccounts(store, spotifyApi);
 const authEnabled = Boolean(
@@ -169,6 +171,9 @@ const soundCloudSearchSchema = youtubeSearchSchema;
 const spotifySearchSchema = youtubeSearchSchema;
 const appleMusicSearchSchema = youtubeSearchSchema.extend({
   storefront: z.string().regex(/^[a-z]{2}$/i).optional()
+});
+const giphySearchSchema = z.object({
+  q: z.string().trim().max(100).optional().default("")
 });
 
 const spotifyResolveSchema = z.object({
@@ -1300,6 +1305,31 @@ app.get("/api/apple/resolve", async (request, response) => {
   }
 });
 
+app.get("/api/giphy", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!giphyApi.configured) {
+    return response.status(503).json({ error: "GIPHY is not configured yet." });
+  }
+  const parsed = giphySearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "GIF searches must be 100 characters or fewer." });
+  }
+  if (!consumeProviderSearchLimit(request)) {
+    return response.status(429).json({ error: "Too many searches. Please try again shortly." });
+  }
+
+  try {
+    response.json({ results: await giphyApi.gifs(parsed.data.q) });
+  } catch (error) {
+    console.error("GIPHY request failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "Could not load GIFs."
+    });
+  }
+});
+
 app.get("/api/music/connections", async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
@@ -1456,7 +1486,7 @@ app.get("/api/apple/token", async (request, response) => {
 
 app.get("/api/config", (_request, response) => {
   response.json({
-    giphyKey: process.env.GIPHY_API_KEY || null,
+    giphyConfigured: giphyApi.configured,
     music: {
       spotifyConfigured: spotifyAccounts.configured,
       appleMusicConfigured: appleMusicApi.configured

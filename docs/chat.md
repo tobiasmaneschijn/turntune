@@ -116,7 +116,8 @@ it from the production branch.
 - Uploaded images go to the public `chat-media` bucket under a path beginning
   with the authenticated user ID.
 - Uploads are restricted to supported image MIME types and 6 MB.
-- GIF search uses GIPHY and is disabled when no public GIPHY key is available.
+- GIF search uses the server-side GIPHY proxy and is disabled when no
+  `GIPHY_API_KEY` is configured.
 - Pasted HTTPS image/GIF URLs are sent as media messages without copying the
   remote file into Storage.
 

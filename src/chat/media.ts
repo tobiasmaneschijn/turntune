@@ -61,34 +61,17 @@ export function readPastedChatMedia(clipboard: DataTransfer): PastedChatMedia | 
   }
 }
 
-export async function fetchGiphyGifs(apiKey: string, query = ''): Promise<GiphyGif[]> {
-  const endpoint = query.trim() ? 'search' : 'trending'
-  const params = new URLSearchParams({
-    api_key: apiKey,
-    limit: '18',
-    rating: 'pg',
-    bundle: 'messaging_non_clips',
-  })
+export async function fetchGiphyGifs(query = '', accessToken?: string): Promise<GiphyGif[]> {
+  const params = new URLSearchParams()
   if (query.trim()) params.set('q', query.trim())
-
-  const response = await fetch(`https://api.giphy.com/v1/gifs/${endpoint}?${params}`)
-  if (!response.ok) throw new Error('Could not load GIFs.')
-
-  const payload = await response.json() as {
-    data: Array<{
-      id: string
-      title: string
-      images: {
-        fixed_width: { url: string }
-        fixed_width_small?: { url: string }
-      }
-    }>
+  const suffix = params.size ? `?${params}` : ''
+  const response = await fetch(`/api/giphy${suffix}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  })
+  const payload = await response.json().catch(() => ({})) as {
+    error?: string
+    results?: GiphyGif[]
   }
-
-  return payload.data.map((gif) => ({
-    id: gif.id,
-    title: gif.title,
-    url: gif.images.fixed_width.url,
-    preview: gif.images.fixed_width_small?.url || gif.images.fixed_width.url,
-  }))
+  if (!response.ok) throw new Error(payload.error || 'Could not load GIFs.')
+  return payload.results || []
 }

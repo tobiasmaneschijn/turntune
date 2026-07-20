@@ -85,7 +85,6 @@ APPLE_MUSIC_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY--
 APPLE_MUSIC_STOREFRONT=us
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-VITE_GIPHY_API_KEY=your-giphy-api-key
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
@@ -151,9 +150,10 @@ does not grant room moderation or database permissions.
 Emoji support works without additional configuration. Uploaded chat images are
 stored in the public `chat-media` Supabase Storage bucket created by
 `20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a
-GIPHY developer key in `VITE_GIPHY_API_KEY`; without it, the GIF button remains
-disabled. In Dokploy, set `GIPHY_API_KEY` instead; SoundSpin exposes that public
-key to the browser through its runtime configuration endpoint.
+GIPHY developer key in the server-side `GIPHY_API_KEY`; without it, the GIF
+button remains disabled. SoundSpin proxies GIF searches so the key is never
+returned to the browser and browser CORS policy does not apply to GIPHY's API
+response.
 
 YouTube keyword search requires a YouTube Data API v3 key in
 `YOUTUBE_API_KEY`. Keep this server-side variable in `.env` locally and in
