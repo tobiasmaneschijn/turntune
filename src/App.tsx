@@ -154,7 +154,6 @@ export function App() {
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
   const [adminPage, setAdminPage] = useState(getAdminPage);
   const [profileReady, setProfileReady] = useState(false);
-  const [profileRefresh, setProfileRefresh] = useState(0);
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
   const [roomPassword, setRoomPassword] = useState("");
@@ -357,22 +356,16 @@ export function App() {
       // Ignore any late snapshot from that room while this page targets another.
       if (next.room.id === roomId) setSnapshot(next);
     };
-    const onXp = (event: { amount: number; message: string }) => {
-      setNotice(`+${event.amount} XP · ${event.message}`);
-      setProfileRefresh((revision) => revision + 1);
-    };
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("room:snapshot", onSnapshot);
-    socket.on("profile:xp", onXp);
     if (socket.connected) onConnect();
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("room:snapshot", onSnapshot);
-      socket.off("profile:xp", onXp);
     };
   }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, profile.avatarUrl, profile.isAppAdmin, auth.loading, auth.enabled, auth.session?.access_token]);
 
@@ -482,7 +475,7 @@ export function App() {
   if (profilePageId && auth.session) {
     return (
       <ProfilePage
-        key={`${profilePageId}:${profileRefresh}`}
+        key={profilePageId}
         profileId={profilePageId}
         accessToken={auth.session.access_token}
         currentUser={profile}
