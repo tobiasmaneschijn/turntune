@@ -665,11 +665,6 @@ export function App() {
       {notice && <div className="toast">{notice}</div>}
 
       <section className={`room-layout ${compactPlayer ? "compact-player-layout" : ""}`}>
-        <nav className="room-mobile-tabs" aria-label="Room panels">
-          <button className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
-          <button className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
-          <button className={mobileRoomPane === "chat" ? "active" : ""} onClick={() => setMobileRoomPane("chat")}><MessageIcon /> Chat</button>
-        </nav>
         <ResizablePanelGroup
           className="room-panels"
           defaultLayout={readRoomPanelLayout(compactPlayer)}
@@ -721,6 +716,11 @@ export function App() {
             />
           </ResizablePanel>
         </ResizablePanelGroup>
+        <nav className="room-mobile-tabs" aria-label="Room panels">
+          <button className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
+          <button className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
+          <button className={mobileRoomPane === "chat" ? "active" : ""} onClick={() => setMobileRoomPane("chat")}><MessageIcon /> Chat</button>
+        </nav>
       </section>
       {roomSettingsOpen && auth.session && (
         <RoomSettingsDialog

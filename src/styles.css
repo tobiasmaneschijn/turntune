@@ -2035,14 +2035,20 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
 .feedback-diagnostics-toggle small { font-size: 11px; }
 
 @media (max-width: 1024px) {
-  .room-layout {
+  .room-layout,
+  .room-layout.compact-player-layout {
     height: calc(100dvh - 64px);
     padding: 8px;
     display: grid;
-    grid-template-rows: 44px minmax(0, 1fr);
+    grid-template-areas:
+      "panels"
+      "tabs";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 44px;
     gap: 8px;
   }
   .room-mobile-tabs {
+    grid-area: tabs;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 3px;
@@ -2066,14 +2072,44 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
   }
   .room-mobile-tabs button svg { width: 15px; height: 15px; }
   .room-mobile-tabs button.active { background: var(--secondary); color: var(--foreground); }
-  .room-panels { display: block !important; overflow: hidden !important; }
-  .room-panel { width: 100% !important; height: 100% !important; display: none !important; flex: none !important; }
-  .room-panel[data-active="true"] { display: block !important; }
+  .room-panels {
+    grid-area: panels;
+    position: relative;
+    display: block !important;
+    overflow: hidden !important;
+  }
+  .room-panels > [data-panel] {
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute !important;
+    inset: 0;
+    display: flex !important;
+    flex: 0 0 100% !important;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .room-panels > [data-panel][data-active="true"] {
+    z-index: 1;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .room-panel {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    flex: none !important;
+  }
   .room-resize-handle { display: none !important; }
   .music-rail,
   .chat,
   .player-column,
-  .now-playing { height: 100%; }
+  .now-playing {
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+  }
 }
 
 @media (max-width: 640px) {
@@ -2086,7 +2122,12 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
   .invite-button > span { display: none; }
   .header-actions { gap: 2px; }
   .invite-button { width: 36px; padding: 0; }
-  .room-layout { padding: 6px; grid-template-rows: 42px minmax(0, 1fr); gap: 6px; }
+  .room-layout,
+  .room-layout.compact-player-layout {
+    padding: 6px 6px max(6px, env(safe-area-inset-bottom));
+    grid-template-rows: minmax(0, 1fr) 42px;
+    gap: 6px;
+  }
   .music-rail-heading,
   .now-playing-heading,
   .chat-header { min-height: 52px; padding-inline: 14px; }
