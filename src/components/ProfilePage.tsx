@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { DevFlair } from "./DevFlair";
+import { FeedbackButton } from "./FeedbackDialog";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -300,7 +301,7 @@ export function ProfilePage({
         <div className="profile-header-inner">
           <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
           <div className="profile-wordmark" aria-label="SoundSpin"><span className="logo-mark"><i /><i /><i /></span>SoundSpin</div>
-          <span aria-hidden="true" />
+          <div className="profile-header-actions"><FeedbackButton userId={currentUser.id} /></div>
         </div>
       </header>
 

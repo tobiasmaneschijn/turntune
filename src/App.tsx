@@ -23,6 +23,7 @@ import { ProfilePage } from "./components/ProfilePage";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
 import { UserSettingsDialog } from "./components/UserSettingsDialog";
+import { FeedbackButton } from "./components/FeedbackDialog";
 import {
   CopyIcon,
   MessageIcon,
@@ -463,6 +464,7 @@ export function App() {
         onOpenRoom={openRoom}
         onOpenProfile={() => openProfile(profile.id)}
         onSignOut={() => void auth.client?.auth.signOut()}
+        feedbackButton={<FeedbackButton userId={profile.id} />}
       />
     );
   }
@@ -526,6 +528,7 @@ export function App() {
         </div>
         <div className="header-actions">
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
+          <FeedbackButton userId={profile.id} roomSlug={snapshot.room.id} />
           <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
           {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
             <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>

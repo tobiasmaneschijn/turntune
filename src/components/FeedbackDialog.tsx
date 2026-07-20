@@ -1,0 +1,276 @@
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { CheckCircle2, ImagePlus, Lightbulb, Paperclip, X } from "lucide-react";
+import { getSupabaseClient } from "../supabase";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "./ui/dialog";
+import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
+
+const MAX_SCREENSHOTS = 5;
+const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
+const SCREENSHOT_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const SCREENSHOT_ACCEPT = SCREENSHOT_TYPES.join(",");
+
+interface ScreenshotAttachment {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+function screenshotExtension(file: File) {
+  if (file.type === "image/png") return "png";
+  if (file.type === "image/webp") return "webp";
+  return "jpg";
+}
+
+export function FeedbackButton({ userId, roomSlug }: { userId: string; roomSlug?: string }) {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [screenshots, setScreenshots] = useState<ScreenshotAttachment[]>([]);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [sent, setSent] = useState(false);
+  const attachmentsRef = useRef(screenshots);
+
+  attachmentsRef.current = screenshots;
+
+  useEffect(() => () => {
+    attachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+  }, []);
+
+  const addScreenshots = useCallback((files: File[]) => {
+    setError("");
+
+    const invalid = files.find((file) => !SCREENSHOT_TYPES.includes(file.type));
+    if (invalid) {
+      setError("Screenshots must be PNG, JPEG, or WebP images.");
+      return;
+    }
+
+    const tooLarge = files.find((file) => file.size > MAX_SCREENSHOT_BYTES);
+    if (tooLarge) {
+      setError("Each screenshot must be 5 MB or smaller.");
+      return;
+    }
+
+    setScreenshots((current) => {
+      const availableSlots = MAX_SCREENSHOTS - current.length;
+      if (files.length > availableSlots) {
+        setError(`You can attach up to ${MAX_SCREENSHOTS} screenshots.`);
+      }
+      return [
+        ...current,
+        ...files.slice(0, availableSlots).map((file) => ({
+          id: crypto.randomUUID(),
+          file,
+          previewUrl: URL.createObjectURL(file)
+        }))
+      ];
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open || sent) return;
+
+    const handlePaste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
+
+      if (!files.length) return;
+      event.preventDefault();
+      addScreenshots(files);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [addScreenshots, open, sent]);
+
+  const removeScreenshot = (id: string) => {
+    setScreenshots((current) => current.filter((attachment) => {
+      if (attachment.id === id) URL.revokeObjectURL(attachment.previewUrl);
+      return attachment.id !== id;
+    }));
+  };
+
+  const clearForm = () => {
+    attachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    setScreenshots([]);
+    setMessage("");
+    setError("");
+  };
+
+  const submitFeedback = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!message.trim() && !screenshots.length) {
+      setError("Add a description or at least one screenshot.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    const uploadedPaths: string[] = [];
+
+    try {
+      const client = await getSupabaseClient();
+      if (!client) throw new Error("Feedback is unavailable while authentication is disabled.");
+
+      const feedbackId = crypto.randomUUID();
+      for (const attachment of screenshots) {
+        const path = `${userId}/${feedbackId}/${attachment.id}.${screenshotExtension(attachment.file)}`;
+        const { error: uploadError } = await client.storage
+          .from("feedback-screenshots")
+          .upload(path, attachment.file, {
+            cacheControl: "3600",
+            contentType: attachment.file.type,
+            upsert: false
+          });
+        if (uploadError) throw uploadError;
+        uploadedPaths.push(path);
+      }
+
+      const { error: insertError } = await client.from("soundspin_feedback").insert({
+        id: feedbackId,
+        user_id: userId,
+        message: message.trim() || null,
+        screenshot_paths: uploadedPaths,
+        room_slug: roomSlug || null,
+        page_path: `${location.pathname}${location.search}`,
+        viewport: { width: window.innerWidth, height: window.innerHeight }
+      });
+      if (insertError) throw insertError;
+
+      clearForm();
+      setSent(true);
+    } catch (submitError) {
+      const client = await getSupabaseClient().catch(() => null);
+      if (client && uploadedPaths.length) {
+        await client.storage.from("feedback-screenshots").remove(uploadedPaths);
+      }
+      setError(submitError instanceof Error ? submitError.message : "Could not send feedback. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => { setSent(false); setOpen(true); }}
+        title="Send feedback"
+        aria-label="Send feedback"
+      >
+        <Lightbulb />
+      </Button>
+
+      <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) setOpen(nextOpen); }}>
+        <DialogContent className="feedback-dialog max-w-xl">
+          {sent ? (
+            <div className="feedback-success">
+              <span className="feedback-success-icon"><CheckCircle2 /></span>
+              <DialogHeader className="pr-0 text-center">
+                <DialogTitle>Thanks for the feedback</DialogTitle>
+                <DialogDescription>Your note has been sent to the SoundSpin team.</DialogDescription>
+              </DialogHeader>
+              <Button onClick={() => setOpen(false)}>Done</Button>
+            </div>
+          ) : (
+            <form onSubmit={submitFeedback} className="feedback-form">
+              <DialogHeader>
+                <DialogTitle className="feedback-title"><Lightbulb /> Send feedback</DialogTitle>
+                <DialogDescription>Tell us what happened and attach anything that helps show it.</DialogDescription>
+              </DialogHeader>
+
+              <div className="feedback-field">
+                <Label htmlFor="feedback-message">What would you like us to know?</Label>
+                <Textarea
+                  id="feedback-message"
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Share an idea, report a problem, or tell us what could be better…"
+                  rows={5}
+                  maxLength={4000}
+                  autoFocus
+                />
+                <small>{message.length.toLocaleString()} / 4,000</small>
+              </div>
+
+              <div className="feedback-field">
+                <div className="feedback-attachment-heading">
+                  <Label htmlFor="feedback-screenshots">Screenshots</Label>
+                  <span>{screenshots.length} / {MAX_SCREENSHOTS}</span>
+                </div>
+
+                {screenshots.length > 0 && (
+                  <div className="feedback-previews" aria-label="Attached screenshots">
+                    {screenshots.map((attachment, index) => (
+                      <div className="feedback-preview" key={attachment.id}>
+                        <img src={attachment.previewUrl} alt={`Screenshot ${index + 1}`} />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="icon-xs"
+                          onClick={() => removeScreenshot(attachment.id)}
+                          aria-label={`Remove screenshot ${index + 1}`}
+                        >
+                          <X />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {screenshots.length < MAX_SCREENSHOTS && (
+                  <label
+                    className="feedback-dropzone"
+                    htmlFor="feedback-screenshots"
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      addScreenshots(Array.from(event.dataTransfer.files));
+                    }}
+                  >
+                    <span className="feedback-dropzone-icon"><ImagePlus /></span>
+                    <span><strong>Paste a screenshot</strong><small>Press Ctrl+V anywhere in this window</small></span>
+                    <span className="feedback-divider">or</span>
+                    <span className="feedback-browse"><Paperclip /> Choose files</span>
+                    <input
+                      id="feedback-screenshots"
+                      type="file"
+                      accept={SCREENSHOT_ACCEPT}
+                      multiple
+                      onChange={(event) => {
+                        addScreenshots(Array.from(event.target.files || []));
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+                <small>PNG, JPEG, or WebP · 5 MB max per image</small>
+              </div>
+
+              {error && <div className="dialog-error" role="alert">{error}</div>}
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
+                <Button type="submit" disabled={submitting || (!message.trim() && !screenshots.length)}>
+                  {submitting ? "Sending…" : "Send feedback"}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

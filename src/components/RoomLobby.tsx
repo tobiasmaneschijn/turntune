@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Badge } from "./ui/badge";
@@ -23,6 +23,7 @@ interface RoomLobbyProps {
   onOpenRoom: (slug: string, password?: string) => void;
   onOpenProfile: () => void;
   onSignOut: () => void;
+  feedbackButton: ReactNode;
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -53,7 +54,8 @@ export function RoomLobby({
   currentUser,
   onOpenRoom,
   onOpenProfile,
-  onSignOut
+  onSignOut,
+  feedbackButton
 }: RoomLobbyProps) {
   const [rooms, setRooms] = useState<RoomDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +105,7 @@ export function RoomLobby({
       <header className="lobby-header">
         <Brand />
         <div className="lobby-header-actions">
+          {feedbackButton}
           <Button variant="ghost" className="lobby-profile h-10 px-2" onClick={onOpenProfile}>
             <Avatar user={currentUser} size={28} />
             <span><strong>{currentUser.name}</strong><small>Profile</small></span>
