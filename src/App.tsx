@@ -864,7 +864,7 @@ function formatPlaybackTime(seconds: number) {
     : `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
-function VibeMeter({
+function BangOMeter({
   snapshot,
   currentUserId
 }: {
@@ -884,23 +884,38 @@ function VibeMeter({
     .filter(([userId]) => eligibleUserIds.has(userId))
     .map(([, vote]) => vote);
   const eligibleListenerCount = eligibleUserIds.size;
-  const score = eligibleListenerCount
-    ? votes.reduce<number>((total, vote) => total + vote, 0) / eligibleListenerCount
+  const sentiment = votes.length
+    ? votes.reduce<number>((total, vote) => total + vote, 0) / votes.length
     : 0;
-  const scorePercent = votes.length
-    ? Math.max(4, ((score + 1) / 2) * 100)
+  const participation = eligibleListenerCount
+    ? votes.length / eligibleListenerCount
     : 0;
   const currentVote = vibe?.votes[currentUserId];
   const addedByCurrentUser = track?.addedBy.id === currentUserId;
   const positiveVotes = votes.filter((vote) => vote === 1).length;
   const negativeVotes = votes.filter((vote) => vote === -1).length;
   const label =
-    !votes.length ? (addedByCurrentUser ? "Waiting for votes" : "Be the first") :
-    score >= .55 ? "Electric" :
-    score >= .15 ? "Feeling it" :
-    score <= -.55 ? "Not landing" :
-    score <= -.15 ? "Cooling off" :
-    "Mixed vibes";
+    !votes.length ? "Waiting on the room" :
+    votes.length === 1 ? "First reaction is in" :
+    sentiment >= .6 ? "Certified banger" :
+    sentiment >= .2 ? "Room is feeling it" :
+    sentiment <= -.6 ? "Not landing" :
+    sentiment <= -.2 ? "Cooling off" :
+    "Split room";
+  const pulseTone = !votes.length
+    ? "idle"
+    : sentiment >= .2
+      ? "positive"
+      : sentiment <= -.2
+        ? "negative"
+        : "mixed";
+  const pulseShape = [9, 13, 18, 25, 31, 25, 18, 13, 9];
+  const pulseHeights = pulseShape.map((height, index) => {
+    const direction = (index - 4) / 4;
+    const lean = 1 + sentiment * direction * .65;
+    const energy = .56 + participation * .44;
+    return Math.max(4, Math.round(height * lean * energy));
+  });
 
   const vote = (value: -1 | 1) => {
     if (addedByCurrentUser) return;
@@ -908,58 +923,53 @@ function VibeMeter({
   };
 
   return (
-    <section className="vibe-meter" aria-label="Vibe meter for the current track">
-      <div className="vibe-meter-heading">
-        <span>Vibe meter</span>
-        <small>{votes.length} / {eligibleListenerCount} voted</small>
+    <section className="bang-meter" aria-label="Bang-O-Meter for the current track">
+      <div className="bang-meter-heading">
+        <span>Bang-O-Meter</span>
+        <small>{votes.length} of {eligibleListenerCount} reacted</small>
       </div>
-      {addedByCurrentUser ? (
-        <div className="vibe-owner-state">
-          <span className="vibe-owner-icon"><UsersIcon size={17} /></span>
-          <span className="vibe-owner-copy">
-            <strong>Listening for reactions</strong>
-            <small>You added this track, so only your listeners can vote.</small>
-          </span>
-          <span className="vibe-owner-results" aria-live="polite">
-            <strong>{label}</strong>
-            <span>{positiveVotes} love it / {negativeVotes} not my vibe</span>
-            <span className="vibe-score" aria-hidden="true">
-              <i style={{ width: `${scorePercent}%` }} />
-            </span>
-          </span>
-        </div>
-      ) : (
-        <div className="vibe-meter-body">
+      <div
+        className={`bang-meter-body ${addedByCurrentUser ? "is-readonly" : ""}`}
+        role="group"
+        aria-label={addedByCurrentUser ? "Listener reactions" : "React to the current track"}
+      >
         <button
           type="button"
-          className={currentVote === -1 ? "active negative" : ""}
+          className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""}`}
           aria-pressed={currentVote === -1}
           disabled={addedByCurrentUser}
-          title={addedByCurrentUser ? "You cannot vote on a track you added" : undefined}
+          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
           onClick={() => vote(-1)}
         >
           <ThumbsDown size={16} />
-          <span>Not my vibe</span>
+          <span>Not it</span>
+          <strong>{negativeVotes}</strong>
         </button>
-        <div className="vibe-summary">
-          <strong>{label}</strong>
-          <div className="vibe-score" aria-hidden="true">
-            <i style={{ width: `${scorePercent}%` }} />
+        <div className="bang-pulse-summary" aria-live="polite">
+          <div
+            key={`${positiveVotes}:${negativeVotes}`}
+            className={`bang-pulse bang-pulse-${pulseTone}`}
+            style={{ opacity: votes.length ? .58 + participation * .42 : .3 }}
+            aria-hidden="true"
+          >
+            {pulseHeights.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
           </div>
+          <strong>{label}</strong>
         </div>
         <button
           type="button"
-          className={currentVote === 1 ? "active positive" : ""}
+          className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""}`}
           aria-pressed={currentVote === 1}
           disabled={addedByCurrentUser}
-          title={addedByCurrentUser ? "You cannot vote on a track you added" : undefined}
+          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
           onClick={() => vote(1)}
         >
           <Heart size={16} />
           <span>Love it</span>
+          <strong>{positiveVotes}</strong>
         </button>
-        </div>
-      )}
+      </div>
+      {addedByCurrentUser && <small className="bang-owner-note">You added this track. Reactions stay with your listeners.</small>}
     </section>
   );
 }
@@ -1322,7 +1332,7 @@ function NowPlaying({
           </div>
           </div>
           </div>
-          <VibeMeter snapshot={snapshot} currentUserId={currentUserId} />
+          <BangOMeter snapshot={snapshot} currentUserId={currentUserId} />
         </>
       ) : (
         <div className="empty-player">
