@@ -40,7 +40,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
-const signupInvitePassword = process.env.SIGNUP_INVITE_PASSWORD;
+const signupInvitePassword = "Vinterman2026";
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const soundCloudApi = new SoundCloudApi(
   process.env.SOUNDCLOUD_CLIENT_ID,
@@ -261,6 +261,17 @@ function roomSlug(name: string) {
     .slice(0, 38) || "room";
   return `${base}-${crypto.randomBytes(3).toString("hex")}`;
 }
+
+console.log("Signup configuration:", {
+  signupInvitePassword: Boolean(signupInvitePassword),
+  supabaseUrl: Boolean(supabaseUrl),
+  supabasePublishableKey: Boolean(supabasePublishableKey),
+  supabaseSecretKey: Boolean(supabaseSecretKey),
+  supabaseJwksUrl: Boolean(supabaseJwksUrl),
+  usesSupabase: store.usesSupabase,
+  authEnabled,
+  signupAdmin: Boolean(signupAdmin)
+});
 
 function hashRoomPassword(password?: string | null) {
   if (!password?.trim()) return null;
