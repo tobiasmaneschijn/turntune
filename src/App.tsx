@@ -44,7 +44,7 @@ import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
 import { UpdatePasswordForm } from "./components/update-password-form";
-import { RealtimeChat } from "./components/realtime-chat";
+import { RealtimeChat, type RealtimeChatHandle } from "./components/realtime-chat";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
@@ -54,6 +54,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useGroupRef } from "./components/ui/resizable";
 import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
+import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
 import { socket } from "./socket";
 import { getSupabaseClient } from "./supabase";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
@@ -84,6 +85,20 @@ function readRoomPanelLayout(compact: boolean): RoomPanelLayout {
     // Fall back to the tuned presets if an old saved layout is invalid.
   }
   return roomPanelPreset(compact);
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+
+  useEffect(() => {
+    const mediaQuery = matchMedia(query);
+    const update = () => setMatches(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
 }
 
 function randomId() {
@@ -178,6 +193,8 @@ export function App() {
   const roomPanelGroupRef = useGroupRef();
   const previousCompactPlayerRef = useRef(compactPlayer);
   const [mobileRoomPane, setMobileRoomPane] = useState<"radio" | "player" | "chat">("player");
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const isNarrowRoomLayout = useMediaQuery("(max-width: 1024px)");
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
@@ -215,6 +232,10 @@ export function App() {
     previousCompactPlayerRef.current = compactPlayer;
     roomPanelGroupRef.current?.setLayout(readRoomPanelLayout(compactPlayer));
   }, [compactPlayer, roomPanelGroupRef]);
+
+  useEffect(() => {
+    setChatUnreadCount(0);
+  }, [roomId]);
 
   useEffect(() => {
     const djUserId = snapshot?.room.djUserId || null;
@@ -713,13 +734,23 @@ export function App() {
               client={auth.client!}
               onOpenProfile={openProfile}
               notifications={userSettings.notifications}
+              isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat"}
+              onActivate={() => setMobileRoomPane("chat")}
+              onUnreadCountChange={setChatUnreadCount}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
         <nav className="room-mobile-tabs" aria-label="Room panels">
           <button className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
           <button className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
-          <button className={mobileRoomPane === "chat" ? "active" : ""} onClick={() => setMobileRoomPane("chat")}><MessageIcon /> Chat</button>
+          <button
+            className={mobileRoomPane === "chat" ? "active" : ""}
+            aria-label={chatUnreadCount > 0 ? `Chat, ${chatUnreadCount} unread` : "Chat"}
+            onClick={() => setMobileRoomPane("chat")}
+          >
+            <MessageIcon /> Chat
+            {chatUnreadCount > 0 && <span className="room-mobile-unread">{chatUnreadCount}</span>}
+          </button>
         </nav>
       </section>
       {roomSettingsOpen && auth.session && (
@@ -1845,16 +1876,23 @@ function RoomChat({
   currentUser,
   client,
   onOpenProfile,
-  notifications
+  notifications,
+  isVisible,
+  onActivate,
+  onUnreadCountChange
 }: {
   snapshot: RoomSnapshot;
   currentUser: User;
   client: SupabaseClient;
   onOpenProfile: (userId: string) => void;
   notifications: SoundSpinUserSettings["notifications"];
+  isVisible: boolean;
+  onActivate: () => void;
+  onUnreadCountChange: (count: number) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
+  const chatRef = useRef<RealtimeChatHandle>(null);
   const seenMentionIdsRef = useRef(new Set<string>());
   const adminUserIds = [...new Set(
     snapshot.users
@@ -1862,8 +1900,21 @@ function RoomChat({
       .map((user) => user.id)
   )];
 
+  useKeyboardShortcuts([{
+    id: "focus-chat",
+    label: "Focus room chat",
+    key: "/",
+    run: () => {
+      onActivate();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => chatRef.current?.focusComposer());
+      });
+    }
+  }]);
+
   useEffect(() => {
     let active = true;
+    setMessages([]);
 
     void (async () => {
       try {
@@ -1911,7 +1962,11 @@ function RoomChat({
   return (
     <aside className="chat panel">
       <div className="chat-header">
-        <div><MessageIcon size={20} /><strong>Room chat</strong></div>
+        <div>
+          <MessageIcon size={20} />
+          <strong>Room chat</strong>
+          <span className="chat-shortcut-hint" title="Press / to focus chat"><kbd>/</kbd> Focus chat</span>
+        </div>
         <div className="chat-presence">
           <div className="chat-presence-avatars">
             {snapshot.users.slice(0, 5).map((user) => (
@@ -1937,6 +1992,7 @@ function RoomChat({
       <div className="supabase-chat-body">
         {error && <div className="chat-error">{error}</div>}
         <RealtimeChat
+          ref={chatRef}
           client={client}
           roomName={`soundspin:${snapshot.room.id}`}
           user={currentUser}
@@ -1946,6 +2002,8 @@ function RoomChat({
           onOpenProfile={onOpenProfile}
           adminUserIds={adminUserIds}
           roomUsers={snapshot.users}
+          isVisible={isVisible}
+          onUnreadCountChange={onUnreadCountChange}
         />
       </div>
     </aside>

@@ -1,6 +1,16 @@
 import { ArrowDown, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import {
@@ -61,14 +71,25 @@ interface RealtimeChatProps {
   onOpenProfile?: (userId: string) => void
   adminUserIds?: string[]
   roomUsers?: User[]
+  isVisible?: boolean
+  onUnreadCountChange?: (count: number) => void
 }
+
+export interface RealtimeChatHandle {
+  focusComposer: () => void
+}
+
+const TYPING_ROOM_LIMIT = 20
+const TYPING_BROADCAST_THROTTLE_MS = 2_000
+const TYPING_IDLE_MS = 3_000
+const GIPHY_SEARCH_DEBOUNCE_MS = 500
 
 /**
  * Interactive room chat. `useRealtimeChat` handles low-latency Broadcast
  * delivery; the parent supplies durable history and an `onSend` persistence
  * callback. See `docs/chat.md` for the complete data flow.
  */
-export const RealtimeChat = ({
+export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(function RealtimeChat({
   client,
   roomName,
   user,
@@ -77,15 +98,25 @@ export const RealtimeChat = ({
   onOpenProfile,
   adminUserIds = [],
   roomUsers = [],
+  isVisible = true,
+  onUnreadCountChange,
   messages: initialMessages = [],
-}: RealtimeChatProps) => {
-  const { containerRef, scrollToBottom, isNearBottom } = useChatScroll()
+}, ref) {
+  const {
+    containerRef,
+    scrollToBottom,
+    refreshPosition,
+    isNearBottom,
+    scrollRevision,
+  } = useChatScroll()
 
   const {
     messages: realtimeMessages,
     sendMessage,
     broadcastReaction,
     reactionEvents,
+    broadcastTyping,
+    typingUserIds,
     isConnected,
   } = useRealtimeChat({
     client,
@@ -99,20 +130,32 @@ export const RealtimeChat = ({
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const [giphyQuery, setGiphyQuery] = useState('')
   const [gifs, setGifs] = useState<GiphyGif[]>([])
+  const [gifsLoading, setGifsLoading] = useState(false)
   const [composerError, setComposerError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
   const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
-  const [unreadCount, setUnreadCount] = useState(0)
+  const [unreadMessageIds, setUnreadMessageIds] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
   const pendingReactionsRef = useRef(new Set<string>())
-  const previousMessageCountRef = useRef(0)
+  const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
-  const unreadStartRef = useRef<number | null>(null)
+  const previousVisibilityRef = useRef(isVisible)
+  const ignoreNextVisibleScrollRef = useRef(false)
+  const typingActiveRef = useRef(false)
+  const lastTypingBroadcastRef = useRef(0)
+  const typingIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const giphyCacheRef = useRef(new Map<string, GiphyGif[]>())
+  const giphyRequestRef = useRef(0)
+  const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [giphyConfigured, setGiphyConfigured] = useState(false)
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
+  const reactionNamesByUserId = useMemo(
+    () => new Map(roomUsers.map((roomUser) => [roomUser.id, roomUser.name])),
+    [roomUsers]
+  )
   const roomMentionOptions = useMemo(
     () => buildRoomMentionOptions(roomUsers, user.id),
     [roomUsers, user.id]
@@ -146,9 +189,25 @@ export const RealtimeChat = ({
     [baseMessages, roomUsers]
   )
   const allMessages = useMemo(
-    () => applyReactionEvents(profiledMessages, reactionEvents),
-    [profiledMessages, reactionEvents]
+    () => applyReactionEvents(profiledMessages, reactionEvents, reactionNamesByUserId),
+    [profiledMessages, reactionEvents, reactionNamesByUserId]
   )
+  const typingNames = useMemo(() => {
+    if (roomUsers.length > TYPING_ROOM_LIMIT) return []
+    const typingIds = new Set(typingUserIds)
+    return roomUsers
+      .filter((roomUser) => roomUser.id !== user.id && typingIds.has(roomUser.id))
+      .map((roomUser) => roomUser.name)
+  }, [roomUsers, typingUserIds, user.id])
+  const typingLabel = typingNames.length === 1
+    ? `${typingNames[0]} is typing…`
+    : typingNames.length === 2
+      ? `${typingNames[0]} and ${typingNames[1]} are typing…`
+      : typingNames.length > 2 ? 'Several people are typing…' : ''
+
+  useImperativeHandle(ref, () => ({
+    focusComposer: () => messageInputRef.current?.focus(),
+  }), [])
 
   useEffect(() => {
     if (onMessage) {
@@ -156,34 +215,94 @@ export const RealtimeChat = ({
     }
   }, [allMessages, onMessage])
 
-  useEffect(() => {
-    const nextCount = allMessages.length
-    const previousCount = previousMessageCountRef.current
-    const addedCount = Math.max(0, nextCount - previousCount)
+  const clearUnread = useCallback(() => setUnreadMessageIds([]), [])
 
-    if (!initializedScrollRef.current && nextCount > 0) {
+  useEffect(() => {
+    initializedScrollRef.current = false
+    ignoreNextVisibleScrollRef.current = false
+    previousMessageIdsRef.current = new Set()
+    previousVisibilityRef.current = isVisible
+    clearUnread()
+  }, [clearUnread, roomName])
+
+  useEffect(() => {
+    onUnreadCountChange?.(unreadMessageIds.length)
+  }, [onUnreadCountChange, unreadMessageIds.length])
+
+  useEffect(() => {
+    const currentIds = new Set(allMessages.map((message) => message.id))
+    const addedMessages = allMessages.filter(
+      (message) => !previousMessageIdsRef.current.has(message.id)
+    )
+
+    if (!initializedScrollRef.current && allMessages.length > 0) {
       initializedScrollRef.current = true
       requestAnimationFrame(() => scrollToBottom('auto'))
-    } else if (addedCount > 0) {
-      const newestMessage = allMessages.at(-1)
-      if (isNearBottom || newestMessage?.user.id === user.id) {
+    } else if (addedMessages.length > 0) {
+      const newestMessage = addedMessages.at(-1)
+      if (isVisible && (isNearBottom || newestMessage?.user.id === user.id)) {
         requestAnimationFrame(() => scrollToBottom())
-        setUnreadCount(0)
-        unreadStartRef.current = null
+        clearUnread()
       } else {
-        if (unreadStartRef.current === null) unreadStartRef.current = previousCount
-        setUnreadCount((current) => current + addedCount)
+        const receivedIds = addedMessages
+          .filter((message) => message.user.id !== user.id)
+          .map((message) => message.id)
+        if (receivedIds.length > 0) {
+          setUnreadMessageIds((current) => [
+            ...current,
+            ...receivedIds.filter((messageId) => !current.includes(messageId)),
+          ])
+        }
       }
     }
 
-    previousMessageCountRef.current = nextCount
-  }, [allMessages, isNearBottom, scrollToBottom, user.id])
+    previousMessageIdsRef.current = currentIds
+  }, [allMessages, clearUnread, isNearBottom, isVisible, scrollToBottom, user.id])
 
   useEffect(() => {
-    if (!isNearBottom) return
-    setUnreadCount(0)
-    unreadStartRef.current = null
-  }, [isNearBottom])
+    const becameVisible = isVisible && !previousVisibilityRef.current
+    previousVisibilityRef.current = isVisible
+    if (becameVisible) {
+      ignoreNextVisibleScrollRef.current = true
+      requestAnimationFrame(refreshPosition)
+      return
+    }
+    if (ignoreNextVisibleScrollRef.current) {
+      ignoreNextVisibleScrollRef.current = false
+      return
+    }
+    if (!isVisible || !isNearBottom) return
+    clearUnread()
+  }, [clearUnread, isNearBottom, isVisible, refreshPosition, scrollRevision])
+
+  const stopTyping = useCallback(() => {
+    if (typingIdleTimeoutRef.current) clearTimeout(typingIdleTimeoutRef.current)
+    typingIdleTimeoutRef.current = null
+    if (!typingActiveRef.current) return
+    typingActiveRef.current = false
+    void broadcastTyping(false)
+  }, [broadcastTyping])
+
+  const noteTyping = useCallback(() => {
+    if (!isConnected || roomUsers.length > TYPING_ROOM_LIMIT) return
+    const now = Date.now()
+    if (
+      !typingActiveRef.current ||
+      now - lastTypingBroadcastRef.current >= TYPING_BROADCAST_THROTTLE_MS
+    ) {
+      typingActiveRef.current = true
+      lastTypingBroadcastRef.current = now
+      void broadcastTyping(true)
+    }
+    if (typingIdleTimeoutRef.current) clearTimeout(typingIdleTimeoutRef.current)
+    typingIdleTimeoutRef.current = setTimeout(stopTyping, TYPING_IDLE_MS)
+  }, [broadcastTyping, isConnected, roomUsers.length, stopTyping])
+
+  useEffect(() => {
+    if (roomUsers.length > TYPING_ROOM_LIMIT || !isConnected) stopTyping()
+  }, [isConnected, roomUsers.length, stopTyping])
+
+  useEffect(() => () => stopTyping(), [stopTyping])
 
   const handleSendMessage = useCallback(
     async (e: React.FormEvent) => {
@@ -202,8 +321,9 @@ export const RealtimeChat = ({
       setSelectedMentions([])
       setMentionQuery(null)
       setReplyingTo(null)
+      stopTyping()
     },
-    [newMessage, isConnected, sendMessage, onSend, replyingTo, selectedMentions]
+    [newMessage, isConnected, sendMessage, onSend, replyingTo, selectedMentions, stopTyping]
   )
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
@@ -331,24 +451,66 @@ export const RealtimeChat = ({
     }
   }
 
-  const loadGifs = async (query = '') => {
+  const loadGifs = useCallback(async (query = '') => {
     if (!giphyConfigured) return
+    const normalizedQuery = query.trim()
+    const cacheKey = normalizedQuery.toLocaleLowerCase()
+    const cached = giphyCacheRef.current.get(cacheKey)
+    if (cached) {
+      setGifs(cached)
+      setGifsLoading(false)
+      return
+    }
+
+    const requestId = ++giphyRequestRef.current
     setComposerError('')
+    setGifsLoading(true)
 
     try {
       const { data } = await client.auth.getSession()
-      setGifs(await fetchGiphyGifs(query, data.session?.access_token))
+      const results = await fetchGiphyGifs(normalizedQuery, data.session?.access_token)
+      if (requestId !== giphyRequestRef.current) return
+      giphyCacheRef.current.set(cacheKey, results)
+      setGifs(results)
     } catch (error) {
+      if (requestId !== giphyRequestRef.current) return
       setComposerError(error instanceof Error ? error.message : 'Could not load GIFs.')
+      setGifs([])
+    } finally {
+      if (requestId === giphyRequestRef.current) setGifsLoading(false)
     }
-  }
+  }, [client, giphyConfigured])
+
+  useEffect(() => {
+    if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
+    giphyDebounceRef.current = null
+    if (!showGiphy || !giphyConfigured) return
+
+    const normalizedQuery = giphyQuery.trim()
+    if (normalizedQuery.length === 1) {
+      giphyRequestRef.current += 1
+      setGifs([])
+      setGifsLoading(false)
+      return
+    }
+    if (!normalizedQuery) {
+      void loadGifs()
+      return
+    }
+
+    giphyDebounceRef.current = setTimeout(
+      () => void loadGifs(normalizedQuery),
+      GIPHY_SEARCH_DEBOUNCE_MS
+    )
+    return () => {
+      if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
+      giphyDebounceRef.current = null
+    }
+  }, [giphyConfigured, giphyQuery, loadGifs, showGiphy])
 
   const toggleGiphy = () => {
     setShowEmoji(false)
-    setShowGiphy((current) => {
-      if (!current && !gifs.length) void loadGifs()
-      return !current
-    })
+    setShowGiphy((current) => !current)
   }
 
   return (
@@ -382,7 +544,7 @@ export const RealtimeChat = ({
                     </span>
                   </div>
                 )}
-                {unreadStartRef.current === index && (
+                {unreadMessageIds[0] === message.id && (
                   <div className="chat-unread-divider"><span>New messages</span></div>
                 )}
                 <ChatMessageItem
@@ -405,23 +567,25 @@ export const RealtimeChat = ({
         </div>
       </div>
 
-      {!isNearBottom && (
+      {(!isNearBottom || unreadMessageIds.length > 0) && (
         <button
           type="button"
           className="chat-scroll-button"
           onClick={() => {
             scrollToBottom()
-            setUnreadCount(0)
-            unreadStartRef.current = null
+            clearUnread()
           }}
         >
-          <span>{unreadCount > 0 ? `${unreadCount} new` : 'Jump to latest'}</span>
+          <span>{unreadMessageIds.length > 0 ? `${unreadMessageIds.length} new` : 'Jump to latest'}</span>
           <ArrowDown className="size-4" />
         </button>
       )}
 
       {(showEmoji || showGiphy) && (
-        <div className={cn('chat-picker-popover', { 'chat-picker-with-reply': Boolean(replyingTo) })}>
+        <div className={cn('chat-picker-popover', {
+          'chat-picker-with-reply': Boolean(replyingTo),
+          'chat-picker-with-typing': Boolean(typingLabel),
+        })}>
           <div className="chat-picker-tabs" role="tablist" aria-label="Message media">
             <button
               type="button"
@@ -432,7 +596,6 @@ export const RealtimeChat = ({
               onClick={() => {
                 setShowEmoji(false)
                 setShowGiphy(true)
-                if (!gifs.length) void loadGifs(giphyQuery)
               }}
             >
               GIFs
@@ -474,7 +637,10 @@ export const RealtimeChat = ({
                     setSkinTone(selectedSkinTone)
                     saveEmojiSkinTone(selectedSkinTone)
                   }}
-                  onEmojiClick={(emoji) => setNewMessage((current) => `${current}${emoji.emoji}`)}
+                  onEmojiClick={(emoji) => {
+                    setNewMessage((current) => `${current}${emoji.emoji}`)
+                    noteTyping()
+                  }}
                 />
               </Suspense>
             </div>
@@ -484,6 +650,8 @@ export const RealtimeChat = ({
                 className="chat-gif-search"
                 onSubmit={(event) => {
                   event.preventDefault()
+                  if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
+                  giphyDebounceRef.current = null
                   void loadGifs(giphyQuery)
                 }}
               >
@@ -501,31 +669,45 @@ export const RealtimeChat = ({
                 )}
                 <button type="submit" className="sr-only">Search GIFs</button>
               </form>
-              <div className="chat-gif-grid">
-                {[0, 1].map((column) => (
-                  <div key={column}>
-                    {gifs.filter((_, index) => index % 2 === column).map((gif) => (
-                      <button
-                        type="button"
-                        key={gif.id}
-                        className="chat-gif-tile"
-                        onClick={() => {
-                          void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF')
-                          setShowGiphy(false)
-                        }}
-                      >
-                        <img src={gif.preview} alt={gif.title} loading="lazy" />
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
+              {gifsLoading ? (
+                <div className="chat-gif-status">Loading GIFs…</div>
+              ) : giphyQuery.trim().length === 1 ? (
+                <div className="chat-gif-status">Type one more character to search.</div>
+              ) : gifs.length === 0 ? (
+                <div className="chat-gif-status">No GIFs found.</div>
+              ) : (
+                <div className="chat-gif-grid">
+                  {[0, 1].map((column) => (
+                    <div key={column}>
+                      {gifs.filter((_, index) => index % 2 === column).map((gif) => (
+                        <button
+                          type="button"
+                          key={gif.id}
+                          className="chat-gif-tile"
+                          onClick={() => {
+                            void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF')
+                            setShowGiphy(false)
+                          }}
+                        >
+                          <img src={gif.preview} alt={gif.title} loading="lazy" />
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
               <p className="chat-gif-footer">Powered by GIPHY</p>
             </div>
           )}
         </div>
       )}
 
+      {typingLabel && (
+        <div className="chat-typing-indicator" aria-live="polite">
+          <i /><i /><i />
+          <span>{typingLabel}</span>
+        </div>
+      )}
       {composerError && <p className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
       <form
         onSubmit={handleSendMessage}
@@ -617,6 +799,8 @@ export const RealtimeChat = ({
               setSelectedMentions((current) => activeMentions(nextMessage, current))
               setMentionQuery(findMentionQuery(nextMessage, event.target.selectionStart))
               setActiveMentionIndex(0)
+              if (nextMessage.trim()) noteTyping()
+              else stopTyping()
             }}
             onKeyDown={(event) => {
               if (!mentionQuery || mentionCandidates.length === 0) return
@@ -635,7 +819,10 @@ export const RealtimeChat = ({
               }
             }}
             onClick={(event) => setMentionQuery(findMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart))}
-            onBlur={() => setMentionQuery(null)}
+            onBlur={() => {
+              setMentionQuery(null)
+              stopTyping()
+            }}
             onPaste={(event) => void pasteMedia(event)}
             placeholder={uploading ? 'Uploading image…' : `Message #${roomName.replace(/^soundspin:/, '')}`}
             disabled={!isConnected || uploading}
@@ -677,4 +864,4 @@ export const RealtimeChat = ({
       </form>
     </div>
   )
-}
+})

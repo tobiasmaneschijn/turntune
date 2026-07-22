@@ -58,17 +58,22 @@ export async function loadChatHistory(
 
   const history = ([...(data || [])] as unknown as ChatHistoryRow[]).reverse()
   const rowsById = new Map(history.map((row) => [row.id, row]))
-  const userIds = [...new Set(history.map((row) => row.user_id))]
+  const userIds = [...new Set(history.flatMap((row) => [
+    row.user_id,
+    ...(row.soundspin_message_reactions || []).map((reaction) => reaction.user_id),
+  ]))]
   const currentProfiles: ChatUserProfile[] = []
+  const profileNames = new Map<string, string>()
 
   if (userIds.length > 0) {
     const { data: profiles, error: profileError } = await client
       .from('soundspin_profiles')
-      .select('user_id, is_app_admin, avatar_key, avatar_url')
+      .select('user_id, display_name, is_app_admin, avatar_key, avatar_url')
       .in('user_id', userIds)
 
     if (profileError) throw profileError
     for (const profile of profiles || []) {
+      profileNames.set(profile.user_id, profile.display_name)
       currentProfiles.push({
         id: profile.user_id,
         avatarSeed: profile.user_id,
@@ -107,6 +112,7 @@ export async function loadChatHistory(
       reactions: (row.soundspin_message_reactions || []).map((reaction) => ({
         emoji: reaction.emoji,
         userId: reaction.user_id,
+        userName: profileNames.get(reaction.user_id),
       })),
       createdAt: row.created_at,
     }

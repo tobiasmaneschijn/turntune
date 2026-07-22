@@ -37,18 +37,43 @@ function stripUntrustedAdminFlair(message: ChatMessage): ChatMessage {
 
 const EVENT_MESSAGE_TYPE = 'message'
 const EVENT_REACTION_TYPE = 'reaction'
+const EVENT_TYPING_TYPE = 'typing'
+export const CHAT_TYPING_TTL_MS = 5_000
+
+interface ChatTypingEvent {
+  userId: string
+  active: boolean
+  sentAt: number
+}
+
+function normalizeTypingEvent(value: unknown): ChatTypingEvent | null {
+  if (!value || typeof value !== 'object') return null
+  const event = value as Partial<ChatTypingEvent>
+  if (
+    typeof event.userId !== 'string' ||
+    !event.userId ||
+    event.userId.length > 100 ||
+    typeof event.active !== 'boolean' ||
+    typeof event.sentAt !== 'number' ||
+    !Number.isFinite(event.sentAt)
+  ) return null
+  return event as ChatTypingEvent
+}
 
 export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
+  const [typingUserIds, setTypingUserIds] = useState<string[]>([])
   const channelRef = useRef<RealtimeChannel | null>(null)
+  const typingTimeoutsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
 
   useEffect(() => {
     const newChannel = client.channel(roomName)
     channelRef.current = newChannel
     setMessages([])
     setReactionEvents([])
+    setTypingUserIds([])
     setIsConnected(false)
 
     newChannel
@@ -62,15 +87,39 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
         const event = payload.payload as ChatReactionEvent
         setReactionEvents((current) => coalesceReactionEvent(current, event))
       })
+      .on('broadcast', { event: EVENT_TYPING_TYPE }, (payload) => {
+        const event = normalizeTypingEvent(payload.payload)
+        if (!event || event.userId === user.id) return
+
+        const previousTimeout = typingTimeoutsRef.current.get(event.userId)
+        if (previousTimeout) clearTimeout(previousTimeout)
+        typingTimeoutsRef.current.delete(event.userId)
+
+        if (!event.active) {
+          setTypingUserIds((current) => current.filter((userId) => userId !== event.userId))
+          return
+        }
+
+        setTypingUserIds((current) =>
+          current.includes(event.userId) ? current : [...current, event.userId]
+        )
+        const timeout = setTimeout(() => {
+          typingTimeoutsRef.current.delete(event.userId)
+          setTypingUserIds((current) => current.filter((userId) => userId !== event.userId))
+        }, CHAT_TYPING_TTL_MS)
+        typingTimeoutsRef.current.set(event.userId, timeout)
+      })
       .subscribe((status) => {
         setIsConnected(status === 'SUBSCRIBED')
       })
 
     return () => {
+      for (const timeout of typingTimeoutsRef.current.values()) clearTimeout(timeout)
+      typingTimeoutsRef.current.clear()
       channelRef.current = null
       void client.removeChannel(newChannel)
     }
-  }, [client, roomName])
+  }, [client, roomName, user.id])
 
   const sendMessage = useCallback(
     async (
@@ -128,5 +177,30 @@ export function useRealtimeChat({ client, roomName, user }: UseRealtimeChatProps
     [isConnected]
   )
 
-  return { messages, sendMessage, broadcastReaction, reactionEvents, isConnected }
+  const broadcastTyping = useCallback(
+    async (active: boolean) => {
+      const channel = channelRef.current
+      if (!channel || !isConnected) return
+      try {
+        await channel.send({
+          type: 'broadcast',
+          event: EVENT_TYPING_TYPE,
+          payload: { userId: user.id, active, sentAt: Date.now() } satisfies ChatTypingEvent,
+        })
+      } catch {
+        // Typing is best-effort ephemeral state and should never interrupt chat.
+      }
+    },
+    [isConnected, user.id]
+  )
+
+  return {
+    messages,
+    sendMessage,
+    broadcastReaction,
+    reactionEvents,
+    broadcastTyping,
+    typingUserIds,
+    isConnected,
+  }
 }

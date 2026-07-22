@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { applyChatUserProfiles, type ChatMessage } from '../src/chat/model.js'
+import {
+  applyChatUserProfiles,
+  applyReactionEvents,
+  groupReactions,
+  reactionLabel,
+  type ChatMessage,
+} from '../src/chat/model.js'
 
 const message: ChatMessage = {
   id: '60dc4785-4115-4ac3-b5ba-86a803b82b13',
@@ -45,4 +51,28 @@ test('switching back to a built-in avatar clears an older custom image', () => {
 
   assert.equal(result.user.avatarKey, 'sunset')
   assert.equal(result.user.avatarUrl, undefined)
+})
+
+test('reaction groups retain resolved reactor names for accessible tooltips', () => {
+  const reactions = [
+    { emoji: '❤️', userId: message.user.id, userName: 'Original name' },
+    { emoji: '❤️', userId: 'other', userName: 'Taylor' },
+  ]
+  const [[, group]] = groupReactions(reactions, message.user.id)
+
+  assert.equal(group.count, 2)
+  assert.equal(group.hasReacted, true)
+  assert.equal(reactionLabel(group, message.user.id), 'You, Taylor')
+})
+
+test('live reaction events resolve names from trusted room profiles', () => {
+  const [result] = applyReactionEvents([message], [{
+    id: 'event',
+    messageId: message.id,
+    userId: 'other',
+    emoji: '😂',
+    action: 'add',
+  }], new Map([['other', 'Taylor']]))
+
+  assert.deepEqual(result.reactions, [{ emoji: '😂', userId: 'other', userName: 'Taylor' }])
 })

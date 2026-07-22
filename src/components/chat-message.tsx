@@ -1,8 +1,13 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useId, useMemo, useState } from 'react'
 import { Reply, SmilePlus, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 
-import { getMessagePreview, groupReactions, type ChatMessage } from '@/chat/model'
+import {
+  getMessagePreview,
+  groupReactions,
+  reactionLabel,
+  type ChatMessage,
+} from '@/chat/model'
 import { splitMentionText } from '@/chat/mentions'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
@@ -66,6 +71,7 @@ export const ChatMessageItem = ({
 }: ChatMessageItemProps) => {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
+  const reactionTooltipPrefix = useId()
   const reply = message.replyTo
   const isMentioned = (message.mentions || []).some((mention) => mention.userId === currentUserId)
   const reactionGroups = useMemo(
@@ -189,18 +195,26 @@ export const ChatMessageItem = ({
         </div>
         {reactionGroups.length > 0 && (
           <div className="chat-message-reactions">
-            {reactionGroups.map(([emoji, group]) => (
-              <button
-                key={emoji}
-                type="button"
-                className={cn({ active: group.hasReacted })}
-                aria-label={`${emoji}, ${group.count} ${group.count === 1 ? 'reaction' : 'reactions'}`}
-                onClick={() => onReact(message, emoji)}
-              >
-                <PlatformEmojiText text={emoji} />
-                <strong>{group.count}</strong>
-              </button>
-            ))}
+            {reactionGroups.map(([emoji, group], index) => {
+              const reactors = reactionLabel(group, currentUserId)
+              const tooltipId = `${reactionTooltipPrefix}-${index}`
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  className={cn({ active: group.hasReacted })}
+                  aria-label={`${emoji} reacted by ${reactors}`}
+                  aria-describedby={tooltipId}
+                  onClick={() => onReact(message, emoji)}
+                >
+                  <PlatformEmojiText text={emoji} />
+                  <strong>{group.count}</strong>
+                  <span id={tooltipId} role="tooltip" className="chat-reaction-tooltip">
+                    {reactors}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

@@ -34,6 +34,7 @@ export interface ChatMention {
 export interface ChatReaction {
   emoji: string
   userId: string
+  userName?: string
 }
 
 export interface ChatReactionEvent extends ChatReaction {
@@ -51,6 +52,7 @@ export interface ChatMedia {
 export interface ReactionGroup {
   count: number
   hasReacted: boolean
+  reactors: Array<Pick<ChatReaction, 'userId' | 'userName'>>
 }
 
 export type ChatUserProfile = Pick<
@@ -134,7 +136,8 @@ export function applyChatUserProfiles(
 /** Applies transient Broadcast events on top of the last durable reaction set. */
 export function applyReactionEvents(
   messages: ChatMessage[],
-  events: ChatReactionEvent[]
+  events: ChatReactionEvent[],
+  userNamesById: ReadonlyMap<string, string> = new Map()
 ): ChatMessage[] {
   const reactionsByMessage = new Map<string, Map<string, ChatReaction>>()
 
@@ -151,7 +154,11 @@ export function applyReactionEvents(
 
     const key = reactionKey(event)
     if (event.action === 'add') {
-      reactions.set(key, { emoji: event.emoji, userId: event.userId })
+      reactions.set(key, {
+        emoji: event.emoji,
+        userId: event.userId,
+        userName: userNamesById.get(event.userId),
+      })
     } else {
       reactions.delete(key)
     }
@@ -187,12 +194,28 @@ export function groupReactions(
 ): Array<[string, ReactionGroup]> {
   const groups = new Map<string, ReactionGroup>()
   for (const reaction of reactions || []) {
-    const group = groups.get(reaction.emoji) || { count: 0, hasReacted: false }
+    const group = groups.get(reaction.emoji) || {
+      count: 0,
+      hasReacted: false,
+      reactors: [],
+    }
     group.count += 1
     group.hasReacted ||= reaction.userId === currentUserId
+    group.reactors.push({ userId: reaction.userId, userName: reaction.userName })
     groups.set(reaction.emoji, group)
   }
   return [...groups.entries()]
+}
+
+export function reactionLabel(group: ReactionGroup, currentUserId: string): string {
+  const names = group.reactors.map((reactor) =>
+    reactor.userId === currentUserId ? 'You' : reactor.userName || 'Unknown listener'
+  )
+  const visibleNames = names.slice(0, 5)
+  const remaining = names.length - visibleNames.length
+  return remaining > 0
+    ? `${visibleNames.join(', ')} and ${remaining} ${remaining === 1 ? 'other' : 'others'}`
+    : visibleNames.join(', ')
 }
 
 export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type'>): string {

@@ -88,7 +88,28 @@ Reactions are durable-first:
 The table primary key is `(message_id, user_id, emoji)`, so one user can add a
 given emoji to a message only once. The realtime hook coalesces repeated events
 for the same tuple to keep long sessions from accumulating an unbounded event
-list.
+list. Reactor display names are resolved from `soundspin_profiles` while loading
+history and from trusted room presence for live events; hovering or focusing a
+reaction chip therefore identifies the listeners without storing duplicate
+names in the reaction table.
+
+## Typing and unread state
+
+Typing is ephemeral Broadcast state on the existing room channel. Clients send
+only a user ID, active flag, and timestamp; visible names come from room
+presence. Indicators are disabled above 20 listeners, active events are
+throttled, and remote entries expire locally if a stop event is lost. Nothing is
+written to Postgres.
+
+Unread state lasts only for the current room visit. The client tracks stable
+message IDs, keeps a divider at the first unread message, and surfaces the count
+on the mobile Chat tab while that panel is hidden. Opening the tab preserves the
+scroll position; reaching the bottom or using Jump to latest marks the current
+visit as read.
+
+The `/` shortcut focuses the composer and activates the mobile Chat panel when
+needed. It is registered through the shared keyboard-shortcut hook so future
+room actions can add definitions without adding more global key listeners.
 
 ## Database schema and security
 
@@ -118,6 +139,8 @@ it from the production branch.
 - Uploads are restricted to supported image MIME types and 6 MB.
 - GIF search uses the server-side GIPHY proxy and is disabled when no
   `GIPHY_API_KEY` is configured.
+- Opening the picker loads trending GIFs. Searches run after a short debounce
+  once at least two characters are entered, while Enter submits immediately.
 - Pasted HTTPS image/GIF URLs are sent as media messages without copying the
   remote file into Storage.
 
