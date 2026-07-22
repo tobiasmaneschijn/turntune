@@ -136,7 +136,7 @@ export class Store {
     if (error) {
       if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
         throw new Error(
-          "SoundSpin database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+          "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
         );
       }
       throw new Error(`Could not load room: ${error.message}`);
@@ -550,7 +550,7 @@ export class Store {
         if (error) {
           if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
             throw new Error(
-              "SoundSpin database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+              "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
             );
           }
           throw new Error(`Could not save room: ${error.message}`);

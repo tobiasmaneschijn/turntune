@@ -45,7 +45,7 @@ then broadcasts a new personalized snapshot.
 This is currently a **single active Node instance** design. Presence maps,
 cached DJ identities, disconnect timers, and Socket.IO fan-out live in one
 process. Supabase makes room state durable, but does not coordinate multiple
-SoundSpin server replicas. Add a shared Socket.IO adapter, distributed locks,
+Lydman server replicas. Add a shared Socket.IO adapter, distributed locks,
 and durable grace scheduling before horizontally scaling the server.
 
 ## Code map
@@ -207,7 +207,7 @@ position at updatedAt + elapsed wall-clock time (when playing)
 ```
 
 Clients use the checkpoint to seek their selected provider player into sync.
-Each listener may use the room source, Spotify in SoundSpin, Spotify Desktop,
+Each listener may use the room source, Spotify in Lydman, Spotify Desktop,
 or Apple Music. Provider mappings are stored with the track; missing mappings
 fall back to the source provider. Only the current DJ's active adapter reports
 a natural end. The current DJ, owner, and moderators may pause, seek, or skip.
@@ -217,7 +217,7 @@ that UUID still matches `playback.track.id`. This makes ended/skip commands
 idempotent: retries, delayed events, or another tab cannot accidentally skip
 the next song too.
 
-Do not use a provider video ID for this check. The SoundSpin track UUID
+Do not use a provider video ID for this check. The Lydman track UUID
 identifies one play instance, even if the same provider track appears later.
 
 ## Permissions
@@ -371,7 +371,7 @@ Run the radio privacy test immediately.
 
 ### The radio skips two songs
 
-Confirm every `queue:next` sender includes the current SoundSpin track UUID and
+Confirm every `queue:next` sender includes the current Lydman track UUID and
 that the server still compares it before advancing. Check whether more than the
 on-air browser reports natural YouTube completion.
 

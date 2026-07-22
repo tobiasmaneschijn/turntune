@@ -58,7 +58,7 @@ async function getMusicKit(accessToken: string) {
     await sdk.configure({
       developerToken: payload.developerToken,
       storefrontId: payload.storefront || "us",
-      app: { name: "SoundSpin", build: "1.0.0" }
+      app: { name: "Lydman", build: "1.0.0" }
     });
     return sdk.getInstance();
   })();
@@ -187,7 +187,7 @@ export function AppleMusicPlayer({
 
   return (
     <div className="provider-player-shell apple-player-shell">
-      <strong>Apple Music in SoundSpin</strong>
+      <strong>Apple Music in Lydman</strong>
       {!authorized ? (
         <button type="button" onClick={authorize} disabled={!ready}>Connect Apple Music</button>
       ) : (

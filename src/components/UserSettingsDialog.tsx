@@ -30,9 +30,9 @@ const playbackOptions: Array<{
   icon: typeof Radio;
 }> = [
   { value: "source", title: "Room source", description: "Use the provider attached to each queued track.", icon: Radio },
-  { value: "spotify-web", title: "Spotify in SoundSpin", description: "Play through the Spotify device in this browser.", icon: Music2 },
+  { value: "spotify-web", title: "Spotify in Lydman", description: "Play through the Spotify device in this browser.", icon: Music2 },
   { value: "spotify-desktop", title: "Spotify Desktop", description: "Send playback to a selected Spotify Connect device.", icon: MonitorSpeaker },
-  { value: "apple", title: "Apple Music", description: "Play matching tracks through MusicKit in SoundSpin.", icon: Music2 }
+  { value: "apple", title: "Apple Music", description: "Play matching tracks through MusicKit in Lydman.", icon: Music2 }
 ];
 
 export function UserSettingsDialog({

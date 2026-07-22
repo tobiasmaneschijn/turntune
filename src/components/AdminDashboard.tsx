@@ -207,7 +207,7 @@ export function AdminDashboard({
   return (
     <main className="admin-page">
       <aside className="admin-sidebar">
-        <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>SoundSpin</strong></div>
+        <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>Lydman</strong></div>
         <div className="admin-console-label">ADMIN CONSOLE</div>
         <nav className="admin-nav" aria-label="Admin dashboard">
           <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
@@ -216,7 +216,7 @@ export function AdminDashboard({
         </nav>
         <div className="admin-sidebar-footer">
           <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
-          <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back to SoundSpin</Button>
+          <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back to Lydman</Button>
         </div>
       </aside>
 

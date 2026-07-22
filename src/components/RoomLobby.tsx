@@ -43,9 +43,9 @@ async function api<T>(path: string, accessToken: string, init?: RequestInit) {
 
 function Brand() {
   return (
-    <div className="logo" aria-label="SoundSpin">
+    <div className="logo" aria-label="Lydman">
       <span className="logo-mark"><i /><i /><i /></span>
-      <span>SoundSpin</span>
+      <span>Lydman</span>
     </div>
   );
 }

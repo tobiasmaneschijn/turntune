@@ -244,7 +244,7 @@ export function App() {
       previousDjUserIdRef.current !== profile.id &&
       userSettings.notifications.djTurn
     ) {
-      showSystemNotification("You’re on deck", "Your SoundSpin DJ turn has started.");
+      showSystemNotification("You’re on deck", "Your Lydman DJ turn has started.");
     }
     previousDjUserIdRef.current = djUserId;
   }, [snapshot?.room.djUserId, profile.id, userSettings.notifications.djTurn]);
@@ -520,7 +520,7 @@ export function App() {
           <CardHeader>
             <Logo />
             <CardTitle>Admin access required</CardTitle>
-            <CardDescription>This dashboard is only available to SoundSpin administrators.</CardDescription>
+            <CardDescription>This dashboard is only available to Lydman administrators.</CardDescription>
           </CardHeader>
           <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
         </Card>
@@ -794,7 +794,7 @@ function AuthScreen({ client }: { client: SupabaseClient }) {
       <nav><Logo /><span>Shared listening, kept simple.</span></nav>
       <section className="auth-content">
         <div className="auth-intro">
-          <Badge variant="outline">SOUNDSPIN</Badge>
+          <Badge variant="outline">LYDMAN</Badge>
           <h1>Listen together,<br />wherever you are.</h1>
           <p>Shared rooms, one queue, and playback that stays in sync.</p>
         </div>
@@ -830,7 +830,7 @@ function Logo() {
   return (
     <div className="logo">
       <span className="logo-mark"><i /><i /><i /></span>
-      <span>SoundSpin</span>
+      <span>Lydman</span>
     </div>
   );
 }
@@ -1184,7 +1184,7 @@ function NowPlaying({
     const message = playbackError;
     if (!message || !userSettings.notifications.playbackErrors || playbackErrorNotifiedRef.current === message) return;
     playbackErrorNotifiedRef.current = message;
-    showSystemNotification("SoundSpin playback error", message);
+    showSystemNotification("Lydman playback error", message);
   }, [playbackError, userSettings.notifications.playbackErrors]);
 
   return (

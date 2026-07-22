@@ -1,6 +1,6 @@
-# SoundSpin
+# Lydman
 
-A private, self-hosted shared radio for teams. SoundSpin synchronizes playback
+A private, self-hosted shared radio for teams. Lydman synchronizes playback
 across a room, lets each listener use their preferred configured music service,
 and includes round-robin DJ turns, real-time chat, presence, and generated avatars.
 
@@ -54,11 +54,11 @@ only a legacy/local fallback.
    the Supabase GitHub integration to apply them automatically from the
    production branch.
 3. In **Authentication → General Configuration**, turn off **Allow new users
-   to sign up**. SoundSpin creates users through its invite-protected server
+   to sign up**. Lydman creates users through its invite-protected server
    endpoint; leaving public signup enabled would let callers bypass the invite
    password by calling Supabase Auth directly.
 4. In **Authentication → URL Configuration**, set the site URL to your
-   production SoundSpin URL.
+   production Lydman URL.
 5. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
 6. Configure a custom SMTP provider for password-reset emails. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
@@ -88,16 +88,16 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
-`SUPABASE_SECRET_KEY` must only be available to the SoundSpin server.
+`SUPABASE_SECRET_KEY` must only be available to the Lydman server.
 `SIGNUP_INVITE_PASSWORD` must also remain server-only. Use a long, randomly
 generated value and share it only with people you want to invite. If it is not
 set, the signup endpoint fails closed and no accounts can be created through
-SoundSpin.
+Lydman.
 Invite-created accounts are auto-confirmed because Supabase's admin create-user
 API does not send confirmation emails. The invite password is therefore the
 signup gate; email ownership is not separately verified during registration.
 The `VITE_` variables configure the local Vite client. In production, the
-client can also receive the same public values from SoundSpin's runtime config
+client can also receive the same public values from Lydman's runtime config
 endpoint, so Dokploy does not need to bake them into the frontend bundle.
 
 Supabase Auth stores the browser session persistently and refreshes access
@@ -123,7 +123,7 @@ troubleshooting guide.
 
 Profiles are created by `20260716220100_profiles_and_progression.sql` and
 simplified by `20260720110538_simplify_profiles.sql`. Every account receives a
-public SoundSpin profile with a display name, bio, avatar, and theme. Available
+public Lydman profile with a display name, bio, avatar, and theme. Available
 avatars and themes are validated server-side before a profile is updated.
 
 Application admins are marked on `soundspin_profiles` by the
@@ -149,18 +149,18 @@ Emoji support works without additional configuration. Uploaded chat images are
 stored in the public `chat-media` Supabase Storage bucket created by
 `20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a
 GIPHY developer key in the server-side `GIPHY_API_KEY`; without it, the GIF
-button remains disabled. SoundSpin proxies GIF searches so the key is never
+button remains disabled. Lydman proxies GIF searches so the key is never
 returned to the browser and browser CORS policy does not apply to GIPHY's API
 response.
 
 YouTube keyword search requires a YouTube Data API v3 key in
 `YOUTUBE_API_KEY`. Keep this server-side variable in `.env` locally and in
-Dokploy's environment settings in production. The browser calls SoundSpin's
+Dokploy's environment settings in production. The browser calls Lydman's
 authenticated search endpoint; the key is never returned to the client.
 
 SoundCloud search requires the `client_id` and `client_secret` from a registered
 SoundCloud application in `SOUNDCLOUD_CLIENT_ID` and
-`SOUNDCLOUD_CLIENT_SECRET`. SoundSpin exchanges them server-side for a cached
+`SOUNDCLOUD_CLIENT_SECRET`. Lydman exchanges them server-side for a cached
 client-credentials token; neither the credentials nor the token are returned to
 the browser. Playback uses SoundCloud's official embedded widget and is limited
 to public tracks SoundCloud reports as playable.
@@ -195,21 +195,21 @@ The shared `Track` model stores a source provider plus ISRC-first provider
 mappings. Tracks waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
 currently playing track remain visible to the room.
 YouTube and SoundCloud play through their embedded players. A listener can link
-Spotify and choose either the SoundSpin Web Playback device or their Spotify
+Spotify and choose either the Lydman Web Playback device or their Spotify
 Desktop/Connect device. Apple Music listeners authorize MusicKit in the player.
-SoundSpin tries to resolve the same recording across catalogs by ISRC, then by
+Lydman tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
 
 Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
 configured. Spotify does not accept `localhost`: use the explicit loopback
 address `http://127.0.0.1:5173/api/spotify/callback` for local development, and
-open SoundSpin at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
+open Lydman at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
 domain in production. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
 cryptographically secure random generator; changing it invalidates stored
 Spotify refresh tokens. Apple Music requires a MusicKit media identifier and
 private key. The private key accepts escaped `\n` line breaks in environment
 configuration.
 
-Important: SoundSpin coordinates playback but does not grant rights to music.
+Important: Lydman coordinates playback but does not grant rights to music.
 Every adapter remains subject to its provider's availability, account rules,
 geographic restrictions, developer terms, and user playback entitlements.

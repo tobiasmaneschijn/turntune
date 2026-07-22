@@ -125,7 +125,7 @@ export function ProfilePage({
     let newPath = "";
     try {
       const client = await getSupabaseClient();
-      if (!client) throw new Error("Avatar uploads require a signed-in SoundSpin account.");
+      if (!client) throw new Error("Avatar uploads require a signed-in Lydman account.");
       newPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
       const { error: uploadError } = await client.storage.from("profile-avatars").upload(newPath, file, {
         cacheControl: "31536000",
@@ -182,7 +182,7 @@ export function ProfilePage({
       <header className="profile-page-header">
         <div className="profile-header-inner">
           <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
-          <div className="profile-wordmark" aria-label="SoundSpin"><span className="logo-mark"><i /><i /><i /></span>SoundSpin</div>
+          <div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div>
           <div className="profile-header-actions">
             {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
             <FeedbackButton userId={currentUser.id} diagnosticContext={{ surface: "profile" }} />
@@ -259,7 +259,7 @@ export function ProfilePage({
                       const selected = profile.theme_key === option.key;
                       return (
                         <button type="button" key={option.key} className={`${selected ? "selected" : ""} theme-swatch-${option.key}`} disabled={saving} onClick={() => void updateProfile({ themeKey: option.key })}>
-                          <i /><span><strong>{option.name}</strong><small>{option.metadata.description || (selected ? "Active theme" : "Use theme")}</small></span>{selected && <Check />}
+                          <i /><span><strong>{option.name}</strong><small>{option.metadata.description?.replaceAll("SoundSpin", "Lydman") || (selected ? "Active theme" : "Use theme")}</small></span>{selected && <Check />}
                         </button>
                       );
                     })}

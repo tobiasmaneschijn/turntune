@@ -662,7 +662,7 @@ io.on("connection", (socket) => {
       const message = error instanceof Error ? error.message : "Could not load this room.";
       reply?.({
         ok: false,
-        error: message.startsWith("SoundSpin database is not initialized")
+        error: message.startsWith("Lydman database is not initialized")
           ? message
           : "Could not load this room."
       });
@@ -1542,7 +1542,7 @@ app.get("/api/spotify/callback", async (request, response) => {
   const codeValue = z.string().min(1).safeParse(request.query.code);
   const oauth = stateValue.success ? spotifyOauthStates.get(stateValue.data) : undefined;
   if (stateValue.success) spotifyOauthStates.delete(stateValue.data);
-  if (!oauth || oauth.expiresAt < Date.now()) return response.status(400).send("Spotify authorization expired. Return to SoundSpin and try again.");
+  if (!oauth || oauth.expiresAt < Date.now()) return response.status(400).send("Spotify authorization expired. Return to Lydman and try again.");
   if (!codeValue.success) return response.redirect(`${oauth.returnTo}${oauth.returnTo.includes("?") ? "&" : "?"}spotify=denied`);
   try {
     await spotifyAccounts.connect(oauth.userId, codeValue.data, oauth.redirectUri);
@@ -1667,5 +1667,5 @@ if (process.env.NODE_ENV === "production") {
 
 await store.init();
 httpServer.listen(port, "0.0.0.0", () => {
-  console.log(`SoundSpin listening on http://0.0.0.0:${port}`);
+  console.log(`Lydman listening on http://0.0.0.0:${port}`);
 });

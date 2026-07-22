@@ -205,7 +205,7 @@ export function FeedbackButton({
               <span className="feedback-success-icon"><CheckCircle2 /></span>
               <DialogHeader className="pr-0 text-center">
                 <DialogTitle>Thanks for the feedback</DialogTitle>
-                <DialogDescription>Your note has been sent to the SoundSpin team.</DialogDescription>
+                <DialogDescription>Your note has been sent to the Lydman team.</DialogDescription>
               </DialogHeader>
               <Button onClick={() => setOpen(false)}>Done</Button>
             </div>

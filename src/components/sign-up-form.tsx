@@ -59,7 +59,7 @@ export function SignUpForm({
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Account created</CardTitle>
-            <CardDescription>Your SoundSpin account is ready.</CardDescription>
+            <CardDescription>Your Lydman account is ready.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">

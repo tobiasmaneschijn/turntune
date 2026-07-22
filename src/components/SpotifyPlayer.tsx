@@ -294,7 +294,7 @@ export function SpotifyPlayer({
       let reconnectAttempts = 0;
       let reconnecting = false;
       const player = spotifyWebPlayerSingleton || new sdk.Player({
-        name: "SoundSpin Web Player",
+        name: "Lydman Web Player",
         volume: volume / 100,
         getOAuthToken: (callback) => {
           void api<{ accessToken: string }>("/api/spotify/token", accessToken)
@@ -312,7 +312,7 @@ export function SpotifyPlayer({
       const scheduleReconnect = (immediate = false) => {
         if (!alive || reconnecting || reconnectTimer !== undefined) return;
         const delay = immediate ? 0 : Math.min(1_000 * (2 ** reconnectAttempts), 15_000);
-        setError("Reconnecting the SoundSpin Spotify device…");
+        setError("Reconnecting the Lydman Spotify device…");
         reconnectTimer = window.setTimeout(() => {
           reconnectTimer = undefined;
           if (!alive) return;
@@ -374,7 +374,7 @@ export function SpotifyPlayer({
           })
           .catch((cause) => {
             if (!alive) return;
-            setError(cause instanceof Error ? cause.message : "Could not activate the SoundSpin Spotify device.");
+            setError(cause instanceof Error ? cause.message : "Could not activate the Lydman Spotify device.");
             scheduleReconnect();
           });
       }) as (payload: never) => void);
@@ -442,7 +442,7 @@ export function SpotifyPlayer({
       return player.connect().then((connected) => {
         if (!connected) {
           scheduleReconnect();
-          throw new Error("Spotify could not connect the SoundSpin Web Player.");
+          throw new Error("Spotify could not connect the Lydman Web Player.");
         }
       });
     }).catch((cause) => {
@@ -616,7 +616,7 @@ export function SpotifyPlayer({
             <DialogHeader className="spotify-activation-copy">
               <DialogTitle>Enable Spotify playback</DialogTitle>
               <DialogDescription>
-                Spotify needs one click before SoundSpin can play audio in this browser. You only need to do this when the browser blocks autoplay.
+                Spotify needs one click before Lydman can play audio in this browser. You only need to do this when the browser blocks autoplay.
               </DialogDescription>
             </DialogHeader>
             {error && <div className="dialog-error" role="alert">{error}</div>}

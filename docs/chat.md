@@ -1,6 +1,6 @@
 # Chat architecture
 
-SoundSpin chat uses two complementary Supabase features:
+Lydman chat uses two complementary Supabase features:
 
 - **Realtime Broadcast** delivers messages and reaction changes immediately to
   clients currently in the room.
