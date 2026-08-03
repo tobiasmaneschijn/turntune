@@ -3,6 +3,9 @@ dist/
 dist-server/
 data/
 .env
+.env.test-users.local
 .DS_Store
 supabase/.temp/
 npm-debug.log*
+playwright-report/
+test-results/

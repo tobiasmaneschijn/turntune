@@ -17,11 +17,13 @@ import {
   Users
 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Textarea } from "./ui/textarea";
 import type { User } from "../types";
 
@@ -210,9 +212,9 @@ export function AdminDashboard({
         <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>Lydman</strong></div>
         <div className="admin-console-label">ADMIN CONSOLE</div>
         <nav className="admin-nav" aria-label="Admin dashboard">
-          <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
-          <button type="button" className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /> Feedback {Boolean(data?.metrics.openFeedback) && <span>{data?.metrics.openFeedback}</span>}</button>
-          <button type="button" className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /> Rooms</button>
+          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
+          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /> Feedback {Boolean(data?.metrics.openFeedback) && <span>{data?.metrics.openFeedback}</span>}</button>
+          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /> Rooms</button>
         </nav>
         <div className="admin-sidebar-footer">
           <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
@@ -226,7 +228,10 @@ export function AdminDashboard({
             <p className="section-kicker">ADMIN</p>
             <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : "Rooms"}</h1>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
+          <div className="admin-topbar-actions">
+            <ThemeToggle compact />
+            <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
+          </div>
         </header>
 
         {error && <div className="admin-error" role="alert">{error}</div>}
@@ -240,10 +245,13 @@ export function AdminDashboard({
             <section className="admin-feedback-list-panel">
               <div className="admin-feedback-tools">
                 <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback…" aria-label="Search feedback" /></div>
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FeedbackStatus | "all")} aria-label="Filter feedback status">
-                  <option value="all">All statuses</option>
-                  {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as FeedbackStatus | "all")}>
+                  <SelectTrigger aria-label="Filter feedback status"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {Object.entries(statusLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>
               </div>
               <div className="admin-feedback-list">
                 {filteredFeedback.map((item) => (
@@ -301,9 +309,12 @@ export function AdminDashboard({
                   <div className="admin-feedback-workflow">
                     <div>
                       <Label htmlFor="admin-feedback-status">Status</Label>
-                      <select id="admin-feedback-status" value={draftStatus} onChange={(event) => setDraftStatus(event.target.value as FeedbackStatus)}>
-                        {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                      </select>
+                      <Select value={draftStatus} onValueChange={(value) => setDraftStatus(value as FeedbackStatus)}>
+                        <SelectTrigger id="admin-feedback-status" className="w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectGroup>
+                          {Object.entries(statusLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                        </SelectGroup></SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label htmlFor="admin-feedback-note">Private admin note</Label>
