@@ -21,6 +21,8 @@ import {
   Volume2
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
+import { Brand } from "./components/Brand";
+import { LandingPage } from "./components/LandingPage";
 import { ProfilePage } from "./components/ProfilePage";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
@@ -269,6 +271,11 @@ export function App() {
 
         const { data: listener } = client.auth.onAuthStateChange((event, session) => {
           if (active) {
+            if (event === "SIGNED_IN") {
+              setRoomId(getRoomId());
+              setProfilePageId(getProfilePageId());
+              setAdminPage(getAdminPage());
+            }
             setAuth((current) => ({
               loading: false,
               client,
@@ -356,6 +363,13 @@ export function App() {
       setSnapshot(null);
     }
   }, [auth.enabled, auth.session]);
+
+  useEffect(() => {
+    if (!auth.enabled || !auth.session || auth.recovery) return;
+    if (["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) {
+      history.replaceState({}, "", "/");
+    }
+  }, [auth.enabled, auth.session, auth.recovery]);
 
   useEffect(() => {
     if (!notice) return;
@@ -464,7 +478,7 @@ export function App() {
   }
 
   if (auth.enabled && !auth.session) {
-    return <AuthScreen client={auth.client!} />;
+    return <PublicEntry client={auth.client!} />;
   }
 
   if (auth.enabled && auth.session && auth.recovery) {
@@ -518,7 +532,7 @@ export function App() {
       <main className="room-access-screen">
         <Card className="room-access-error">
           <CardHeader>
-            <Logo />
+            <Brand />
             <CardTitle>Admin access required</CardTitle>
             <CardDescription>This dashboard is only available to Lydman administrators.</CardDescription>
           </CardHeader>
@@ -599,7 +613,7 @@ export function App() {
       <main className="room-access-screen">
         <Card className="room-access-error">
           <CardHeader>
-            <Logo />
+            <Brand />
             <CardTitle>Couldn’t join this room</CardTitle>
             <CardDescription>{roomJoinError}</CardDescription>
           </CardHeader>
@@ -623,7 +637,7 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms"><Logo /></Button>
+        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms"><Brand /></Button>
         <div className="room-heading">
           <div>
             <strong>{snapshot.room.name}</strong>
@@ -769,29 +783,63 @@ export function App() {
 function LoadingScreen({ label }: { label: string }) {
   return (
     <div className="loading-screen">
-      <Logo />
+      <Brand />
       <div className="equalizer"><i /><i /><i /><i /></div>
       <p>{label}</p>
     </div>
   );
 }
 
-function AuthScreen({ client }: { client: SupabaseClient }) {
+function PublicEntry({ client }: { client: SupabaseClient }) {
   const [path, setPath] = useState(location.pathname);
+
+  useEffect(() => {
+    const onPopState = () => setPath(location.pathname);
+    addEventListener("popstate", onPopState);
+    return () => removeEventListener("popstate", onPopState);
+  }, []);
+
   const navigate = (nextPath: string) => {
     history.pushState({}, "", nextPath);
     setPath(nextPath);
   };
 
+  if (path === "/") return <LandingPage onNavigate={navigate} />;
+
+  return <AuthScreen client={client} path={path} onNavigate={navigate} />;
+}
+
+function AuthScreen({
+  client,
+  path,
+  onNavigate
+}: {
+  client: SupabaseClient;
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+
   const form = path === "/sign-up"
-    ? <SignUpForm onNavigate={navigate} className="w-full" />
+    ? <SignUpForm onNavigate={onNavigate} className="w-full" />
     : path === "/forgot-password"
-      ? <ForgotPasswordForm client={client} onNavigate={navigate} className="w-full" />
-      : <LoginForm client={client} onNavigate={navigate} className="w-full" />;
+      ? <ForgotPasswordForm client={client} onNavigate={onNavigate} className="w-full" />
+      : <LoginForm client={client} onNavigate={onNavigate} className="w-full" />;
 
   return (
     <main className="welcome auth-welcome">
-      <nav><Logo /><span>Shared listening, kept simple.</span></nav>
+      <nav>
+        <a
+          className="auth-home-link"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("/");
+          }}
+        >
+          <Brand />
+        </a>
+        <span>Shared listening, kept simple.</span>
+      </nav>
       <section className="auth-content">
         <div className="auth-intro">
           <Badge variant="outline">LYDMAN</Badge>
@@ -813,7 +861,7 @@ function PasswordRecoveryScreen({
 }) {
   return (
     <main className="welcome auth-welcome">
-      <nav><Logo /><span>Secure your account.</span></nav>
+      <nav><Brand /><span>Secure your account.</span></nav>
       <section className="auth-content">
         <div className="auth-intro">
           <Badge variant="outline">ACCOUNT RECOVERY</Badge>
@@ -823,15 +871,6 @@ function PasswordRecoveryScreen({
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
     </main>
-  );
-}
-
-function Logo() {
-  return (
-    <div className="logo">
-      <span className="logo-mark"><i /><i /><i /></span>
-      <span>Lydman</span>
-    </div>
   );
 }
 
@@ -854,7 +893,7 @@ function Welcome({
 
   return (
     <main className="welcome">
-      <nav><Logo /><span>Music is better together.</span></nav>
+      <nav><Brand /><span>Music is better together.</span></nav>
       <section className="welcome-content">
         <div className="welcome-copy">
           <Badge variant="outline">SHARED LISTENING</Badge>

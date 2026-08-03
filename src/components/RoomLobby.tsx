@@ -1,6 +1,7 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { Brand } from "./Brand";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -39,15 +40,6 @@ async function api<T>(path: string, accessToken: string, init?: RequestInit) {
   const payload = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "Something went wrong.");
   return payload;
-}
-
-function Brand() {
-  return (
-    <div className="logo" aria-label="Lydman">
-      <span className="logo-mark"><i /><i /><i /></span>
-      <span>Lydman</span>
-    </div>
-  );
 }
 
 export function RoomLobby({
