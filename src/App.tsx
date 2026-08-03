@@ -23,6 +23,7 @@ import {
   X
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
+import { LandingPage } from "./components/LandingPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { PanelErrorBoundary } from "./components/AppErrorBoundary";
@@ -280,6 +281,11 @@ export function App() {
 
         const { data: listener } = client.auth.onAuthStateChange((event, session) => {
           if (active) {
+            if (event === "SIGNED_IN") {
+              setRoomId(getRoomId());
+              setProfilePageId(getProfilePageId());
+              setAdminPage(getAdminPage());
+            }
             setAuth((current) => ({
               loading: false,
               client,
@@ -372,6 +378,13 @@ export function App() {
       setSnapshot(null);
     }
   }, [auth.enabled, auth.session]);
+
+  useEffect(() => {
+    if (!auth.enabled || !auth.session || auth.recovery) return;
+    if (["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) {
+      history.replaceState({}, "", "/");
+    }
+  }, [auth.enabled, auth.session, auth.recovery]);
 
   useEffect(() => {
     if (!notice) return;
@@ -511,7 +524,7 @@ export function App() {
   }
 
   if (auth.enabled && !auth.session) {
-    return <AuthScreen client={auth.client!} />;
+    return <PublicEntry client={auth.client!} />;
   }
 
   if (auth.enabled && auth.session && auth.recovery) {
@@ -843,22 +856,56 @@ function LoadingScreen({ label }: { label: string }) {
   );
 }
 
-function AuthScreen({ client }: { client: SupabaseClient }) {
+function PublicEntry({ client }: { client: SupabaseClient }) {
   const [path, setPath] = useState(location.pathname);
+
+  useEffect(() => {
+    const onPopState = () => setPath(location.pathname);
+    addEventListener("popstate", onPopState);
+    return () => removeEventListener("popstate", onPopState);
+  }, []);
+
   const navigate = (nextPath: string) => {
     history.pushState({}, "", nextPath);
     setPath(nextPath);
   };
 
+  if (path === "/") return <LandingPage onNavigate={navigate} />;
+
+  return <AuthScreen client={client} path={path} onNavigate={navigate} />;
+}
+
+function AuthScreen({
+  client,
+  path,
+  onNavigate
+}: {
+  client: SupabaseClient;
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+
   const form = path === "/sign-up"
-    ? <SignUpForm onNavigate={navigate} className="w-full" />
+    ? <SignUpForm onNavigate={onNavigate} className="w-full" />
     : path === "/forgot-password"
-      ? <ForgotPasswordForm client={client} onNavigate={navigate} className="w-full" />
-      : <LoginForm client={client} onNavigate={navigate} className="w-full" />;
+      ? <ForgotPasswordForm client={client} onNavigate={onNavigate} className="w-full" />
+      : <LoginForm client={client} onNavigate={onNavigate} className="w-full" />;
 
   return (
     <main className="welcome auth-welcome">
-      <nav><Brand /><div className="welcome-nav-actions"><span>Shared listening, kept simple.</span><ThemeToggle compact /></div></nav>
+      <nav>
+        <a
+          className="auth-home-link"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("/");
+          }}
+        >
+          <Brand />
+        </a>
+        <div className="welcome-nav-actions"><span>Shared listening, kept simple.</span><ThemeToggle compact /></div>
+      </nav>
       <section className="auth-content">
         <div className="auth-intro">
           <Badge variant="outline">LYDMAN</Badge>
