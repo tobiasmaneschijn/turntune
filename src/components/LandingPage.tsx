@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { User } from "@/types";
 import { Avatar } from "@/components/Avatar";
-import { Brand } from "@/components/Brand";
+import { Brand } from "@/components/app-primitives";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {

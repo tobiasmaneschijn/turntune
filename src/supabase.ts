@@ -4,10 +4,10 @@ interface RuntimeConfig {
   supabase: {
     url: string;
     anonKey: string;
-  } | null;
+  };
 }
 
-let clientPromise: Promise<SupabaseClient | null> | null = null;
+let clientPromise: Promise<SupabaseClient> | null = null;
 
 function createBrowserClient(url: string, publishableKey: string) {
   return createClient(url, publishableKey, {
@@ -36,7 +36,9 @@ export function getSupabaseClient() {
         return response.json() as Promise<RuntimeConfig>;
       })
       .then(({ supabase }) => {
-        if (!supabase) return null;
+        if (!supabase?.url || !supabase.anonKey) {
+          throw new Error("Supabase authentication is not configured.");
+        }
         return createBrowserClient(supabase.url, supabase.anonKey);
       });
   }

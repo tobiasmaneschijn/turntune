@@ -1,5 +1,6 @@
 export type PlaybackPreference = "source" | "spotify-web" | "spotify-desktop" | "apple";
 export type PlaybackFallback = "source" | "ask" | "silent";
+export type ThemeMode = "dark" | "light" | "system";
 
 export interface SoundSpinUserSettings {
   playback: {
@@ -17,6 +18,7 @@ export interface SoundSpinUserSettings {
     playbackErrors: boolean;
   };
   appearance: {
+    theme: ThemeMode;
     reducedMotion: boolean;
     artworkBlur: number;
   };
@@ -42,6 +44,7 @@ const defaults: SoundSpinUserSettings = {
     playbackErrors: true
   },
   appearance: {
+    theme: "dark",
     reducedMotion: false,
     artworkBlur: 30
   }
@@ -64,6 +67,7 @@ export function readUserSettings(): SoundSpinUserSettings {
   const playback = stored.playback || {} as Partial<SoundSpinUserSettings["playback"]>;
   const notifications = stored.notifications || {} as Partial<SoundSpinUserSettings["notifications"]>;
   const appearance = stored.appearance || {} as Partial<SoundSpinUserSettings["appearance"]>;
+  const storedTheme = appearance.theme ?? localStorage.getItem("soundspin-theme");
   return {
     playback: {
       ...defaults.playback,
@@ -79,6 +83,7 @@ export function readUserSettings(): SoundSpinUserSettings {
     appearance: {
       ...defaults.appearance,
       ...appearance,
+      theme: storedTheme === "light" || storedTheme === "system" ? storedTheme : "dark",
       artworkBlur: Math.max(0, Math.min(60, Number(appearance.artworkBlur ?? defaults.appearance.artworkBlur)))
     }
   };
@@ -86,6 +91,7 @@ export function readUserSettings(): SoundSpinUserSettings {
 
 export function saveUserSettings(settings: SoundSpinUserSettings) {
   localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  localStorage.setItem("soundspin-theme", settings.appearance.theme);
   localStorage.setItem(LEGACY_PLAYBACK_PROVIDER_KEY, settings.playback.preference);
   if (settings.playback.spotifyDeviceId) localStorage.setItem(LEGACY_SPOTIFY_DEVICE_KEY, settings.playback.spotifyDeviceId);
   else localStorage.removeItem(LEGACY_SPOTIFY_DEVICE_KEY);

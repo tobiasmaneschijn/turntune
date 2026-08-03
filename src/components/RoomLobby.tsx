@@ -1,7 +1,8 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
-import { Brand } from "./Brand";
+import { Brand } from "./app-primitives";
+import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -16,6 +17,9 @@ import {
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Skeleton } from "./ui/skeleton";
 import type { RoomDirectoryEntry, User } from "../types";
 
 interface RoomLobbyProps {
@@ -101,6 +105,7 @@ export function RoomLobby({
         <div className="lobby-header-actions">
           {adminButton}
           {feedbackButton}
+          <ThemeToggle compact />
           <Button variant="ghost" className="lobby-profile h-10 px-2" onClick={onOpenProfile}>
             <Avatar user={currentUser} size={28} />
             <span><strong>{currentUser.name}</strong><small>Profile</small></span>
@@ -124,14 +129,18 @@ export function RoomLobby({
         </section>
 
         {error && (
-          <div className="lobby-error" role="alert">
-            <span>{error}</span>
-            <Button variant="ghost" size="icon-xs" onClick={() => setError("")}><X /></Button>
-          </div>
+          <Alert variant="destructive" className="lobby-error">
+            <AlertCircle />
+            <AlertTitle>Rooms could not be updated</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+            <AlertAction><Button variant="ghost" size="icon-xs" onClick={() => setError("")} aria-label="Dismiss error"><X /></Button></AlertAction>
+          </Alert>
         )}
 
         {loading ? (
-          <div className="lobby-loading"><div className="equalizer"><i /><i /><i /><i /></div><span>Loading rooms…</span></div>
+          <div className="room-card-grid" aria-label="Loading rooms">
+            {[0, 1, 2].map((item) => <Skeleton key={item} className="h-36 rounded-xl" />)}
+          </div>
         ) : (
           <div className="lobby-sections">
             {favorites.length > 0 && (
@@ -230,7 +239,15 @@ function RoomSection({
             </Card>
           ))}
         </div>
-      ) : <div className="empty-room-section">{empty}</div>}
+      ) : (
+        <Empty className="empty-room-section">
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><Radio /></EmptyMedia>
+            <EmptyTitle>No rooms here yet</EmptyTitle>
+            <EmptyDescription>{empty}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
     </section>
   );
 }

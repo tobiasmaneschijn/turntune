@@ -1,19 +1,23 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
+import { toast } from "sonner";
 import { buildFeedbackDiagnostics, type FeedbackDiagnosticContext } from "../feedback-diagnostics";
 import { getSupabaseClient } from "../supabase";
 import { Button } from "./ui/button";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
+  DialogTrigger
 } from "./ui/dialog";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const MAX_SCREENSHOTS = 5;
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
@@ -137,7 +141,6 @@ export function FeedbackButton({
 
     try {
       const client = await getSupabaseClient();
-      if (!client) throw new Error("Feedback is unavailable while authentication is disabled.");
 
       const feedbackId = crypto.randomUUID();
       for (const attachment of screenshots) {
@@ -169,6 +172,7 @@ export function FeedbackButton({
 
       clearForm();
       setSent(true);
+      toast.success("Feedback sent");
     } catch (submitError) {
       const client = await getSupabaseClient().catch(() => null);
       if (client && uploadedPaths.length) {
@@ -181,24 +185,21 @@ export function FeedbackButton({
   };
 
   return (
-    <>
-      <Button
-        variant="ghost"
-        size="icon"
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) setOpen(nextOpen); }}>
+      <DialogTrigger
+        render={<Button variant="ghost" size="icon" />}
         onClick={() => {
           setSent(false);
           setDiagnosticPreview(buildFeedbackDiagnostics(diagnosticContext || {
             surface: roomSlug ? "room" : "room-directory"
           }));
-          setOpen(true);
         }}
         title="Send feedback"
         aria-label="Send feedback"
       >
         <Lightbulb />
-      </Button>
+      </DialogTrigger>
 
-      <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) setOpen(nextOpen); }}>
         <DialogContent className="feedback-dialog max-w-xl">
           {sent ? (
             <div className="feedback-success">
@@ -219,22 +220,28 @@ export function FeedbackButton({
               <div className="feedback-classification">
                 <div className="feedback-field">
                   <Label htmlFor="feedback-category">Category</Label>
-                  <select id="feedback-category" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
-                    <option value="bug">Bug</option>
-                    <option value="idea">Idea</option>
-                    <option value="playback">Playback</option>
-                    <option value="chat">Chat</option>
-                    <option value="account">Account</option>
-                    <option value="other">Other</option>
-                  </select>
+                  <Select value={category} onValueChange={(value) => setCategory(value as typeof category)}>
+                    <SelectTrigger id="feedback-category" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup>
+                      <SelectItem value="bug">Bug</SelectItem>
+                      <SelectItem value="idea">Idea</SelectItem>
+                      <SelectItem value="playback">Playback</SelectItem>
+                      <SelectItem value="chat">Chat</SelectItem>
+                      <SelectItem value="account">Account</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectGroup></SelectContent>
+                  </Select>
                 </div>
                 <div className="feedback-field">
                   <Label htmlFor="feedback-impact">Impact</Label>
-                  <select id="feedback-impact" value={impact} onChange={(event) => setImpact(event.target.value as typeof impact)}>
-                    <option value="minor">Minor</option>
-                    <option value="blocking">Blocking something</option>
-                    <option value="unusable">App unusable</option>
-                  </select>
+                  <Select value={impact} onValueChange={(value) => setImpact(value as typeof impact)}>
+                    <SelectTrigger id="feedback-impact" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup>
+                      <SelectItem value="minor">Minor</SelectItem>
+                      <SelectItem value="blocking">Blocking something</SelectItem>
+                      <SelectItem value="unusable">App unusable</SelectItem>
+                    </SelectGroup></SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -321,7 +328,7 @@ export function FeedbackButton({
                 )}
               </div>
 
-              {error && <div className="dialog-error" role="alert">{error}</div>}
+              {error && <Alert variant="destructive"><AlertTitle>Could not send feedback</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
@@ -332,7 +339,6 @@ export function FeedbackButton({
             </form>
           )}
         </DialogContent>
-      </Dialog>
-    </>
+    </Dialog>
   );
 }

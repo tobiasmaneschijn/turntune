@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bell, CircleCheck, Link2, MonitorSpeaker, Music2, Palette, Radio, RefreshCw, Unplug } from "lucide-react";
+import { useTheme } from "next-themes";
 import type { PlaybackPreference, SoundSpinUserSettings } from "../playback-settings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
+import { Slider } from "./ui/slider";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 
 interface SpotifyDevice {
   id: string | null;
@@ -53,6 +58,7 @@ export function UserSettingsDialog({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance">("playback");
+  const { theme = settings.appearance.theme, setTheme } = useTheme();
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [deviceError, setDeviceError] = useState("");
@@ -73,6 +79,10 @@ export function UserSettingsDialog({
     ...settings,
     appearance: { ...settings.appearance, ...patch }
   });
+  const updateTheme = (nextTheme: SoundSpinUserSettings["appearance"]["theme"]) => {
+    setTheme(nextTheme);
+    updateAppearance({ theme: nextTheme });
+  };
 
   const refreshDevices = useCallback(() => {
     if (!accessToken || !connections.spotifyConnected) return;
@@ -118,33 +128,33 @@ export function UserSettingsDialog({
           <DialogDescription>Customize playback, connected services, notifications, and appearance.</DialogDescription>
         </DialogHeader>
 
-        <div className="user-settings-layout">
-          <div className="settings-tabs" role="tablist" aria-label="Setting categories">
-            <button type="button" role="tab" aria-selected={tab === "playback"} className={tab === "playback" ? "active" : ""} onClick={() => setTab("playback")}><Radio /> Playback</button>
-            <button type="button" role="tab" aria-selected={tab === "connections"} className={tab === "connections" ? "active" : ""} onClick={() => setTab("connections")}><Link2 /> Connections</button>
-            <button type="button" role="tab" aria-selected={tab === "notifications"} className={tab === "notifications" ? "active" : ""} onClick={() => setTab("notifications")}><Bell /> Notifications</button>
-            <button type="button" role="tab" aria-selected={tab === "appearance"} className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette /> Appearance</button>
-          </div>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation="vertical" className="user-settings-layout">
+          <TabsList className="settings-tabs" aria-label="Setting categories">
+            <TabsTrigger value="playback"><Radio /> Playback</TabsTrigger>
+            <TabsTrigger value="connections"><Link2 /> Connections</TabsTrigger>
+            <TabsTrigger value="notifications"><Bell /> Notifications</TabsTrigger>
+            <TabsTrigger value="appearance"><Palette /> Appearance</TabsTrigger>
+          </TabsList>
 
           <div className="settings-tab-panel" role="tabpanel">
             {tab === "playback" && (
               <div className="settings-panel-stack">
                 <section>
                   <div className="settings-section-heading"><strong>Default playback device</strong><small>Used whenever a matching version of the room track is available.</small></div>
-                  <div className="playback-option-list">
+                  <ToggleGroup className="playback-option-list" aria-label="Default playback device">
                     {playbackOptions.map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
                       const selected = settings.playback.preference === option.value;
                       const Icon = option.icon;
                       return (
-                        <button type="button" key={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable} aria-pressed={selected} onClick={() => updatePlayback({ preference: option.value })}>
+                        <ToggleGroupItem key={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable} pressed={selected} onPressedChange={() => updatePlayback({ preference: option.value })}>
                           <span className="playback-option-icon"><Icon /></span>
                           <span><strong>{option.title}</strong><small>{unavailable ? "Not configured by the host" : option.description}</small></span>
                           {selected && <CircleCheck className="playback-option-check" />}
-                        </button>
+                        </ToggleGroupItem>
                       );
                     })}
-                  </div>
+                  </ToggleGroup>
                   {settings.playback.preference.startsWith("spotify") && !connections.spotifyConnected && (
                     <div className="settings-inline-notice">
                       <span>Connect Spotify before using this playback device.</span>
@@ -155,17 +165,20 @@ export function UserSettingsDialog({
 
                 <section className="settings-control-group">
                   <Label htmlFor="default-volume">Default volume <strong>{settings.playback.defaultVolume}%</strong></Label>
-                  <input id="default-volume" type="range" min={0} max={100} value={settings.playback.defaultVolume} onChange={(event) => updatePlayback({ defaultVolume: Number(event.target.value) })} />
+                  <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label="Default volume" />
                 </section>
 
                 {settings.playback.preference === "spotify-desktop" && (
                   <section className="settings-control-group">
                     <Label htmlFor="spotify-device">Spotify Connect device</Label>
                     <div className="settings-select-row">
-                      <select id="spotify-device" value={settings.playback.spotifyDeviceId} onChange={(event) => updatePlayback({ spotifyDeviceId: event.target.value })} disabled={!devices.length}>
-                        <option value="">Automatic selection</option>
-                        {devices.map((device) => <option key={device.id!} value={device.id!}>{device.name} · {device.type}{device.is_active ? " · Active" : ""}</option>)}
-                      </select>
+                      <Select value={settings.playback.spotifyDeviceId || "automatic"} onValueChange={(value) => updatePlayback({ spotifyDeviceId: !value || value === "automatic" ? "" : value })}>
+                        <SelectTrigger id="spotify-device" className="w-full" disabled={!devices.length}><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectGroup>
+                          <SelectItem value="automatic">Automatic selection</SelectItem>
+                          {devices.map((device) => <SelectItem key={device.id!} value={device.id!}>{device.name} · {device.type}{device.is_active ? " · Active" : ""}</SelectItem>)}
+                        </SelectGroup></SelectContent>
+                      </Select>
                       <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
                     </div>
                     {deviceError && <small className="settings-field-error">{deviceError}</small>}
@@ -174,11 +187,14 @@ export function UserSettingsDialog({
 
                 <section className="settings-control-group">
                   <Label htmlFor="fallback-behavior">When the preferred provider has no match</Label>
-                  <select id="fallback-behavior" value={settings.playback.fallback} onChange={(event) => updatePlayback({ fallback: event.target.value as SoundSpinUserSettings["playback"]["fallback"] })}>
-                    <option value="source">Use the room source automatically</option>
-                    <option value="ask">Ask for each unavailable track</option>
-                    <option value="silent">Keep local playback silent</option>
-                  </select>
+                  <Select value={settings.playback.fallback} onValueChange={(value) => updatePlayback({ fallback: value as SoundSpinUserSettings["playback"]["fallback"] })}>
+                    <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup>
+                      <SelectItem value="source">Use the room source automatically</SelectItem>
+                      <SelectItem value="ask">Ask for each unavailable track</SelectItem>
+                      <SelectItem value="silent">Keep local playback silent</SelectItem>
+                    </SelectGroup></SelectContent>
+                  </Select>
                 </section>
 
                 <SettingSwitch title="Resume after reconnecting" description="Catch up to the room automatically when the playback device reconnects." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />
@@ -217,16 +233,24 @@ export function UserSettingsDialog({
 
             {tab === "appearance" && (
               <div className="settings-panel-stack">
+                <section className="settings-control-group">
+                  <Label htmlFor="color-theme">Color theme</Label>
+                  <Select value={theme} onValueChange={(value) => updateTheme(value as SoundSpinUserSettings["appearance"]["theme"])}>
+                    <SelectTrigger id="color-theme" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup><SelectItem value="dark">Dark</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="system">System</SelectItem></SelectGroup></SelectContent>
+                  </Select>
+                  <small>Dark stays the default. System follows your device preference.</small>
+                </section>
                 <SettingSwitch title="Compact player by default" description="Keep the center player collapsed between visits." checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
                 <SettingSwitch title="Reduced motion" description="Disable decorative transitions and movement." checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
                 <section className="settings-control-group">
                   <Label htmlFor="artwork-blur">Artwork background blur <strong>{settings.appearance.artworkBlur}px</strong></Label>
-                  <input id="artwork-blur" type="range" min={0} max={60} value={settings.appearance.artworkBlur} onChange={(event) => updateAppearance({ artworkBlur: Number(event.target.value) })} />
+                  <Slider id="artwork-blur" min={0} max={60} value={[settings.appearance.artworkBlur]} onValueChange={(value) => updateAppearance({ artworkBlur: typeof value === "number" ? value : value[0] })} aria-label="Artwork background blur" />
                 </section>
               </div>
             )}
           </div>
-        </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

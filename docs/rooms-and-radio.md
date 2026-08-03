@@ -128,8 +128,10 @@ The browser connects Socket.IO and emits `room:join`. The server then:
 7. Adds the socket to presence and cancels this user's pending DJ eviction.
 8. Removes lineup entries that are neither online nor covered by a live grace
    timer. This cleans stale persisted DJs after a server restart.
-9. Persists normalized state, joins the Socket.IO room, and broadcasts
-   personalized snapshots.
+9. Persists normalized state and joins the Socket.IO room.
+10. Sends the joining socket a personalized snapshot and broadcasts a
+    presence-only update to existing listeners. A full personalized broadcast
+    occurs only if normalization or stale-lineup cleanup changed shared state.
 
 Listener count is the number of distinct connected user IDs, not the number of
 tabs or sockets. `roomUsers` remains socket-based internally, but `uniqueUsers`
@@ -255,6 +257,7 @@ Every command accepts an acknowledgement callback shaped like
 | `playback:update` | `{ playing, position }` | Save an authorized playback checkpoint. |
 | `vibe:vote` | `{ value: -1 \| 0 \| 1 }` | Set/remove the listener's vote for the current track. |
 | `room:snapshot` | server event | Personalized room, presence, DJ identities, and server time. |
+| `room:presence` | server event | Presence and DJ identities without replaying unchanged room/playback state. |
 
 Add new events in this order: define a Zod schema, resolve membership from the
 socket, authorize on the server, mutate authoritative state, await persistence,

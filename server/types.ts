@@ -134,3 +134,12 @@ export interface RoomSnapshot {
   djUsers: User[];
   serverTime: number;
 }
+
+export interface RoomPresence {
+  roomId: string;
+  /** Users with a live socket. Used for presence/listener count. */
+  users: User[];
+  /** DJ identities, including disconnected DJs during their grace period. */
+  djUsers: User[];
+  serverTime: number;
+}

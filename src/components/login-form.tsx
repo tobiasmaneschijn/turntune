@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 export function LoginForm({
   client,
@@ -68,13 +69,15 @@ export function LoginForm({
               <div className="grid gap-2">
                 <div className="flex items-center">
                   <Label htmlFor="password">Password</Label>
-                  <button
+                  <Button
                     type="button"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                    variant="link"
+                    size="sm"
+                    className="ml-auto h-auto p-0"
                     onClick={() => onNavigate('/forgot-password')}
                   >
                     Forgot your password?
-                  </button>
+                  </Button>
                 </div>
                 <Input
                   id="password"
@@ -84,7 +87,7 @@ export function LoginForm({
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <Alert variant="destructive"><AlertTitle>Could not sign in</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Signing in…' : 'Sign in'}
               </Button>
