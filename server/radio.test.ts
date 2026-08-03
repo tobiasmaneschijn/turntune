@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { advanceRadio, GracePeriodRegistry, normalizeRadioState, roomForListener } from "./radio.js";
-import { uniqueUsers } from "./presence.js";
+import { roomPresence, uniqueUsers } from "./presence.js";
 import type { Room, Track, User } from "./types.js";
 
 const alice: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
@@ -57,6 +57,19 @@ test("counts one listener per account even with multiple sockets", () => {
   const listeners = uniqueUsers([alice, bob, updatedAlice]);
   assert.deepEqual(listeners.map((user) => user.id), [alice.id, bob.id]);
   assert.equal(listeners.find((user) => user.id === alice.id)?.name, "Alice Updated");
+});
+
+test("presence updates cannot replay room or playback state", () => {
+  const state = room();
+  const payload = roomPresence(state, [alice, bob, alice], [alice, bob], 42);
+  assert.deepEqual(payload, {
+    roomId: state.id,
+    users: [alice, bob],
+    djUsers: [alice, bob],
+    serverTime: 42
+  });
+  assert.equal("room" in payload, false);
+  assert.equal("playback" in payload, false);
 });
 
 test("migrates a legacy shared queue into private queues", () => {

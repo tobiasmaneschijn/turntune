@@ -1,0 +1,63 @@
+import { Laptop, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
+import { Button } from "./ui/button";
+import { readUserSettings, saveUserSettings, type ThemeMode } from "../playback-settings";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "./ui/dropdown-menu";
+
+const modes = [
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "system", label: "System", icon: Laptop }
+] as const;
+
+export function ThemeToggle({ compact = false }: { compact?: boolean }) {
+  const { theme = "dark", setTheme } = useTheme();
+  const active = modes.find((mode) => mode.value === theme) || modes[0];
+  const ActiveIcon = active.icon;
+  const changeTheme = (value: string) => {
+    const nextTheme = value as ThemeMode;
+    setTheme(nextTheme);
+    const settings = readUserSettings();
+    saveUserSettings({ ...settings, appearance: { ...settings.appearance, theme: nextTheme } });
+    window.dispatchEvent(new CustomEvent("soundspin:theme-change", { detail: nextTheme }));
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size={compact ? "icon" : "sm"} aria-label="Change color theme" />
+        }
+      >
+        <ActiveIcon data-icon={compact ? undefined : "inline-start"} />
+        {!compact && <span>Theme</span>}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Appearance</DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={theme} onValueChange={changeTheme}>
+          {modes.map((mode) => {
+            const Icon = mode.icon;
+            return (
+              <DropdownMenuRadioItem key={mode.value} value={mode.value}>
+                <Icon />
+                {mode.label}
+              </DropdownMenuRadioItem>
+            );
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

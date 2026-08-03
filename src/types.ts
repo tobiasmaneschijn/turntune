@@ -117,3 +117,10 @@ export interface RoomSnapshot {
   djUsers: User[];
   serverTime: number;
 }
+
+export interface RoomPresence {
+  roomId: string;
+  users: User[];
+  djUsers: User[];
+  serverTime: number;
+}

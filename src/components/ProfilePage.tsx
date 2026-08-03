@@ -3,6 +3,7 @@ import { ArrowLeft, Check, ImageUp, LayoutDashboard, Palette } from "lucide-reac
 import { Avatar } from "./Avatar";
 import { DevFlair } from "./DevFlair";
 import { FeedbackButton } from "./FeedbackDialog";
+import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
@@ -184,6 +185,7 @@ export function ProfilePage({
           <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
           <div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div>
           <div className="profile-header-actions">
+            <ThemeToggle compact />
             {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
             <FeedbackButton userId={currentUser.id} diagnosticContext={{ surface: "profile" }} />
           </div>
