@@ -12,7 +12,7 @@
     "test": "npm run test:signup && npm run test:chat && npm run test:feedback && npm run test:giphy && npm run test:radio && npm run test:soundcloud && npm run test:music",
     "test:signup": "tsx --test server/invite-signup.test.ts",
     "test:chat": "tsx --test tests/chat-model.test.ts tests/chat-mentions.test.ts tests/chat-shortcuts.test.ts tests/chat-media.test.ts",
-    "test:feedback": "tsx --test tests/feedback-diagnostics.test.ts",
+    "test:feedback": "tsx --test tests/feedback-diagnostics.test.ts tests/feedback-agent-prompt.test.ts",
     "test:giphy": "tsx --test server/giphy.test.ts",
     "test:radio": "tsx --test server/radio.test.ts",
     "test:soundcloud": "tsx --test server/soundcloud.test.ts",

@@ -32,12 +32,36 @@ const messages: ChatMessage[] = [
   { id: "m2", user, content: "Queued one more for the sunset set.", type: "text", createdAt: "2026-07-31T18:31:00Z", reactions: [], replyTo: { id: "m1", user: { ...user, name: "Mira" }, content: "That transition was perfect.", type: "text", createdAt: "2026-07-31T18:30:00Z", reactions: [] } }
 ];
 const adminData = { metrics: { users: 1284, rooms: 42, feedback: 86, openFeedback: 12, messages: 18420 }, activity: [{ date: "2026-07-25", users: 84, feedback: 4, messages: 920 }, { date: "2026-07-31", users: 126, feedback: 7, messages: 1430 }], feedback: [{ id: "feedback-0001", userId: "listener-1", userName: "Mira", userAvatarUrl: null, message: "The compact player should remember its size on tablet.", roomSlug: "sunset-radio", pagePath: "/room/sunset-radio", viewport: { width: 1024, height: 768 }, category: "idea", impact: "minor", diagnostics: { browser: "Chromium", theme: "dark" }, status: "new", adminNote: "", createdAt: "2026-07-31T17:20:00Z", updatedAt: "2026-07-31T17:20:00Z", screenshots: [] }], rooms: [{ slug: "sunset-radio", name: "Sunset Radio", isPublic: true, listenerCount: 18, createdAt: "2026-06-01T10:00:00Z", updatedAt: "2026-07-31T18:20:00Z" }] };
+const feedbackFixtureMessages = [
+  "The compact player should remember its size on tablet.",
+  "Playback briefly pauses when another listener joins the room.",
+  "Let hosts pin an announcement above the room chat.",
+  "The queue order is difficult to scan during a busy session.",
+  "Add a keyboard shortcut to open the track search.",
+  "Profile avatars sometimes appear stale after uploading a new image."
+];
+const feedbackFixtureStatuses = ["new", "new", "new", "new", "new", "new", "new", "reviewing", "reviewing", "reviewing", "planned", "planned", "resolved", "resolved", "closed"] as const;
+const adminFeedbackData = {
+  ...adminData,
+  feedback: feedbackFixtureStatuses.map((status, index) => ({
+    ...adminData.feedback[0],
+    id: `feedback-${String(index + 1).padStart(4, "0")}`,
+    userId: `listener-${index + 1}`,
+    userName: ["Mira", "Jonas", "Sofia", "Noah", "Lea"][index % 5],
+    message: feedbackFixtureMessages[index % feedbackFixtureMessages.length],
+    category: (["idea", "playback", "chat", "bug", "account"] as const)[index % 5],
+    impact: (["minor", "blocking", "minor", "unusable"] as const)[index % 4],
+    status,
+    createdAt: new Date(Date.parse("2026-07-31T17:20:00Z") - index * 3_600_000).toISOString(),
+    updatedAt: new Date(Date.parse("2026-07-31T17:20:00Z") - index * 3_600_000).toISOString()
+  }))
+};
 let boundaryShouldThrow = true;
 const rejectedAuthClient = { auth: { signInWithPassword: async () => ({ error: new Error("Email or password is incorrect.") }) } };
 
 globalThis.fetch = async (input) => {
   const url = String(input);
-  if (url.includes("/api/admin/dashboard")) return Response.json(adminData);
+  if (url.includes("/api/admin/dashboard")) return Response.json(scenario === "admin-feedback" ? adminFeedbackData : adminData);
   if (url.includes("/api/profiles/")) return Response.json({ profile, options: [
     { key: "pulse", kind: "avatar", name: "Pulse", metadata: {} }, { key: "orbit", kind: "avatar", name: "Orbit", metadata: {} },
     { key: "afterglow", kind: "theme", name: "Afterglow", metadata: { description: "Warm neon accents" } }, { key: "deep-space", kind: "theme", name: "Deep Space", metadata: { description: "A cooler cosmic profile" } }

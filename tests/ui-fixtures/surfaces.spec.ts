@@ -1,14 +1,21 @@
 import { expect, test } from "@playwright/test";
 
 const desktopScenarios = ["lobby", "lobby-empty", "room-active", "room-empty", "queue", "chat", "settings", "profile", "feedback", "login-error", "admin", "admin-feedback", "loading", "failure", "access"];
-const mobileScenarios = ["lobby", "room-active", "queue", "chat", "settings", "profile", "admin"];
+const mobileScenarios = ["lobby", "room-active", "queue", "chat", "settings", "profile", "admin", "admin-feedback"];
 
 for (const scenario of desktopScenarios) {
   test(`desktop ${scenario}`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop");
     await page.goto(`/tests/ui-harness/index.html?scenario=${scenario}`);
     if (scenario === "feedback") await page.getByRole("button", { name: "Send feedback" }).click();
-    if (scenario === "admin-feedback") await page.getByRole("button", { name: /Feedback/ }).click();
+    if (scenario === "admin-feedback") {
+      await page.getByRole("button", { name: /Feedback/ }).click();
+      const firstLane = page.locator(".admin-feedback-column-list").first();
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = 0; });
+    }
     if (scenario === "login-error") {
       await page.getByLabel("Email").fill("qa@example.com");
       await page.getByLabel("Password").fill("incorrect-password");
@@ -23,7 +30,14 @@ for (const scenario of desktopScenarios) {
     await page.addInitScript(() => localStorage.setItem("soundspin-theme", "light"));
     await page.goto(`/tests/ui-harness/index.html?scenario=${scenario}`);
     if (scenario === "feedback") await page.getByRole("button", { name: "Send feedback" }).click();
-    if (scenario === "admin-feedback") await page.getByRole("button", { name: /Feedback/ }).click();
+    if (scenario === "admin-feedback") {
+      await page.getByRole("button", { name: /Feedback/ }).click();
+      const firstLane = page.locator(".admin-feedback-column-list").first();
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = 0; });
+    }
     if (scenario === "login-error") {
       await page.getByLabel("Email").fill("qa@example.com");
       await page.getByLabel("Password").fill("incorrect-password");
@@ -43,6 +57,14 @@ for (const scenario of mobileScenarios) {
       await expect(dialog).toBeVisible();
       await expect(page.getByRole("tab", { name: "Playback" })).toBeInViewport();
       await expect.poll(async () => (await dialog.boundingBox())?.width || 0).toBeGreaterThan(340);
+    }
+    if (scenario === "admin-feedback") {
+      await page.getByRole("button", { name: /Feedback/ }).click();
+      const firstLane = page.locator(".admin-feedback-column-list").first();
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect.poll(() => firstLane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await firstLane.evaluate((element) => { element.scrollTop = 0; });
     }
     await expect(page.locator("body")).toHaveScreenshot(`${scenario}-mobile.png`);
   });
@@ -69,6 +91,21 @@ test("dialogs trap focus and restore it to the trigger", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test("admin feedback copies an agent-ready prompt", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/tests/ui-harness/index.html?scenario=admin-feedback");
+  await page.getByRole("button", { name: /Feedback/ }).click();
+  await page.getByRole("button", { name: /Open feedback/ }).first().click();
+  await page.getByRole("button", { name: "Copy AI prompt" }).click();
+
+  await expect(page.getByRole("button", { name: "Prompt copied" })).toBeVisible();
+  const prompt = await page.evaluate(() => navigator.clipboard.readText());
+  expect(prompt).toContain("You are working on SoundSpin");
+  expect(prompt).toContain("The compact player should remember its size on tablet.");
+  expect(prompt).toContain("## Technical diagnostics");
+  expect(prompt).toContain("## Task");
 });
 
 test("settings controls are keyboard operable", async ({ page }) => {
