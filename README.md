@@ -19,6 +19,7 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - Supabase-backed room ownership and storage
 - YouTube, SoundCloud, Spotify, and Apple Music catalog search
 - Provider-neutral tracks with per-listener synchronized playback
+- Visible app version and in-app changelog
 - Single-container deployment for Dokploy
 
 ## Local development
@@ -48,6 +49,15 @@ Supabase configuration.
   replies, reactions, media, and RLS.
 - [`docs/codebase-review.md`](docs/codebase-review.md) records the stability review,
   module boundaries, validation, and remaining risks.
+
+## Release notes
+
+The app version comes from `package.json`; the in-app changelog is maintained in
+[`src/changelog.ts`](src/changelog.ts). For the next release, update the package
+version in `package.json` and `package-lock.json`, then add a dated entry at the
+top of `CHANGELOG` with that literal version number. Keep every release entry's
+version fixed so package version changes preserve the history. Keep notes brief
+and describe changes users can see.
 
 ## Development checks
 

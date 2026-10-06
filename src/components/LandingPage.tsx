@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { User } from "@/types";
 import { Avatar } from "@/components/Avatar";
 import { Brand } from "@/components/app-primitives";
+import { AppVersion } from "@/components/AppVersion";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -299,7 +300,10 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       <footer className="landing-footer">
         <Brand />
         <p>Shared listening, kept simple.</p>
-        <small>© {new Date().getFullYear()} Lydman</small>
+        <div className="landing-footer-meta">
+          <AppVersion />
+          <small>© {new Date().getFullYear()} Lydman</small>
+        </div>
       </footer>
     </main>
   );

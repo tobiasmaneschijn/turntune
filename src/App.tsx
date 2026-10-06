@@ -28,6 +28,7 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { PanelErrorBoundary } from "./components/AppErrorBoundary";
 import { Brand } from "./components/app-primitives";
+import { AppVersion } from "./components/AppVersion";
 import {
   CopyIcon,
   MessageIcon,
@@ -597,7 +598,10 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms" aria-label="Back to rooms"><Brand /></Button>
+        <div className="app-brand-stack">
+          <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms" aria-label="Back to rooms"><Brand /></Button>
+          <AppVersion />
+        </div>
         <div className="room-heading">
           <div>
             <strong>{snapshot.room.name}</strong>
@@ -827,6 +831,7 @@ function AuthScreen({
         </div>
         {form}
       </section>
+      <footer className="app-release-footer"><AppVersion /></footer>
     </main>
   );
 }
@@ -849,6 +854,7 @@ function PasswordRecoveryScreen({
         </div>
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
+      <footer className="app-release-footer"><AppVersion /></footer>
     </main>
   );
 }
@@ -898,6 +904,7 @@ function Welcome({
           </CardContent>
         </Card>
       </section>
+      <footer className="app-release-footer"><AppVersion /></footer>
     </main>
   );
 }

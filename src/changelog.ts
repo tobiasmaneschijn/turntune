@@ -1,0 +1,42 @@
+import { version } from "../package.json";
+
+export const APP_VERSION = version;
+
+export type ChangelogSection = {
+  title: "Added" | "Improved" | "Fixed";
+  items: readonly string[];
+};
+
+export type ChangelogRelease = {
+  version: string;
+  date: string;
+  title: string;
+  sections: readonly ChangelogSection[];
+};
+
+// Keep the newest release first, with a fixed version number for every entry.
+export const CHANGELOG: readonly ChangelogRelease[] = [
+  {
+    version: "0.1.0",
+    date: "2026-10-06",
+    title: "Shared listening, kept simple.",
+    sections: [
+      {
+        title: "Added",
+        items: [
+          "A visible app version and an in-app changelog to keep up with releases.",
+          "Shared radio rooms with synchronized playback, DJ turns, and private music queues.",
+          "Room chat with replies, reactions, images, and GIF search when configured.",
+          "Music search and playback options for YouTube, SoundCloud, Spotify, and Apple Music.",
+        ],
+      },
+      {
+        title: "Improved",
+        items: [
+          "Responsive room panels and simpler profiles with display names, bios, avatars, and themes.",
+          "In-app feedback and an admin workflow for reviewing reports.",
+        ],
+      },
+    ],
+  },
+];

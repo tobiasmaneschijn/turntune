@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ImageUp, LayoutDashboard, Palette } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { AppVersion } from "./AppVersion";
 import { DevFlair } from "./DevFlair";
 import { FeedbackButton } from "./FeedbackDialog";
 import { ThemeToggle } from "./ThemeToggle";
@@ -183,7 +184,10 @@ export function ProfilePage({
       <header className="profile-page-header">
         <div className="profile-header-inner">
           <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
-          <div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div>
+          <div className="app-brand-stack">
+            <div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div>
+            <AppVersion />
+          </div>
           <div className="profile-header-actions">
             <ThemeToggle compact />
             {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}

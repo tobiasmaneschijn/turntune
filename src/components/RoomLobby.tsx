@@ -2,6 +2,7 @@ import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { AlertCircle, ArrowRight, Globe2, Heart, LockKeyhole, LogOut, Plus, Radio, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Brand } from "./app-primitives";
+import { AppVersion } from "./AppVersion";
 import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -101,7 +102,7 @@ export function RoomLobby({
   return (
     <main className="room-lobby">
       <header className="lobby-header">
-        <Brand />
+        <div className="app-brand-stack"><Brand /><AppVersion /></div>
         <div className="lobby-header-actions">
           {adminButton}
           {feedbackButton}

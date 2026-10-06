@@ -24,6 +24,7 @@ import {
   Users
 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { AppVersion } from "./AppVersion";
 import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -261,6 +262,7 @@ export function AdminDashboard({
             <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : "Rooms"}</h1>
           </div>
           <div className="admin-topbar-actions">
+            <AppVersion />
             <ThemeToggle compact />
             <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
           </div>
