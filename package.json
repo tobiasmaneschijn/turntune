@@ -18,6 +18,7 @@
     "test:soundcloud": "tsx --test server/soundcloud.test.ts",
     "test:music": "tsx --test server/music.test.ts",
     "test:playback": "tsx --test tests/playback-*.test.ts tests/player-api-loader.test.ts",
+    "test:ui:playback": "playwright test --config=playwright.playback.config.ts",
     "test:integration": "tsx --test tests/server-integration.test.ts",
     "test:ui": "playwright test",
     "test:ui:live": "playwright test --config=playwright.live.config.ts",

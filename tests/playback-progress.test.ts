@@ -26,3 +26,16 @@ test("manual pause, unrelated playback, and invalid progress cannot advance a ro
   assert.equal(tracker.observe("short-track", 0, 1, true, true), false);
   assert.equal(tracker.observe("track-a", NaN, 180, true, true), false);
 });
+
+test("a stopped sample after a backward seek is not a natural end", () => {
+  const tracker = new PlaybackEndTracker();
+  tracker.observe("track-a", 179, 180, false, true);
+  assert.equal(tracker.observe("track-a", 10, 180, true, true), false);
+  assert.equal(tracker.observe("track-a", 0, 180, true, true), false);
+});
+
+test("seeking to the beginning creates a new completion checkpoint", () => {
+  const tracker = new PlaybackEndTracker();
+  tracker.observe("track-a:checkpoint-1", 179, 180, false, true);
+  assert.equal(tracker.observe("track-a:checkpoint-2", 0, 180, true, true), false);
+});

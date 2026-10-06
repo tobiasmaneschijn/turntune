@@ -97,15 +97,26 @@ export function AppleMusicPlayer({
   const commandRef = useRef("");
   const loadedTrackRef = useRef("");
   const endTrackerRef = useRef(new PlaybackEndTracker());
+  const accessTokenRef = useRef(accessToken);
+  const onEndedRef = useRef(onEnded);
+  const onStatusRef = useRef(onStatus);
+  const onErrorRef = useRef(onError);
   const [authorized, setAuthorized] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const track = playback.track;
 
-  useEffect(() => {
-    if (error) onError?.(error);
-  }, [error, onError]);
+  accessTokenRef.current = accessToken;
+  onEndedRef.current = onEnded;
+  onStatusRef.current = onStatus;
+  onErrorRef.current = onError;
 
+  useEffect(() => {
+    if (error) onErrorRef.current?.(error);
+  }, [error]);
+
+  // The app's auth token can refresh while audio is playing. MusicKit owns
+  // its own authorization, so refreshing that token must not reset its queue.
   useEffect(() => {
     let alive = true;
     const owner = {};
@@ -114,7 +125,7 @@ export function AppleMusicPlayer({
     loadedTrackRef.current = "";
     setReady(false);
     setError("");
-    void getMusicKit(accessToken).then((music) => {
+    void getMusicKit(accessTokenRef.current).then((music) => {
       if (!alive) return;
       musicRef.current = music;
       const isAuthorized = Boolean(music.isAuthorized);
@@ -135,7 +146,7 @@ export function AppleMusicPlayer({
         if (!musicKitOwner) await music?.pause();
       }).catch(() => undefined);
     };
-  }, [accessToken]);
+  }, []);
 
   const authorize = useCallback(() => {
     const music = musicRef.current;
@@ -197,16 +208,17 @@ export function AppleMusicPlayer({
       if (!music || loadedTrackRef.current !== `${track.id}:${mapping.providerId}`) return;
       const currentTime = Number(music.currentPlaybackTime || 0);
       const duration = Number(music.currentPlaybackDuration || track.durationMs && track.durationMs / 1000 || 0);
-      onStatus({ ready: true, buffering: playback.playing && currentTime === 0, currentTime, duration });
+      onStatusRef.current({ ready: true, buffering: playback.playing && currentTime === 0, currentTime, duration });
       const states = window.MusicKit?.PlaybackStates;
       const stopped = Boolean(states && [states.completed, states.ended, states.stopped].includes(music.playbackState as number)) ||
         music.playbackState === "completed" || music.playbackState === "stopped" || music.playbackState === "ended";
-      if (endTrackerRef.current.observe(`${track.id}:${mapping.providerId}`, currentTime, duration, stopped, playback.playing && isDj)) {
-        onEnded();
+      if (endTrackerRef.current.observe(`${track.id}:${mapping.providerId}:${playback.position}:${playback.updatedAt}`,
+        currentTime, duration, stopped, playback.playing && isDj)) {
+        onEndedRef.current();
       }
     }, 750);
     return () => window.clearInterval(interval);
-  }, [track?.id, track?.durationMs, mapping.providerId, authorized, playback.playing, isDj, onEnded, onStatus]);
+  }, [track?.id, track?.durationMs, mapping.providerId, authorized, playback.playing, playback.position, playback.updatedAt, isDj]);
 
   return (
     <div className="provider-player-shell apple-player-shell">

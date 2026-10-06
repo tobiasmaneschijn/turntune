@@ -245,28 +245,32 @@ export function SoundCloudPlayer({
       return;
     }
     const revision = ++commandRevisionRef.current;
-    const position = targetPosition(playback);
     widget.getPosition((currentPositionMs) => {
       if (
         !aliveRef.current ||
         loadingTrackRef.current ||
         revision !== commandRevisionRef.current ||
+        playbackRef.current.track?.id !== track.id ||
         loadedTrackIdRef.current !== track.id
       ) return;
 
+      // The iframe may answer late after browser throttling. Calculate the
+      // room target when sending the command, not when requesting its position.
+      const current = playbackRef.current;
+      const position = targetPosition(current);
       const currentPosition = currentPositionMs / 1000;
       if (Math.abs(currentPosition - position) > 2.5) {
         // Widget commands cross the iframe through asynchronous postMessage.
         // Wait for SEEK before playing so a late seek cannot pause a track that
         // already started. Near the beginning, skip the unnecessary seek.
         pendingSeekRef.current = { trackId: track.id, revision };
-        if (!playback.playing) widget.pause();
+        if (!current.playing) widget.pause();
         widget.seekTo(position * 1000);
         return;
       }
 
       pendingSeekRef.current = null;
-      playback.playing ? widget.play() : widget.pause();
+      current.playing ? widget.play() : widget.pause();
     });
   }, [ready, loadedRevision, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 

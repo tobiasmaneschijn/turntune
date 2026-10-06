@@ -1,4 +1,5 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { RoomPlaybackClock } from "../playback-clock";
 import { socket } from "../socket";
 import { requestSocketAction } from "../socket-request";
 import type { RoomPresence, RoomSnapshot, User } from "../types";
@@ -19,6 +20,7 @@ interface RoomConnectionOptions {
 export function useRoomConnection({ roomId, password, profile, ready, accessToken,
   onConnected, onSnapshot, onPasswordRequired, onJoinError, onNotice }: RoomConnectionOptions) {
   const [retryRevision, setRetryRevision] = useState(0);
+  const playbackClockRef = useRef(new RoomPlaybackClock());
   useEffect(() => {
     if (!roomId || !profile.name || !ready) {
       socket.disconnect();
@@ -47,7 +49,7 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
       if (!socket.active) onJoinError(error.message || "Could not connect. Please try again.");
     };
     const receiveSnapshot = (next: RoomSnapshot) => {
-      if (active && next.room.id === roomId) onSnapshot(next);
+      if (active && next.room.id === roomId) onSnapshot(playbackClockRef.current.normalize(next));
     };
     const receivePresence = (next: RoomPresence) => {
       if (!active || next.roomId !== roomId) return;

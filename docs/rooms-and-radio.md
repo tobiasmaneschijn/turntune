@@ -144,6 +144,25 @@ grace. When switching rooms, the server keeps the old membership until the new
 room has passed authentication, access checks, and loading. This prevents a
 temporary database/auth failure from making an active tab look disconnected.
 
+Access-token refreshes intentionally reconnect Socket.IO because authentication
+is verified during the server handshake. Provider player lifecycles should stay
+mounted through that refresh; changing API credentials alone is not a playback
+command.
+
+### Playback clocks
+
+The server's `playback.updatedAt` and snapshot `serverTime` share one clock.
+`RoomPlaybackClock` translates that checkpoint to the browser's clock when
+`useRoomConnection` receives it, so an incorrect listener system clock does not
+become a seek or alter the position sent by pause/play controls. The estimate
+uses the server's elapsed time at snapshot creation; it does not estimate
+one-way network latency.
+
+Unchanged room, track, position, playing state, and server timestamp keep their
+original translated timestamp across queue/vote updates and reconnects. This
+prevents snapshot delivery jitter from issuing another player seek. Presence
+updates preserve the current playback object and never translate its checkpoint.
+
 ## DJ rotation
 
 `djQueueUserIds` behaves as a ring. `advanceRadio` checks at most one complete
@@ -213,6 +232,41 @@ Each listener may use the room source, Spotify in Lydman, Spotify Desktop,
 or Apple Music. Provider mappings are stored with the track; missing mappings
 fall back to the source provider. Only the current DJ's active adapter reports
 a natural end. The current DJ, owner, and moderators may pause, seek, or skip.
+
+Spotify reads its current recording, position, and paused state before deciding
+what to change. Returning focus, making the tab visible, or restoring network
+connectivity performs a health check. Healthy playback is left running; playing
+position differences of up to two seconds are tolerated during these checks.
+Larger differences seek the loaded recording, and a stopped player resumes it.
+A changed room checkpoint or manual Sync applies the requested seek even when
+the difference is small. Paused-room positions use a 250 ms tolerance on health
+checks. Loading a different recording uses the Spotify Web API; transferring
+the device is reserved for a missing-device response during that load.
+
+Commands run in order and discard observations/retries that belong to an old
+checkpoint, device connection, or component lifetime. Overlapping wake events
+share one check. Actual SDK disconnects still reconnect with backoff and honor
+the listener's resume-after-reconnect setting; manual Sync overrides that setting.
+Refreshing the app access token updates the credential used by Spotify and Apple
+Music without recreating their provider adapters or replaying the track.
+
+Spotify cannot load a new recording while keeping it paused. A paused room
+therefore keeps the local player silent and loads the correct recording at the
+room checkpoint when playback resumes. Seeks on an already loaded recording
+work while paused. Completion observations are tied to the room checkpoint so
+progress seen before a backward seek cannot finish the new playback position.
+
+The provider regression suite runs with `npm run test:ui:playback` and uses the
+actual React adapters with mocked SDKs and HTTP endpoints. It verifies command
+behavior independently of provider accounts; an audible Spotify check still
+requires a Premium account and a browser allowed to play protected media.
+
+Remaining limitations: SoundCloud and Apple Music report progress after buffering
+but do not periodically correct drift as YouTube does. Spotify/Apple completion
+tracking also requires a near-end progress observation; aggressive browser
+throttling can miss that observation. A future provider-event or authoritative
+completion fallback should distinguish buffering and explicit seeks from a
+natural end before advancing the radio.
 
 `queue:next` must include the current track UUID. The server advances only when
 that UUID still matches `playback.track.id`. This makes ended/skip commands

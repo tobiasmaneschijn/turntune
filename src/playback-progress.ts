@@ -11,7 +11,8 @@ export class PlaybackEndTracker {
       this.ended = false;
     }
     if (!Number.isFinite(progress) || !Number.isFinite(duration) || duration <= 0) return false;
-    const finished = expectedPlaying && stopped && !this.ended && this.lastProgress > 0 && this.lastProgress >= duration - 2;
+    const atEnd = progress >= duration - 2 || progress <= 1;
+    const finished = expectedPlaying && stopped && atEnd && !this.ended && this.lastProgress > 0 && this.lastProgress >= duration - 2;
     if (finished) this.ended = true;
     this.lastProgress = Math.max(0, progress);
     return finished;
