@@ -39,6 +39,7 @@ function mapSpotifyTrack(track: SpotifyTrack): CatalogTrack {
 
 export class SpotifyApi {
   private appToken: { value: string; expiresAt: number } | null = null;
+  private appTokenPromise: Promise<string> | null = null;
 
   constructor(
     private readonly clientId = process.env.SPOTIFY_CLIENT_ID,
@@ -75,12 +76,17 @@ export class SpotifyApi {
 
   async getAppToken() {
     if (this.appToken && this.appToken.expiresAt > Date.now() + 30_000) return this.appToken.value;
-    const payload = await this.tokenRequest(new URLSearchParams({ grant_type: "client_credentials" }));
-    this.appToken = {
-      value: payload.access_token,
-      expiresAt: Date.now() + payload.expires_in * 1000
-    };
-    return this.appToken.value;
+    if (!this.appTokenPromise) {
+      this.appTokenPromise = this.tokenRequest(new URLSearchParams({ grant_type: "client_credentials" }))
+        .then((payload) => {
+          this.appToken = {
+            value: payload.access_token,
+            expiresAt: Date.now() + payload.expires_in * 1000
+          };
+          return payload.access_token;
+        }).finally(() => { this.appTokenPromise = null; });
+    }
+    return this.appTokenPromise;
   }
 
   exchangeAuthorizationCode(code: string, redirectUri: string) {

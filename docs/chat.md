@@ -18,7 +18,9 @@ loads the durable database history when it enters a room.
 | `src/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
 | `src/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
 | `src/chat/persistence.ts` | All chat table names, Data API queries, database-row mapping, and durable writes. |
-| `src/hooks/use-realtime-chat.tsx` | Supabase channel lifecycle and Broadcast send/receive behavior. It does not write chat tables. |
+| `src/chat/protocol.ts` | Runtime validation of peer Broadcast payloads, safe media URLs, and removal of untrusted admin claims. |
+| `src/chat/realtime.ts` | One room's channel lifetime, acknowledgement handling, typing timers, and late-callback protection. |
+| `src/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
 | `src/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
 | `src/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
 | `src/components/platform-emoji-text.tsx` | Platform-aware emoji rendering and the persisted skin-tone preference. |
@@ -34,15 +36,22 @@ durable, realtime-only, or purely presentational.
 When a user sends a message:
 
 1. `useRealtimeChat.sendMessage` creates the message and UUID.
-2. The sender adds it to local state immediately. Supabase Broadcast does not
-   echo to the sender unless `self: true` is configured.
-3. The hook broadcasts a `message` event to the other connected clients.
+2. The transport broadcasts a `message` event and waits for a server
+   acknowledgement (`broadcast.ack: true`). Failed sends preserve the draft.
+3. The sender adds the acknowledged message to local state. Supabase Broadcast
+   does not echo to the sender unless `self: true` is configured. Repeated
+   incoming message IDs are merged instead of rendered twice.
 4. `RealtimeChat` calls its `onSend` callback.
 5. `RoomChat` persists the same UUID and payload in `soundspin_messages`.
 
 This gives the room low-latency delivery while retaining a durable history. If
 step 5 fails, the message may have appeared live but will not return after a
 reload; the UI shows that distinction explicitly.
+
+Only one send or upload can run at a time. Text edited while a send is pending
+is preserved, and completion from a departed room cannot update a new room.
+The room loads durable history after each successful subscription, including
+reconnects, and clears obsolete transient reaction overlays before reloading.
 
 When a room opens, `loadChatHistory` fetches the newest 200 messages, reverses
 them into chronological order, maps database names to the UI model, and loads
@@ -73,9 +82,9 @@ the PostgREST schema cache, the composite self-relationship may not be exposed
 and the entire history request can fail with `PGRST200`.
 
 Instead, `loadChatHistory` selects `reply_to_id` as a scalar and joins it to the
-loaded rows in memory. A reply to a message older than the 200-row history
-window still loads normally, but its small reply preview is unavailable until
-that older message is fetched.
+loaded rows in memory. Missing reply targets are fetched in one additional
+room-scoped query, preserving previews beyond the 200-row history window.
+Unavailable reply previews or profile enrichment do not hide the core history.
 
 ## Reaction flow
 

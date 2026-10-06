@@ -9,6 +9,9 @@ interface SpotifySecret {
 export class SpotifyAccounts {
   private readonly key: Buffer | null;
   private readonly accessTokens = new Map<string, { value: string; expiresAt: number }>();
+  private readonly refreshes = new Map<string, Promise<string>>();
+  private readonly credentialRevisions = new Map<string, number>();
+  private readonly connectionChanges = new Map<string, Promise<void>>();
 
   constructor(
     private readonly store: Store,
@@ -54,33 +57,65 @@ export class SpotifyAccounts {
 
   async connect(userId: string, code: string, redirectUri: string) {
     if (!this.configured) throw new Error("Spotify accounts are not configured yet.");
-    const token = await this.spotify.exchangeAuthorizationCode(code, redirectUri);
-    if (!token.refresh_token) throw new Error("Spotify did not issue a refresh token.");
-    await this.store.saveMusicConnection({
-      userId,
-      provider: "spotify",
-      refreshTokenCiphertext: this.encrypt({ refreshToken: token.refresh_token }),
-      scopes: token.scope?.split(" ").filter(Boolean) || [],
-      metadata: {}
-    });
-    this.accessTokens.set(userId, {
-      value: token.access_token,
-      expiresAt: Date.now() + token.expires_in * 1000
+    await this.changeConnection(userId, async () => {
+      const token = await this.spotify.exchangeAuthorizationCode(code, redirectUri);
+      if (!token.refresh_token) throw new Error("Spotify did not issue a refresh token.");
+      await this.store.saveMusicConnection({
+        userId,
+        provider: "spotify",
+        refreshTokenCiphertext: this.encrypt({ refreshToken: token.refresh_token }),
+        scopes: token.scope?.split(" ").filter(Boolean) || [],
+        metadata: {}
+      });
+      this.accessTokens.set(userId, {
+        value: token.access_token,
+        expiresAt: Date.now() + token.expires_in * 1000
+      });
     });
   }
 
   async disconnect(userId: string) {
+    await this.changeConnection(userId, async () => {
+      this.accessTokens.delete(userId);
+      await this.store.deleteMusicConnection(userId, "spotify");
+    });
+  }
+
+  private changeConnection(userId: string, change: () => Promise<void>) {
+    this.credentialRevisions.set(userId, (this.credentialRevisions.get(userId) || 0) + 1);
     this.accessTokens.delete(userId);
-    await this.store.deleteMusicConnection(userId, "spotify");
+    // Serialize account changes and finish any rotated-token write before
+    // deletion so a late request cannot recreate a disconnected account.
+    const pending = Promise.all([
+      this.connectionChanges.get(userId)?.catch(() => undefined),
+      this.refreshes.get(userId)?.catch(() => undefined)
+    ]).then(change).finally(() => {
+      if (this.connectionChanges.get(userId) === pending) this.connectionChanges.delete(userId);
+    });
+    this.connectionChanges.set(userId, pending);
+    return pending;
   }
 
   async getAccessToken(userId: string) {
+    if (this.connectionChanges.has(userId)) throw new Error("Spotify connection is being updated. Try again.");
     const cached = this.accessTokens.get(userId);
     if (cached && cached.expiresAt > Date.now() + 30_000) return cached.value;
+    const pending = this.refreshes.get(userId);
+    if (pending) return pending;
+    const revision = this.credentialRevisions.get(userId) || 0;
+    const refresh = this.refreshAccessToken(userId, revision).finally(() => {
+      if (this.refreshes.get(userId) === refresh) this.refreshes.delete(userId);
+    });
+    this.refreshes.set(userId, refresh);
+    return refresh;
+  }
+
+  private async refreshAccessToken(userId: string, revision: number) {
     const connection = await this.store.getMusicConnection(userId, "spotify");
     if (!connection) throw new Error("Connect Spotify first.");
     const currentSecret = this.decrypt(connection.refreshTokenCiphertext);
     const token = await this.spotify.refreshUserToken(currentSecret.refreshToken);
+    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error("Spotify connection changed. Try again.");
     if (token.refresh_token) {
       await this.store.saveMusicConnection({
         userId,
@@ -90,6 +125,7 @@ export class SpotifyAccounts {
         metadata: connection.metadata
       });
     }
+    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error("Spotify connection changed. Try again.");
     this.accessTokens.set(userId, {
       value: token.access_token,
       expiresAt: Date.now() + token.expires_in * 1000

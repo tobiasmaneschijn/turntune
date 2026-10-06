@@ -1,11 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-interface RuntimeConfig {
-  supabase: {
-    url: string;
-    anonKey: string;
-  } | null;
-}
+import { parseRuntimeConfig } from "./runtime-config";
 
 let clientPromise: Promise<SupabaseClient | null> | null = null;
 
@@ -26,19 +20,23 @@ export function getSupabaseClient() {
     const vitePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
     if (viteUrl && vitePublishableKey) {
-      clientPromise = Promise.resolve(createBrowserClient(viteUrl, vitePublishableKey));
-      return clientPromise;
-    }
-
-    clientPromise = fetch("/api/config")
+      clientPromise = Promise.resolve().then(() => createBrowserClient(viteUrl, vitePublishableKey));
+    } else {
+      clientPromise = fetch("/api/config", { signal: AbortSignal.timeout(10_000) })
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not load authentication configuration.");
-        return response.json() as Promise<RuntimeConfig>;
+        return parseRuntimeConfig(await response.json());
       })
       .then(({ supabase }) => {
         if (!supabase) return null;
         return createBrowserClient(supabase.url, supabase.anonKey);
       });
+    }
+    // A temporary network error must not poison every future attempt.
+    clientPromise = clientPromise.catch((error: unknown) => {
+      clientPromise = null;
+      throw error;
+    });
   }
   return clientPromise;
 }

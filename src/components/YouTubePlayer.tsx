@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Playback } from "../types";
+import { createPlayerApiLoader } from "../player-api-loader";
 
 declare global {
   interface Window {
@@ -38,23 +39,12 @@ export interface PlayerStatus {
   duration: number;
 }
 
-let apiPromise: Promise<void> | null = null;
-
-function loadApi() {
-  if (window.YT?.Player) return Promise.resolve();
-  if (apiPromise) return apiPromise;
-  apiPromise = new Promise((resolve) => {
-    const previous = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previous?.();
-      resolve();
-    };
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(script);
-  });
-  return apiPromise;
-}
+const loadApi = createPlayerApiLoader({
+  src: "https://www.youtube.com/iframe_api",
+  label: "the YouTube player",
+  readApi: () => window.YT?.Player ? window.YT : undefined,
+  readyCallback: "onYouTubeIframeAPIReady"
+});
 
 function targetPosition(playback: Playback) {
   return playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
@@ -66,7 +56,8 @@ export function YouTubePlayer({
   isDj,
   volume,
   onEnded,
-  onStatus
+  onStatus,
+  onError
 }: {
   playback: Playback;
   syncRevision: number;
@@ -74,6 +65,7 @@ export function YouTubePlayer({
   volume: number;
   onEnded: () => void;
   onStatus: (status: PlayerStatus) => void;
+  onError?: (message: string) => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerApi | null>(null);
@@ -82,23 +74,32 @@ export function YouTubePlayer({
   const onStatusRef = useRef(onStatus);
   const isDjRef = useRef(isDj);
   const onEndedRef = useRef(onEnded);
+  const onErrorRef = useRef(onError);
   const [ready, setReady] = useState(false);
 
   playbackRef.current = playback;
   onStatusRef.current = onStatus;
   isDjRef.current = isDj;
   onEndedRef.current = onEnded;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let active = true;
     void loadApi().then(() => {
       if (!active || !mountRef.current || !window.YT) return;
-      playerRef.current = new window.YT.Player(mountRef.current, {
+      // The SDK replaces its target with an iframe. Keep React's host intact
+      // so effect cleanup/replay always has a connected element to mount into.
+      const target = document.createElement("div");
+      mountRef.current.replaceChildren(target);
+      playerRef.current = new window.YT.Player(target, {
         playerVars: { controls: 0, disablekb: 1, modestbranding: 1, playsinline: 1 },
         events: {
-          onReady: () => setReady(true),
+          onReady: () => { if (active) setReady(true); },
           onStateChange: (event) => {
-            if (event.data === window.YT?.PlayerState.ENDED && isDjRef.current) {
+            if (!active) return;
+            const current = playbackRef.current;
+            if (event.data === window.YT?.PlayerState.ENDED && isDjRef.current && current.playing &&
+              current.track?.id === trackIdRef.current) {
               onEndedRef.current();
             }
             onStatusRef.current({
@@ -107,9 +108,18 @@ export function YouTubePlayer({
               currentTime: playerRef.current?.getCurrentTime() || 0,
               duration: playerRef.current?.getDuration() || 0
             });
+          },
+          onError: () => {
+            if (!active) return;
+            onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
+            onErrorRef.current?.("This YouTube track could not be played. It may be unavailable or blocked from embedding.");
           }
         }
       });
+    }).catch((cause) => {
+      if (!active) return;
+      onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
+      onErrorRef.current?.(cause instanceof Error ? cause.message : "Could not initialize YouTube playback.");
     });
     return () => {
       active = false;
@@ -119,8 +129,14 @@ export function YouTubePlayer({
   }, []);
 
   useEffect(() => {
-    if (!ready || !playerRef.current || !playback.track) return;
+    if (!ready || !playerRef.current) return;
     const player = playerRef.current;
+    if (!playback.track) {
+      player.pauseVideo();
+      trackIdRef.current = null;
+      onStatusRef.current({ ready: true, buffering: false, currentTime: 0, duration: 0 });
+      return;
+    }
     const position = targetPosition(playback);
     if (trackIdRef.current !== playback.track.id) {
       trackIdRef.current = playback.track.id;

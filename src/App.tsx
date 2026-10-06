@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   Check,
   ChevronDown,
@@ -56,7 +56,10 @@ import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
 import { socket } from "./socket";
-import { getSupabaseClient } from "./supabase";
+import { useAppAuth } from "./hooks/use-app-auth";
+import { useRoomConnection } from "./hooks/use-room-connection";
+import { requestSocketAction } from "./socket-request";
+import { readStoredValue, storeValue } from "./lib/browser-storage";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
 
@@ -75,7 +78,7 @@ function roomPanelPreset(compact: boolean): RoomPanelLayout {
 
 function readRoomPanelLayout(compact: boolean): RoomPanelLayout {
   try {
-    const value = localStorage.getItem(`${ROOM_LAYOUT_STORAGE_KEY}:${compact ? "chat" : "player"}`);
+    const value = readStoredValue(`${ROOM_LAYOUT_STORAGE_KEY}:${compact ? "chat" : "player"}`);
     if (!value) return roomPanelPreset(compact);
     const parsed = JSON.parse(value) as Partial<RoomPanelLayout>;
     if ([parsed.radio, parsed.player, parsed.chat].every((size) => typeof size === "number" && size > 0)) {
@@ -135,10 +138,14 @@ function getAdminPage() {
 }
 
 function readProfile(): User {
-  const stored = localStorage.getItem("soundspin-profile");
+  const stored = readStoredValue("soundspin-profile");
   if (stored) {
     try {
-      return { avatarKey: "pulse", isAppAdmin: false, ...(JSON.parse(stored) as User) };
+      const parsed = JSON.parse(stored) as Partial<User> | null;
+      if (parsed && typeof parsed.id === "string" && parsed.id &&
+          typeof parsed.name === "string" && typeof parsed.avatarSeed === "string") {
+        return { avatarKey: "pulse", ...parsed, isAppAdmin: false } as User;
+      }
     } catch {
       // Create a fresh profile below.
     }
@@ -168,7 +175,7 @@ function providerLabel(provider: Provider) {
 }
 
 function readSearchProvider(): SearchProvider {
-  const provider = localStorage.getItem(SEARCH_PROVIDER_STORAGE_KEY);
+  const provider = readStoredValue(SEARCH_PROVIDER_STORAGE_KEY);
   return provider === "soundcloud" || provider === "spotify" || provider === "apple"
     ? provider
     : "youtube";
@@ -209,13 +216,7 @@ export function App() {
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const previousDjUserIdRef = useRef<string | null>(null);
-  const [auth, setAuth] = useState<{
-    loading: boolean;
-    client: SupabaseClient | null;
-    session: Session | null;
-    enabled: boolean;
-    recovery: boolean;
-  }>({ loading: true, client: null, session: null, enabled: false, recovery: false });
+  const { auth, setAuth, retryAuth } = useAppAuth();
 
   const changeUserSettings = useCallback((next: SoundSpinUserSettings) => {
     setUserSettings(next);
@@ -250,52 +251,6 @@ export function App() {
   }, [snapshot?.room.djUserId, profile.id, userSettings.notifications.djTurn]);
 
   useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => void) | undefined;
-
-    void getSupabaseClient()
-      .then(async (client) => {
-        if (!active) return;
-        if (!client) {
-          setProfileReady(true);
-          setAuth({ loading: false, client: null, session: null, enabled: false, recovery: false });
-          return;
-        }
-
-        const { data } = await client.auth.getSession();
-        if (!active) return;
-        const recovery = new URLSearchParams(location.hash.slice(1)).get("type") === "recovery";
-        setAuth({ loading: false, client, session: data.session, enabled: true, recovery });
-
-        const { data: listener } = client.auth.onAuthStateChange((event, session) => {
-          if (active) {
-            setAuth((current) => ({
-              loading: false,
-              client,
-              session,
-              enabled: true,
-              recovery: event === "PASSWORD_RECOVERY"
-                ? true
-                : event === "SIGNED_IN" || event === "SIGNED_OUT"
-                  ? false
-                  : current.recovery
-            }));
-          }
-        });
-        unsubscribe = () => listener.subscription.unsubscribe();
-      })
-      .catch((error) => {
-        console.error(error);
-        if (active) setAuth({ loading: false, client: null, session: null, enabled: false, recovery: false });
-      });
-
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, []);
-
-  useEffect(() => {
     const authUser = auth.session?.user;
     if (!authUser || profile.id === authUser.id) return;
     const nextProfile = {
@@ -305,7 +260,7 @@ export function App() {
       avatarKey: "pulse",
       isAppAdmin: false
     };
-    localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+    storeValue("soundspin-profile", JSON.stringify(nextProfile));
     setProfile(nextProfile);
   }, [auth.session?.user.id, profile.id]);
 
@@ -323,7 +278,8 @@ export function App() {
     let active = true;
     setProfileReady(false);
     void fetch(`/api/profiles/${session.user.id}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` }
+      headers: { Authorization: `Bearer ${session.access_token}` },
+      signal: AbortSignal.timeout(10_000)
     })
       .then(async (response) => {
         const payload = await response.json() as { profile?: SoundSpinProfile };
@@ -337,7 +293,7 @@ export function App() {
           isAppAdmin: payload.profile.is_app_admin
         };
         if (active) {
-          localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+          storeValue("soundspin-profile", JSON.stringify(nextProfile));
           setProfile(nextProfile);
         }
       })
@@ -382,50 +338,17 @@ export function App() {
     return () => removeEventListener("popstate", onPopState);
   }, []);
 
-  useEffect(() => {
-    if (!roomId || !profile.name) return;
-    if (auth.loading || (auth.enabled && !auth.session)) return;
-    socket.auth = auth.enabled ? { accessToken: auth.session!.access_token } : {};
-    socket.connect();
-    const onConnect = () => {
-      setConnected(true);
-      socket.emit("room:join", { roomId, roomName: history.state?.roomName, password: roomPassword || undefined, user: profile }, (result: { ok: boolean; error?: string; requiresPassword?: boolean }) => {
-        if (result.ok) {
-          setRoomPasswordRequired(false);
-          setRoomJoinError("");
-          return;
-        }
-        if (result.requiresPassword) {
-          setRoomPasswordRequired(true);
-          setRoomJoinError(result.error || "Enter the room password.");
-        } else {
-          setRoomJoinError(result.error || "Could not join the room.");
-        }
-      });
-    };
-    const onDisconnect = () => setConnected(false);
-    const onConnectError = (error: Error) => setNotice(error.message);
-    // Snapshots are personalized by the server: next.room.queue is ours only.
-    // Never infer or cache another DJ's upcoming tracks in the client.
-    const onSnapshot = (next: RoomSnapshot) => {
-      // A failed cross-room join leaves the previous server membership intact.
-      // Ignore any late snapshot from that room while this page targets another.
-      if (next.room.id === roomId) setSnapshot(next);
-    };
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onConnectError);
-    socket.on("room:snapshot", onSnapshot);
-    if (socket.connected) onConnect();
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onConnectError);
-      socket.off("room:snapshot", onSnapshot);
-    };
-  }, [roomId, roomPassword, profile.id, profile.name, profile.avatarSeed, profile.avatarKey, profile.avatarUrl, profile.isAppAdmin, auth.loading, auth.enabled, auth.session?.access_token]);
+  const retryRoom = useRoomConnection({
+    roomId, password: roomPassword, profile,
+    ready: !auth.loading && !auth.error && (!auth.enabled || Boolean(auth.session && profileReady)),
+    accessToken: auth.session?.access_token,
+    onConnected: setConnected, onSnapshot: setSnapshot,
+    onPasswordRequired: setRoomPasswordRequired, onJoinError: setRoomJoinError, onNotice: setNotice
+  });
 
   const openRoom = (id: string, password?: string) => {
+    setAdminPage(false);
+    setProfilePageId(null);
     setSnapshot(null);
     setRoomPassword(password || "");
     setRoomPasswordRequired(false);
@@ -436,7 +359,7 @@ export function App() {
 
   const enterRoom = (name: string, roomName?: string) => {
     const nextProfile = { ...profile, name: name.trim() };
-    localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+    storeValue("soundspin-profile", JSON.stringify(nextProfile));
     setProfile(nextProfile);
     if (auth.client && auth.session) {
       void auth.client.auth.updateUser({ data: { display_name: nextProfile.name } });
@@ -455,9 +378,22 @@ export function App() {
     setRoomSettingsOpen(false);
     setUserSettingsOpen(false);
     setAdminPage(false);
+    setProfilePageId(null);
     history.pushState({}, "", "/");
     setRoomId(null);
   };
+
+  if (auth.error) {
+    return (
+      <main className="room-access-screen">
+        <Card className="room-access-error">
+          <CardHeader><Logo /><CardTitle>Could not connect</CardTitle>
+            <CardDescription>{auth.error}</CardDescription></CardHeader>
+          <CardContent><Button onClick={retryAuth}>Try again</Button></CardContent>
+        </Card>
+      </main>
+    );
+  }
 
   if (auth.loading || (auth.enabled && auth.session && (profile.id !== auth.session.user.id || !profileReady))) {
     return <LoadingScreen label="Restoring your session…" />;
@@ -551,7 +487,7 @@ export function App() {
             avatarUrl: updated.avatar_url || undefined,
             isAppAdmin: updated.is_app_admin
           };
-          localStorage.setItem("soundspin-profile", JSON.stringify(nextProfile));
+          storeValue("soundspin-profile", JSON.stringify(nextProfile));
           setProfile(nextProfile);
         }}
         onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
@@ -594,7 +530,7 @@ export function App() {
     );
   }
 
-  if (roomJoinError && !snapshot) {
+  if (roomJoinError) {
     return (
       <main className="room-access-screen">
         <Card className="room-access-error">
@@ -603,7 +539,7 @@ export function App() {
             <CardTitle>Couldn’t join this room</CardTitle>
             <CardDescription>{roomJoinError}</CardDescription>
           </CardHeader>
-          <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
+          <CardContent><Button onClick={() => { setRoomJoinError(""); retryRoom(); }}>Try again</Button> <Button variant="ghost" onClick={goHome}>Back to rooms</Button></CardContent>
         </Card>
       </main>
     );
@@ -634,7 +570,7 @@ export function App() {
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
           <div className="header-tool-group">
           {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-          <FeedbackButton
+          {auth.session && <FeedbackButton
             userId={profile.id}
             roomSlug={snapshot.room.id}
             diagnosticContext={{
@@ -653,9 +589,9 @@ export function App() {
                 : "idle",
               preferredPlayback: userSettings.playback.preference
             }}
-          />
+          />}
           <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
-          {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
+          {auth.session && (snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
             <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>
           )}
           </div>
@@ -664,17 +600,17 @@ export function App() {
             size="sm"
             className="invite-button"
             onClick={() => {
-              void navigator.clipboard.writeText(location.href);
-              setNotice("Invite link copied");
-              window.setTimeout(() => setNotice(""), 1800);
+              void navigator.clipboard.writeText(location.href)
+                .then(() => setNotice("Invite link copied"))
+                .catch(() => setNotice("Could not copy the link. Copy the room address from your browser."));
             }}
           >
             <CopyIcon size={17} />
             <span>Invite</span>
           </Button>
-          <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
+          {auth.session && <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
             <Avatar user={profile} size={30} />
-          </Button>
+          </Button>}
           {auth.enabled && (
             <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={() => void auth.client?.auth.signOut()}>
               <LogOut />
@@ -693,12 +629,13 @@ export function App() {
           orientation="horizontal"
           onLayoutChanged={(layout, meta) => {
             if (meta.isUserInteraction) {
-              localStorage.setItem(`${ROOM_LAYOUT_STORAGE_KEY}:${compactPlayer ? "chat" : "player"}`, JSON.stringify(layout));
+              storeValue(`${ROOM_LAYOUT_STORAGE_KEY}:${compactPlayer ? "chat" : "player"}`, JSON.stringify(layout));
             }
           }}
         >
           <ResizablePanel className="room-panel room-panel-radio" id="radio" minSize="260px" maxSize="340px" data-active={mobileRoomPane === "radio"}>
             <MusicRail
+              key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUserId={profile.id}
               accessToken={auth.session?.access_token}
@@ -709,6 +646,7 @@ export function App() {
           <ResizablePanel className="room-panel room-panel-player" id="player" minSize="340px" data-active={mobileRoomPane === "player"}>
             <div className="player-column">
               <NowPlaying
+                key={`${snapshot.room.id}:${profile.id}`}
                 snapshot={snapshot}
                 isDj={isDj}
                 canControlPlayback={canControlPlayback}
@@ -728,16 +666,17 @@ export function App() {
           </ResizablePanel>
           <ResizableHandle className="room-resize-handle" withHandle />
           <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="380px" data-active={mobileRoomPane === "chat"}>
-            <RoomChat
+            {auth.client ? <RoomChat
+              key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUser={profile}
-              client={auth.client!}
+              client={auth.client}
               onOpenProfile={openProfile}
               notifications={userSettings.notifications}
               isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat"}
               onActivate={() => setMobileRoomPane("chat")}
               onUnreadCountChange={setChatUnreadCount}
-            />
+            /> : <aside className="chat panel"><Empty><EmptyHeader><EmptyMedia variant="icon"><MessageIcon /></EmptyMedia><EmptyTitle>Chat is unavailable in local mode</EmptyTitle><EmptyDescription>Rooms with accounts include shared chat and message history.</EmptyDescription></EmptyHeader></Empty></aside>}
           </ResizablePanel>
         </ResizablePanelGroup>
         <nav className="room-mobile-tabs" aria-label="Room panels">
@@ -778,6 +717,11 @@ function LoadingScreen({ label }: { label: string }) {
 
 function AuthScreen({ client }: { client: SupabaseClient }) {
   const [path, setPath] = useState(location.pathname);
+  useEffect(() => {
+    const onPopState = () => setPath(location.pathname);
+    addEventListener("popstate", onPopState);
+    return () => removeEventListener("popstate", onPopState);
+  }, []);
   const navigate = (nextPath: string) => {
     history.pushState({}, "", nextPath);
     setPath(nextPath);
@@ -1118,12 +1062,16 @@ function NowPlaying({
 
   const update = (playing: boolean) => {
     const position = playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
-    socket.emit("playback:update", { playing, position });
+    requestSocketAction(socket, "playback:update", { trackId: track?.id, playing, position }, (result) => {
+      if (!result.ok) setPlaybackError(result.error || "Could not update playback.");
+    });
   };
 
   const commitSeek = () => {
     if (!canControlPlayback || seekPreview === null) return;
-    socket.emit("playback:update", { playing: playback.playing, position: seekPreview });
+    requestSocketAction(socket, "playback:update", { trackId: track?.id, playing: playback.playing, position: seekPreview }, (result) => {
+      if (!result.ok) setPlaybackError(result.error || "Could not seek this track.");
+    });
   };
 
   const syncPlayback = () => {
@@ -1132,7 +1080,7 @@ function NowPlaying({
   };
 
   const handleEnded = useCallback(() => {
-    if (track) socket.emit("queue:next", { trackId: track.id });
+    if (track) requestSocketAction(socket, "queue:next", { trackId: track.id }, () => {});
   }, [track?.id]);
 
   const shownPosition = seekPreview ?? playerStatus.currentTime;
@@ -1276,6 +1224,7 @@ function NowPlaying({
                 volume={volume}
                 onEnded={handleEnded}
                 onStatus={setPlayerStatus}
+                onError={setPlaybackError}
               />
             ) : effectiveProvider === "youtube" ? (
               <YouTubePlayer
@@ -1286,6 +1235,7 @@ function NowPlaying({
                 // The track ID lets the server reject duplicate/stale ended events.
                 onEnded={handleEnded}
                 onStatus={setPlayerStatus}
+                onError={setPlaybackError}
               />
             ) : (
               <div className="provider-player-shell">
@@ -1313,7 +1263,7 @@ function NowPlaying({
               <button className="round-button" onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room">
                 <RefreshCw size={19} />
               </button>
-              <button disabled={!canControlPlayback} className="round-button" onClick={() => socket.emit("queue:next", { trackId: track.id })} aria-label="Next track">
+              <button disabled={!canControlPlayback} className="round-button" onClick={() => requestSocketAction(socket, "queue:next", { trackId: track.id }, (result) => { if (!result.ok) setPlaybackError(result.error || "Could not skip this track."); })} aria-label="Next track">
                 <SkipIcon size={20} />
               </button>
             </div>
@@ -1423,6 +1373,19 @@ function MusicRail({
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);
   const [resolvingUrl, setResolvingUrl] = useState(false);
+  const activeRailRef = useRef(true);
+  const addingTrackRef = useRef(false);
+  const searchRequestRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    activeRailRef.current = true;
+    return () => { activeRailRef.current = false; searchRequestRef.current?.abort(); };
+  }, []);
+  useEffect(() => {
+    searchRequestRef.current?.abort();
+    setSearching(false);
+    setSearchResults([]);
+    setSearchError("");
+  }, [provider]);
   const joinedDjQueue = snapshot.room.djQueueUserIds.includes(currentUserId);
   const canJoinDjQueue = snapshot.room.settings.djAccess !== "roles" ||
     snapshot.room.ownerUserId === currentUserId ||
@@ -1440,10 +1403,14 @@ function MusicRail({
     permalinkUrl?: string;
     durationMs?: number;
   }) => {
-    socket.emit(
+    if (!activeRailRef.current || addingTrackRef.current) return;
+    addingTrackRef.current = true;
+    requestSocketAction(socket,
       "queue:add",
       track,
       (result: { ok: boolean; error?: string; started?: boolean; position?: number }) => {
+        addingTrackRef.current = false;
+        if (!activeRailRef.current) return;
         setAddingResultId("");
         if (!result.ok) return setNotice(result.error || "Could not add track");
         setNotice(
@@ -1461,7 +1428,7 @@ function MusicRail({
   };
 
   const toggleDjQueue = () => {
-    socket.emit(joinedDjQueue ? "dj:leave" : "dj:join", undefined, (result: { ok: boolean; error?: string }) => {
+    requestSocketAction(socket, joinedDjQueue ? "dj:leave" : "dj:join", undefined, (result: { ok: boolean; error?: string }) => {
       setNotice(result.ok
         ? joinedDjQueue ? "Left the DJ queue" : "Joined the DJ queue"
         : result.error || "Could not update the DJ queue.");
@@ -1546,25 +1513,31 @@ function MusicRail({
 
     setSearching(true);
     setSearchError("");
+    searchRequestRef.current?.abort();
+    const request = new AbortController();
+    searchRequestRef.current = request;
     try {
       const response = await fetch(`/api/${provider}/search?q=${encodeURIComponent(searchQuery)}`, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)])
       });
       const payload = await response.json() as {
         results?: Array<ProviderSearchResult & { channel?: string }>;
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error || `Could not search ${providerLabel(provider)}.`);
+      if (!activeRailRef.current || request.signal.aborted) return;
       setSearchResults((payload.results || []).map((result) => ({
         ...result,
         provider,
         artist: result.artist || result.channel || providerLabel(provider)
       })));
     } catch (error) {
+      if (!activeRailRef.current || request.signal.aborted) return;
       setSearchResults([]);
       setSearchError(error instanceof Error ? error.message : `Could not search ${providerLabel(provider)}.`);
     } finally {
-      setSearching(false);
+      if (activeRailRef.current && !request.signal.aborted) setSearching(false);
     }
   };
 
@@ -1586,13 +1559,13 @@ function MusicRail({
     trackId: string,
     successMessage: string
   ) => {
-    socket.emit(event, { trackId }, (result: { ok: boolean; error?: string }) => {
+    requestSocketAction(socket, event, { trackId }, (result: { ok: boolean; error?: string }) => {
       setNotice(result.ok ? successMessage : result.error || "Could not update the queue.");
     });
   };
 
   const moveQueueTrack = (trackId: string, toIndex: number) => {
-    socket.emit("queue:move", { trackId, toIndex }, (result: { ok: boolean; error?: string }) => {
+    requestSocketAction(socket, "queue:move", { trackId, toIndex }, (result: { ok: boolean; error?: string }) => {
       if (!result.ok) setNotice(result.error || "Could not reorder the queue.");
     });
   };
@@ -1657,6 +1630,8 @@ function MusicRail({
                 className="clear-search"
                 aria-label="Clear search"
                 onClick={() => {
+                  searchRequestRef.current?.abort();
+                  setSearching(false);
                   setQuery("");
                   setSearchResults([]);
                   setSearchError("");
@@ -1674,7 +1649,7 @@ function MusicRail({
                   ? value
                   : "youtube";
                 setProvider(nextProvider);
-                localStorage.setItem(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
+                storeValue(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
                 setSearchResults([]);
                 setSearchError("");
               }}
@@ -1892,6 +1867,9 @@ function RoomChat({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState("");
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const historyRequestRef = useRef(0);
+  const activeRef = useRef(true);
   const chatRef = useRef<RealtimeChatHandle>(null);
   const seenMentionIdsRef = useRef(new Set<string>());
   const adminUserIds = [...new Set(
@@ -1912,35 +1890,42 @@ function RoomChat({
     }
   }]);
 
-  useEffect(() => {
-    let active = true;
-    setMessages([]);
-
+  const refreshHistory = useCallback(() => {
+    const request = ++historyRequestRef.current;
+    setLoadingHistory(true);
     void (async () => {
       try {
         const history = await loadChatHistory(client, snapshot.room.id);
-        if (!active) return;
+        if (!activeRef.current || request !== historyRequestRef.current) return;
         history.forEach((message) => seenMentionIdsRef.current.add(message.id));
         setMessages(history);
         setError("");
       } catch {
-        if (active) {
-          setError("Chat history could not be loaded. Please refresh and try again.");
+        if (activeRef.current && request === historyRequestRef.current) {
+          setError("Chat history could not be loaded.");
         }
+      } finally {
+        if (activeRef.current && request === historyRequestRef.current) setLoadingHistory(false);
       }
     })();
 
+  }, [client, snapshot.room.id]);
+
+  useEffect(() => {
+    activeRef.current = true;
+    seenMentionIdsRef.current.clear();
     return () => {
-      active = false;
+      activeRef.current = false;
+      ++historyRequestRef.current;
     };
   }, [client, snapshot.room.id]);
 
   const persistMessage = async (message: ChatMessage) => {
     try {
       await saveChatMessage(client, snapshot.room.id, currentUser, message);
-      setError("");
+      if (activeRef.current) setError("");
     } catch {
-      setError("The message was sent live but could not be saved to history.");
+      if (activeRef.current) setError("The message was sent live but could not be saved to history.");
     }
   };
 
@@ -1951,8 +1936,7 @@ function RoomChat({
       if (
         notifications.chatMentions &&
         message.user.id !== currentUser.id &&
-        currentUser.name &&
-        message.content.toLocaleLowerCase().includes(`@${currentUser.name.toLocaleLowerCase()}`)
+        message.mentions?.some((mention) => mention.userId === currentUser.id)
       ) {
         showSystemNotification(`${message.user.name} mentioned you`, message.content || "New room chat mention");
       }
@@ -1990,7 +1974,7 @@ function RoomChat({
         </div>
       </div>
       <div className="supabase-chat-body">
-        {error && <div className="chat-error">{error}</div>}
+        {error && <div className="chat-error" role="alert">{error} <Button size="sm" variant="ghost" onClick={refreshHistory} disabled={loadingHistory}>{loadingHistory ? "Loading…" : "Retry history"}</Button></div>}
         <RealtimeChat
           ref={chatRef}
           client={client}
@@ -1999,6 +1983,7 @@ function RoomChat({
           messages={messages}
           onMessage={handleMessages}
           onSend={persistMessage}
+          onConnected={refreshHistory}
           onOpenProfile={onOpenProfile}
           adminUserIds={adminUserIds}
           roomUsers={snapshot.users}

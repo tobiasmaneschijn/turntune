@@ -1,3 +1,5 @@
+import { formatDuration } from "./music.js";
+
 export interface SoundCloudSearchResult {
   provider: "soundcloud";
   id: string;
@@ -39,17 +41,6 @@ interface SoundCloudTokenResponse {
   expires_in?: number;
   error?: string;
   error_description?: string;
-}
-
-function formatDuration(milliseconds?: number) {
-  if (!milliseconds || milliseconds < 0) return undefined;
-  const seconds = Math.floor(milliseconds / 1000);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remaining = seconds % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
-    : `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
 function soundCloudError(payload: unknown, fallback: string) {
@@ -126,7 +117,8 @@ export class SoundCloudApi {
     const response = await this.fetcher("https://secure.soundcloud.com/oauth/token", {
       method: "POST",
       headers,
-      body
+      body,
+      signal: AbortSignal.timeout(10_000)
     });
     const payload = await response.json() as SoundCloudTokenResponse;
     if (!response.ok || !payload.access_token) {
@@ -176,7 +168,8 @@ export class SoundCloudApi {
       headers: {
         Accept: "application/json; charset=utf-8",
         Authorization: `OAuth ${await this.accessToken()}`
-      }
+      },
+      signal: AbortSignal.timeout(10_000)
     });
     if (response.status === 401 && retry) {
       this.token = null;

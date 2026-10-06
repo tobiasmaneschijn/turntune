@@ -1,5 +1,5 @@
 import type { AppleMusicApi } from "./apple-music.js";
-import { bestCatalogMatch, bestCertainCatalogMatch, type CatalogTrack, type ProviderTrackMapping } from "./music.js";
+import { bestCertainCatalogMatch, type CatalogTrack, type ProviderTrackMapping } from "./music.js";
 import type { SpotifyApi } from "./spotify.js";
 import type { Provider, Track } from "./types.js";
 
@@ -102,9 +102,9 @@ export async function resolveTrackMappings(
         const matchedByIsrc = Boolean(isrc);
         const result = matchedByIsrc
           ? await appleMusic.findByIsrc(isrc!)
-          : bestCatalogMatch(await appleMusic.searchTracks(query), source, 0.48);
+          : bestCertainCatalogMatch(await appleMusic.searchTracks(query), source);
         if (result) {
-          mappings.apple = mapping(result, matchedByIsrc ? "isrc" : "fuzzy");
+          mappings.apple = mapping(result, matchedByIsrc ? "isrc" : "exact-metadata");
           isrc ||= result.isrc;
         }
       } catch (error) {

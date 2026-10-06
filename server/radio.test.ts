@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceRadio, GracePeriodRegistry, normalizeRadioState, roomForListener } from "./radio.js";
+import { advanceRadio, GracePeriodRegistry, normalizeRadioState, privateQueue, roomForListener } from "./radio.js";
 import { uniqueUsers } from "./presence.js";
 import type { Room, Track, User } from "./types.js";
 
@@ -68,6 +68,59 @@ test("migrates a legacy shared queue into private queues", () => {
   assert.deepEqual(state.djQueues[alice.id].map((item) => item.id), ["alice-old"]);
   assert.deepEqual(state.djQueues[bob.id].map((item) => item.id), ["bob-old"]);
   assert.equal(state.queue, undefined);
+});
+
+test("repairs missing and malformed persisted radio fields without crashing", () => {
+  const state = {
+    id: "legacy",
+    settings: null,
+    djQueueUserIds: [alice.id, alice.id, null, 3],
+    djQueues: { alice: [null, {}, track("valid", alice)], bob: "invalid" },
+    queue: [{}, track("valid", alice)],
+    history: [null],
+    playback: { track: {}, position: -10 }
+  } as unknown as Room;
+  normalizeRadioState(state);
+  assert.deepEqual(state.djQueueUserIds, [alice.id]);
+  assert.deepEqual(state.djQueues.alice.map((item) => item.id), ["valid"]);
+  assert.deepEqual(state.djQueues.bob, []);
+  assert.deepEqual(state.moderatorUserIds, []);
+  assert.deepEqual(state.history, []);
+  assert.equal(state.playback.track, null);
+  assert.equal(state.playback.playing, false);
+  assert.equal(state.playback.position, 0);
+  assert.equal(state.vibe, null);
+  normalizeRadioState(state);
+  assert.deepEqual(state.djQueues.alice.map((item) => item.id), ["valid"]);
+});
+
+test("clears stale votes and rejects the playing DJ's own persisted vote", () => {
+  const state = room();
+  state.playback = { track: track("playing", alice), playing: true, position: -10, updatedAt: 1 };
+  state.vibe = { trackId: "playing", votes: { alice: 1, bob: -1, invalid: 2 as 1 } };
+  normalizeRadioState(state);
+  assert.equal(state.playback.position, 0);
+  assert.equal(state.djUserId, alice.id);
+  assert.deepEqual(Object.entries(state.vibe!.votes), [[bob.id, -1]]);
+  state.vibe!.trackId = "previous";
+  normalizeRadioState(state);
+  assert.deepEqual(Object.entries(state.vibe!.votes), []);
+});
+
+test("private queue lookup handles guest IDs that match object properties", () => {
+  const state = room();
+  for (const id of ["constructor", "__proto__", "toString"]) {
+    const user = { ...alice, id };
+    privateQueue(state, id).push(track(id, user));
+    assert.deepEqual(roomForListener(state, id).queue.map((item) => item.id), [id]);
+  }
+  assert.equal(Object.getPrototypeOf(state.djQueues), Object.prototype);
+});
+
+test("reading a listener snapshot does not allocate a persistent empty queue", () => {
+  const state = room();
+  assert.deepEqual(roomForListener(state, "new-listener").queue, []);
+  assert.equal(Object.hasOwn(state.djQueues, "new-listener"), false);
 });
 
 test("cancels a pending disconnect eviction when the DJ reconnects", async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Playback } from "../types";
 import type { PlayerStatus } from "./YouTubePlayer";
+import { createPlayerApiLoader } from "../player-api-loader";
 
 interface SoundCloudProgress {
   currentPosition?: number;
@@ -49,20 +50,11 @@ declare global {
   }
 }
 
-let apiPromise: Promise<void> | null = null;
-
-function loadApi() {
-  if (window.SC?.Widget) return Promise.resolve();
-  if (apiPromise) return apiPromise;
-  apiPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://w.soundcloud.com/player/api.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Could not load the SoundCloud player."));
-    document.head.appendChild(script);
-  });
-  return apiPromise;
-}
+const loadApi = createPlayerApiLoader({
+  src: "https://w.soundcloud.com/player/api.js",
+  label: "the SoundCloud player",
+  readApi: () => window.SC?.Widget
+});
 
 function targetPosition(playback: Playback) {
   return playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
@@ -101,7 +93,8 @@ export function SoundCloudPlayer({
   isDj,
   volume,
   onEnded,
-  onStatus
+  onStatus,
+  onError
 }: {
   playback: Playback;
   syncRevision: number;
@@ -109,6 +102,7 @@ export function SoundCloudPlayer({
   volume: number;
   onEnded: () => void;
   onStatus: (status: PlayerStatus) => void;
+  onError?: (message: string) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetRef = useRef<SoundCloudWidgetApi | null>(null);
@@ -116,18 +110,22 @@ export function SoundCloudPlayer({
   const loadingTrackRef = useRef(false);
   const loadedTrackIdRef = useRef<string | null>(null);
   const initialTrackIdRef = useRef(playback.track?.id || null);
+  const initialUrlRef = useRef(widgetUrl(playback.track?.permalinkUrl || "https://soundcloud.com"));
   const commandRevisionRef = useRef(0);
   const pendingSeekRef = useRef<{ trackId: string; revision: number } | null>(null);
   const playbackRef = useRef(playback);
   const isDjRef = useRef(isDj);
   const onEndedRef = useRef(onEnded);
   const onStatusRef = useRef(onStatus);
+  const onErrorRef = useRef(onError);
   const [ready, setReady] = useState(false);
+  const [loadedRevision, setLoadedRevision] = useState(0);
 
   playbackRef.current = playback;
   isDjRef.current = isDj;
   onEndedRef.current = onEnded;
   onStatusRef.current = onStatus;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let active = true;
@@ -146,7 +144,7 @@ export function SoundCloudPlayer({
         setReady(true);
       });
       widget.bind(events.LOAD_PROGRESS, (progress) => {
-        if (!active || loadingTrackRef.current) return;
+        if (!active || loadingTrackRef.current || loadedTrackIdRef.current !== playbackRef.current.track?.id) return;
         onStatusRef.current({
           ready: true,
           buffering: (progress?.loadProgress || 0) < (progress?.relativePosition || 0),
@@ -155,9 +153,10 @@ export function SoundCloudPlayer({
         });
       });
       widget.bind(events.PLAY_PROGRESS, (progress) => {
-        if (!active || loadingTrackRef.current) return;
+        if (!active || loadingTrackRef.current || loadedTrackIdRef.current !== playbackRef.current.track?.id) return;
+        const trackId = loadedTrackIdRef.current;
         widget.getDuration((duration) => {
-          if (!active || loadingTrackRef.current) return;
+          if (!active || loadingTrackRef.current || trackId !== loadedTrackIdRef.current || trackId !== playbackRef.current.track?.id) return;
           onStatusRef.current({
             ready: true,
             buffering: false,
@@ -184,6 +183,7 @@ export function SoundCloudPlayer({
           active &&
           !loadingTrackRef.current &&
           isDjRef.current &&
+          playbackRef.current.playing &&
           loadedTrackIdRef.current === playbackRef.current.track?.id
         ) {
           onEndedRef.current();
@@ -191,10 +191,17 @@ export function SoundCloudPlayer({
       });
       widget.bind(events.ERROR, () => {
         if (!active) return;
+        loadingTrackRef.current = false;
+        loadedTrackIdRef.current = null;
+        pendingSeekRef.current = null;
+        commandRevisionRef.current += 1;
         onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
+        onErrorRef.current?.("This SoundCloud track could not be played. It may be unavailable in your region.");
       });
-    }).catch(() => {
-      if (active) onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
+    }).catch((cause) => {
+      if (!active) return;
+      onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
+      onErrorRef.current?.(cause instanceof Error ? cause.message : "Could not initialize SoundCloud playback.");
     });
 
     return () => {
@@ -214,21 +221,29 @@ export function SoundCloudPlayer({
   useEffect(() => {
     const widget = widgetRef.current;
     const track = playback.track;
-    if (!ready || !widget || !track?.permalinkUrl) return;
-    if (loadedTrackIdRef.current !== track.id) {
-      loadingTrackRef.current = true;
+    if (!ready || !widget) return;
+    if (!track?.permalinkUrl) {
+      widget.pause();
+      loadingTrackRef.current = false;
+      loadedTrackIdRef.current = null;
       pendingSeekRef.current = null;
       commandRevisionRef.current += 1;
-      setReady(false);
-      widget.load(track.permalinkUrl, widgetOptions(() => {
-        if (!aliveRef.current) return;
-        loadedTrackIdRef.current = track.id;
-        loadingTrackRef.current = false;
-        setReady(true);
-      }));
       return;
     }
     if (loadingTrackRef.current) return;
+    if (loadedTrackIdRef.current !== track.id) {
+      loadingTrackRef.current = true;
+      pendingSeekRef.current = null;
+      const loadRevision = ++commandRevisionRef.current;
+      onStatusRef.current({ ready: true, buffering: true, currentTime: 0, duration: 0 });
+      widget.load(track.permalinkUrl, widgetOptions(() => {
+        if (!aliveRef.current || commandRevisionRef.current !== loadRevision) return;
+        loadedTrackIdRef.current = track.id;
+        loadingTrackRef.current = false;
+        setLoadedRevision((revision) => revision + 1);
+      }));
+      return;
+    }
     const revision = ++commandRevisionRef.current;
     const position = targetPosition(playback);
     widget.getPosition((currentPositionMs) => {
@@ -253,18 +268,18 @@ export function SoundCloudPlayer({
       pendingSeekRef.current = null;
       playback.playing ? widget.play() : widget.pause();
     });
-  }, [ready, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt, syncRevision]);
+  }, [ready, loadedRevision, playback.track?.id, playback.track?.permalinkUrl, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
     if (ready && !loadingTrackRef.current) widgetRef.current?.setVolume(volume);
-  }, [ready, volume]);
+  }, [ready, loadedRevision, volume]);
 
   useEffect(() => {
     if (!ready) return;
     const timer = window.setInterval(() => {
       const widget = widgetRef.current;
       const current = playbackRef.current;
-      if (!widget || !current.track || loadingTrackRef.current) return;
+      if (!widget || !current.track || loadingTrackRef.current || loadedTrackIdRef.current !== current.track.id) return;
       const trackId = current.track.id;
       widget.getPosition((positionMs) => {
         if (!aliveRef.current || loadingTrackRef.current || playbackRef.current.track?.id !== trackId) return;
@@ -283,12 +298,11 @@ export function SoundCloudPlayer({
     return () => window.clearInterval(timer);
   }, [ready]);
 
-  const permalinkUrl = playback.track?.permalinkUrl || "https://soundcloud.com";
   return (
     <div className="soundcloud-shell">
       <iframe
         ref={iframeRef}
-        src={widgetUrl(permalinkUrl)}
+        src={initialUrlRef.current}
         title={`SoundCloud player for ${playback.track?.title || "current track"}`}
         allow="autoplay"
         scrolling="no"

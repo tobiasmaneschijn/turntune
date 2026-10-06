@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeRadioState } from "./radio.js";
 import type {
   DjAccess,
   Room,
@@ -19,9 +20,11 @@ interface Database {
   musicConnections?: Record<string, MusicProviderConnection>;
 }
 
-const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");
-const dataFile = path.join(dataDir, "soundspin.json");
-const tempFile = path.join(dataDir, "soundspin.tmp.json");
+interface StoreOptions {
+  dataDir?: string;
+  /** Explicit null selects local storage, including in isolated tests. */
+  supabase?: SupabaseClient | null;
+}
 
 export class Store {
   // The cache is the live room object graph used by Socket.IO handlers. Supabase
@@ -30,11 +33,20 @@ export class Store {
   // Serialize writes so a slower save cannot overwrite a newer radio state.
   private writeChain: Promise<void> = Promise.resolve();
   private supabase: SupabaseClient | null = null;
+  private roomLoads = new Map<string, Promise<Room | undefined>>();
+  private readonly dataDir: string;
+  private readonly dataFile: string;
+  private readonly tempFile: string;
 
-  constructor() {
+  constructor(options: StoreOptions = {}) {
+    this.dataDir = options.dataDir || process.env.DATA_DIR || path.join(process.cwd(), "data");
+    this.dataFile = path.join(this.dataDir, "soundspin.json");
+    this.tempFile = path.join(this.dataDir, "soundspin.tmp.json");
     const url = process.env.SUPABASE_URL;
     const secretKey = process.env.SUPABASE_SECRET_KEY;
-    if (url && secretKey) {
+    if (options.supabase !== undefined) {
+      this.supabase = options.supabase;
+    } else if (url && secretKey) {
       this.supabase = createAdminClient();
     }
   }
@@ -45,9 +57,20 @@ export class Store {
 
   async init() {
     if (this.supabase) return;
-    await mkdir(dataDir, { recursive: true });
+    await mkdir(this.dataDir, { recursive: true });
     try {
-      this.data = JSON.parse(await readFile(dataFile, "utf8")) as Database;
+      const data = JSON.parse(await readFile(this.dataFile, "utf8")) as Database;
+      if (!data || typeof data !== "object" || !data.rooms || typeof data.rooms !== "object" || Array.isArray(data.rooms)) {
+        throw new Error("The saved SoundSpin database has an invalid format.");
+      }
+      for (const [id, room] of Object.entries(data.rooms)) {
+        if (!room || typeof room !== "object" || Array.isArray(room)) {
+          throw new Error(`The saved SoundSpin room ${id} has an invalid format.`);
+        }
+        room.id = id;
+        normalizeRadioState(room);
+      }
+      this.data = data;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await this.persistFile();
@@ -120,21 +143,48 @@ export class Store {
   }
 
   getRoom(id: string) {
-    return this.data.rooms[id];
+    return Object.hasOwn(this.data.rooms, id) ? this.data.rooms[id] : undefined;
+  }
+
+  /** Reserve a guest room before a join yields, so every socket shares its owner/state. */
+  getOrCreateLocalRoom(id: string, create: () => Room): Room {
+    if (this.supabase) throw new Error("Supabase rooms must be explicitly created before joining.");
+    const current = this.getRoom(id);
+    if (current) return current;
+    const room = create();
+    if (room.id !== id) throw new Error("The new room address does not match its cache key.");
+    Object.defineProperty(this.data.rooms, id, { value: room, enumerable: true, writable: true, configurable: true });
+    return room;
   }
 
   async loadRoom(id: string) {
     const cached = this.getRoom(id);
     if (cached || !this.supabase) return cached;
 
-    const { data, error } = await this.supabase
+    // All sockets must coordinate through the same live object. A second load
+    // must not replace it while the first join is already mutating it.
+    const pending = this.roomLoads.get(id);
+    if (pending) return pending;
+    const loading = this.loadRoomFromDatabase(id);
+    this.roomLoads.set(id, loading);
+    try {
+      return await loading;
+    } finally {
+      this.roomLoads.delete(id);
+    }
+  }
+
+  private async loadRoomFromDatabase(id: string) {
+    const supabase = this.supabase!;
+
+    const { data, error } = await supabase
       .from("soundspin_rooms")
       .select("state, name, owner_id, is_public, password_hash, settings")
       .eq("slug", id)
       .maybeSingle();
 
     if (error) {
-      if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
+      if (error.code === "PGRST205") {
         throw new Error(
           "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
         );
@@ -142,7 +192,7 @@ export class Store {
       throw new Error(`Could not load room: ${error.message}`);
     }
     if (!data) return undefined;
-    const { data: roomRoles, error: roomRoleError } = await this.supabase
+    const { data: roomRoles, error: roomRoleError } = await supabase
       .from("soundspin_room_members")
       .select("user_id, role")
       .eq("room_slug", id)
@@ -154,6 +204,7 @@ export class Store {
     // are the authorization/directory source of truth.
     const room = {
       ...(data.state as Room),
+      id,
       name: data.name,
       ownerUserId: data.owner_id,
       moderatorUserIds: (roomRoles || []).filter((member) => member.role === "moderator").map((member) => member.user_id),
@@ -162,6 +213,10 @@ export class Store {
       passwordProtected: Boolean(data.password_hash),
       settings: data.settings || {}
     };
+    normalizeRadioState(room);
+    // A creator may have populated the cache while this read was in flight.
+    const cached = this.getRoom(id);
+    if (cached) return cached;
     this.data.rooms[id] = room;
     return room;
   }
@@ -312,7 +367,7 @@ export class Store {
     if (update.isPublic !== undefined) values.is_public = update.isPublic;
     if (update.passwordHash !== undefined) values.password_hash = update.passwordHash;
     if (update.djAccess !== undefined) {
-      const cachedSettings = this.getRoom(roomSlug)?.settings || {};
+      const cachedSettings = (await this.loadRoom(roomSlug))?.settings || {};
       values.settings = { ...cachedSettings, djAccess: update.djAccess };
     }
     const { data, error } = await this.supabase
@@ -396,8 +451,14 @@ export class Store {
     if (room.owner_id !== ownerUserId) throw new Error("Only the room owner can manage DJ roles.");
     if (targetUserId === ownerUserId) throw new Error("The owner can always join the DJ queue.");
 
-    const cached = this.getRoom(roomSlug);
-    if (cached?.moderatorUserIds.includes(targetUserId)) {
+    const { data: targetMembership, error: targetMembershipError } = await this.supabase
+      .from("soundspin_room_members")
+      .select("role")
+      .eq("room_slug", roomSlug)
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    if (targetMembershipError) throw new Error(`Could not verify target role: ${targetMembershipError.message}`);
+    if (targetMembership?.role === "moderator") {
       throw new Error("Moderators can already join the DJ queue.");
     }
     const { error } = await this.supabase.from("soundspin_room_members").upsert(
@@ -410,6 +471,7 @@ export class Store {
       { onConflict: "room_slug,user_id" }
     );
     if (error) throw new Error(`Could not update DJ role: ${error.message}`);
+    const cached = this.getRoom(roomSlug);
     if (cached) {
       cached.djRoleUserIds = dj
         ? [...new Set([...(cached.djRoleUserIds || []), targetUserId])]
@@ -420,16 +482,20 @@ export class Store {
 
   async loadOrCreateProfile(userId: string, displayName: string) {
     if (!this.supabase) return null;
-    const { data, error } = await this.supabase
+    const current = await this.getProfile(userId);
+    if (current) return current;
+    // A reconnect carries potentially stale browser profile data. Only seed a
+    // missing profile; never reset a saved display name while joining a room.
+    const { error } = await this.supabase
       .from("soundspin_profiles")
       .upsert(
         { user_id: userId, display_name: displayName, updated_at: new Date().toISOString() },
-        { onConflict: "user_id" }
-      )
-      .select(PROFILE_COLUMNS)
-      .single();
+        { onConflict: "user_id", ignoreDuplicates: true }
+      );
     if (error) throw new Error(`Could not load profile: ${error.message}`);
-    return data as SoundSpinProfile;
+    const profile = await this.getProfile(userId);
+    if (!profile) throw new Error("Could not load profile after creating it.");
+    return profile;
   }
 
   async getProfile(userId: string) {
@@ -533,37 +599,51 @@ export class Store {
    */
   saveRoom(room: Room) {
     this.data.rooms[room.id] = room;
-    this.writeChain = this.writeChain.then(async () => {
-      if (this.supabase) {
-        const { error } = await this.supabase.from("soundspin_rooms").upsert(
-          {
-            slug: room.id,
-            name: room.name,
-            owner_id: room.ownerUserId,
-            state: room,
-            is_public: room.isPublic ?? true,
-            settings: room.settings || {},
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: "slug" }
-        );
-        if (error) {
-          if (error.code === "PGRST205" || error.message.includes("soundspin_rooms")) {
-            throw new Error(
-              "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
-            );
-          }
-          throw new Error(`Could not save room: ${error.message}`);
+    if (!this.supabase) return this.persistFile();
+    // Capture this save now: callers keep mutating the authoritative room while
+    // its preceding write is still in flight.
+    const state = structuredClone(room);
+    const supabase = this.supabase;
+    return this.enqueueWrite(async () => {
+      // Room creation/settings own the authoritative metadata columns. A radio
+      // save must not revert them with an older copy captured before an edit.
+      const { data, error } = await supabase.from("soundspin_rooms")
+        .update({ state, updated_at: new Date().toISOString() })
+        .eq("slug", state.id)
+        .select("slug")
+        .maybeSingle();
+      if (error) {
+        if (error.code === "PGRST205") {
+          throw new Error(
+            "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+          );
         }
-      } else {
-        await this.persistFile();
+        throw new Error(`Could not save room: ${error.message}`);
       }
+      if (!data) throw new Error("Could not save room: the room no longer exists.");
     });
+  }
+
+  /** Waits for writes already scheduled, for graceful server shutdown. */
+  flush() {
     return this.writeChain;
   }
 
-  private async persistFile() {
-    await writeFile(tempFile, JSON.stringify(this.data, null, 2), "utf8");
-    await rename(tempFile, dataFile);
+  private enqueueWrite(write: () => Promise<void>) {
+    const result = this.writeChain.then(write);
+    // The caller still sees its failure. Future writes can recover after a
+    // temporary database outage or a failed rename instead of staying poisoned.
+    this.writeChain = result.catch(() => {});
+    return result;
+  }
+
+  private persistFile() {
+    const serialized = JSON.stringify(this.data, null, 2);
+    // Room saves and provider credentials share one file and temporary path.
+    // They must use the same write queue to avoid racing renames or losing data.
+    return this.enqueueWrite(async () => {
+      await writeFile(this.tempFile, serialized, "utf8");
+      await rename(this.tempFile, this.dataFile);
+    });
   }
 }

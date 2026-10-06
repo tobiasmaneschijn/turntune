@@ -9,6 +9,7 @@ import {
   type ChatMessage,
 } from '@/chat/model'
 import { splitMentionText } from '@/chat/mentions'
+import { safeChatMediaUrl } from '@/chat/protocol'
 import { cn } from '@/lib/utils'
 import { Avatar } from '@/components/Avatar'
 import { DevFlair } from '@/components/DevFlair'
@@ -73,6 +74,7 @@ export const ChatMessageItem = ({
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const reactionTooltipPrefix = useId()
   const reply = message.replyTo
+  const mediaUrl = safeChatMediaUrl(message.mediaUrl)
   const isMentioned = (message.mentions || []).some((mention) => mention.userId === currentUserId)
   const reactionGroups = useMemo(
     () => groupReactions(message.reactions, currentUserId),
@@ -179,10 +181,10 @@ export const ChatMessageItem = ({
           </div>
         )}
         <div className="chat-message-body">
-          {message.mediaUrl && (
-            <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
+          {mediaUrl && (
+            <a href={mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
               <img
-                src={message.mediaUrl}
+                src={mediaUrl}
                 alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
                 loading="lazy"
               />

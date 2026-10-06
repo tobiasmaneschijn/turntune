@@ -6,12 +6,15 @@ import {
   bestCatalogMatch,
   bestCertainCatalogMatch,
   catalogMatchScore,
-  isCertainCatalogMatch
+  isCertainCatalogMatch,
+  normalizeTrackText,
+  formatDuration
 } from "./music.js";
 import { SpotifyApi } from "./spotify.js";
 import { SpotifyAccounts } from "./spotify-accounts.js";
 import type { Store } from "./store.js";
 import type { MusicProviderConnection } from "./types.js";
+import { resolveTrackMappings } from "./provider-mappings.js";
 
 test("catalog matching favors the same title, artist, and duration", () => {
   const source = { title: "Midnight City (Official Audio)", artist: "M83", durationMs: 244_000 };
@@ -21,6 +24,22 @@ test("catalog matching favors the same title, artist, and duration", () => {
   ];
   assert.ok(catalogMatchScore(candidates[1], source) > catalogMatchScore(candidates[0], source));
   assert.equal(bestCatalogMatch(candidates, source)?.id, "right");
+});
+
+test("catalog matching preserves international titles and folds accented text", () => {
+  assert.equal(normalizeTrackText("Beyoncé — Déjà Vu"), "beyonce deja vu");
+  assert.equal(normalizeTrackText("夜に駆ける"), "夜に駆ける");
+  assert.equal(isCertainCatalogMatch({ provider: "apple", id: "song", title: "夜に駆ける", artist: "YOASOBI", durationMs: 260_000 },
+    { title: "夜に駆ける", artist: "YOASOBI", durationMs: 260_500 }), true);
+  assert.equal(catalogMatchScore({ provider: "apple", id: "other", title: "群青", artist: "YOASOBI" },
+    { title: "夜に駆ける", artist: "YOASOBI" }), 0.23);
+});
+
+test("empty normalized titles cannot produce a confident catalog match", () => {
+  assert.equal(catalogMatchScore({ provider: "apple", id: "song", title: "Official Audio", artist: "Artist" },
+    { title: "Music Video", artist: "Artist" }), 0);
+  assert.equal(formatDuration(Infinity), undefined);
+  assert.equal(formatDuration(NaN), undefined);
 });
 
 test("certain catalog matching rejects a base track for a remix or edit", () => {
@@ -149,4 +168,125 @@ test("Spotify account refresh tokens are encrypted at rest and can be refreshed"
   assert.equal(stored.refreshTokenCiphertext.includes("refresh-secret"), false);
   accounts.invalidate("user-id");
   assert.equal(await accounts.getAccessToken("user-id"), "refreshed-access");
+});
+
+test("simultaneous Spotify catalog searches share the app-token request", async () => {
+  let tokenRequests = 0;
+  const spotify = new SpotifyApi("client", "secret", "US", async (input) => {
+    if (String(input).includes("accounts.spotify.com")) {
+      tokenRequests += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return Response.json({ access_token: "app-token", token_type: "Bearer", expires_in: 3600 });
+    }
+    return Response.json({ tracks: { items: [] } });
+  });
+  await Promise.all([spotify.searchTracks("one"), spotify.searchTracks("two"), spotify.searchTracks("three")]);
+  assert.equal(tokenRequests, 1);
+});
+
+function accountStore() {
+  let connection: MusicProviderConnection | null = null;
+  return {
+    get connection() { return connection; },
+    store: {
+      getMusicConnection: async () => connection,
+      saveMusicConnection: async (saved: Omit<MusicProviderConnection, "createdAt" | "updatedAt">) => {
+        connection = { ...saved, createdAt: "created", updatedAt: "updated" };
+      },
+      deleteMusicConnection: async () => { connection = null; }
+    } as unknown as Store
+  };
+}
+
+test("concurrent Spotify access requests refresh once and retain rotated credentials", async () => {
+  const storage = accountStore();
+  let refreshRequests = 0;
+  let beginRefresh!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => { beginRefresh = resolve; });
+  let finishRefresh!: () => void;
+  const refreshFinished = new Promise<void>((resolve) => { finishRefresh = resolve; });
+  const spotify = new SpotifyApi("client", "secret", "US", async (_input, init) => {
+    const body = init?.body as URLSearchParams;
+    if (body.get("grant_type") === "authorization_code") {
+      return Response.json({ access_token: "first", refresh_token: "refresh-1", expires_in: 1 });
+    }
+    refreshRequests += 1;
+    assert.equal(body.get("refresh_token"), refreshRequests === 1 ? "refresh-1" : "refresh-2");
+    beginRefresh();
+    await refreshFinished;
+    return Response.json({ access_token: "refreshed", refresh_token: "refresh-2", expires_in: 3600 });
+  });
+  const accounts = new SpotifyAccounts(storage.store, spotify, "encryption-key");
+  await accounts.connect("user", "code", "http://localhost/callback");
+  const first = accounts.getAccessToken("user");
+  const second = accounts.getAccessToken("user");
+  await refreshStarted;
+  assert.equal(refreshRequests, 1);
+  finishRefresh();
+  assert.deepEqual(await Promise.all([first, second]), ["refreshed", "refreshed"]);
+  accounts.invalidate("user");
+  assert.equal(await accounts.getAccessToken("user"), "refreshed");
+  assert.equal(refreshRequests, 2);
+});
+
+test("disconnecting Spotify cancels an in-flight refresh and prevents new token requests", async () => {
+  const storage = accountStore();
+  let beginRefresh!: () => void;
+  const refreshStarted = new Promise<void>((resolve) => { beginRefresh = resolve; });
+  let finishRefresh!: () => void;
+  const refreshFinished = new Promise<void>((resolve) => { finishRefresh = resolve; });
+  const spotify = new SpotifyApi("client", "secret", "US", async (_input, init) => {
+    const body = init?.body as URLSearchParams;
+    if (body.get("grant_type") === "authorization_code") {
+      return Response.json({ access_token: "first", refresh_token: "refresh-1", expires_in: 1 });
+    }
+    beginRefresh();
+    await refreshFinished;
+    return Response.json({ access_token: "late-access", refresh_token: "late-refresh", expires_in: 3600 });
+  });
+  const accounts = new SpotifyAccounts(storage.store, spotify, "encryption-key");
+  await accounts.connect("user", "code", "http://localhost/callback");
+  const refresh = accounts.getAccessToken("user");
+  await refreshStarted;
+  const disconnect = accounts.disconnect("user");
+  await assert.rejects(accounts.getAccessToken("user"), /being updated/);
+  const rejected = assert.rejects(refresh, /connection changed/);
+  finishRefresh();
+  await rejected;
+  await disconnect;
+  assert.equal(storage.connection, null);
+  await assert.rejects(accounts.getAccessToken("user"), /Connect Spotify first/);
+});
+
+test("disconnect queued during Spotify connection leaves no stored or cached credentials", async () => {
+  const storage = accountStore();
+  let beginConnect!: () => void;
+  const connectionStarted = new Promise<void>((resolve) => { beginConnect = resolve; });
+  let finishConnect!: () => void;
+  const connectionFinished = new Promise<void>((resolve) => { finishConnect = resolve; });
+  const spotify = new SpotifyApi("client", "secret", "US", async () => {
+    beginConnect();
+    await connectionFinished;
+    return Response.json({ access_token: "first", refresh_token: "refresh-1", expires_in: 3600 });
+  });
+  const accounts = new SpotifyAccounts(storage.store, spotify, "encryption-key");
+  const connect = accounts.connect("user", "code", "http://localhost/callback");
+  await connectionStarted;
+  const disconnect = accounts.disconnect("user");
+  finishConnect();
+  await Promise.all([connect, disconnect]);
+  assert.equal(storage.connection, null);
+  await assert.rejects(accounts.getAccessToken("user"), /Connect Spotify first/);
+});
+
+test("Apple Music counterpart mapping rejects a different remix and accepts exact metadata", async () => {
+  const source = { provider: "soundcloud" as const, providerId: "soundcloud:tracks:123", title: "Midnight City (Club Remix)", artist: "M83", durationMs: 244_000 };
+  const candidate = { provider: "apple" as const, id: "base-recording", title: "Midnight City", artist: "M83", durationMs: 244_000 };
+  const spotify = { configured: false } as SpotifyApi;
+  const apple = { configured: true, searchTracks: async () => [candidate] } as unknown as AppleMusicApi;
+  assert.equal((await resolveTrackMappings(source, spotify, apple)).mappings?.apple, undefined);
+  const exactApple = { configured: true, searchTracks: async () => [{ ...candidate, id: "exact-remix", title: source.title }] } as unknown as AppleMusicApi;
+  const resolved = await resolveTrackMappings(source, spotify, exactApple);
+  assert.equal(resolved.mappings?.apple?.providerId, "exact-remix");
+  assert.equal(resolved.mappings?.apple?.matchMethod, "exact-metadata");
 });

@@ -8,6 +8,7 @@ import {
 } from '@/chat/model'
 import type { User } from '@/types'
 import { normalizeChatMentions } from '@/chat/mentions'
+import { safeChatMediaUrl } from '@/chat/protocol'
 
 export const CHAT_HISTORY_LIMIT = 200
 
@@ -58,7 +59,21 @@ export async function loadChatHistory(
 
   const history = ([...(data || [])] as unknown as ChatHistoryRow[]).reverse()
   const rowsById = new Map(history.map((row) => [row.id, row]))
-  const userIds = [...new Set(history.flatMap((row) => [
+  const missingReplyIds = [...new Set(history.flatMap((row) =>
+    row.reply_to_id && !rowsById.has(row.reply_to_id) ? [row.reply_to_id] : []
+  ))]
+  if (missingReplyIds.length > 0) {
+    const { data: replies, error: replyError } = await client
+      .from('soundspin_messages')
+      .select(CHAT_HISTORY_SELECT)
+      .eq('room_slug', roomSlug)
+      .in('id', missingReplyIds)
+    // A missing/deleted preview must not hide otherwise readable history.
+    if (!replyError) {
+      for (const reply of (replies || []) as unknown as ChatHistoryRow[]) rowsById.set(reply.id, reply)
+    }
+  }
+  const userIds = [...new Set([...rowsById.values()].flatMap((row) => [
     row.user_id,
     ...(row.soundspin_message_reactions || []).map((reaction) => reaction.user_id),
   ]))]
@@ -71,14 +86,14 @@ export async function loadChatHistory(
       .select('user_id, display_name, is_app_admin, avatar_key, avatar_url')
       .in('user_id', userIds)
 
-    if (profileError) throw profileError
-    for (const profile of profiles || []) {
+    // Profile enrichment is optional; retain message snapshots if it is unavailable.
+    for (const profile of profileError ? [] : profiles || []) {
       profileNames.set(profile.user_id, profile.display_name)
       currentProfiles.push({
         id: profile.user_id,
         avatarSeed: profile.user_id,
         avatarKey: profile.avatar_key,
-        avatarUrl: profile.avatar_url || undefined,
+        avatarUrl: safeChatMediaUrl(profile.avatar_url),
         isAppAdmin: profile.is_app_admin,
       })
     }
@@ -90,7 +105,7 @@ export async function loadChatHistory(
       id: row.id,
       content: row.content,
       type: row.message_type,
-      mediaUrl: row.media_url || undefined,
+      mediaUrl: safeChatMediaUrl(row.media_url),
       storagePath: row.storage_path || undefined,
       mentions: normalizeChatMentions(row.mentions),
       user: {
@@ -102,7 +117,7 @@ export async function loadChatHistory(
         id: reply.id,
         content: reply.content,
         type: reply.message_type,
-        mediaUrl: reply.media_url || undefined,
+        mediaUrl: safeChatMediaUrl(reply.media_url),
         mentions: normalizeChatMentions(reply.mentions),
         user: {
           id: reply.user_id,

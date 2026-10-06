@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Playback, ProviderTrackMapping } from "../types";
 import type { PlayerStatus } from "./YouTubePlayer";
+import { createPlayerApiLoader } from "../player-api-loader";
+import { PlaybackEndTracker } from "../playback-progress";
+import { storeValue } from "../lib/browser-storage";
 
 interface MusicKitInstance {
   isAuthorized?: boolean;
   authorize(): Promise<string>;
   setQueue(options: { song: string }): Promise<unknown>;
   play(): Promise<unknown>;
-  pause(): void;
+  pause(): Promise<unknown> | void;
   seekToTime?(seconds: number): Promise<unknown> | void;
   currentPlaybackTime: number;
   currentPlaybackDuration: number;
@@ -17,6 +20,7 @@ interface MusicKitInstance {
 }
 
 interface MusicKitGlobal {
+  PlaybackStates?: { completed: number; ended: number; stopped: number };
   configure(options: { developerToken: string; storefrontId: string; app: { name: string; build: string } }): Promise<unknown> | unknown;
   getInstance(): MusicKitInstance;
 }
@@ -25,33 +29,24 @@ declare global {
   interface Window { MusicKit?: MusicKitGlobal }
 }
 
-let musicKitScriptPromise: Promise<MusicKitGlobal> | null = null;
 let configuredMusicKit: Promise<MusicKitInstance> | null = null;
+let musicKitOwner: object | null = null;
+let musicKitCommands: Promise<void> = Promise.resolve();
 
-function loadMusicKitScript() {
-  if (window.MusicKit) return Promise.resolve(window.MusicKit);
-  if (musicKitScriptPromise) return musicKitScriptPromise;
-  musicKitScriptPromise = new Promise((resolve, reject) => {
-    const ready = () => window.MusicKit ? resolve(window.MusicKit) : reject(new Error("Apple Music did not initialize."));
-    document.addEventListener("musickitloaded", ready, { once: true });
-    if (!document.querySelector('script[src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"]')) {
-      const script = document.createElement("script");
-      script.src = "https://js-cdn.music.apple.com/musickit/v3/musickit.js";
-      script.async = true;
-      script.onerror = () => reject(new Error("Could not load Apple MusicKit."));
-      document.body.appendChild(script);
-    }
-    window.setTimeout(() => {
-      if (!window.MusicKit) reject(new Error("Apple Music took too long to load."));
-    }, 15_000);
-  });
-  return musicKitScriptPromise;
-}
+const loadMusicKitScript = createPlayerApiLoader({
+  src: "https://js-cdn.music.apple.com/musickit/v3/musickit.js",
+  label: "Apple MusicKit",
+  readApi: () => window.MusicKit,
+  readyEvent: "musickitloaded"
+});
 
 async function getMusicKit(accessToken: string) {
   if (configuredMusicKit) return configuredMusicKit;
   configuredMusicKit = (async () => {
-    const response = await fetch("/api/apple/token", { headers: { Authorization: `Bearer ${accessToken}` } });
+    const response = await fetch("/api/apple/token", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000)
+    });
     const payload = await response.json() as { developerToken?: string; storefront?: string; error?: string };
     if (!response.ok || !payload.developerToken) throw new Error(payload.error || "Apple Music is not configured.");
     const sdk = await loadMusicKitScript();
@@ -61,7 +56,10 @@ async function getMusicKit(accessToken: string) {
       app: { name: "Lydman", build: "1.0.0" }
     });
     return sdk.getInstance();
-  })();
+  })().catch((cause) => {
+    configuredMusicKit = null;
+    throw cause;
+  });
   return configuredMusicKit;
 }
 
@@ -70,7 +68,7 @@ function targetPosition(playback: Playback) {
 }
 
 function reportAppleAuthorization(authorized: boolean) {
-  localStorage.setItem("soundspin-apple-authorized", String(authorized));
+  storeValue("soundspin-apple-authorized", String(authorized));
   window.dispatchEvent(new Event("soundspin:apple-authorization"));
 }
 
@@ -98,8 +96,7 @@ export function AppleMusicPlayer({
   const musicRef = useRef<MusicKitInstance | null>(null);
   const commandRef = useRef("");
   const loadedTrackRef = useRef("");
-  const endedTrackRef = useRef("");
-  const lastProgressRef = useRef(0);
+  const endTrackerRef = useRef(new PlaybackEndTracker());
   const [authorized, setAuthorized] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -111,6 +108,12 @@ export function AppleMusicPlayer({
 
   useEffect(() => {
     let alive = true;
+    const owner = {};
+    musicKitOwner = owner;
+    commandRef.current = "";
+    loadedTrackRef.current = "";
+    setReady(false);
+    setError("");
     void getMusicKit(accessToken).then((music) => {
       if (!alive) return;
       musicRef.current = music;
@@ -121,7 +124,17 @@ export function AppleMusicPlayer({
     }).catch((cause) => {
       if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Apple Music.");
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      const music = musicRef.current;
+      musicRef.current = null;
+      if (musicKitOwner !== owner) return;
+      musicKitOwner = null;
+      // A provider switch must stop audio after any in-flight queue operation.
+      musicKitCommands = musicKitCommands.then(async () => {
+        if (!musicKitOwner) await music?.pause();
+      }).catch(() => undefined);
+    };
   }, [accessToken]);
 
   const authorize = useCallback(() => {
@@ -129,9 +142,11 @@ export function AppleMusicPlayer({
     if (!music) return;
     setError("");
     void music.authorize().then(() => {
+      if (musicRef.current !== music) return;
       setAuthorized(true);
       reportAppleAuthorization(true);
     }).catch((cause) => {
+      if (musicRef.current !== music) return;
       setError(cause instanceof Error ? cause.message : "Apple Music authorization failed.");
     });
   }, []);
@@ -142,48 +157,56 @@ export function AppleMusicPlayer({
 
   useEffect(() => {
     const music = musicRef.current;
-    if (!music || !track || !authorized) return;
-    const signature = `${track.id}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}`;
+    if (!music || !authorized || !ready) return;
+    const trackKey = track ? `${track.id}:${mapping.providerId}` : "";
+    const signature = `${trackKey}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}`;
     if (commandRef.current === signature) return;
     commandRef.current = signature;
     let alive = true;
-    void (async () => {
+    // MusicKit queue writes are asynchronous and cannot be cancelled. Serialize
+    // them so a slower old track cannot replace the latest room track.
+    musicKitCommands = musicKitCommands.then(async () => {
+      if (!alive) return;
       try {
-        if (loadedTrackRef.current !== track.id) {
+        if (!track) {
+          await music.pause();
+          loadedTrackRef.current = "";
+          return;
+        }
+        if (loadedTrackRef.current !== trackKey) {
           await music.setQueue({ song: mapping.providerId });
           if (!alive) return;
-          loadedTrackRef.current = track.id;
+          loadedTrackRef.current = trackKey;
         }
         await music.seekToTime?.(targetPosition(playback));
         if (!alive) return;
         if (playback.playing) await music.play();
-        else music.pause();
+        else await music.pause();
         if (alive) setError("");
       } catch (cause) {
         if (alive) setError(cause instanceof Error ? cause.message : "Apple Music playback failed.");
       }
-    })();
+    });
     return () => { alive = false; };
-  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, syncRevision]);
+  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, ready, syncRevision]);
 
   useEffect(() => {
     if (!track || !authorized) return;
     const interval = window.setInterval(() => {
       const music = musicRef.current;
-      if (!music) return;
+      if (!music || loadedTrackRef.current !== `${track.id}:${mapping.providerId}`) return;
       const currentTime = Number(music.currentPlaybackTime || 0);
       const duration = Number(music.currentPlaybackDuration || track.durationMs && track.durationMs / 1000 || 0);
       onStatus({ ready: true, buffering: playback.playing && currentTime === 0, currentTime, duration });
-      const stopped = music.playbackState === 0 || music.playbackState === 1 || music.playbackState === 8 ||
+      const states = window.MusicKit?.PlaybackStates;
+      const stopped = Boolean(states && [states.completed, states.ended, states.stopped].includes(music.playbackState as number)) ||
         music.playbackState === "completed" || music.playbackState === "stopped" || music.playbackState === "ended";
-      if (isDj && stopped && duration > 0 && lastProgressRef.current >= duration - 2 && endedTrackRef.current !== track.id) {
-        endedTrackRef.current = track.id;
+      if (endTrackerRef.current.observe(`${track.id}:${mapping.providerId}`, currentTime, duration, stopped, playback.playing && isDj)) {
         onEnded();
       }
-      lastProgressRef.current = currentTime;
     }, 750);
     return () => window.clearInterval(interval);
-  }, [track?.id, track?.durationMs, authorized, playback.playing, isDj, onEnded, onStatus]);
+  }, [track?.id, track?.durationMs, mapping.providerId, authorized, playback.playing, isDj, onEnded, onStatus]);
 
   return (
     <div className="provider-player-shell apple-player-shell">

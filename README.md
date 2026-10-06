@@ -38,6 +38,10 @@ JSON store and local display-name identity. To test authentication and database
 persistence, copy `.env.example` to `.env` and add your Supabase project values.
 Production deployments are expected to keep Supabase enabled; the JSON store is
 only a legacy/local fallback.
+Local mode supports rooms, DJ queues, and shared playback. Chat, account profiles,
+feedback, and room administration require the configured account services.
+Production startup rejects absent or partial Supabase configuration. A browser
+configuration failure shows a retry screen instead of switching to local mode.
 
 ## Architecture documentation
 
@@ -46,6 +50,25 @@ only a legacy/local fallback.
   Supabase persistence, invariants, and troubleshooting.
 - [`docs/chat.md`](docs/chat.md) explains realtime chat, durable history,
   replies, reactions, media, and RLS.
+- [`docs/codebase-review.md`](docs/codebase-review.md) records the stability review,
+  module boundaries, validation, and remaining risks.
+
+## Development checks
+
+```bash
+npm test
+npm run build
+```
+
+The test command discovers every test in `tests/` and `server/`, including an
+isolated two-listener server test. It uses temporary storage and removes provider
+and Supabase credentials from the child process. The build checks both frontend
+and server types before producing assets. GitHub Actions runs both checks on
+pushes and pull requests.
+
+For focused checks use `test:radio`, `test:chat`, `test:playback`, or
+`test:integration`. Integration tests never load `.env` or contact the configured
+database.
 
 ## Supabase setup
 

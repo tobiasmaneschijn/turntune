@@ -22,7 +22,7 @@ export interface CatalogTrack {
 }
 
 export function formatDuration(durationMs?: number) {
-  if (!durationMs || durationMs < 0) return undefined;
+  if (!durationMs || !Number.isFinite(durationMs) || durationMs < 0) return undefined;
   const totalSeconds = Math.floor(durationMs / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -36,10 +36,11 @@ export function normalizeTrackText(value: string) {
   return value
     .toLocaleLowerCase()
     .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .replace(/\([^)]*(official|video|audio|lyrics?|visuali[sz]er)[^)]*\)/g, " ")
     .replace(/\[[^\]]*(official|video|audio|lyrics?|visuali[sz]er)[^\]]*\]/g, " ")
     .replace(/\b(official|music|video|audio|lyrics?|visuali[sz]er|hd|hq)\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 }
 
@@ -67,6 +68,7 @@ export function catalogMatchScore(
   const candidateTitle = normalizeTrackText(candidate.title);
   const sourceArtist = normalizeTrackText(source.artist || "");
   const candidateArtist = normalizeTrackText(candidate.artist);
+  if (!sourceTitle || !candidateTitle) return 0;
   let score = 0;
 
   if (sourceTitle === candidateTitle) score += 0.7;

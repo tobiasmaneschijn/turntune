@@ -2,6 +2,9 @@ import type { ChatMedia } from '@/chat/model'
 
 export const CHAT_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif'
 export const CHAT_IMAGE_MAX_BYTES = 6 * 1024 * 1024
+const CHAT_IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+}
 
 export interface GiphyGif {
   id: string
@@ -15,13 +18,14 @@ export type PastedChatMedia =
   | { kind: 'remote'; media: ChatMedia & { content: string } }
 
 export function validateChatImage(file: File): string | null {
-  if (!file.type.startsWith('image/')) return 'Please choose an image file.'
+  if (!CHAT_IMAGE_EXTENSIONS[file.type]) return 'Choose a JPEG, PNG, WebP, or GIF image.'
+  if (file.size === 0) return 'This image file is empty. Please choose another one.'
   if (file.size > CHAT_IMAGE_MAX_BYTES) return 'Images must be 6 MB or smaller.'
   return null
 }
 
 export function createChatStoragePath(userId: string, roomName: string, file: File): string {
-  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const extension = CHAT_IMAGE_EXTENSIONS[file.type] || 'jpg'
   const safeRoom = roomName.replace(/[^a-zA-Z0-9-]/g, '-')
   return `${userId}/${safeRoom}/${crypto.randomUUID()}.${extension}`
 }
@@ -61,12 +65,13 @@ export function readPastedChatMedia(clipboard: DataTransfer): PastedChatMedia | 
   }
 }
 
-export async function fetchGiphyGifs(query = '', accessToken?: string): Promise<GiphyGif[]> {
+export async function fetchGiphyGifs(query = '', accessToken?: string, signal?: AbortSignal): Promise<GiphyGif[]> {
   const params = new URLSearchParams()
   if (query.trim()) params.set('q', query.trim())
   const suffix = params.size ? `?${params}` : ''
   const response = await fetch(`/api/giphy${suffix}`, {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    signal,
   })
   const payload = await response.json().catch(() => ({})) as {
     error?: string

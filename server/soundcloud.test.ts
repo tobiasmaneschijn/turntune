@@ -6,6 +6,7 @@ test("search and URL resolution authenticate once and map playable tracks", asyn
   const requests: Array<{ url: string; authorization?: string }> = [];
   const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
+    assert.ok(init?.signal instanceof AbortSignal, "SoundCloud requests must have a timeout signal");
     const authorization = new Headers(init?.headers).get("authorization") || undefined;
     requests.push({ url, authorization });
 

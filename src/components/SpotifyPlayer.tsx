@@ -4,6 +4,9 @@ import type { Playback, ProviderTrackMapping } from "../types";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import type { PlayerStatus } from "./YouTubePlayer";
+import { createPlayerApiLoader } from "../player-api-loader";
+import { PlaybackEndTracker } from "../playback-progress";
+import { readStoredValue, storeValue } from "../lib/browser-storage";
 
 interface SpotifySdkState {
   paused: boolean;
@@ -36,32 +39,18 @@ declare global {
   }
 }
 
-let spotifySdkPromise: Promise<NonNullable<Window["Spotify"]>> | null = null;
 let spotifyWebPlayerSingleton: SpotifySdkPlayer | null = null;
 let spotifyWebDeviceIdSingleton = "";
 let spotifyWebOwner: object | null = null;
 let spotifyWebPauseTimer: number | undefined;
+let spotifyWebTokenProvider: ((callback: (token: string) => void) => void) | null = null;
 
-function loadSpotifySdk() {
-  if (window.Spotify) return Promise.resolve(window.Spotify);
-  if (spotifySdkPromise) return spotifySdkPromise;
-  spotifySdkPromise = new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error("Spotify player took too long to load.")), 15_000);
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      window.clearTimeout(timeout);
-      if (window.Spotify) resolve(window.Spotify);
-      else reject(new Error("Spotify player did not initialize."));
-    };
-    if (!document.querySelector('script[src="https://sdk.scdn.co/spotify-player.js"]')) {
-      const script = document.createElement("script");
-      script.src = "https://sdk.scdn.co/spotify-player.js";
-      script.async = true;
-      script.onerror = () => reject(new Error("Could not load Spotify's web player."));
-      document.body.appendChild(script);
-    }
-  });
-  return spotifySdkPromise;
-}
+const loadSpotifySdk = createPlayerApiLoader({
+  src: "https://sdk.scdn.co/spotify-player.js",
+  label: "Spotify's web player",
+  readApi: () => window.Spotify,
+  readyCallback: "onSpotifyWebPlaybackSDKReady"
+});
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
@@ -71,12 +60,14 @@ if (import.meta.hot) {
     spotifyWebPlayerSingleton = null;
     spotifyWebDeviceIdSingleton = "";
     spotifyWebOwner = null;
+    spotifyWebTokenProvider = null;
   });
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
   const response = await fetch(path, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -151,8 +142,7 @@ export function SpotifyPlayer({
   const playerRef = useRef<SpotifySdkPlayer | null>(null);
   const deviceIdRef = useRef("");
   const commandRef = useRef("");
-  const endedTrackRef = useRef("");
-  const lastProgressRef = useRef(0);
+  const endTrackerRef = useRef(new PlaybackEndTracker());
   const hasBeenReadyRef = useRef(false);
   const suppressedReconnectRef = useRef("");
   const playbackRef = useRef(playback);
@@ -261,14 +251,14 @@ export function SpotifyPlayer({
       ).then(({ devices = [] }) => {
         if (!alive) return;
         const available = devices.filter((device) => device.id && !device.is_restricted);
-        const saved = preferredDeviceId ?? localStorage.getItem("soundspin-spotify-device-id");
+        const saved = preferredDeviceId ?? readStoredValue("soundspin-spotify-device-id");
         const selected = available.find((device) => device.id === saved) ||
           available.find((device) => device.is_active && device.type === "Computer") ||
           available.find((device) => device.is_active) ||
           available.find((device) => device.type === "Computer") ||
           available[0];
         if (!selected?.id) throw new Error("Open Spotify on your computer or another device, then try again.");
-        localStorage.setItem("soundspin-spotify-device-id", selected.id);
+        storeValue("soundspin-spotify-device-id", selected.id);
         deviceIdRef.current = selected.id;
         setDeviceId(selected.id);
       }).catch((cause) => {
@@ -282,6 +272,18 @@ export function SpotifyPlayer({
 
     const webOwner = {};
     spotifyWebOwner = webOwner;
+    // The SDK is reused across mounts, but its authorization must use the
+    // active component's session and callbacks after an app token refresh.
+    spotifyWebTokenProvider = (callback) => {
+      void api<{ accessToken: string }>("/api/spotify/token", accessToken)
+        .then(({ accessToken: spotifyToken }) => { if (alive) callback(spotifyToken); })
+        .catch((cause) => {
+          if (!alive) return;
+          const message = cause instanceof Error ? cause.message : "Spotify authorization expired.";
+          setError(message);
+          onConnectionLost(message);
+        });
+    };
     if (spotifyWebPauseTimer !== undefined) {
       window.clearTimeout(spotifyWebPauseTimer);
       spotifyWebPauseTimer = undefined;
@@ -296,15 +298,7 @@ export function SpotifyPlayer({
       const player = spotifyWebPlayerSingleton || new sdk.Player({
         name: "Lydman Web Player",
         volume: volume / 100,
-        getOAuthToken: (callback) => {
-          void api<{ accessToken: string }>("/api/spotify/token", accessToken)
-            .then(({ accessToken: spotifyToken }) => callback(spotifyToken))
-            .catch((cause) => {
-              const message = cause instanceof Error ? cause.message : "Spotify authorization expired.";
-              setError(message);
-              onConnectionLost(message);
-            });
-        }
+        getOAuthToken: (callback) => spotifyWebTokenProvider?.(callback)
       });
       spotifyWebPlayerSingleton = player;
       player.removeListener();
@@ -454,6 +448,7 @@ export function SpotifyPlayer({
       recoverWebPlayerRef.current = () => undefined;
       if (spotifyWebOwner === webOwner) {
         spotifyWebOwner = null;
+        spotifyWebTokenProvider = null;
         playerRef.current?.removeListener();
         spotifyWebPauseTimer = window.setTimeout(() => {
           spotifyWebPauseTimer = undefined;
@@ -539,19 +534,22 @@ export function SpotifyPlayer({
   useEffect(() => {
     if (!track || !mapping) return;
     let alive = true;
+    let polling = false;
     const update = async () => {
+      if (polling) return;
+      polling = true;
       try {
         if (mode === "web" && playerRef.current) {
           const state = await playerRef.current.getCurrentState();
           if (!alive || !state) return;
           const currentTime = state.position / 1000;
           const duration = state.duration / 1000;
-          onStatus({ ready: true, buffering: false, currentTime, duration });
-          if (isDj && state.paused && duration > 0 && lastProgressRef.current >= duration - 2 && endedTrackRef.current !== track.id) {
-            endedTrackRef.current = track.id;
+          const sameRecording = state.track_window.current_track.uri === spotifyUri;
+          onStatus({ ready: true, buffering: playback.playing && !sameRecording, currentTime: sameRecording ? currentTime : 0, duration: sameRecording ? duration : 0 });
+          if (endTrackerRef.current.observe(`${track.id}:${spotifyUri}`, sameRecording ? currentTime : 0,
+            duration, sameRecording && state.paused, playback.playing && isDj)) {
             onEnded();
           }
-          lastProgressRef.current = currentTime;
           return;
         }
         if (mode === "desktop") {
@@ -563,20 +561,22 @@ export function SpotifyPlayer({
           const state = payload.state;
           const currentTime = (state?.progress_ms || 0) / 1000;
           const duration = (state?.item?.duration_ms || track.durationMs || 0) / 1000;
+          const sameRecording = state?.item?.uri === spotifyUri;
           onStatus({
             ready: Boolean(deviceId),
-            buffering: Boolean(playback.playing && state?.item?.uri !== spotifyUri),
-            currentTime,
-            duration
+            buffering: Boolean(playback.playing && !sameRecording),
+            currentTime: sameRecording ? currentTime : 0,
+            duration: sameRecording ? duration : 0
           });
-          if (isDj && !state?.is_playing && duration > 0 && lastProgressRef.current >= duration - 2 && endedTrackRef.current !== track.id) {
-            endedTrackRef.current = track.id;
+          if (endTrackerRef.current.observe(`${track.id}:${spotifyUri}`, sameRecording ? currentTime : 0,
+            duration, sameRecording && !state?.is_playing, playback.playing && isDj)) {
             onEnded();
           }
-          lastProgressRef.current = currentTime;
         }
       } catch {
         // Command errors are surfaced above; transient polling errors are ignored.
+      } finally {
+        polling = false;
       }
     };
     void update();

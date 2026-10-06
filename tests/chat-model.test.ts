@@ -6,6 +6,8 @@ import {
   applyReactionEvents,
   groupReactions,
   reactionLabel,
+  mergeChatMessages,
+  shouldShowMessageHeader,
   type ChatMessage,
 } from '../src/chat/model.js'
 
@@ -75,4 +77,21 @@ test('live reaction events resolve names from trusted room profiles', () => {
   }], new Map([['other', 'Taylor']]))
 
   assert.deepEqual(result.reactions, [{ emoji: '😂', userId: 'other', userName: 'Taylor' }])
+})
+
+test('history and repeated broadcasts show one durable message per id', () => {
+  const persisted = { ...message, reactions: [{ userId: 'other', emoji: '❤️' }] }
+  assert.deepEqual(mergeChatMessages([persisted], [message, message]), [persisted])
+})
+
+test('timeline sorts actual instants across timezone offsets and timestamp formats', () => {
+  const later = { ...message, id: 'later', createdAt: '2026-07-19T12:00:01+02:00' }
+  const earlier = { ...message, id: 'earlier', createdAt: '2026-07-19T10:00:00Z' }
+  assert.deepEqual(mergeChatMessages([later], [earlier]).map((item) => item.id), ['earlier', 'later'])
+})
+
+test('same-author messages show a new header after midnight', () => {
+  const previous = { ...message, createdAt: '2026-07-19T23:59:00' }
+  const next = { ...message, id: 'next', createdAt: '2026-07-20T00:01:00' }
+  assert.equal(shouldShowMessageHeader(next, previous), true)
 })

@@ -8,6 +8,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
+import { validateServerConfig } from "./config.js";
+import { safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
 import { uniqueUsers } from "./presence.js";
 import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import { AppleMusicApi } from "./apple-music.js";
@@ -31,6 +33,8 @@ import {
 } from "./radio.js";
 import type { Room, RoomSnapshot, Track, User } from "./types.js";
 
+validateServerConfig(process.env);
+
 const port = Number(process.env.PORT || 3000);
 const app = express();
 const httpServer = createServer(app);
@@ -40,7 +44,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseJwksUrl = process.env.SUPABASE_JWKS_URL;
-const signupInvitePassword = "Vinterman2026";
+const signupInvitePassword = process.env.SIGNUP_INVITE_PASSWORD?.trim() || "";
 const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 const soundCloudApi = new SoundCloudApi(
   process.env.SOUNDCLOUD_CLIENT_ID,
@@ -66,6 +70,8 @@ const signupAdmin = supabaseAdmin && signupInvitePassword ? supabaseAdmin : null
 const roomUsers = new Map<string, Map<string, User>>();
 const roomDjUsers = new Map<string, Map<string, User>>();
 const socketRooms = new Map<string, string>();
+const activeSocketActions = new Set<Promise<void>>();
+let shuttingDown = false;
 const DJ_DISCONNECT_GRACE_MS = 60_000;
 const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const youtubeSearchCache = new Map<string, {
@@ -144,6 +150,7 @@ const trackSchema = z.object({
 });
 
 const playbackSchema = z.object({
+  trackId: z.string().uuid(),
   playing: z.boolean(),
   position: z.number().min(0).max(60 * 60 * 24)
 });
@@ -510,6 +517,7 @@ function hasPendingDjEviction(roomId: string, userId: string) {
 }
 
 function scheduleDjEviction(room: Room, user: User) {
+  if (shuttingDown) return;
   if (!room.djQueueUserIds.includes(user.id)) return;
   const key = djEvictionKey(room.id, user.id);
   if (djEvictions.has(key)) return;
@@ -576,7 +584,17 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("room:join", async (payload, reply) => {
+  const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => {
+    const safe = safeSocketHandler(handler);
+    const run = event === "room:join" ? serialSocketHandler(safe) : safe;
+    socket.on(event, (payload: unknown, reply?: unknown) => {
+      if (shuttingDown) return;
+      const operation = run(payload, reply);
+      activeSocketActions.add(operation);
+      void operation.finally(() => activeSocketActions.delete(operation));
+    });
+  };
+  onAction("room:join", async (payload, reply) => {
     const parsed = joinSchema.safeParse(payload);
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid room or profile." });
 
@@ -619,7 +637,8 @@ io.on("connection", (socket) => {
         });
       }
 
-      const room = await store.loadRoom(roomId) || createRoom(roomId, user.id, roomName);
+      const room = await store.loadRoom(roomId) ||
+        store.getOrCreateLocalRoom(roomId, () => createRoom(roomId, user.id, roomName));
       if (!room.ownerUserId) room.ownerUserId = user.id;
       if (!room.moderatorUserIds) room.moderatorUserIds = [];
       normalizeRadioState(room);
@@ -631,6 +650,7 @@ io.on("connection", (socket) => {
         delete room.vibe.votes[room.playback.track.addedBy.id];
       }
       await store.recordRoomMember(roomId, user.id);
+      if (!socket.connected) return;
 
       // Switch rooms only after the destination has been authorized and loaded.
       // A same-room join is an idempotent presence/profile refresh.
@@ -641,6 +661,7 @@ io.on("connection", (socket) => {
         if (joinedRoom !== socket.id && joinedRoom !== roomId) await socket.leave(joinedRoom);
       }
 
+      if (!socket.connected) return;
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
       cancelDjEviction(roomId, user.id);
@@ -652,13 +673,18 @@ io.on("connection", (socket) => {
       );
       if (room.djQueueUserIds.includes(user.id)) rememberDjUser(roomId, user);
       if (room.djUserId && !room.djQueueUserIds.includes(room.djUserId)) advanceRadio(room);
-      await store.saveRoom(room);
       socketRooms.set(socket.id, roomId);
       await socket.join(roomId);
+      await store.saveRoom(room);
+      if (!socket.connected) return;
       broadcast(room);
       reply?.({ ok: true });
     } catch (error) {
       console.error(error);
+      if (socketRooms.get(socket.id) === roomId) {
+        await leaveCurrentRoom(socket.id);
+        await socket.leave(roomId);
+      }
       const message = error instanceof Error ? error.message : "Could not load this room.";
       reply?.({
         ok: false,
@@ -669,7 +695,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("room:moderator:set", async (payload, reply) => {
+  onAction("room:moderator:set", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = moderatorSchema.safeParse(payload);
     if (!membership || !parsed.success) {
@@ -697,7 +723,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("room:dj-role:set", async (payload, reply) => {
+  onAction("room:dj-role:set", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = djRoleSchema.safeParse(payload);
     if (!membership || !parsed.success) {
@@ -725,7 +751,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("dj:join", async (_payload, reply) => {
+  onAction("dj:join", async (_payload, reply) => {
     const membership = getMembership(socket.id);
     if (!membership) return reply?.({ ok: false, error: "Join a room first." });
     if (!canJoinDjQueue(membership.room, membership.user.id)) {
@@ -749,7 +775,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("dj:leave", async (_payload, reply) => {
+  onAction("dj:leave", async (_payload, reply) => {
     const membership = getMembership(socket.id);
     if (!membership) return reply?.({ ok: false, error: "Join a room first." });
     const wasCurrentDj = membership.room.djUserId === membership.user.id;
@@ -762,14 +788,21 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("queue:add", async (payload, reply) => {
-    const membership = getMembership(socket.id);
+  onAction("queue:add", async (payload, reply) => {
+    let membership = getMembership(socket.id);
     const parsed = trackSchema.safeParse(payload);
     if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid track." });
     if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
       return reply?.({ ok: false, error: "Join the DJ queue before adding tracks." });
     }
+    const originalMembership = membership;
     const resolved = await resolveTrackMappings(parsed.data, spotifyApi, appleMusicApi);
+    membership = getMembership(socket.id);
+    if (!socket.connected || !membership || membership.room !== originalMembership.room ||
+        membership.user.id !== originalMembership.user.id ||
+        !membership.room.djQueueUserIds.includes(membership.user.id)) {
+      return reply?.({ ok: false, error: "Your room or DJ membership changed. Try again from your current room." });
+    }
     if (
       (membership.room.playback.track?.provider === parsed.data.provider &&
       membership.room.playback.track.providerId === parsed.data.providerId) ||
@@ -808,7 +841,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("queue:remove", async (payload, reply) => {
+  onAction("queue:remove", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueTrackSchema.safeParse(payload);
     if (!membership || !parsed.success) {
@@ -823,7 +856,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("queue:play-next", async (payload, reply) => {
+  onAction("queue:play-next", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueTrackSchema.safeParse(payload);
     if (!membership) return reply?.({ ok: false, error: "Join a room first." });
@@ -838,7 +871,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("queue:move", async (payload, reply) => {
+  onAction("queue:move", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueMoveSchema.safeParse(payload);
     if (!membership) return reply?.({ ok: false, error: "Join a room first." });
@@ -854,7 +887,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("queue:next", async (payload, reply) => {
+  onAction("queue:next", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueNextSchema.safeParse(payload);
     if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
@@ -871,18 +904,19 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("playback:update", async (payload, reply) => {
+  onAction("playback:update", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = playbackSchema.safeParse(payload);
     if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
       return reply?.({ ok: false, error: "Only the current DJ or a room moderator controls playback." });
     }
-    if (!parsed.success || !membership.room.playback.track) {
+    if (!parsed.success || !membership.room.playback.track || membership.room.playback.track.id !== parsed.data.trackId) {
       return reply?.({ ok: false, error: "Invalid playback update." });
     }
     membership.room.playback = {
       ...membership.room.playback,
-      ...parsed.data,
+      playing: parsed.data.playing,
+      position: parsed.data.position,
       updatedAt: Date.now()
     };
     await store.saveRoom(membership.room);
@@ -890,7 +924,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("vibe:vote", async (payload, reply) => {
+  onAction("vibe:vote", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = vibeVoteSchema.safeParse(payload);
     const track = membership?.room.playback.track;
@@ -913,7 +947,7 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
-  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id); });
+  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(console.error); });
 });
 
 app.get("/api/health", (_request, response) => {
@@ -1658,6 +1692,20 @@ app.get("/api/config", (_request, response) => {
   });
 });
 
+app.use("/api", (_request, response) => {
+  response.status(404).json({ error: "That API endpoint does not exist." });
+});
+
+app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
+  if (response.headersSent) return next(error);
+  const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 500;
+  if (status === 400 || status === 413) {
+    return response.status(status).json({ error: status === 413 ? "The request is too large." : "The request body is invalid." });
+  }
+  console.error(error);
+  response.status(500).json({ error: "The server could not complete this request. Please try again." });
+});
+
 if (process.env.NODE_ENV === "production") {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.resolve(dirname, "../dist");
@@ -1666,6 +1714,27 @@ if (process.env.NODE_ENV === "production") {
 }
 
 await store.init();
-httpServer.listen(port, "0.0.0.0", () => {
-  console.log(`Lydman listening on http://0.0.0.0:${port}`);
+httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
+  const address = httpServer.address();
+  console.log(`Lydman listening on http://${process.env.HOST || "0.0.0.0"}:${typeof address === "object" && address ? address.port : port}`);
 });
+
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  djEvictions.clear();
+  const deadline = setTimeout(() => process.exit(1), 10_000);
+  deadline.unref();
+  try {
+    await new Promise<void>((resolve) => io.close(() => resolve()));
+    await Promise.allSettled([...activeSocketActions]);
+    await store.flush();
+    clearTimeout(deadline);
+  } catch (error) {
+    console.error("Could not finish pending saves during shutdown.", error);
+    process.exitCode = 1;
+  }
+}
+
+process.once("SIGTERM", () => { void shutdown(); });
+process.once("SIGINT", () => { void shutdown(); });

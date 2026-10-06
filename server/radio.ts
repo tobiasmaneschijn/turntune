@@ -1,4 +1,4 @@
-import type { Room, SnapshotRoom, Track } from "./types.js";
+import type { Room, SnapshotRoom, Track, User } from "./types.js";
 
 export class GracePeriodRegistry {
   private timers = new Map<string, NodeJS.Timeout>();
@@ -28,6 +28,11 @@ export class GracePeriodRegistry {
   has(key: string) {
     return this.timers.has(key);
   }
+
+  clear() {
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+  }
 }
 
 /**
@@ -37,18 +42,44 @@ export class GracePeriodRegistry {
  * de-duplication here instead of spreading defensive checks across handlers.
  */
 export function normalizeRadioState(room: Room) {
-  room.settings ||= {};
+  const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const ids = (value: unknown): string[] => Array.isArray(value)
+    ? [...new Set(value.filter((id): id is string => typeof id === "string" && id.length > 0))]
+    : [];
+  const tracks = (value: unknown): Track[] => Array.isArray(value) ? value.filter(isUsableTrack) : [];
+  if (!object(room.settings)) room.settings = {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
-  room.djRoleUserIds = [...new Set(room.djRoleUserIds || [])];
-  room.djQueueUserIds = [...new Set(room.djQueueUserIds || [])];
-  room.djQueues ||= {};
+  room.moderatorUserIds = ids(room.moderatorUserIds);
+  room.djRoleUserIds = ids(room.djRoleUserIds);
+  room.djQueueUserIds = ids(room.djQueueUserIds);
+  const queues: Record<string, Track[]> = Object.create(null);
+  if (object(room.djQueues)) {
+    for (const [id, value] of Object.entries(room.djQueues)) {
+      queues[id] = tracks(value);
+    }
+  }
+  room.djQueues = queues;
+  room.history = tracks(room.history).slice(0, 100);
+  const playback: Record<string, unknown> = object(room.playback) ? room.playback : {};
+  const playingTrack = isUsableTrack(playback.track) ? playback.track : null;
+  room.playback = {
+    track: playingTrack,
+    playing: Boolean(playingTrack && playback.playing === true),
+    position: playingTrack && typeof playback.position === "number" && Number.isFinite(playback.position)
+      ? Math.max(0, playback.position) : 0,
+    updatedAt: typeof playback.updatedAt === "number" && Number.isFinite(playback.updatedAt)
+      ? playback.updatedAt : Date.now()
+  };
+  room.createdAt = typeof room.createdAt === "number" && Number.isFinite(room.createdAt) ? room.createdAt : Date.now();
+  room.isPublic = typeof room.isPublic === "boolean" ? room.isPublic : true;
+  room.passwordProtected = room.passwordProtected === true;
 
   // Move rooms created before the round-robin flow into private per-user queues.
-  if (room.queue?.length) {
-    for (const track of room.queue) {
+  if (Array.isArray(room.queue)) {
+    for (const track of tracks(room.queue)) {
       const userId = track.addedBy.id;
-      room.djQueues[userId] ||= [];
-      room.djQueues[userId].push(track);
+      const queue = privateQueue(room, userId);
+      if (!queue.some((queuedTrack) => queuedTrack.id === track.id)) queue.push(track);
       if (!room.djQueueUserIds.includes(userId)) room.djQueueUserIds.push(userId);
     }
   }
@@ -60,6 +91,27 @@ export function normalizeRadioState(room: Room) {
   } else {
     room.djUserId = null;
   }
+  if (room.playback.track) {
+    const votes = Object.create(null) as Record<string, -1 | 1>;
+    if (object(room.vibe) && room.vibe.trackId === room.playback.track.id && object(room.vibe.votes)) {
+      for (const [id, value] of Object.entries(room.vibe.votes)) {
+        if (id !== room.djUserId && (value === -1 || value === 1)) votes[id] = value;
+      }
+    }
+    room.vibe = { trackId: room.playback.track.id, votes };
+  } else {
+    room.vibe = null;
+  }
+}
+
+function isUsableTrack(value: unknown): value is Track {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const track = value as Partial<Track>;
+  const user = track.addedBy as Partial<User> | undefined;
+  return typeof track.id === "string" && track.id.length > 0 &&
+    typeof track.title === "string" && typeof track.providerId === "string" &&
+    ["youtube", "soundcloud", "spotify", "apple"].includes(track.provider || "") &&
+    Boolean(user && typeof user.id === "string" && user.id.length > 0);
 }
 
 export function canJoinDjQueue(room: Room, userId: string) {
@@ -110,7 +162,9 @@ export function advanceRadio(room: Room) {
 }
 
 export function privateQueue(room: Room, userId: string): Track[] {
-  room.djQueues[userId] ||= [];
+  if (!Object.hasOwn(room.djQueues, userId) || !Array.isArray(room.djQueues[userId])) {
+    Object.defineProperty(room.djQueues, userId, { value: [], writable: true, enumerable: true, configurable: true });
+  }
   return room.djQueues[userId];
 }
 
@@ -121,5 +175,6 @@ export function privateQueue(room: Room, userId: string): Track[] {
  */
 export function roomForListener(room: Room, userId: string): SnapshotRoom {
   const { djQueues: _privateQueues, queue: _legacyQueue, ...sharedRoom } = room;
-  return { ...sharedRoom, queue: [...privateQueue(room, userId)] };
+  const queue = Object.hasOwn(room.djQueues, userId) ? room.djQueues[userId] : [];
+  return { ...sharedRoom, queue: [...queue] };
 }

@@ -73,6 +73,7 @@ interface RealtimeChatProps {
   roomUsers?: User[]
   isVisible?: boolean
   onUnreadCountChange?: (count: number) => void
+  onConnected?: () => void
 }
 
 export interface RealtimeChatHandle {
@@ -100,6 +101,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   roomUsers = [],
   isVisible = true,
   onUnreadCountChange,
+  onConnected,
   messages: initialMessages = [],
 }, ref) {
   const {
@@ -122,6 +124,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     client,
     roomName,
     user,
+    onConnected,
   })
   const [newMessage, setNewMessage] = useState('')
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
@@ -133,6 +136,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [gifsLoading, setGifsLoading] = useState(false)
   const [composerError, setComposerError] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [sending, setSending] = useState(false)
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
   const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>([])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -149,7 +153,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const typingIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const giphyCacheRef = useRef(new Map<string, GiphyGif[]>())
   const giphyRequestRef = useRef(0)
+  const giphyAbortRef = useRef<AbortController | null>(null)
   const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sendingRef = useRef(false)
+  const uploadingRef = useRef(false)
+  const latestDraftRef = useRef(newMessage)
+  latestDraftRef.current = newMessage
+  const lifetimeRef = useRef({ active: true })
   const [giphyConfigured, setGiphyConfigured] = useState(false)
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
   const reactionNamesByUserId = useMemo(
@@ -168,6 +178,12 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       option.user.name.toLocaleLowerCase().includes(query)
     ).slice(0, 8)
   }, [mentionQuery, roomMentionOptions])
+
+  useEffect(() => {
+    const lifetime = { active: true }
+    lifetimeRef.current = lifetime
+    return () => { lifetime.active = false }
+  }, [roomName, user.id])
 
   useEffect(() => {
     void fetch('/api/config')
@@ -307,21 +323,41 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const handleSendMessage = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
-      if (!newMessage.trim() || !isConnected) return
-
-      const content = newMessage.trim()
-      const sentMessage = await sendMessage(
-        content,
-        undefined,
-        replyingTo || undefined,
-        activeMentions(content, selectedMentions)
-      )
-      if (sentMessage) await onSend?.(sentMessage)
-      setNewMessage('')
-      setSelectedMentions([])
-      setMentionQuery(null)
-      setReplyingTo(null)
-      stopTyping()
+      if (!newMessage.trim() || !isConnected || sendingRef.current || uploadingRef.current) return
+      const lifetime = lifetimeRef.current
+      const draft = newMessage
+      const content = draft.trim()
+      sendingRef.current = true
+      setSending(true)
+      setComposerError('')
+      try {
+        const sentMessage = await sendMessage(
+          content,
+          undefined,
+          replyingTo || undefined,
+          activeMentions(content, selectedMentions)
+        )
+        if (lifetime.active) {
+          // Keep text typed while delivery was pending.
+          if (latestDraftRef.current === draft) {
+            setNewMessage('')
+            setSelectedMentions([])
+            setMentionQuery(null)
+            stopTyping()
+          }
+          setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
+        }
+        try {
+          await onSend?.(sentMessage)
+        } catch {
+          if (lifetime.active) setComposerError('Message delivered live, but it could not be saved to history.')
+        }
+      } catch (error) {
+        if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this message. Please try again.')
+      } finally {
+        sendingRef.current = false
+        if (lifetime.active) setSending(false)
+      }
     },
     [newMessage, isConnected, sendMessage, onSend, replyingTo, selectedMentions, stopTyping]
   )
@@ -350,14 +386,31 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       content: string,
       storagePath?: string
     ) => {
-      if (!isConnected) return
-      const sentMessage = await sendMessage(
-        content,
-        { type, mediaUrl, storagePath },
-        replyingTo || undefined
-      )
-      if (sentMessage) await onSend?.(sentMessage)
-      setReplyingTo(null)
+      if (!isConnected || sendingRef.current || (uploadingRef.current && !storagePath)) return false
+      const lifetime = lifetimeRef.current
+      sendingRef.current = true
+      setSending(true)
+      setComposerError('')
+      try {
+        const sentMessage = await sendMessage(
+          content.slice(0, 500) || 'Shared image',
+          { type, mediaUrl, storagePath },
+          replyingTo || undefined
+        )
+        if (lifetime.active) setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
+        try {
+          await onSend?.(sentMessage)
+        } catch {
+          if (lifetime.active) setComposerError('Image delivered live, but it could not be saved to history.')
+        }
+        return true
+      } catch (error) {
+        if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this image. Please try again.')
+        return false
+      } finally {
+        sendingRef.current = false
+        if (lifetime.active) setSending(false)
+      }
     },
     [isConnected, onSend, replyingTo, sendMessage]
   )
@@ -391,6 +444,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       (reaction) => reaction.userId === user.id && reaction.emoji === emoji
     )
     const action = hasReacted ? 'remove' : 'add'
+    const lifetime = lifetimeRef.current
 
     try {
       await persistReactionChange(client, {
@@ -399,6 +453,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         userId: user.id,
         emoji,
       })
+      if (!lifetime.active) return
       setComposerError('')
       await broadcastReaction({
         messageId: message.id,
@@ -407,17 +462,20 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         action,
       })
     } catch {
-      setComposerError('Could not update that reaction. Please try again.')
+      if (lifetime.active) setComposerError('Could not confirm that reaction update. Please try again.')
     } finally {
       pendingReactionsRef.current.delete(key)
     }
   }, [broadcastReaction, client, isConnected, user.id])
 
   const uploadImage = async (file: File) => {
+    if (!isConnected || uploadingRef.current || sendingRef.current) return
     setComposerError('')
     const validationError = validateChatImage(file)
     if (validationError) return setComposerError(validationError)
 
+    const lifetime = lifetimeRef.current
+    uploadingRef.current = true
     setUploading(true)
     const storagePath = createChatStoragePath(user.id, roomName, file)
     try {
@@ -426,16 +484,24 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         cacheControl: '3600',
         upsert: false,
       })
-      if (error) return setComposerError(error.message)
+      if (error) throw error
+      if (!lifetime.active) {
+        await client.storage.from('chat-media').remove([storagePath])
+        return
+      }
 
       const { data } = client.storage.from('chat-media').getPublicUrl(storagePath)
       await sendMediaMessage('image', data.publicUrl, file.name, storagePath)
+    } catch (error) {
+      if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not upload this image. Please try again.')
     } finally {
-      setUploading(false)
+      uploadingRef.current = false
+      if (lifetime.active) setUploading(false)
     }
   }
 
   const pasteMedia = async (event: React.ClipboardEvent<HTMLInputElement>) => {
+    if (!isConnected || uploadingRef.current || sendingRef.current) return
     const pastedMedia = readPastedChatMedia(event.clipboardData)
     if (!pastedMedia) return
 
@@ -453,6 +519,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
   const loadGifs = useCallback(async (query = '') => {
     if (!giphyConfigured) return
+    const requestId = ++giphyRequestRef.current
+    const lifetime = lifetimeRef.current
+    giphyAbortRef.current?.abort()
+    const controller = new AbortController()
+    giphyAbortRef.current = controller
     const normalizedQuery = query.trim()
     const cacheKey = normalizedQuery.toLocaleLowerCase()
     const cached = giphyCacheRef.current.get(cacheKey)
@@ -462,29 +533,36 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       return
     }
 
-    const requestId = ++giphyRequestRef.current
     setComposerError('')
     setGifsLoading(true)
 
     try {
       const { data } = await client.auth.getSession()
-      const results = await fetchGiphyGifs(normalizedQuery, data.session?.access_token)
-      if (requestId !== giphyRequestRef.current) return
+      if (!lifetime.active || requestId !== giphyRequestRef.current) return
+      const results = await fetchGiphyGifs(normalizedQuery, data.session?.access_token, controller.signal)
+      if (!lifetime.active || requestId !== giphyRequestRef.current) return
       giphyCacheRef.current.set(cacheKey, results)
       setGifs(results)
     } catch (error) {
-      if (requestId !== giphyRequestRef.current) return
+      if (!lifetime.active || requestId !== giphyRequestRef.current) return
       setComposerError(error instanceof Error ? error.message : 'Could not load GIFs.')
       setGifs([])
     } finally {
-      if (requestId === giphyRequestRef.current) setGifsLoading(false)
+      if (lifetime.active && requestId === giphyRequestRef.current) setGifsLoading(false)
     }
   }, [client, giphyConfigured])
 
   useEffect(() => {
+    // Invalidate immediately, including cached results, the debounce window,
+    // and closing the picker while a request is still in flight.
+    giphyRequestRef.current += 1
+    giphyAbortRef.current?.abort()
     if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
     giphyDebounceRef.current = null
-    if (!showGiphy || !giphyConfigured) return
+    if (!showGiphy || !giphyConfigured) {
+      setGifsLoading(false)
+      return
+    }
 
     const normalizedQuery = giphyQuery.trim()
     if (normalizedQuery.length === 1) {
@@ -495,14 +573,17 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     }
     if (!normalizedQuery) {
       void loadGifs()
-      return
+    } else {
+      setGifs([])
+      setGifsLoading(true)
+      giphyDebounceRef.current = setTimeout(
+        () => void loadGifs(normalizedQuery),
+        GIPHY_SEARCH_DEBOUNCE_MS
+      )
     }
-
-    giphyDebounceRef.current = setTimeout(
-      () => void loadGifs(normalizedQuery),
-      GIPHY_SEARCH_DEBOUNCE_MS
-    )
     return () => {
+      giphyRequestRef.current += 1
+      giphyAbortRef.current?.abort()
       if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
       giphyDebounceRef.current = null
     }
@@ -638,7 +719,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                     saveEmojiSkinTone(selectedSkinTone)
                   }}
                   onEmojiClick={(emoji) => {
-                    setNewMessage((current) => `${current}${emoji.emoji}`)
+                    setNewMessage((current) => current.length + emoji.emoji.length <= 500 ? current + emoji.emoji : current)
                     noteTyping()
                   }}
                 />
@@ -685,8 +766,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                           key={gif.id}
                           className="chat-gif-tile"
                           onClick={() => {
-                            void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF')
-                            setShowGiphy(false)
+                            void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF').then((sent) => {
+                              if (sent && lifetimeRef.current.active) setShowGiphy(false)
+                            })
                           }}
                         >
                           <img src={gif.preview} alt={gif.title} loading="lazy" />
@@ -708,7 +790,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           <span>{typingLabel}</span>
         </div>
       )}
-      {composerError && <p className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
+      {composerError && <p role="alert" className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
       <form
         onSubmit={handleSendMessage}
         className={cn('chat-composer', { 'chat-composer-replying': Boolean(replyingTo) })}
@@ -773,7 +855,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="button"
             variant="ghost"
             size="icon"
-            disabled={!isConnected || uploading}
+            disabled={!isConnected || uploading || sending}
             aria-label="Upload image"
             title="Upload image"
             onClick={() => fileInputRef.current?.click()}
@@ -832,7 +914,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="button"
             variant="ghost"
             size="icon"
-            disabled={!isConnected || !giphyConfigured}
+            disabled={!isConnected || !giphyConfigured || uploading || sending}
             aria-label={giphyConfigured ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
             title={giphyConfigured ? 'Add GIF' : 'Set GIPHY_API_KEY to enable GIFs'}
             onClick={toggleGiphy}
@@ -854,7 +936,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             className="chat-send-button"
             type="submit"
             size="icon"
-            disabled={!isConnected || !newMessage.trim()}
+            disabled={!isConnected || uploading || sending || !newMessage.trim()}
             aria-label="Send message"
             title="Send message"
           >
