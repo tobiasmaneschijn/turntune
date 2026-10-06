@@ -1,5 +1,6 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { toast } from "sonner";
 import {
   Check,
   ChevronDown,
@@ -18,15 +19,15 @@ import {
   Shield,
   Trash2,
   ThumbsDown,
-  Volume2
+  Volume2,
+  X
 } from "lucide-react";
 import { Avatar } from "./components/Avatar";
-import { ProfilePage } from "./components/ProfilePage";
+import { LandingPage } from "./components/LandingPage";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
-import { RoomSettingsDialog } from "./components/RoomSettingsDialog";
-import { UserSettingsDialog } from "./components/UserSettingsDialog";
-import { FeedbackButton } from "./components/FeedbackDialog";
-import { AdminDashboard } from "./components/AdminDashboard";
+import { PanelErrorBoundary } from "./components/AppErrorBoundary";
+import { Brand } from "./components/app-primitives";
 import {
   CopyIcon,
   MessageIcon,
@@ -49,9 +50,13 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./components/ui/input-group";
 import { Label } from "./components/ui/label";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./components/ui/empty";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useGroupRef } from "./components/ui/resizable";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Slider } from "./components/ui/slider";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import type { ChatMessage } from "./chat/model";
 import { loadChatHistory, saveChatMessage } from "./chat/persistence";
 import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
@@ -62,6 +67,12 @@ import { requestSocketAction } from "./socket-request";
 import { readStoredValue, storeValue } from "./lib/browser-storage";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
 import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
+
+const AdminDashboard = lazy(() => import("./components/AdminDashboard").then((module) => ({ default: module.AdminDashboard })));
+const FeedbackButton = lazy(() => import("./components/FeedbackDialog").then((module) => ({ default: module.FeedbackButton })));
+const ProfilePage = lazy(() => import("./components/ProfilePage").then((module) => ({ default: module.ProfilePage })));
+const RoomSettingsDialog = lazy(() => import("./components/RoomSettingsDialog").then((module) => ({ default: module.RoomSettingsDialog })));
+const UserSettingsDialog = lazy(() => import("./components/UserSettingsDialog").then((module) => ({ default: module.UserSettingsDialog })));
 
 type SearchProvider = Provider;
 
@@ -229,6 +240,12 @@ export function App() {
   }, [userSettings.appearance.artworkBlur, userSettings.appearance.reducedMotion]);
 
   useEffect(() => {
+    const syncTheme = () => setUserSettings(readUserSettings());
+    window.addEventListener("soundspin:theme-change", syncTheme);
+    return () => window.removeEventListener("soundspin:theme-change", syncTheme);
+  }, []);
+
+  useEffect(() => {
     if (previousCompactPlayerRef.current === compactPlayer) return;
     previousCompactPlayerRef.current = compactPlayer;
     roomPanelGroupRef.current?.setLayout(readRoomPanelLayout(compactPlayer));
@@ -276,7 +293,7 @@ export function App() {
     }
 
     let active = true;
-    setProfileReady(false);
+    if (profile.id !== session.user.id) setProfileReady(false);
     void fetch(`/api/profiles/${session.user.id}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
       signal: AbortSignal.timeout(10_000)
@@ -304,7 +321,9 @@ export function App() {
         if (active) setProfileReady(true);
       });
     return () => { active = false; };
-  }, [auth.enabled, auth.client, auth.session?.user.id, auth.session?.access_token]);
+    // A refreshed access token does not change the profile. Refetching here
+    // would briefly unmount the room (and its player) whenever a tab wakes.
+  }, [auth.enabled, auth.client, auth.session?.user.id]);
 
   useEffect(() => {
     if (auth.enabled && !auth.session) {
@@ -314,7 +333,20 @@ export function App() {
   }, [auth.enabled, auth.session]);
 
   useEffect(() => {
+    if (!auth.enabled || !auth.session) return;
+    if (!auth.recovery && ["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) {
+      history.replaceState({}, "", "/");
+    }
+    // PublicEntry manages its own navigation while signed out. Restore the
+    // authenticated route from the current address when that entry unmounts.
+    setRoomId(getRoomId());
+    setProfilePageId(getProfilePageId());
+    setAdminPage(getAdminPage());
+  }, [auth.enabled, auth.session?.user.id, auth.recovery]);
+
+  useEffect(() => {
     if (!notice) return;
+    toast(notice, { id: "lydman-notice" });
     const timer = window.setTimeout(() => setNotice(""), 2600);
     return () => window.clearTimeout(timer);
   }, [notice]);
@@ -340,7 +372,9 @@ export function App() {
 
   const retryRoom = useRoomConnection({
     roomId, password: roomPassword, profile,
-    ready: !auth.loading && !auth.error && (!auth.enabled || Boolean(auth.session && profileReady)),
+    ready: !auth.loading && !auth.error && Boolean(
+      auth.client && auth.session && profile.id === auth.session.user.id && profileReady
+    ),
     accessToken: auth.session?.access_token,
     onConnected: setConnected, onSnapshot: setSnapshot,
     onPasswordRequired: setRoomPasswordRequired, onJoinError: setRoomJoinError, onNotice: setNotice
@@ -387,7 +421,7 @@ export function App() {
     return (
       <main className="room-access-screen">
         <Card className="room-access-error">
-          <CardHeader><Logo /><CardTitle>Could not connect</CardTitle>
+          <CardHeader><Brand /><CardTitle>Could not connect</CardTitle>
             <CardDescription>{auth.error}</CardDescription></CardHeader>
           <CardContent><Button onClick={retryAuth}>Try again</Button></CardContent>
         </Card>
@@ -400,7 +434,7 @@ export function App() {
   }
 
   if (auth.enabled && !auth.session) {
-    return <AuthScreen client={auth.client!} />;
+    return <PublicEntry client={auth.client!} />;
   }
 
   if (auth.enabled && auth.session && auth.recovery) {
@@ -434,18 +468,20 @@ export function App() {
 
   if (adminPage && auth.session && profile.isAppAdmin) {
     return (
-      <AdminDashboard
-        accessToken={auth.session.access_token}
-        currentUser={profile}
-        onBack={() => {
-          history.pushState({}, "", "/");
-          setAdminPage(false);
-        }}
-        onOpenRoom={(slug) => {
-          setAdminPage(false);
-          openRoom(slug);
-        }}
-      />
+      <Suspense fallback={<LoadingScreen label="Loading admin console…" />}>
+        <AdminDashboard
+          accessToken={auth.session.access_token}
+          currentUser={profile}
+          onBack={() => {
+            history.pushState({}, "", "/");
+            setAdminPage(false);
+          }}
+          onOpenRoom={(slug) => {
+            setAdminPage(false);
+            openRoom(slug);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -454,8 +490,8 @@ export function App() {
       <main className="room-access-screen">
         <Card className="room-access-error">
           <CardHeader>
-            <Logo />
-            <CardTitle>Admin access required</CardTitle>
+            <Brand />
+            <CardTitle role="heading" aria-level={1}>Admin access required</CardTitle>
             <CardDescription>This dashboard is only available to Lydman administrators.</CardDescription>
           </CardHeader>
           <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
@@ -466,32 +502,34 @@ export function App() {
 
   if (profilePageId && auth.session) {
     return (
-      <ProfilePage
-        key={profilePageId}
-        profileId={profilePageId}
-        accessToken={auth.session.access_token}
-        currentUser={profile}
-        onBack={() => {
-          if (history.state?.from) history.back();
-          else {
-            history.pushState({}, "", "/");
-            setProfilePageId(null);
-          }
-        }}
-        onOwnProfileUpdated={(updated) => {
-          const nextProfile = {
-            id: updated.user_id,
-            name: updated.display_name,
-            avatarSeed: updated.user_id,
-            avatarKey: updated.avatar_key,
-            avatarUrl: updated.avatar_url || undefined,
-            isAppAdmin: updated.is_app_admin
-          };
-          storeValue("soundspin-profile", JSON.stringify(nextProfile));
-          setProfile(nextProfile);
-        }}
-        onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
-      />
+      <Suspense fallback={<LoadingScreen label="Loading profile…" />}>
+        <ProfilePage
+          key={profilePageId}
+          profileId={profilePageId}
+          accessToken={auth.session.access_token}
+          currentUser={profile}
+          onBack={() => {
+            if (history.state?.from) history.back();
+            else {
+              history.pushState({}, "", "/");
+              setProfilePageId(null);
+            }
+          }}
+          onOwnProfileUpdated={(updated) => {
+            const nextProfile = {
+              id: updated.user_id,
+              name: updated.display_name,
+              avatarSeed: updated.user_id,
+              avatarKey: updated.avatar_key,
+              avatarUrl: updated.avatar_url || undefined,
+              isAppAdmin: updated.is_app_admin
+            };
+            storeValue("soundspin-profile", JSON.stringify(nextProfile));
+            setProfile(nextProfile);
+          }}
+          onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
+        />
+      </Suspense>
     );
   }
 
@@ -503,7 +541,7 @@ export function App() {
         onOpenRoom={openRoom}
         onOpenProfile={() => openProfile(profile.id)}
         onSignOut={() => void auth.client?.auth.signOut()}
-        feedbackButton={<FeedbackButton userId={profile.id} diagnosticContext={{ surface: "room-directory" }} />}
+        feedbackButton={<Suspense fallback={null}><FeedbackButton userId={profile.id} diagnosticContext={{ surface: "room-directory" }} /></Suspense>}
         adminButton={profile.isAppAdmin ? <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button> : null}
       />
     );
@@ -535,7 +573,7 @@ export function App() {
       <main className="room-access-screen">
         <Card className="room-access-error">
           <CardHeader>
-            <Logo />
+            <Brand />
             <CardTitle>Couldn’t join this room</CardTitle>
             <CardDescription>{roomJoinError}</CardDescription>
           </CardHeader>
@@ -559,7 +597,7 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms"><Logo /></Button>
+        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms" aria-label="Back to rooms"><Brand /></Button>
         <div className="room-heading">
           <div>
             <strong>{snapshot.room.name}</strong>
@@ -570,7 +608,7 @@ export function App() {
           <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
           <div className="header-tool-group">
           {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-          {auth.session && <FeedbackButton
+          <Suspense fallback={null}><FeedbackButton
             userId={profile.id}
             roomSlug={snapshot.room.id}
             diagnosticContext={{
@@ -589,16 +627,18 @@ export function App() {
                 : "idle",
               preferredPlayback: userSettings.playback.preference
             }}
-          />}
-          <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings"><Settings /></Button>
-          {auth.session && (snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
-            <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings"><Shield /></Button>
+          /></Suspense>
+          <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings" aria-label="Settings"><Settings /></Button>
+          {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
+            <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings" aria-label="Room settings"><Shield /></Button>
           )}
           </div>
+          <ThemeToggle compact />
           <Button
             variant="outline"
             size="sm"
             className="invite-button"
+            aria-label="Copy room invite link"
             onClick={() => {
               void navigator.clipboard.writeText(location.href)
                 .then(() => setNotice("Invite link copied"))
@@ -608,9 +648,9 @@ export function App() {
             <CopyIcon size={17} />
             <span>Invite</span>
           </Button>
-          {auth.session && <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile">
+          <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile" aria-label="Open your profile">
             <Avatar user={profile} size={30} />
-          </Button>}
+          </Button>
           {auth.enabled && (
             <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={() => void auth.client?.auth.signOut()}>
               <LogOut />
@@ -618,8 +658,6 @@ export function App() {
           )}
         </div>
       </header>
-
-      {notice && <div className="toast">{notice}</div>}
 
       <section className={`room-layout ${compactPlayer ? "compact-player-layout" : ""}`}>
         <ResizablePanelGroup
@@ -645,7 +683,7 @@ export function App() {
           <ResizableHandle className="room-resize-handle" withHandle />
           <ResizablePanel className="room-panel room-panel-player" id="player" minSize="340px" data-active={mobileRoomPane === "player"}>
             <div className="player-column">
-              <NowPlaying
+              <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Player"><NowPlaying
                 key={`${snapshot.room.id}:${profile.id}`}
                 snapshot={snapshot}
                 isDj={isDj}
@@ -661,28 +699,44 @@ export function App() {
                 onCloseSettings={() => setUserSettingsOpen(false)}
                 userSettings={userSettings}
                 onUserSettingsChange={changeUserSettings}
-              />
+              /></PanelErrorBoundary>
             </div>
           </ResizablePanel>
           <ResizableHandle className="room-resize-handle" withHandle />
           <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="380px" data-active={mobileRoomPane === "chat"}>
-            {auth.client ? <RoomChat
+            <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Chat"><RoomChat
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUser={profile}
-              client={auth.client}
+              client={auth.client!}
               onOpenProfile={openProfile}
               notifications={userSettings.notifications}
               isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat"}
               onActivate={() => setMobileRoomPane("chat")}
               onUnreadCountChange={setChatUnreadCount}
-            /> : <aside className="chat panel"><Empty><EmptyHeader><EmptyMedia variant="icon"><MessageIcon /></EmptyMedia><EmptyTitle>Chat is unavailable in local mode</EmptyTitle><EmptyDescription>Rooms with accounts include shared chat and message history.</EmptyDescription></EmptyHeader></Empty></aside>}
+            /></PanelErrorBoundary>
           </ResizablePanel>
         </ResizablePanelGroup>
-        <nav className="room-mobile-tabs" aria-label="Room panels">
-          <button className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
-          <button className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
+        <nav
+          className="room-mobile-tabs"
+          aria-label="Room panels"
+          role="tablist"
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const panes = ["radio", "player", "chat"] as const;
+            const offset = event.key === "ArrowRight" ? 1 : -1;
+            const nextPane = panes[(panes.indexOf(mobileRoomPane) + offset + panes.length) % panes.length];
+            setMobileRoomPane(nextPane);
+            (event.currentTarget.querySelector(`[data-pane="${nextPane}"]`) as HTMLButtonElement | null)?.focus();
+          }}
+        >
+          <button data-pane="radio" role="tab" aria-selected={mobileRoomPane === "radio"} className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
+          <button data-pane="player" role="tab" aria-selected={mobileRoomPane === "player"} className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
           <button
+            data-pane="chat"
+            role="tab"
+            aria-selected={mobileRoomPane === "chat"}
             className={mobileRoomPane === "chat" ? "active" : ""}
             aria-label={chatUnreadCount > 0 ? `Chat, ${chatUnreadCount} unread` : "Chat"}
             onClick={() => setMobileRoomPane("chat")}
@@ -693,13 +747,13 @@ export function App() {
         </nav>
       </section>
       {roomSettingsOpen && auth.session && (
-        <RoomSettingsDialog
+        <Suspense fallback={null}><RoomSettingsDialog
           snapshot={snapshot}
           currentUserId={profile.id}
           accessToken={auth.session.access_token}
           onClose={() => setRoomSettingsOpen(false)}
           onNotice={setNotice}
-        />
+        /></Suspense>
       )}
     </main>
   );
@@ -708,34 +762,63 @@ export function App() {
 function LoadingScreen({ label }: { label: string }) {
   return (
     <div className="loading-screen">
-      <Logo />
+      <Brand />
       <div className="equalizer"><i /><i /><i /><i /></div>
       <p>{label}</p>
     </div>
   );
 }
 
-function AuthScreen({ client }: { client: SupabaseClient }) {
+function PublicEntry({ client }: { client: SupabaseClient }) {
   const [path, setPath] = useState(location.pathname);
+
   useEffect(() => {
     const onPopState = () => setPath(location.pathname);
     addEventListener("popstate", onPopState);
     return () => removeEventListener("popstate", onPopState);
   }, []);
+
   const navigate = (nextPath: string) => {
     history.pushState({}, "", nextPath);
     setPath(nextPath);
   };
 
+  if (path === "/") return <LandingPage onNavigate={navigate} />;
+
+  return <AuthScreen client={client} path={path} onNavigate={navigate} />;
+}
+
+function AuthScreen({
+  client,
+  path,
+  onNavigate
+}: {
+  client: SupabaseClient;
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+
   const form = path === "/sign-up"
-    ? <SignUpForm onNavigate={navigate} className="w-full" />
+    ? <SignUpForm onNavigate={onNavigate} className="w-full" />
     : path === "/forgot-password"
-      ? <ForgotPasswordForm client={client} onNavigate={navigate} className="w-full" />
-      : <LoginForm client={client} onNavigate={navigate} className="w-full" />;
+      ? <ForgotPasswordForm client={client} onNavigate={onNavigate} className="w-full" />
+      : <LoginForm client={client} onNavigate={onNavigate} className="w-full" />;
 
   return (
     <main className="welcome auth-welcome">
-      <nav><Logo /><span>Shared listening, kept simple.</span></nav>
+      <nav>
+        <a
+          className="auth-home-link"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            onNavigate("/");
+          }}
+        >
+          <Brand />
+        </a>
+        <div className="welcome-nav-actions"><span>Shared listening, kept simple.</span><ThemeToggle compact /></div>
+      </nav>
       <section className="auth-content">
         <div className="auth-intro">
           <Badge variant="outline">LYDMAN</Badge>
@@ -757,7 +840,7 @@ function PasswordRecoveryScreen({
 }) {
   return (
     <main className="welcome auth-welcome">
-      <nav><Logo /><span>Secure your account.</span></nav>
+      <nav><Brand /><div className="welcome-nav-actions"><span>Secure your account.</span><ThemeToggle compact /></div></nav>
       <section className="auth-content">
         <div className="auth-intro">
           <Badge variant="outline">ACCOUNT RECOVERY</Badge>
@@ -767,15 +850,6 @@ function PasswordRecoveryScreen({
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
     </main>
-  );
-}
-
-function Logo() {
-  return (
-    <div className="logo">
-      <span className="logo-mark"><i /><i /><i /></span>
-      <span>Lydman</span>
-    </div>
   );
 }
 
@@ -798,7 +872,7 @@ function Welcome({
 
   return (
     <main className="welcome">
-      <nav><Logo /><span>Music is better together.</span></nav>
+      <nav><Brand /><div className="welcome-nav-actions"><span>Music is better together.</span><ThemeToggle compact /></div></nav>
       <section className="welcome-content">
         <div className="welcome-copy">
           <Badge variant="outline">SHARED LISTENING</Badge>
@@ -1067,9 +1141,11 @@ function NowPlaying({
     });
   };
 
-  const commitSeek = () => {
-    if (!canControlPlayback || seekPreview === null) return;
-    requestSocketAction(socket, "playback:update", { trackId: track?.id, playing: playback.playing, position: seekPreview }, (result) => {
+  const commitSeek = (value: number | readonly number[]) => {
+    if (!canControlPlayback || !track) return;
+    const position = typeof value === "number" ? value : value[0];
+    if (!Number.isFinite(position)) return;
+    requestSocketAction(socket, "playback:update", { trackId: track.id, playing: playback.playing, position }, (result) => {
       if (!result.ok) setPlaybackError(result.error || "Could not seek this track.");
     });
   };
@@ -1140,10 +1216,10 @@ function NowPlaying({
       <section className={`now-playing panel ${compact ? "compact" : ""}`}>
       <div className="now-playing-heading">
         <div className="section-kicker">Now playing</div>
-        <button type="button" onClick={onToggleCompact} title={compact ? "Focus the player" : "Give chat more room"}>
+        <Button variant="ghost" size="sm" type="button" onClick={onToggleCompact} title={compact ? "Focus the player" : "Give chat more room"}>
           {compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
           <span>{compact ? "Focus player" : "Focus chat"}</span>
-        </button>
+        </Button>
       </div>
       {keepSpotifyWebMounted && (
         <SpotifyPlayer
@@ -1173,7 +1249,7 @@ function NowPlaying({
               <div className="provider-player-shell fallback-player-shell">
                 <strong>Use the room source?</strong>
                 <small>No {providerLabel(preferredProvider)} match was found for this track.</small>
-                <button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</button>
+                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</Button>
               </div>
             ) : fallbackIsSilent ? (
               <div className="provider-player-shell fallback-player-shell">
@@ -1201,7 +1277,7 @@ function NowPlaying({
               ) : (
                 <div className="provider-player-shell spotify-player-shell">
                   <strong>Connect Spotify to listen</strong>
-                  <button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>Connect Spotify</button>
+                  <Button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>Connect Spotify</Button>
                 </div>
               )
             ) : effectiveProvider === "apple" && effectiveMapping && accessToken ? (
@@ -1257,30 +1333,28 @@ function NowPlaying({
               </p>
             </div>
             <div className="player-controls">
-              <button disabled={!canControlPlayback} className="round-button primary" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
+              <Button disabled={!canControlPlayback} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
                 {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-              </button>
-              <button className="round-button" onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room">
+              </Button>
+              <Button variant="outline" className="round-button" size="icon" onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room">
                 <RefreshCw size={19} />
-              </button>
-              <button disabled={!canControlPlayback} className="round-button" onClick={() => requestSocketAction(socket, "queue:next", { trackId: track.id }, (result) => { if (!result.ok) setPlaybackError(result.error || "Could not skip this track."); })} aria-label="Next track">
+              </Button>
+              <Button variant="outline" disabled={!canControlPlayback} className="round-button" size="icon" onClick={() => requestSocketAction(socket, "queue:next", { trackId: track.id }, (result) => { if (!result.ok) setPlaybackError(result.error || "Could not skip this track."); })} aria-label="Next track">
                 <SkipIcon size={20} />
-              </button>
+              </Button>
             </div>
           </div>
           <div className="playback-progress">
             <span>{formatPlaybackTime(shownPosition)}</span>
-            <input
-              type="range"
+            <Slider
               min={0}
               max={Math.max(playerStatus.duration, 1)}
               step={1}
-              value={Math.min(shownPosition, Math.max(playerStatus.duration, 1))}
+              value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
               disabled={!canControlPlayback || !playerStatus.duration}
               aria-label="Playback position"
-              onChange={(event) => setSeekPreview(Number(event.target.value))}
-              onPointerUp={commitSeek}
-              onKeyUp={commitSeek}
+              onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
+              onValueCommitted={commitSeek}
             />
             <span>{formatPlaybackTime(playerStatus.duration)}</span>
           </div>
@@ -1298,15 +1372,14 @@ function NowPlaying({
             {providerFallback && <small className="provider-fallback">No {providerLabel(preferredProvider)} match · using {providerLabel(effectiveProvider!)}</small>}
             <label className="volume-control">
               <Volume2 size={14} />
-              <input
-                type="range"
+              <Slider
                 min={0}
                 max={100}
-                value={volume}
+                value={[volume]}
                 aria-label="Volume"
-                onChange={(event) => onUserSettingsChange({
+                onValueChange={(value) => onUserSettingsChange({
                   ...userSettings,
-                  playback: { ...userSettings.playback, defaultVolume: Number(event.target.value) }
+                  playback: { ...userSettings.playback, defaultVolume: typeof value === "number" ? value : value[0] }
                 })}
               />
             </label>
@@ -1324,7 +1397,7 @@ function NowPlaying({
       )}
       </section>
       {settingsOpen && (
-        <UserSettingsDialog
+        <Suspense fallback={null}><UserSettingsDialog
           settings={userSettings}
           connections={connections}
           accessToken={accessToken}
@@ -1332,7 +1405,7 @@ function NowPlaying({
           onConnectSpotify={connectSpotify}
           onDisconnectSpotify={disconnectSpotify}
           onClose={onCloseSettings}
-        />
+        /></Suspense>
       )}
     </>
   );
@@ -1597,18 +1670,20 @@ function MusicRail({
         )}
       </section>
 
-      <div className="music-tabs" role="tablist" aria-label="Music tools">
-        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
+        <TabsList className="music-tabs" aria-label="Music tools">
+        <TabsTrigger value="history">
           <Clock3 size={14} /> History
-        </button>
-        <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}>
+        </TabsTrigger>
+        <TabsTrigger value="search">
           <Search size={14} /> Search
-        </button>
-        <button className={tab === "queue" ? "active" : ""} onClick={() => setTab("queue")}>
+        </TabsTrigger>
+        <TabsTrigger value="queue">
           <ListMusic size={14} /> Queue
           {snapshot.room.queue.length > 0 && <i>{snapshot.room.queue.length}</i>}
-        </button>
-      </div>
+        </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {tab === "search" && (
         <div className="rail-pane search-pane">
@@ -1617,52 +1692,59 @@ function MusicRail({
             <small>{joinedDjQueue ? "Add results to your private queue" : "Join the DJ queue to add music"}</small>
           </div>
           <form className="provider-search-form" onSubmit={searchProvider}>
-            <Search size={16} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Search ${providerLabel(provider)}`}
-              autoFocus
-            />
-            {query && (
-              <button
-                type="button"
-                className="clear-search"
-                aria-label="Clear search"
-                onClick={() => {
-                  searchRequestRef.current?.abort();
-                  setSearching(false);
-                  setQuery("");
-                  setSearchResults([]);
-                  setSearchError("");
-                }}
-              >
-                ×
-              </button>
-            )}
-            <span className="provider-divider" />
-            <select
-              value={provider}
-              onChange={(event) => {
-                const value = event.target.value;
-                const nextProvider: SearchProvider = value === "soundcloud" || value === "spotify" || value === "apple"
-                  ? value
-                  : "youtube";
-                setProvider(nextProvider);
-                storeValue(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
-                setSearchResults([]);
-                setSearchError("");
-              }}
-              aria-label="Music provider"
-            >
-              <option value="youtube">YouTube</option>
-              <option value="spotify">Spotify</option>
-              <option disabled value="apple">Apple Music (Coming Soon)</option>
-              <option value="soundcloud">SoundCloud</option>
-            </select>
-            <button type="submit" className="search-submit" disabled={searching}>
-              {searching ? "…" : "Go"}
-            </button>
+            <InputGroup className="provider-search-group">
+              <InputGroupInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={`Search ${providerLabel(provider)}`}
+                aria-label="Search music"
+                autoFocus
+              />
+              <InputGroupAddon align="inline-start"><Search /></InputGroupAddon>
+              <InputGroupAddon align="inline-end" className="provider-search-actions">
+                {query && (
+                  <InputGroupButton
+                    size="icon-xs"
+                    aria-label="Clear search"
+                    onClick={() => {
+                      searchRequestRef.current?.abort();
+                      setSearching(false);
+                      setQuery("");
+                      setSearchResults([]);
+                      setSearchError("");
+                    }}
+                  >
+                    <X />
+                  </InputGroupButton>
+                )}
+                <span className="provider-divider" />
+                <Select
+                  value={provider}
+                  onValueChange={(value) => {
+                    const nextProvider: SearchProvider = value === "soundcloud" || value === "spotify" || value === "apple"
+                      ? value
+                      : "youtube";
+                    setProvider(nextProvider);
+                    storeValue(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
+                    setSearchResults([]);
+                    setSearchError("");
+                  }}
+                >
+                  <SelectTrigger size="sm" className="provider-select" aria-label="Music provider"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="youtube">YouTube</SelectItem>
+                      <SelectItem value="spotify">Spotify</SelectItem>
+                      <SelectItem disabled value="apple">Apple Music (Coming Soon)</SelectItem>
+                      <SelectItem value="soundcloud">SoundCloud</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <InputGroupButton type="submit" size="sm" variant="default" className="search-submit" disabled={searching}>
+                  {searching ? "Searching…" : "Go"}
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
           </form>
 
           <div className="search-result-list">

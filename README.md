@@ -33,15 +33,11 @@ npm run dev
 Open `http://127.0.0.1:5173`. The web app is served by Vite and proxies its
 Socket.IO connection to the API on port 3000.
 
-Without Supabase environment variables, local development uses the original
-JSON store and local display-name identity. To test authentication and database
-persistence, copy `.env.example` to `.env` and add your Supabase project values.
-Production deployments are expected to keep Supabase enabled; the JSON store is
-only a legacy/local fallback.
-Local mode supports rooms, DJ queues, and shared playback. Chat, account profiles,
-feedback, and room administration require the configured account services.
-Production startup rejects absent or partial Supabase configuration. A browser
-configuration failure shows a retry screen instead of switching to local mode.
+Copy `.env.example` to `.env` and add your Supabase project values before opening
+the app. The browser requires Supabase authentication; configuration failures show
+a retry screen. The server retains a credential-free JSON store for isolated
+development and integration tests. Production startup rejects absent or partial
+Supabase configuration.
 
 ## Architecture documentation
 

@@ -4,11 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#09090b" />
+    <script>
+      (() => {
+        try {
+          const stored = localStorage.getItem("soundspin-theme") || "dark";
+          const resolved = stored === "system"
+            ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : stored;
+          const effectiveTheme = resolved === "light" ? "light" : "dark";
+          document.documentElement.classList.add(effectiveTheme);
+          document.documentElement.style.colorScheme = effectiveTheme;
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", effectiveTheme === "light" ? "#f7f7f2" : "#09090b");
+        } catch {
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.colorScheme = "dark";
+        }
+      })();
+    </script>
     <meta
       name="description"
-      content="Lydman — listen to music together, wherever you work."
+      content="Create a shared music room, take turns as DJ, chat, and keep everyone listening in sync."
     />
-    <title>Lydman</title>
+    <title>Lydman — Listen together</title>
   </head>
   <body>
     <div id="root"></div>

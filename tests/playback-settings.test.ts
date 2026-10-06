@@ -70,3 +70,17 @@ test("restricted browser storage cannot crash settings reads or writes", (t) => 
   assert.equal(settings.playback.defaultVolume, 80);
   assert.doesNotThrow(() => saveUserSettings(settings));
 });
+
+test("theme selection retains the legacy preference and saves with validated settings", (t) => {
+  const values = useStorage(t);
+  values.set("soundspin-theme", "light");
+  assert.equal(readUserSettings().appearance.theme, "light");
+  values.set(USER_SETTINGS_STORAGE_KEY, '{"appearance":{"theme":"system","artworkBlur":"NaN"}}');
+  const settings = readUserSettings();
+  assert.equal(settings.appearance.theme, "system");
+  assert.equal(settings.appearance.artworkBlur, 30);
+  saveUserSettings(settings);
+  assert.equal(values.get("soundspin-theme"), "system");
+  values.set(USER_SETTINGS_STORAGE_KEY, '{"appearance":{"theme":"invalid"}}');
+  assert.equal(readUserSettings().appearance.theme, "dark");
+});

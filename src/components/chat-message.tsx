@@ -1,4 +1,4 @@
-import { lazy, Suspense, useId, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useId, useMemo, useState } from 'react'
 import { Reply, SmilePlus, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 
@@ -58,7 +58,7 @@ interface ChatMessageItemProps {
   onJumpToMessage: (messageId: string) => void
 }
 
-export const ChatMessageItem = ({
+export const ChatMessageItem = memo(function ChatMessageItem({
   message,
   isOwnMessage,
   currentUserId,
@@ -69,7 +69,7 @@ export const ChatMessageItem = ({
   onReply,
   onReact,
   onJumpToMessage,
-}: ChatMessageItemProps) => {
+}: ChatMessageItemProps) {
   const [showReactionPicker, setShowReactionPicker] = useState(false)
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const reactionTooltipPrefix = useId()
@@ -118,6 +118,7 @@ export const ChatMessageItem = ({
               key={emoji}
               type="button"
               title={`React with ${emoji}`}
+              aria-label={`React with ${emoji}`}
               onClick={() => onReact(message, emoji)}
             >
               <PlatformEmojiText text={emoji} />
@@ -222,4 +223,4 @@ export const ChatMessageItem = ({
       </div>
     </div>
   )
-}
+})

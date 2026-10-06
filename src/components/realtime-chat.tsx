@@ -3,6 +3,7 @@ import type { SkinTones, Theme } from 'emoji-picker-react'
 import {
   forwardRef,
   lazy,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -85,6 +86,74 @@ const TYPING_BROADCAST_THROTTLE_MS = 2_000
 const TYPING_IDLE_MS = 3_000
 const GIPHY_SEARCH_DEBOUNCE_MS = 500
 
+interface ChatMessageListProps {
+  messages: ChatMessage[]
+  currentUserId: string
+  liveAdminUserIds: ReadonlySet<string>
+  unreadMessageId?: string
+  onOpenProfile?: (userId: string) => void
+  onReply: (message: ChatMessage) => void
+  onReact: (message: ChatMessage, emoji: string) => void
+  onJumpToMessage: (messageId: string) => void
+}
+
+const ChatMessageList = memo(function ChatMessageList({
+  messages,
+  currentUserId,
+  liveAdminUserIds,
+  unreadMessageId,
+  onOpenProfile,
+  onReply,
+  onReact,
+  onJumpToMessage,
+}: ChatMessageListProps) {
+  return (
+    <div className="chat-message-list space-y-1">
+      {messages.map((message, index) => {
+        const previousMessage = index > 0 ? messages[index - 1] : undefined
+        const beginsNewDay = startsNewDay(message, previousMessage)
+        const showHeader = shouldShowMessageHeader(message, previousMessage)
+
+        return (
+          <div
+            key={message.id}
+            className="animate-in fade-in slide-in-from-bottom-4 duration-300"
+          >
+            {beginsNewDay && (
+              <div className="chat-date-divider">
+                <span>
+                  {new Date(message.createdAt).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </span>
+              </div>
+            )}
+            {unreadMessageId === message.id && (
+              <div className="chat-unread-divider"><span>New messages</span></div>
+            )}
+            <ChatMessageItem
+              message={message}
+              isOwnMessage={message.user.id === currentUserId}
+              currentUserId={currentUserId}
+              showHeader={showHeader}
+              isAuthorAppAdmin={Boolean(message.user.isAppAdmin || liveAdminUserIds.has(message.user.id))}
+              isReplyAuthorAppAdmin={Boolean(message.replyTo && (
+                message.replyTo.user.isAppAdmin || liveAdminUserIds.has(message.replyTo.user.id)
+              ))}
+              onOpenProfile={onOpenProfile}
+              onReply={onReply}
+              onReact={onReact}
+              onJumpToMessage={onJumpToMessage}
+            />
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
 /**
  * Interactive room chat. `useRealtimeChat` handles low-latency Broadcast
  * delivery; the parent supplies durable history and an `onSend` persistence
@@ -126,7 +195,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     user,
     onConnected,
   })
-  const [newMessage, setNewMessage] = useState('')
+  const [hasDraft, setHasDraft] = useState(false)
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
@@ -143,6 +212,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [unreadMessageIds, setUnreadMessageIds] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messageInputRef = useRef<HTMLInputElement>(null)
+  const draftMessageRef = useRef('')
   const pendingReactionsRef = useRef(new Set<string>())
   const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
@@ -157,8 +227,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sendingRef = useRef(false)
   const uploadingRef = useRef(false)
-  const latestDraftRef = useRef(newMessage)
-  latestDraftRef.current = newMessage
   const lifetimeRef = useRef({ active: true })
   const [giphyConfigured, setGiphyConfigured] = useState(false)
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
@@ -323,10 +391,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const handleSendMessage = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
-      if (!newMessage.trim() || !isConnected || sendingRef.current || uploadingRef.current) return
-      const lifetime = lifetimeRef.current
-      const draft = newMessage
+      const draft = draftMessageRef.current
       const content = draft.trim()
+      if (!content || !isConnected || sendingRef.current || uploadingRef.current) return
+      const lifetime = lifetimeRef.current
       sendingRef.current = true
       setSending(true)
       setComposerError('')
@@ -339,8 +407,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         )
         if (lifetime.active) {
           // Keep text typed while delivery was pending.
-          if (latestDraftRef.current === draft) {
-            setNewMessage('')
+          if (draftMessageRef.current === draft) {
+            draftMessageRef.current = ''
+            if (messageInputRef.current) messageInputRef.current.value = ''
+            setHasDraft(false)
             setSelectedMentions([])
             setMentionQuery(null)
             stopTyping()
@@ -359,14 +429,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         if (lifetime.active) setSending(false)
       }
     },
-    [newMessage, isConnected, sendMessage, onSend, replyingTo, selectedMentions, stopTyping]
+    [isConnected, sendMessage, onSend, replyingTo, selectedMentions, stopTyping]
   )
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
     if (!mentionQuery) return
-    const inserted = insertMention(newMessage, mentionQuery, option.mention)
+    const inserted = insertMention(draftMessageRef.current, mentionQuery, option.mention)
     if (inserted.text.length > 500) return
-    setNewMessage(inserted.text)
+    draftMessageRef.current = inserted.text
+    if (messageInputRef.current) messageInputRef.current.value = inserted.text
+    setHasDraft(Boolean(inserted.text.trim()))
     setSelectedMentions((current) => [
       ...current.filter((mention) => mention.userId !== option.mention.userId),
       option.mention,
@@ -377,7 +449,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       messageInputRef.current?.focus()
       messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
     })
-  }, [mentionQuery, newMessage])
+  }, [mentionQuery])
 
   const sendMediaMessage = useCallback(
     async (
@@ -467,6 +539,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       pendingReactionsRef.current.delete(key)
     }
   }, [broadcastReaction, client, isConnected, user.id])
+
+  const handleReaction = useCallback((message: ChatMessage, emoji: string) => {
+    void toggleReaction(message, emoji)
+  }, [toggleReaction])
 
   const uploadImage = async (file: File) => {
     if (!isConnected || uploadingRef.current || sendingRef.current) return
@@ -603,49 +679,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             No messages yet. Start the conversation!
           </div>
         ) : null}
-        <div className="chat-message-list space-y-1">
-          {allMessages.map((message, index) => {
-            const previousMessage = index > 0 ? allMessages[index - 1] : undefined
-            const beginsNewDay = startsNewDay(message, previousMessage)
-            const showHeader = shouldShowMessageHeader(message, previousMessage)
-
-            return (
-              <div
-                key={message.id}
-                className="animate-in fade-in slide-in-from-bottom-4 duration-300"
-              >
-                {beginsNewDay && (
-                  <div className="chat-date-divider">
-                    <span>
-                      {new Date(message.createdAt).toLocaleDateString(undefined, {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </span>
-                  </div>
-                )}
-                {unreadMessageIds[0] === message.id && (
-                  <div className="chat-unread-divider"><span>New messages</span></div>
-                )}
-                <ChatMessageItem
-                  message={message}
-                  isOwnMessage={message.user.id === user.id}
-                  currentUserId={user.id}
-                  showHeader={showHeader}
-                  isAuthorAppAdmin={Boolean(message.user.isAppAdmin || liveAdminUserIds.has(message.user.id))}
-                  isReplyAuthorAppAdmin={Boolean(message.replyTo && (
-                    message.replyTo.user.isAppAdmin || liveAdminUserIds.has(message.replyTo.user.id)
-                  ))}
-                  onOpenProfile={onOpenProfile}
-                  onReply={selectReply}
-                  onReact={(selectedMessage, emoji) => void toggleReaction(selectedMessage, emoji)}
-                  onJumpToMessage={jumpToMessage}
-                />
-              </div>
-            )
-          })}
-        </div>
+        <ChatMessageList
+          messages={allMessages}
+          currentUserId={user.id}
+          liveAdminUserIds={liveAdminUserIds}
+          unreadMessageId={unreadMessageIds[0]}
+          onOpenProfile={onOpenProfile}
+          onReply={selectReply}
+          onReact={handleReaction}
+          onJumpToMessage={jumpToMessage}
+        />
       </div>
 
       {(!isNearBottom || unreadMessageIds.length > 0) && (
@@ -719,8 +762,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                     saveEmojiSkinTone(selectedSkinTone)
                   }}
                   onEmojiClick={(emoji) => {
-                    setNewMessage((current) => current.length + emoji.emoji.length <= 500 ? current + emoji.emoji : current)
+                    const nextMessage = `${draftMessageRef.current}${emoji.emoji}`
+                    if (nextMessage.length > 500) return
+                    draftMessageRef.current = nextMessage
+                    if (messageInputRef.current) messageInputRef.current.value = nextMessage
+                    setHasDraft(Boolean(nextMessage.trim()))
                     noteTyping()
+                    requestAnimationFrame(() => {
+                      messageInputRef.current?.focus()
+                      messageInputRef.current?.setSelectionRange(nextMessage.length, nextMessage.length)
+                    })
                   }}
                 />
               </Suspense>
@@ -766,8 +817,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                           key={gif.id}
                           className="chat-gif-tile"
                           onClick={() => {
+                            const lifetime = lifetimeRef.current
                             void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF').then((sent) => {
-                              if (sent && lifetimeRef.current.active) setShowGiphy(false)
+                              if (sent && lifetime.active) setShowGiphy(false)
                             })
                           }}
                         >
@@ -873,12 +925,15 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             aria-expanded={Boolean(mentionQuery && mentionCandidates.length)}
             aria-activedescendant={mentionQuery && mentionCandidates.length ? `chat-mention-option-${activeMentionIndex}` : undefined}
             data-form-type="other"
-            value={newMessage}
             maxLength={500}
             onChange={(event) => {
               const nextMessage = event.target.value
-              setNewMessage(nextMessage)
-              setSelectedMentions((current) => activeMentions(nextMessage, current))
+              draftMessageRef.current = nextMessage
+              const nextHasDraft = Boolean(nextMessage.trim())
+              setHasDraft((current) => current === nextHasDraft ? current : nextHasDraft)
+              setSelectedMentions((current) => current.length > 0
+                ? activeMentions(nextMessage, current)
+                : current)
               setMentionQuery(findMentionQuery(nextMessage, event.target.selectionStart))
               setActiveMentionIndex(0)
               if (nextMessage.trim()) noteTyping()
@@ -936,7 +991,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             className="chat-send-button"
             type="submit"
             size="icon"
-            disabled={!isConnected || uploading || sending || !newMessage.trim()}
+            disabled={!isConnected || uploading || sending || !hasDraft}
             aria-label="Send message"
             title="Send message"
           >

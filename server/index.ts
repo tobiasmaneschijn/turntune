@@ -10,7 +10,7 @@ import { z } from "zod";
 import { Store } from "./store.js";
 import { validateServerConfig } from "./config.js";
 import { safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
-import { uniqueUsers } from "./presence.js";
+import { roomPresence, uniqueUsers } from "./presence.js";
 import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import { AppleMusicApi } from "./apple-music.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
@@ -479,6 +479,16 @@ function snapshot(room: Room, userId: string): RoomSnapshot {
   };
 }
 
+function broadcastPresence(room: Room) {
+  // Presence is identical for every recipient and does not carry private queues.
+  // Keep it separate from room snapshots so a join/leave cannot seek every player.
+  io.to(room.id).emit("room:presence", roomPresence(
+    room,
+    roomUsers.get(room.id)?.values() || [],
+    roomDjUsers.get(room.id)?.values() || []
+  ));
+}
+
 function broadcast(room: Room) {
   // Do not replace this with io.to(room.id).emit(...). Queue privacy requires a
   // separate snapshot for every recipient.
@@ -566,7 +576,7 @@ async function leaveCurrentRoom(socketId: string) {
     scheduleDjEviction(room, leavingUser);
   }
   if (users?.size === 0) roomUsers.delete(roomId);
-  broadcast(room);
+  broadcastPresence(room);
 }
 
 io.use(async (socket, next) => {
@@ -639,6 +649,7 @@ io.on("connection", (socket) => {
 
       const room = await store.loadRoom(roomId) ||
         store.getOrCreateLocalRoom(roomId, () => createRoom(roomId, user.id, roomName));
+      const roomStateBeforeJoin = JSON.stringify(room);
       if (!room.ownerUserId) room.ownerUserId = user.id;
       if (!room.moderatorUserIds) room.moderatorUserIds = [];
       normalizeRadioState(room);
@@ -677,7 +688,15 @@ io.on("connection", (socket) => {
       await socket.join(roomId);
       await store.saveRoom(room);
       if (!socket.connected) return;
-      broadcast(room);
+      if (JSON.stringify(room) !== roomStateBeforeJoin) {
+        // Legacy normalization or stale-lineup cleanup changed shared radio state.
+        broadcast(room);
+      } else {
+        // Only the joining socket needs the room document. Existing listeners
+        // receive presence without replaying the unchanged playback checkpoint.
+        io.to(socket.id).emit("room:snapshot", snapshot(room, user.id));
+        broadcastPresence(room);
+      }
       reply?.({ ok: true });
     } catch (error) {
       console.error(error);

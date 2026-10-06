@@ -2,6 +2,7 @@ import { readStoredValue } from "./lib/browser-storage";
 
 export type PlaybackPreference = "source" | "spotify-web" | "spotify-desktop" | "apple";
 export type PlaybackFallback = "source" | "ask" | "silent";
+export type ThemeMode = "dark" | "light" | "system";
 
 export interface SoundSpinUserSettings {
   playback: {
@@ -19,6 +20,7 @@ export interface SoundSpinUserSettings {
     playbackErrors: boolean;
   };
   appearance: {
+    theme: ThemeMode;
     reducedMotion: boolean;
     artworkBlur: number;
   };
@@ -44,6 +46,7 @@ const defaults: SoundSpinUserSettings = {
     playbackErrors: true
   },
   appearance: {
+    theme: "dark",
     reducedMotion: false,
     artworkBlur: 30
   }
@@ -81,6 +84,7 @@ export function readUserSettings(): SoundSpinUserSettings {
   const playback = record(stored.playback);
   const notifications = record(stored.notifications);
   const appearance = record(stored.appearance);
+  const storedTheme = appearance.theme ?? readStoredValue("soundspin-theme");
   return {
     playback: {
       preference: playbackPreference(playback.preference ?? legacyPreference),
@@ -99,6 +103,7 @@ export function readUserSettings(): SoundSpinUserSettings {
       playbackErrors: boolean(notifications.playbackErrors, defaults.notifications.playbackErrors)
     },
     appearance: {
+      theme: storedTheme === "light" || storedTheme === "system" ? storedTheme : "dark",
       reducedMotion: boolean(appearance.reducedMotion, defaults.appearance.reducedMotion),
       artworkBlur: boundedNumber(appearance.artworkBlur, defaults.appearance.artworkBlur, 60)
     }
@@ -108,6 +113,7 @@ export function readUserSettings(): SoundSpinUserSettings {
 export function saveUserSettings(settings: SoundSpinUserSettings) {
   try {
     localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem("soundspin-theme", settings.appearance.theme);
     localStorage.setItem(LEGACY_PLAYBACK_PROVIDER_KEY, settings.playback.preference);
     if (settings.playback.spotifyDeviceId) localStorage.setItem(LEGACY_SPOTIFY_DEVICE_KEY, settings.playback.spotifyDeviceId);
     else localStorage.removeItem(LEGACY_SPOTIFY_DEVICE_KEY);

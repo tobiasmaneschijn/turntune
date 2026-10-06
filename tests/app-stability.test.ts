@@ -13,7 +13,7 @@ test("account recovery survives initialization but does not reopen after complet
   assert.equal(recoveryAfterAuthEvent("SIGNED_OUT", true, false), false);
 });
 
-test("runtime configuration enables local mode only for an explicit null", () => {
+test("runtime configuration accepts an explicit server-local mode and rejects malformed credentials", () => {
   assert.deepEqual(parseRuntimeConfig({ supabase: null }), { supabase: null });
   for (const config of [null, {}, { supabase: false }, { supabase: {} },
     { supabase: { url: "https://example.com", anonKey: "" } },

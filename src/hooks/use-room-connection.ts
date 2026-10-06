@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { socket } from "../socket";
 import { requestSocketAction } from "../socket-request";
-import type { RoomSnapshot, User } from "../types";
+import type { RoomPresence, RoomSnapshot, User } from "../types";
 
 interface RoomConnectionOptions {
   roomId: string | null;
@@ -10,7 +10,7 @@ interface RoomConnectionOptions {
   ready: boolean;
   accessToken?: string;
   onConnected: (connected: boolean) => void;
-  onSnapshot: (snapshot: RoomSnapshot) => void;
+  onSnapshot: Dispatch<SetStateAction<RoomSnapshot | null>>;
   onPasswordRequired: (required: boolean) => void;
   onJoinError: (message: string) => void;
   onNotice: (message: string) => void;
@@ -49,10 +49,17 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
     const receiveSnapshot = (next: RoomSnapshot) => {
       if (active && next.room.id === roomId) onSnapshot(next);
     };
+    const receivePresence = (next: RoomPresence) => {
+      if (!active || next.roomId !== roomId) return;
+      onSnapshot((current) => current && current.room.id === next.roomId
+        ? { ...current, users: next.users, djUsers: next.djUsers, serverTime: next.serverTime }
+        : current);
+    };
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("room:snapshot", receiveSnapshot);
+    socket.on("room:presence", receivePresence);
     if (socket.connected) onConnect();
     else socket.connect();
     return () => {
@@ -61,6 +68,7 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("room:snapshot", receiveSnapshot);
+      socket.off("room:presence", receivePresence);
     };
   }, [roomId, password, profile.id, profile.name, profile.avatarSeed, profile.avatarKey,
     profile.avatarUrl, profile.isAppAdmin, ready, accessToken, onConnected, onSnapshot,

@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { parseRuntimeConfig } from "./runtime-config";
 
-let clientPromise: Promise<SupabaseClient | null> | null = null;
+let clientPromise: Promise<SupabaseClient> | null = null;
 
 function createBrowserClient(url: string, publishableKey: string) {
   return createClient(url, publishableKey, {
@@ -28,7 +28,9 @@ export function getSupabaseClient() {
         return parseRuntimeConfig(await response.json());
       })
       .then(({ supabase }) => {
-        if (!supabase) return null;
+        if (!supabase?.url || !supabase.anonKey) {
+          throw new Error("Supabase authentication is not configured.");
+        }
         return createBrowserClient(supabase.url, supabase.anonKey);
       });
     }

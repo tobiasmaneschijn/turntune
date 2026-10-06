@@ -1,0 +1,26 @@
+/* Shared motion primitives and reduced-motion behavior. */
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(216,255,87,0); } 0%,
+100% { box-shadow: 0 0 0 0 rgba(216,255,87,.35); } }
+@keyframes settings-spin { to { transform: rotate(360deg); } }
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  *,
+*::before,
+*::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+@keyframes chat-typing-pulse { 0%,
+60%,
+100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@keyframes equalize { to { height: 5px; } }
+@keyframes bang-pulse-arrive {
+  0% { transform: scaleY(.58); }
+  62% { transform: scaleY(1.1); }
+  100% { transform: scaleY(1); }
+}

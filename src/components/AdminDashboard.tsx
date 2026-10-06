@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Archive,
   BarChart3,
+  CalendarClock,
+  CheckCheck,
+  Check,
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Copy,
+  Eye,
   ExternalLink,
   Globe2,
   Inbox,
@@ -14,38 +20,29 @@ import {
   Radio,
   RefreshCw,
   Search,
+  Sparkles,
   Users
 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Field, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+import { ScrollArea, ScrollBar } from "./ui/scroll-area";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "./ui/sheet";
 import { Textarea } from "./ui/textarea";
+import { cn } from "../lib/utils";
+import { buildFeedbackAgentPrompt, type FeedbackAgentPromptData } from "../feedback-agent-prompt";
 import type { User } from "../types";
 
 type AdminTab = "overview" | "feedback" | "rooms";
 type FeedbackStatus = "new" | "reviewing" | "planned" | "resolved" | "closed";
 
-interface AdminFeedback {
-  id: string;
-  userId: string;
-  userName: string;
-  userAvatarUrl: string | null;
-  message: string | null;
-  roomSlug: string | null;
-  pagePath: string;
-  viewport: { width?: number; height?: number };
-  category: "bug" | "idea" | "playback" | "chat" | "account" | "other";
-  impact: "minor" | "blocking" | "unusable";
-  diagnostics: Record<string, unknown>;
-  status: FeedbackStatus;
-  adminNote: string;
-  createdAt: string;
-  updatedAt: string;
-  screenshots: Array<{ path: string; url: string | null }>;
-}
+interface AdminFeedback extends FeedbackAgentPromptData {}
 
 interface AdminDashboardData {
   metrics: {
@@ -74,6 +71,24 @@ const statusLabels: Record<FeedbackStatus, string> = {
   resolved: "Resolved",
   closed: "Closed"
 };
+
+const feedbackStatuses: FeedbackStatus[] = ["new", "reviewing", "planned", "resolved", "closed"];
+
+const statusDescriptions: Record<FeedbackStatus, string> = {
+  new: "Needs triage",
+  reviewing: "Under investigation",
+  planned: "Accepted for delivery",
+  resolved: "Completed or fixed",
+  closed: "No further action"
+};
+
+const statusIcons = {
+  new: Sparkles,
+  reviewing: Eye,
+  planned: CalendarClock,
+  resolved: CheckCheck,
+  closed: Archive
+} satisfies Record<FeedbackStatus, typeof Inbox>;
 
 const categoryLabels: Record<AdminFeedback["category"], string> = {
   bug: "Bug",
@@ -137,6 +152,7 @@ export function AdminDashboard({
   const [draftStatus, setDraftStatus] = useState<FeedbackStatus>("new");
   const [draftNote, setDraftNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -144,7 +160,7 @@ export function AdminDashboard({
     try {
       const payload = await adminApi<AdminDashboardData>("/api/admin/dashboard", accessToken);
       setData(payload);
-      setSelectedId((current) => current || payload.feedback[0]?.id || null);
+      setSelectedId((current) => current && payload.feedback.some((item) => item.id === current) ? current : null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
     } finally {
@@ -170,7 +186,25 @@ export function AdminDashboard({
     if (!selectedFeedback) return;
     setDraftStatus(selectedFeedback.status);
     setDraftNote(selectedFeedback.adminNote);
+    setCopyState("idle");
   }, [selectedFeedback?.id, selectedFeedback?.status, selectedFeedback?.adminNote]);
+
+  const copyFeedbackPrompt = async () => {
+    if (!selectedFeedback) return;
+    const prompt = buildFeedbackAgentPrompt({
+      ...selectedFeedback,
+      status: draftStatus,
+      adminNote: draftNote
+    });
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setCopyState("error");
+    }
+  };
 
   const saveFeedback = async () => {
     if (!selectedFeedback) return;
@@ -210,9 +244,9 @@ export function AdminDashboard({
         <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>Lydman</strong></div>
         <div className="admin-console-label">ADMIN CONSOLE</div>
         <nav className="admin-nav" aria-label="Admin dashboard">
-          <button type="button" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
-          <button type="button" className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /> Feedback {Boolean(data?.metrics.openFeedback) && <span>{data?.metrics.openFeedback}</span>}</button>
-          <button type="button" className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /> Rooms</button>
+          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
+          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /> Feedback {Boolean(data?.metrics.openFeedback) && <span>{data?.metrics.openFeedback}</span>}</button>
+          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /> Rooms</button>
         </nav>
         <div className="admin-sidebar-footer">
           <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
@@ -226,7 +260,10 @@ export function AdminDashboard({
             <p className="section-kicker">ADMIN</p>
             <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : "Rooms"}</h1>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
+          <div className="admin-topbar-actions">
+            <ThemeToggle compact />
+            <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
+          </div>
         </header>
 
         {error && <div className="admin-error" role="alert">{error}</div>}
@@ -236,85 +273,170 @@ export function AdminDashboard({
         ) : data && tab === "overview" ? (
           <OverviewPanel data={data} onOpenFeedback={(id) => { setSelectedId(id); setTab("feedback"); }} />
         ) : data && tab === "feedback" ? (
-          <div className="admin-feedback-layout">
-            <section className="admin-feedback-list-panel">
+          <>
+            <section className="admin-feedback-workspace" aria-label="Feedback workflow board">
               <div className="admin-feedback-tools">
+                <div className="admin-feedback-tools-copy">
+                  <strong>Workflow board</strong>
+                  <span>Select a card to review details or move it to another lane.</span>
+                </div>
                 <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback…" aria-label="Search feedback" /></div>
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FeedbackStatus | "all")} aria-label="Filter feedback status">
-                  <option value="all">All statuses</option>
-                  {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as FeedbackStatus | "all")}>
+                  <SelectTrigger aria-label="Filter feedback lanes"><SelectValue>{statusFilter === "all" ? "All lanes" : statusLabels[statusFilter]}</SelectValue></SelectTrigger>
+                  <SelectContent><SelectGroup>
+                    <SelectItem value="all">All lanes</SelectItem>
+                    {feedbackStatuses.map((status) => <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>)}
+                  </SelectGroup></SelectContent>
+                </Select>
+                <Badge variant="secondary">{filteredFeedback.length} shown</Badge>
               </div>
-              <div className="admin-feedback-list">
-                {filteredFeedback.map((item) => (
-                  <button type="button" key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}>
-                    <span className={`feedback-status-dot ${item.status}`} />
-                    <span className="admin-feedback-summary"><strong>{feedbackExcerpt(item)}</strong><small>{item.userName} · {formatDate(item.createdAt)}</small></span>
-                    <Badge variant="outline">{categoryLabels[item.category]}</Badge>
-                    <ChevronRight />
-                  </button>
-                ))}
-                {!filteredFeedback.length && <div className="admin-empty"><Inbox /><strong>No feedback found</strong><span>Try another search or status filter.</span></div>}
-              </div>
+
+              {filteredFeedback.length ? (
+                <ScrollArea className="admin-feedback-board-scroll">
+                  <div className={cn("admin-feedback-board", statusFilter !== "all" && "filtered")}>
+                    {feedbackStatuses
+                      .filter((status) => statusFilter === "all" || status === statusFilter)
+                      .map((status) => {
+                        const items = filteredFeedback.filter((item) => item.status === status);
+                        const StatusIcon = statusIcons[status];
+                        return (
+                          <section className={cn("admin-feedback-column", status)} key={status} aria-labelledby={`feedback-column-${status}`}>
+                            <header className="admin-feedback-column-header">
+                              <span className="admin-feedback-column-icon"><StatusIcon /></span>
+                              <span>
+                                <strong id={`feedback-column-${status}`}>{statusLabels[status]}</strong>
+                                <small>{statusDescriptions[status]}</small>
+                              </span>
+                              <Badge variant="outline">{items.length}</Badge>
+                            </header>
+                            <div className="admin-feedback-column-list">
+                              {items.map((item) => (
+                                <Card
+                                  size="sm"
+                                  key={item.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-label={`Open feedback: ${feedbackExcerpt(item)}`}
+                                  className={cn("admin-feedback-card", selectedId === item.id && "active")}
+                                  onClick={() => setSelectedId(item.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      setSelectedId(item.id);
+                                    }
+                                  }}
+                                >
+                                  <CardHeader>
+                                    <CardTitle>{feedbackExcerpt(item)}</CardTitle>
+                                    <CardDescription>{item.userName} · {formatDate(item.createdAt)}</CardDescription>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <Badge variant="outline">{categoryLabels[item.category]}</Badge>
+                                    <span className={cn("feedback-impact-label", item.impact)}>{impactLabels[item.impact]}</span>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                              {!items.length && (
+                                <Empty className="admin-feedback-column-empty">
+                                  <EmptyHeader>
+                                    <EmptyMedia variant="icon"><StatusIcon /></EmptyMedia>
+                                    <EmptyTitle>Nothing here</EmptyTitle>
+                                    <EmptyDescription>No feedback is currently {statusLabels[status].toLowerCase()}.</EmptyDescription>
+                                  </EmptyHeader>
+                                </Empty>
+                              )}
+                            </div>
+                          </section>
+                        );
+                      })}
+                  </div>
+                  <ScrollBar orientation="horizontal" />
+                </ScrollArea>
+              ) : (
+                <Empty className="admin-feedback-board-empty">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon"><Inbox /></EmptyMedia>
+                    <EmptyTitle>No feedback found</EmptyTitle>
+                    <EmptyDescription>Try another search or show all lanes.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
             </section>
 
-            <section className="admin-feedback-detail-panel">
-              {selectedFeedback ? (
-                <>
-                  <div className="admin-feedback-detail-header">
-                    <div>
-                      <span className={`feedback-status-label ${selectedFeedback.status}`}>{statusLabels[selectedFeedback.status]}</span>
-                      <span className={`feedback-impact-label ${selectedFeedback.impact}`}>{impactLabels[selectedFeedback.impact]}</span>
-                      <span>{categoryLabels[selectedFeedback.category]}</span>
-                      <span>#{selectedFeedback.id.slice(0, 8)}</span>
+            <Sheet open={Boolean(selectedFeedback)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+              <SheetContent className="admin-feedback-sheet">
+                {selectedFeedback && (
+                  <>
+                    <SheetHeader>
+                      <div className="admin-feedback-detail-header">
+                        <div>
+                          <span className={cn("feedback-status-label", selectedFeedback.status)}>{statusLabels[selectedFeedback.status]}</span>
+                          <span className={cn("feedback-impact-label", selectedFeedback.impact)}>{impactLabels[selectedFeedback.impact]}</span>
+                          <Badge variant="outline">{categoryLabels[selectedFeedback.category]}</Badge>
+                        </div>
+                        <time>{formatDate(selectedFeedback.createdAt)}</time>
+                      </div>
+                      <SheetTitle>{categoryLabels[selectedFeedback.category]} feedback from {selectedFeedback.userName}</SheetTitle>
+                      <SheetDescription>Feedback #{selectedFeedback.id.slice(0, 8)} · {selectedFeedback.pagePath}</SheetDescription>
+                    </SheetHeader>
+
+                    <div className="admin-feedback-detail-scroll">
+                      <div className="admin-feedback-author">
+                        <Avatar user={{ id: selectedFeedback.userId, name: selectedFeedback.userName, avatarSeed: selectedFeedback.userId, avatarUrl: selectedFeedback.userAvatarUrl || undefined }} size={40} />
+                        <span><strong>{selectedFeedback.userName}</strong><small>{selectedFeedback.roomSlug ? `Room: ${selectedFeedback.roomSlug}` : selectedFeedback.pagePath}</small></span>
+                      </div>
+                      <div className="admin-feedback-message">{selectedFeedback.message || <em>No written description.</em>}</div>
+                      {selectedFeedback.screenshots.length > 0 && (
+                        <div className="admin-screenshot-grid">
+                          {selectedFeedback.screenshots.map((screenshot, index) => screenshot.url ? (
+                            <a href={screenshot.url} target="_blank" rel="noreferrer" key={screenshot.path} title="Open full screenshot">
+                              <img src={screenshot.url} alt={`Feedback screenshot ${index + 1}`} />
+                              <span><ExternalLink /> Open</span>
+                            </a>
+                          ) : <div className="admin-screenshot-missing" key={screenshot.path}>Preview unavailable</div>)}
+                        </div>
+                      )}
+                      <div className="admin-feedback-context">
+                        <span><strong>Page</strong>{selectedFeedback.pagePath}</span>
+                        <span><strong>Viewport</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : "Unknown"}</span>
+                        <span><strong>Submitted</strong>{new Date(selectedFeedback.createdAt).toLocaleString()}</span>
+                      </div>
+                      {Object.keys(selectedFeedback.diagnostics || {}).length > 0 ? (
+                        <details className="admin-feedback-diagnostics">
+                          <summary>Technical diagnostics</summary>
+                          <pre>{JSON.stringify(selectedFeedback.diagnostics, null, 2)}</pre>
+                        </details>
+                      ) : (
+                        <div className="admin-diagnostics-empty">Technical diagnostics were not included by the user.</div>
+                      )}
+                      <FieldGroup className="admin-feedback-workflow">
+                        <Field>
+                          <FieldLabel htmlFor="admin-feedback-status">Status</FieldLabel>
+                          <Select value={draftStatus} onValueChange={(value) => setDraftStatus(value as FeedbackStatus)}>
+                            <SelectTrigger id="admin-feedback-status" className="w-full"><SelectValue>{statusLabels[draftStatus]}</SelectValue></SelectTrigger>
+                            <SelectContent><SelectGroup>
+                              {feedbackStatuses.map((status) => <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>)}
+                            </SelectGroup></SelectContent>
+                          </Select>
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="admin-feedback-note">Private admin note</FieldLabel>
+                          <Textarea id="admin-feedback-note" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} placeholder="Add context, a decision, or follow-up notes…" />
+                        </Field>
+                      </FieldGroup>
                     </div>
-                    <time>{formatDate(selectedFeedback.createdAt)}</time>
-                  </div>
-                  <div className="admin-feedback-author">
-                    <Avatar user={{ id: selectedFeedback.userId, name: selectedFeedback.userName, avatarSeed: selectedFeedback.userId, avatarUrl: selectedFeedback.userAvatarUrl || undefined }} size={40} />
-                    <span><strong>{selectedFeedback.userName}</strong><small>{selectedFeedback.roomSlug ? `Room: ${selectedFeedback.roomSlug}` : selectedFeedback.pagePath}</small></span>
-                  </div>
-                  <div className="admin-feedback-message">{selectedFeedback.message || <em>No written description.</em>}</div>
-                  {selectedFeedback.screenshots.length > 0 && (
-                    <div className="admin-screenshot-grid">
-                      {selectedFeedback.screenshots.map((screenshot, index) => screenshot.url ? (
-                        <a href={screenshot.url} target="_blank" rel="noreferrer" key={screenshot.path} title="Open full screenshot">
-                          <img src={screenshot.url} alt={`Feedback screenshot ${index + 1}`} />
-                          <span><ExternalLink /> Open</span>
-                        </a>
-                      ) : <div className="admin-screenshot-missing" key={screenshot.path}>Preview unavailable</div>)}
-                    </div>
-                  )}
-                  <div className="admin-feedback-context">
-                    <span><strong>Page</strong>{selectedFeedback.pagePath}</span>
-                    <span><strong>Viewport</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : "Unknown"}</span>
-                    <span><strong>Submitted</strong>{new Date(selectedFeedback.createdAt).toLocaleString()}</span>
-                  </div>
-                  {Object.keys(selectedFeedback.diagnostics || {}).length > 0 ? (
-                    <details className="admin-feedback-diagnostics">
-                      <summary>Technical diagnostics</summary>
-                      <pre>{JSON.stringify(selectedFeedback.diagnostics, null, 2)}</pre>
-                    </details>
-                  ) : (
-                    <div className="admin-diagnostics-empty">Technical diagnostics were not included by the user.</div>
-                  )}
-                  <div className="admin-feedback-workflow">
-                    <div>
-                      <Label htmlFor="admin-feedback-status">Status</Label>
-                      <select id="admin-feedback-status" value={draftStatus} onChange={(event) => setDraftStatus(event.target.value as FeedbackStatus)}>
-                        {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <Label htmlFor="admin-feedback-note">Private admin note</Label>
-                      <Textarea id="admin-feedback-note" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} placeholder="Add context, a decision, or follow-up notes…" />
-                    </div>
-                    <Button onClick={() => void saveFeedback()} disabled={saving || (draftStatus === selectedFeedback.status && draftNote === selectedFeedback.adminNote)}>{saving ? "Saving…" : "Save changes"}</Button>
-                  </div>
-                </>
-              ) : <div className="admin-empty"><Inbox /><strong>Select a feedback item</strong><span>Details and screenshots will appear here.</span></div>}
-            </section>
-          </div>
+                    <SheetFooter>
+                      <Button variant="outline" onClick={() => void copyFeedbackPrompt()}>
+                        {copyState === "copied" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                        {copyState === "copied" ? "Prompt copied" : copyState === "error" ? "Copy failed — retry" : "Copy AI prompt"}
+                      </Button>
+                      <Button onClick={() => void saveFeedback()} disabled={saving || (draftStatus === selectedFeedback.status && draftNote === selectedFeedback.adminNote)}>{saving ? "Saving…" : "Save changes"}</Button>
+                    </SheetFooter>
+                  </>
+                )}
+              </SheetContent>
+            </Sheet>
+          </>
         ) : data && (
           <RoomsPanel data={data} onOpenRoom={onOpenRoom} />
         )}
