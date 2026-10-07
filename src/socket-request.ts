@@ -4,6 +4,9 @@ export interface SocketReply {
   requiresPassword?: boolean;
   started?: boolean;
   position?: number;
+  undo?: { token: string; expiresAt: number; title: string };
+  added?: number;
+  skipped?: Array<{ title: string; reason: string }>;
 }
 
 interface RequestSocket {

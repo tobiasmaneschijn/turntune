@@ -4,7 +4,7 @@ import { normalizeRealtimeMessage, normalizeRealtimeReaction, normalizeTypingEve
 
 export const CHAT_TYPING_TTL_MS = 5_000
 
-interface RealtimeChatCallbacks {
+export interface RealtimeChatCallbacks {
   onMessage: (message: ChatMessage) => void
   onReaction: (event: ChatReactionEvent) => void
   onTyping: (userIds: string[]) => void
@@ -124,3 +124,4 @@ export function createRealtimeChatSession(
 }
 
 export type RealtimeChatSession = ReturnType<typeof createRealtimeChatSession>
+export type ChatSessionFactory = (userId: string, callbacks: RealtimeChatCallbacks) => RealtimeChatSession

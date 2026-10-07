@@ -1,0 +1,31 @@
+.playback-control-help { margin: 6px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.playback-command-feedback { margin: 8px 0 0; color: var(--foreground); font-size: 12px; }
+.playback-recovery { margin-top: 10px; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--destructive); border-radius: var(--radius-lg); background: color-mix(in oklch, var(--destructive), transparent 94%); font-size: 12px; }
+.playback-recovery > span { flex: 1 1 160px; }
+.sync-status[data-status="error"] { color: var(--destructive); }
+.sync-status[data-status="pending"] > span { background: var(--muted-foreground); box-shadow: none; }
+.sync-status[data-status="quiet"] > span { background: var(--muted-foreground); box-shadow: none; }
+.now-playing .volume-control { display: flex; align-items: center; gap: 6px; }
+.now-playing .volume-control > button { flex: 0 0 auto; }
+.now-playing .track-details-action { margin-top: 3px; padding-inline: 0; font-size: 12px; }
+.playback-device-action { margin-top: 4px; max-width: 100%; white-space: normal; height: auto; text-align: left; font-size: 12px; }
+.track-details-dialog h3 { overflow-wrap: anywhere; font-size: 20px; line-height: 1.4; }
+.track-details-dialog dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 18px; }
+.track-details-dialog dt { color: var(--muted-foreground); }
+.track-details-dialog dd { margin: 0; overflow-wrap: anywhere; }
+.track-details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.track-details-actions a { text-decoration: underline; text-underline-offset: 3px; }
+.now-playing .current-track h3 { min-width: 0; margin: 0; font-size: clamp(18px, 2vw, 30px); font-weight: 700; letter-spacing: -.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.now-playing .section-kicker { margin: 0; }
+.now-playing.compact .current-track h3 { font-size: 16px; }
+.track-stage > img { transition: opacity var(--motion-surface, 200ms) ease-out; }
+.bang-reaction.active { transition: background var(--motion-control, 150ms) ease-out, border-color var(--motion-control, 150ms) ease-out; }
+@media (max-width: 1024px), (pointer: coarse) {
+  .now-playing .volume-control > button, .track-details-action, .playback-device-action { min-height: 44px; }
+  .now-playing .current-track h3 { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
+.bang-reaction.is-accepted { animation: accepted-reaction var(--motion-control, 160ms) var(--motion-ease-out, ease-out); }
+@keyframes accepted-reaction { from { box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary), transparent 60%); } to { box-shadow: 0 0 0 0 transparent; } }
+.bang-meter.decorations-off .bang-reaction, .bang-meter.decorations-off .bang-pulse, .bang-meter.decorations-off .bang-pulse i { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) { .bang-reaction.is-accepted { animation: none; } }
+.reduced-motion .bang-reaction.is-accepted { animation: none; }

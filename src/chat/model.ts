@@ -92,9 +92,14 @@ export function mergeChatMessages(
     if (!messagesById.has(message.id)) messagesById.set(message.id, message)
   }
 
-  return [...messagesById.values()].sort((left, right) =>
-    Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id)
-  )
+  return [...messagesById.values()].sort(compareChatMessages)
+}
+
+/** Preserve database microsecond order as well as timestamps expressed with different offsets. */
+export function compareChatMessages(left: Pick<ChatMessage, 'createdAt' | 'id'>, right: Pick<ChatMessage, 'createdAt' | 'id'>) {
+  const remainder = (timestamp: string) => Number((timestamp.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1] || '').padEnd(6, '0').slice(3, 6))
+  return Date.parse(left.createdAt) - Date.parse(right.createdAt) || remainder(left.createdAt) - remainder(right.createdAt) ||
+    (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
 }
 
 /**

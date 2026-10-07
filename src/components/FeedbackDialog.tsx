@@ -1,8 +1,9 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { buildFeedbackDiagnostics, type FeedbackDiagnosticContext } from "../feedback-diagnostics";
 import { getSupabaseClient } from "../supabase";
+import { feedbackStageLabel, submitFeedbackRecord, type FeedbackSubmissionStage } from "../feedback-submission";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import {
@@ -30,22 +31,31 @@ interface ScreenshotAttachment {
   previewUrl: string;
 }
 
-function screenshotExtension(file: File) {
-  if (file.type === "image/png") return "png";
-  if (file.type === "image/webp") return "webp";
-  return "jpg";
-}
-
 export function FeedbackButton({
   userId,
   roomSlug,
-  diagnosticContext
+  diagnosticContext,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+  finalFocus,
+  clientLoader = getSupabaseClient
 }: {
   userId: string;
   roomSlug?: string;
   diagnosticContext?: FeedbackDiagnosticContext;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  finalFocus?: RefObject<HTMLElement | null>;
+  clientLoader?: () => Promise<Parameters<typeof submitFeedbackRecord>[0]>;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (nextOpen: boolean) => {
+    setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
   const [message, setMessage] = useState("");
   const [category, setCategory] = useState<"bug" | "idea" | "playback" | "chat" | "account" | "other">("bug");
   const [impact, setImpact] = useState<"minor" | "blocking" | "unusable">("minor");
@@ -54,16 +64,32 @@ export function FeedbackButton({
   const [screenshots, setScreenshots] = useState<ScreenshotAttachment[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submissionStage, setSubmissionStage] = useState<FeedbackSubmissionStage>({ kind: "preparing" });
   const [sent, setSent] = useState(false);
   const attachmentsRef = useRef(screenshots);
+  const submittingRef = useRef(false);
+  const activeRef = useRef(true);
+  const identityRef = useRef(`${userId}:${roomSlug || ""}`);
+  identityRef.current = `${userId}:${roomSlug || ""}`;
+
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
 
   attachmentsRef.current = screenshots;
+
+  useEffect(() => {
+    if (!open) return;
+    setSent(false);
+    setDiagnosticPreview(buildFeedbackDiagnostics(diagnosticContext || {
+      surface: roomSlug ? "room" : "room-directory"
+    }));
+  }, [open]);
 
   useEffect(() => () => {
     attachmentsRef.current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
   }, []);
 
   const addScreenshots = useCallback((files: File[]) => {
+    if (submittingRef.current) return;
     setError("");
 
     const invalid = files.find((file) => !SCREENSHOT_TYPES.includes(file.type));
@@ -130,63 +156,47 @@ export function FeedbackButton({
 
   const submitFeedback = async (event: FormEvent) => {
     event.preventDefault();
+    if (submittingRef.current) return;
     if (!message.trim() && !screenshots.length) {
       setError("Add a description or at least one screenshot.");
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
+    setSubmissionStage({ kind: "preparing" });
     setError("");
-    const uploadedPaths: string[] = [];
+    const identity = identityRef.current;
+    const isCurrent = () => activeRef.current && identityRef.current === identity;
+    const input = {
+      userId,
+      screenshots: screenshots.map(({ id, file }) => ({ id, file })),
+      record: {
+        message: message.trim() || null, room_slug: roomSlug || null,
+        page_path: location.pathname, viewport: { width: window.innerWidth, height: window.innerHeight },
+        category, impact, diagnostics: includeDiagnostics ? diagnosticPreview : {}
+      }
+    };
 
     try {
-      const client = await getSupabaseClient();
+      const client = await clientLoader();
 
-      const feedbackId = crypto.randomUUID();
-      for (const attachment of screenshots) {
-        const path = `${userId}/${feedbackId}/${attachment.id}.${screenshotExtension(attachment.file)}`;
-        const { error: uploadError } = await client.storage
-          .from("feedback-screenshots")
-          .upload(path, attachment.file, {
-            cacheControl: "3600",
-            contentType: attachment.file.type,
-            upsert: false
-          });
-        if (uploadError) throw uploadError;
-        uploadedPaths.push(path);
-      }
-
-      const { error: insertError } = await client.from("soundspin_feedback").insert({
-        id: feedbackId,
-        user_id: userId,
-        message: message.trim() || null,
-        screenshot_paths: uploadedPaths,
-        room_slug: roomSlug || null,
-        page_path: location.pathname,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        category,
-        impact,
-        diagnostics: includeDiagnostics ? diagnosticPreview : {}
-      });
-      if (insertError) throw insertError;
-
+      await submitFeedbackRecord(client, input, (stage) => { if (isCurrent()) setSubmissionStage(stage); });
+      if (!isCurrent()) return;
       clearForm();
       setSent(true);
       toast.success("Feedback sent");
     } catch (submitError) {
-      const client = await getSupabaseClient().catch(() => null);
-      if (client && uploadedPaths.length) {
-        await client.storage.from("feedback-screenshots").remove(uploadedPaths);
-      }
-      setError(submitError instanceof Error ? submitError.message : "Could not send feedback. Please try again.");
+      if (isCurrent()) setError(submitError instanceof Error ? submitError.message : "Could not send feedback. Please try again.");
     } finally {
-      setSubmitting(false);
+      submittingRef.current = false;
+      if (activeRef.current) setSubmitting(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!submitting) setOpen(nextOpen); }}>
-      <DialogTrigger
+      {!hideTrigger && <DialogTrigger
         render={<Button variant="ghost" size="icon" />}
         onClick={() => {
           setSent(false);
@@ -198,9 +208,9 @@ export function FeedbackButton({
         aria-label="Send feedback"
       >
         <Lightbulb />
-      </DialogTrigger>
+      </DialogTrigger>}
 
-        <DialogContent className="feedback-dialog max-w-xl">
+        <DialogContent className="feedback-dialog max-w-xl" finalFocus={finalFocus}>
           {sent ? (
             <div className="feedback-success">
               <span className="feedback-success-icon"><CheckCircle2 /></span>
@@ -211,7 +221,7 @@ export function FeedbackButton({
               <Button onClick={() => setOpen(false)}>Done</Button>
             </div>
           ) : (
-            <form onSubmit={submitFeedback} className="feedback-form">
+            <form onSubmit={submitFeedback} className="feedback-form" aria-busy={submitting}>
               <DialogHeader>
                 <DialogTitle className="feedback-title"><Lightbulb /> Send feedback</DialogTitle>
                 <DialogDescription>Tell us what happened and attach anything that helps show it.</DialogDescription>
@@ -220,7 +230,7 @@ export function FeedbackButton({
               <div className="feedback-classification">
                 <div className="feedback-field">
                   <Label htmlFor="feedback-category">Category</Label>
-                  <Select value={category} onValueChange={(value) => setCategory(value as typeof category)}>
+                  <Select value={category} disabled={submitting} onValueChange={(value) => setCategory(value as typeof category)}>
                     <SelectTrigger id="feedback-category" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="bug">Bug</SelectItem>
@@ -234,7 +244,7 @@ export function FeedbackButton({
                 </div>
                 <div className="feedback-field">
                   <Label htmlFor="feedback-impact">Impact</Label>
-                  <Select value={impact} onValueChange={(value) => setImpact(value as typeof impact)}>
+                  <Select value={impact} disabled={submitting} onValueChange={(value) => setImpact(value as typeof impact)}>
                     <SelectTrigger id="feedback-impact" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="minor">Minor</SelectItem>
@@ -249,6 +259,7 @@ export function FeedbackButton({
                 <Label htmlFor="feedback-message">What would you like us to know?</Label>
                 <Textarea
                   id="feedback-message"
+                  disabled={submitting}
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   placeholder="Share an idea, report a problem, or tell us what could be better…"
@@ -276,6 +287,7 @@ export function FeedbackButton({
                           size="icon-xs"
                           onClick={() => removeScreenshot(attachment.id)}
                           aria-label={`Remove screenshot ${index + 1}`}
+                          disabled={submitting}
                         >
                           <X />
                         </Button>
@@ -303,6 +315,7 @@ export function FeedbackButton({
                       type="file"
                       accept={SCREENSHOT_ACCEPT}
                       multiple
+                      disabled={submitting}
                       onChange={(event) => {
                         addScreenshots(Array.from(event.target.files || []));
                         event.target.value = "";
@@ -317,7 +330,7 @@ export function FeedbackButton({
                 <div className="feedback-diagnostics-toggle">
                   <span className="feedback-diagnostics-icon"><Info /></span>
                   <span><strong>Include technical diagnostics</strong><small>Browser, device, app state, performance, and recent sanitized errors.</small></span>
-                  <Switch checked={includeDiagnostics} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
+                  <Switch checked={includeDiagnostics} disabled={submitting} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
                 </div>
                 {includeDiagnostics && (
                   <details>
@@ -329,11 +342,12 @@ export function FeedbackButton({
               </div>
 
               {error && <Alert variant="destructive"><AlertTitle>Could not send feedback</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+              {submitting && <p className="feedback-submission-stage" role="status">{feedbackStageLabel(submissionStage)}…</p>}
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
                 <Button type="submit" disabled={submitting || (!message.trim() && !screenshots.length)}>
-                  {submitting ? "Sending…" : "Send feedback"}
+                  {submitting ? "Working…" : "Send feedback"}
                 </Button>
               </DialogFooter>
             </form>

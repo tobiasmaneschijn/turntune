@@ -111,12 +111,19 @@ test("admin feedback copies an agent-ready prompt", async ({ page, context }) =>
 test("settings controls are keyboard operable", async ({ page }) => {
   await page.goto("/tests/ui-harness/index.html?scenario=settings");
   await page.getByRole("tab", { name: "Appearance" }).click();
-  const themeSelect = page.getByRole("combobox").first();
+  const appearance = page.getByRole("tabpanel", { name: "Appearance", exact: true });
+  await expect(appearance).toBeVisible();
+  const themeSelect = appearance.getByRole("combobox", { name: "Color theme", exact: true });
   await themeSelect.focus();
-  await page.keyboard.press("Enter");
+  await expect(themeSelect).toBeFocused();
+  await themeSelect.press("Enter");
   const systemOption = page.getByRole("option", { name: "System" });
   await expect(systemOption).toBeVisible();
-  await page.keyboard.press("End");
+  const selectedOption = page.getByRole("option", { selected: true });
+  // The popup paints before its initial focus transfer completes. Keyboard
+  // navigation starts after focus reaches the selected item in the list.
+  await expect(selectedOption).toBeFocused();
+  await selectedOption.press("End");
   await expect(systemOption).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(themeSelect).toBeFocused();

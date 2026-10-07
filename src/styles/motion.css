@@ -1,4 +1,18 @@
 /* Shared motion primitives and reduced-motion behavior. */
+:root {
+  --motion-fast: 110ms;
+  --motion-control: 150ms;
+  --motion-surface: 200ms;
+  --motion-artwork: 280ms;
+  --motion-ease-out: cubic-bezier(.2,.8,.2,1);
+  --motion-ease-exit: ease-in;
+}
+[data-slot="button"], .app-shell button, .room-lobby button,
+[data-slot="dialog-content"] button, [data-slot="menu-content"] [role="menuitem"] {
+  transition-property: background-color, border-color, color, box-shadow, opacity, transform, translate;
+  transition-duration: var(--motion-control);
+  transition-timing-function: var(--motion-ease-out);
+}
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(216,255,87,0); } 0%,
 100% { box-shadow: 0 0 0 0 rgba(216,255,87,.35); } }
 @keyframes settings-spin { to { transform: rotate(360deg); } }
@@ -14,7 +28,13 @@
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+  [data-slot="button"]:active { translate: none !important; }
+  .round-button:hover, .bang-reaction:active, .bang-reaction.active { transform: none !important; }
 }
+.reduced-motion [data-slot="button"]:active { translate: none !important; }
+.reduced-motion .round-button:hover,
+.reduced-motion .bang-reaction:active,
+.reduced-motion .bang-reaction.active { transform: none !important; }
 @keyframes chat-typing-pulse { 0%,
 60%,
 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
@@ -24,3 +44,10 @@
   62% { transform: scaleY(1.1); }
   100% { transform: scaleY(1); }
 }
+@keyframes room-pane-arrive { from { opacity: .6; } to { opacity: 1; } }
+.room-mobile-tabs button { transition: background-color var(--motion-control) var(--motion-ease-out), color var(--motion-control) var(--motion-ease-out); }
+@media (max-width: 1024px) {
+  .room-panels > [data-panel][data-active="true"] { animation: room-pane-arrive var(--motion-surface) var(--motion-ease-out); }
+}
+@media (prefers-reduced-motion: reduce) { .room-panels > [data-panel] { animation: none !important; } }
+.reduced-motion .room-panels > [data-panel] { animation: none !important; }

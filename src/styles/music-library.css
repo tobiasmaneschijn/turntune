@@ -1,0 +1,48 @@
+.music-library-content { padding: 8px 14px 18px; min-width: 0; }
+.music-library-content p, .music-library-content small { font-size: 12px; line-height: 1.5; }
+.music-library-content h3 { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 8px; font-size: 14px; }
+.music-library-content h3 small, .music-library-help, .music-save-set small { color: var(--muted-foreground); }
+.music-library-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.music-library-heading p { margin: 0; }
+.music-library-help, .music-create-set { margin: 8px 0; font-size: 12px; }
+.music-library-help summary, .music-create-set summary { cursor: pointer; min-height: 32px; display: list-item; padding-block: 8px; }
+.music-library-help p { margin-top: 4px; }
+.music-save-set { display: grid; gap: 8px; margin-top: 14px; }
+.music-save-set label { display: grid; gap: 6px; font-size: 12px; }
+.music-library-row { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.music-library-row > .track-artwork { width: 40px; height: 40px; border-radius: 7px; }
+.music-library-row strong, .music-library-row small { display: block; overflow-wrap: anywhere; }
+.music-library-row strong { font-size: 13px; }
+.music-library-row small { color: var(--muted-foreground); }
+.music-library-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.music-saved-set { border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.music-saved-set h4 { font-size: 13px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.music-saved-set details { font-size: 12px; line-height: 1.5; }
+.music-saved-set summary { cursor: pointer; min-height: 32px; }
+.music-saved-set ol { padding-left: 22px; overflow-wrap: anywhere; }
+.music-rename-set { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.music-library-delete { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 12px; }
+.music-library-delete p { width: 100%; }
+.music-track-details { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.music-track-popover-positioner { z-index: 65; }
+.music-track-popover { display: grid; position: relative; gap: 16px; width: min(420px, calc(100vw - 24px)); padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 12px 40px rgb(0 0 0 / .24); }
+.music-details-header { padding-right: 36px; }
+.music-details-header h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.music-details-header p { margin: 6px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.music-details-close { position: absolute; top: 10px; right: 10px; }
+.music-track-details h3, .music-track-details p { overflow-wrap: anywhere; user-select: text; }
+.music-track-details h3 { margin: 0; font-size: 20px; line-height: 1.4; }
+.music-track-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 18px; }
+.music-track-details dt { color: var(--muted-foreground); }
+.music-track-details dd { margin: 0; overflow-wrap: anywhere; }
+.music-details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.music-details-actions a { text-decoration: underline; text-underline-offset: 3px; }
+.music-undo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.music-import-summary { margin: 6px 0; padding-left: 16px; overflow-wrap: anywhere; }
+@media (max-width: 640px), (pointer: coarse) {
+  .music-library-content button, .music-library-content summary, .music-details-actions button, .music-details-actions a { min-height: 44px; }
+  .music-track-details button, .music-undo button, .music-feedback summary { min-height: 44px; }
+  .music-track-details button[aria-label="Close"], .music-track-details button:has(.sr-only) { min-width: 44px; }
+  .music-library-content button[data-size="icon"] { min-width: 44px; }
+}
+@media (max-width: 640px) { .music-track-details { align-self: end; margin: 0 -16px -16px; width: calc(100% + 32px); max-width: none; border-radius: 16px 16px 0 0; padding-bottom: max(24px, env(safe-area-inset-bottom)); max-height: 90dvh; } }

@@ -3,6 +3,7 @@ import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeRadioState } from "./radio.js";
+import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, type LibraryMutation, type PrivateLibrary } from "./private-library.js";
 import type {
   DjAccess,
   Room,
@@ -18,6 +19,7 @@ const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, a
 interface Database {
   rooms: Record<string, Room>;
   musicConnections?: Record<string, MusicProviderConnection>;
+  privateLibraries?: Record<string, PrivateLibrary>;
 }
 
 interface StoreOptions {
@@ -34,6 +36,7 @@ export class Store {
   private writeChain: Promise<void> = Promise.resolve();
   private supabase: SupabaseClient | null = null;
   private roomLoads = new Map<string, Promise<Room | undefined>>();
+  private libraryWrites = new Map<string, Promise<PrivateLibrary>>();
   private readonly dataDir: string;
   private readonly dataFile: string;
   private readonly tempFile: string;
@@ -146,6 +149,49 @@ export class Store {
     return Object.hasOwn(this.data.rooms, id) ? this.data.rooms[id] : undefined;
   }
 
+  async getPrivateLibrary(userId: string): Promise<PrivateLibrary> {
+    if (!this.supabase) return structuredClone(this.data.privateLibraries && Object.hasOwn(this.data.privateLibraries, userId) ? this.data.privateLibraries[userId] : emptyLibrary());
+    const { data, error } = await this.supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
+    return data ? privateLibrarySchema.parse(data.data) : emptyLibrary();
+  }
+
+  /** Per-owner ordering plus database revision checks prevent lost concurrent-tab edits. */
+  updatePrivateLibrary(userId: string, value: LibraryMutation): Promise<PrivateLibrary> {
+    const mutation = libraryMutationSchema.parse(value);
+    const previous = this.libraryWrites.get(userId);
+    const operation = (previous ? previous.catch(() => emptyLibrary()) : Promise.resolve(emptyLibrary())).then(async () => {
+      if (!this.supabase) {
+        this.data.privateLibraries ||= {};
+        const before = this.data.privateLibraries[userId];
+        const next = changePrivateLibrary(before || emptyLibrary(), mutation);
+        Object.defineProperty(this.data.privateLibraries, userId, { value: next, writable: true, enumerable: true, configurable: true });
+        try { await this.persistFile(); }
+        catch (error) { if (before) this.data.privateLibraries[userId] = before; else delete this.data.privateLibraries[userId]; throw error; }
+        return structuredClone(next);
+      }
+      const supabase = this.supabase;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { data, error } = await supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
+        if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
+        const next = changePrivateLibrary(data ? privateLibrarySchema.parse(data.data) : emptyLibrary(), mutation);
+        if (!data) {
+          const insert = await supabase.from("soundspin_private_libraries").insert({ user_id: userId, data: next, revision: 1 });
+          if (!insert.error) return next;
+          if (insert.error.code === "23505") continue;
+          throw new Error(`Could not save private picks and sets: ${insert.error.message}`);
+        }
+        const update = await supabase.from("soundspin_private_libraries").update({ data: next, revision: data.revision + 1, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("revision", data.revision).select("revision").maybeSingle();
+        if (update.error) throw new Error(`Could not save private picks and sets: ${update.error.message}`);
+        if (update.data) return next;
+      }
+      throw new Error("Your library changed in another tab. Refresh and try again.");
+    });
+    this.libraryWrites.set(userId, operation);
+    void operation.finally(() => { if (this.libraryWrites.get(userId) === operation) this.libraryWrites.delete(userId); }).catch(() => {});
+    return operation;
+  }
+
   /** Reserve a guest room before a join yields, so every socket shares its owner/state. */
   getOrCreateLocalRoom(id: string, create: () => Room): Room {
     if (this.supabase) throw new Error("Supabase rooms must be explicitly created before joining.");
@@ -233,28 +279,52 @@ export class Store {
         role: room.ownerUserId === userId ? "owner" : null,
         listenerCount: listenerCounts[room.id] || 0,
         createdAt: new Date(room.createdAt).toISOString(),
-        updatedAt: new Date(room.createdAt).toISOString()
+        updatedAt: new Date(room.createdAt).toISOString(),
+        description: typeof room.settings.description === "string" ? room.settings.description.trim().slice(0, 240) : undefined
       }));
     }
 
-    const [{ data: favorites, error: favoriteError }, { data: memberships, error: membershipError }] = await Promise.all([
-      this.supabase.from("soundspin_room_favorites").select("room_slug").eq("user_id", userId),
-      this.supabase.from("soundspin_room_members").select("room_slug, role").eq("user_id", userId)
+    const supabase = this.supabase;
+    const allRows = async <T>(table: string, columns: string, filterColumn: string, filterValue: string, orderColumn: string) => {
+      const rows: T[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const { data, error } = await supabase.from(table).select(columns).eq(filterColumn, filterValue).order(orderColumn).range(offset, offset + 499);
+        if (error) throw new Error(`Could not load your room directory: ${error.message}`);
+        rows.push(...(data || []) as unknown as T[]);
+        if (!data || data.length < 500) return rows;
+      }
+    };
+    const [favorites, memberships] = await Promise.all([
+      allRows<{ room_slug: string }>("soundspin_room_favorites", "room_slug", "user_id", userId, "room_slug"),
+      allRows<{ room_slug: string; role: RoomRole }>("soundspin_room_members", "room_slug, role", "user_id", userId, "room_slug")
     ]);
-    if (favoriteError) throw new Error(`Could not load room favorites: ${favoriteError.message}`);
-    if (membershipError) throw new Error(`Could not load room memberships: ${membershipError.message}`);
+    const validSlug = (value: unknown): value is string => typeof value === "string" && /^[a-z0-9-]{3,48}$/.test(value);
+    const favoriteSlugs = new Set(favorites.map((favorite) => favorite.room_slug).filter(validSlug));
+    const roles = new Map(memberships.filter((member) => validSlug(member.room_slug)).map((member) => [member.room_slug, member.role]));
+    const columns = "slug, name, owner_id, is_public, password_hash, settings, created_at, updated_at";
+    type DirectoryRow = { slug: string; name: string; owner_id: string; is_public: boolean; password_hash: string | null; settings: Record<string, unknown> | null; created_at: string; updated_at: string };
+    const lookupSlugs = [...new Set([...favoriteSlugs, ...roles.keys()])];
+    const lookup = async () => {
+      const found: DirectoryRow[] = [];
+      for (let index = 0; index < lookupSlugs.length; index += 100) {
+        const { data, error } = await supabase.from("soundspin_rooms").select(columns).in("slug", lookupSlugs.slice(index, index + 100));
+        if (error) throw new Error(`Could not load your saved rooms: ${error.message}`);
+        found.push(...(data || []) as DirectoryRow[]);
+      }
+      return found;
+    };
+    const [publicResult, owned, saved] = await Promise.all([
+      supabase.from("soundspin_rooms").select(columns).eq("is_public", true).order("updated_at", { ascending: false }).limit(200),
+      allRows<DirectoryRow>("soundspin_rooms", columns, "owner_id", userId, "slug"),
+      lookup()
+    ]);
+    if (publicResult.error) throw new Error(`Could not load public rooms: ${publicResult.error.message}`);
+    const rooms = [...new Map([...(publicResult.data || []) as DirectoryRow[], ...owned, ...saved].map((room) => [room.slug, room])).values()];
 
-    const favoriteSlugs = new Set((favorites || []).map((favorite) => favorite.room_slug));
-    const roles = new Map((memberships || []).map((member) => [member.room_slug, member.role as RoomRole]));
-    const { data: rooms, error } = await this.supabase
-      .from("soundspin_rooms")
-      .select("slug, name, owner_id, is_public, password_hash, created_at, updated_at")
-      .order("updated_at", { ascending: false })
-      .limit(200);
-    if (error) throw new Error(`Could not load rooms: ${error.message}`);
-
-    return (rooms || [])
-      .filter((room) => room.is_public || favoriteSlugs.has(room.slug) || roles.has(room.slug))
+    return rooms
+      // A stale favorite is not permission to disclose a revoked private room.
+      .filter((room) => room.is_public || room.owner_id === userId || roles.has(room.slug))
+      .sort((first, second) => second.updated_at.localeCompare(first.updated_at))
       .map((room): RoomDirectoryEntry => ({
         slug: room.slug,
         name: room.name,
@@ -262,10 +332,11 @@ export class Store {
         isPublic: room.is_public,
         passwordProtected: Boolean(room.password_hash),
         isFavorite: favoriteSlugs.has(room.slug),
-        role: roles.get(room.slug) || null,
+        role: room.owner_id === userId ? "owner" : roles.get(room.slug) || null,
         listenerCount: listenerCounts[room.slug] || 0,
         createdAt: room.created_at,
-        updatedAt: room.updated_at
+        updatedAt: room.updated_at,
+        description: typeof room.settings?.description === "string" ? room.settings.description.trim().slice(0, 240) : undefined
       }));
   }
 
@@ -295,11 +366,11 @@ export class Store {
         exists: true,
         isPublic: room.isPublic ?? true,
         passwordHash: null,
-        role: room.ownerUserId === userId ? "owner" as const : null
+        role: room.ownerUserId === userId ? "owner" as const : room.moderatorUserIds.includes(userId) ? "moderator" as const : room.djRoleUserIds.includes(userId) ? "dj" as const : null
       } : { exists: false, isPublic: false, passwordHash: null, role: null };
     }
     const [{ data: room, error }, { data: membership, error: membershipError }] = await Promise.all([
-      this.supabase.from("soundspin_rooms").select("is_public, password_hash").eq("slug", roomSlug).maybeSingle(),
+      this.supabase.from("soundspin_rooms").select("owner_id, is_public, password_hash").eq("slug", roomSlug).maybeSingle(),
       this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle()
     ]);
     if (error) throw new Error(`Could not check room access: ${error.message}`);
@@ -308,8 +379,35 @@ export class Store {
       exists: Boolean(room),
       isPublic: room?.is_public ?? false,
       passwordHash: room?.password_hash || null,
-      role: (membership?.role as RoomRole | undefined) || null
+      role: room?.owner_id === userId ? "owner" as const : (membership?.role as RoomRole | undefined) || null
     };
+  }
+
+  /** Caller supplies already-admitted live identities; never discover/add recipients here. */
+  async allowedRoomReaders(roomSlug: string, userIds: string[]): Promise<Set<string>> {
+    const ids = [...new Set(userIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 100))];
+    if (!ids.length) return new Set();
+    if (!this.supabase) {
+      const room = this.getRoom(roomSlug);
+      if (!room) return new Set();
+      if (room.isPublic) return new Set(ids);
+      const roles = new Set([room.ownerUserId, ...room.moderatorUserIds, ...room.djRoleUserIds]);
+      return new Set(ids.filter((id) => roles.has(id)));
+    }
+    // Deliberately bypass live-room cache: access can be revoked outside this process.
+    const { data: metadata, error } = await this.supabase.from("soundspin_rooms").select("owner_id, is_public").eq("slug", roomSlug).maybeSingle();
+    if (error) throw new Error(`Could not verify room readers: ${error.message}`);
+    if (!metadata) return new Set();
+    if (metadata.is_public) return new Set(ids);
+    const allowed = new Set(ids.filter((id) => id === metadata.owner_id));
+    const others = ids.filter((id) => id !== metadata.owner_id);
+    for (let offset = 0; offset < others.length; offset += 100) {
+      const batch = others.slice(offset, offset + 100);
+      const { data, error: membershipError } = await this.supabase.from("soundspin_room_members").select("user_id").eq("room_slug", roomSlug).in("user_id", batch);
+      if (membershipError) throw new Error(`Could not verify room readers: ${membershipError.message}`);
+      for (const member of data || []) if (batch.includes(member.user_id)) allowed.add(member.user_id);
+    }
+    return allowed;
   }
 
   async recordRoomMember(roomSlug: string, userId: string) {
@@ -337,8 +435,9 @@ export class Store {
   async updateRoomSettings(
     roomSlug: string,
     userId: string,
-    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess }
+    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string }
   ) {
+    if (update.description !== undefined && update.description.trim().length > 240) throw new Error("Room descriptions can contain at most 240 characters.");
     if (!this.supabase) {
       const room = this.getRoom(roomSlug);
       if (!room || (room.ownerUserId !== userId && !room.moderatorUserIds?.includes(userId))) {
@@ -348,17 +447,17 @@ export class Store {
       if (update.isPublic !== undefined) room.isPublic = update.isPublic;
       if (update.passwordHash !== undefined) room.passwordProtected = Boolean(update.passwordHash);
       if (update.djAccess !== undefined) room.settings.djAccess = update.djAccess;
+      if (update.description !== undefined) room.settings.description = update.description.trim();
       await this.saveRoom(room);
       return room;
     }
-    const { data: membership, error: membershipError } = await this.supabase
-      .from("soundspin_room_members")
-      .select("role")
-      .eq("room_slug", roomSlug)
-      .eq("user_id", userId)
-      .maybeSingle();
+    const [{ data: membership, error: membershipError }, { data: metadata, error: metadataError }] = await Promise.all([
+      this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle(),
+      this.supabase.from("soundspin_rooms").select("owner_id, settings").eq("slug", roomSlug).maybeSingle()
+    ]);
     if (membershipError) throw new Error(`Could not verify room role: ${membershipError.message}`);
-    if (!membership || !["owner", "moderator"].includes(membership.role)) {
+    if (metadataError) throw new Error(`Could not verify room owner: ${metadataError.message}`);
+    if (metadata?.owner_id !== userId && (!membership || !["owner", "moderator"].includes(membership.role))) {
       throw new Error("Only the owner or a moderator can change room settings.");
     }
 
@@ -366,9 +465,8 @@ export class Store {
     if (update.name !== undefined) values.name = update.name;
     if (update.isPublic !== undefined) values.is_public = update.isPublic;
     if (update.passwordHash !== undefined) values.password_hash = update.passwordHash;
-    if (update.djAccess !== undefined) {
-      const cachedSettings = (await this.loadRoom(roomSlug))?.settings || {};
-      values.settings = { ...cachedSettings, djAccess: update.djAccess };
+    if (update.djAccess !== undefined || update.description !== undefined) {
+      values.settings = { ...(metadata?.settings || {}), ...(update.djAccess !== undefined ? { djAccess: update.djAccess } : {}), ...(update.description !== undefined ? { description: update.description.trim() } : {}) };
     }
     const { data, error } = await this.supabase
       .from("soundspin_rooms")

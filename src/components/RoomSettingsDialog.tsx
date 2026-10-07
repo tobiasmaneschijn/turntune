@@ -25,6 +25,7 @@ export function RoomSettingsDialog({
   onNotice: (notice: string) => void;
 }) {
   const [name, setName] = useState(snapshot.room.name);
+  const [description, setDescription] = useState(snapshot.room.settings.description || "");
   const [isPublic, setIsPublic] = useState(snapshot.room.isPublic);
   const [djAccess, setDjAccess] = useState<"everyone" | "roles">(snapshot.room.settings.djAccess || "everyone");
   const [passwordMode, setPasswordMode] = useState<"unchanged" | "replace" | "remove">("unchanged");
@@ -37,7 +38,7 @@ export function RoomSettingsDialog({
     event.preventDefault();
     setSaving(true);
     setError("");
-    const body: { name: string; isPublic: boolean; djAccess: "everyone" | "roles"; password?: string | null } = { name, isPublic, djAccess };
+    const body: { name: string; description: string; isPublic: boolean; djAccess: "everyone" | "roles"; password?: string | null } = { name, description: description.trim(), isPublic, djAccess };
     if (passwordMode === "replace") body.password = password;
     if (passwordMode === "remove") body.password = null;
     try {
@@ -73,7 +74,7 @@ export function RoomSettingsDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl room-settings-dialog">
         <form className="grid gap-5" autoComplete="off" onSubmit={save}>
           <DialogHeader>
             <DialogTitle>Room settings</DialogTitle>
@@ -85,6 +86,11 @@ export function RoomSettingsDialog({
               <div className="grid gap-2">
                 <Label htmlFor="settings-name">Room name</Label>
                 <Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="settings-description">Description <span className="font-normal text-muted-foreground">Optional</span></Label>
+                <Input id="settings-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" placeholder="What do you like listening to here?" />
+                <p id="settings-description-help" className="room-description-help">Shown in the directory. Plain text, up to 240 characters.</p>
               </div>
               <div className="switch-row">
                 <span><Globe2 /><span><strong>Public room</strong><small>List this room in the directory</small></span></span>

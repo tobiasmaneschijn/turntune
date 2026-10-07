@@ -8,9 +8,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
+import { mountPrivateLibraryRoutes } from "./library-routes.js";
+import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./chat-history.js";
+import { createChatRelay } from "./chat-relay.js";
+import { resolveChatMediaUrl } from "./chat-media.js";
+import { withPublicRoomPreview } from "./directory-preview.js";
+import { createSavedSetResolver, resolveSavedSet, SetImportRegistry } from "./saved-set.js";
 import { validateServerConfig } from "./config.js";
 import { safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
 import { roomPresence, uniqueUsers } from "./presence.js";
+import { activeAnnouncement, announcementSchema, AnnouncementExpiryRegistry, changeAnnouncement } from "./announcements.js";
 import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
 import { AppleMusicApi } from "./apple-music.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
@@ -24,8 +31,10 @@ import {
 } from "./invite-signup.js";
 import {
   advanceRadio,
+  appendQueueSet,
   canJoinDjQueue,
   GracePeriodRegistry,
+  QueueUndoRegistry,
   normalizeRadioState,
   privateQueue,
   removeDj,
@@ -74,6 +83,13 @@ const activeSocketActions = new Set<Promise<void>>();
 let shuttingDown = false;
 const DJ_DISCONNECT_GRACE_MS = 60_000;
 const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
+const queueUndo = new QueueUndoRegistry();
+const setImports = new SetImportRegistry();
+const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi });
+const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
+  await store.saveRoom(room);
+  broadcast(room);
+});
 const youtubeSearchCache = new Map<string, {
   expiresAt: number;
   results: YouTubeSearchResult[];
@@ -168,6 +184,7 @@ const queueNextSchema = z.object({
 });
 
 const vibeVoteSchema = z.object({
+  trackId: z.string().min(1).optional(),
   value: z.union([z.literal(-1), z.literal(0), z.literal(1)])
 });
 
@@ -237,6 +254,7 @@ const roomCreateSchema = z.object({
 
 const roomSettingsSchema = z.object({
   name: z.string().trim().min(1).max(48).optional(),
+  description: z.string().trim().max(240).optional(),
   isPublic: z.boolean().optional(),
   password: z.union([z.string().max(128), z.null()]).optional(),
   djAccess: z.enum(["everyone", "roles"]).optional()
@@ -409,6 +427,50 @@ async function getApiAdminUserId(request: express.Request): Promise<
   return { ok: true, userId };
 }
 
+mountPrivateLibraryRoutes(app, store, getApiUserId);
+async function canWriteRoomChat(userId: string, roomSlug: string) {
+  const access = await store.getRoomAccess(roomSlug, userId);
+  return access.exists && (access.isPublic || Boolean(access.role)) &&
+    [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
+}
+const chatRelay = createChatRelay({
+  getMembership,
+  canWriteRoom: canWriteRoomChat,
+  // The standalone JSON mode has no durable chat table. Configured production
+  // always checks stored IDs and propagates lookup failure before broadcasting.
+  loadMessageById: id => authEnabled ? loadStoredChatMessage(supabaseAdmin, id) : Promise.resolve(null),
+  loadReply: (roomId, messageId) => loadChatReply(supabaseAdmin, roomId, messageId),
+  resolveMediaUrl: async (roomId, storagePath, userId) => (await resolveChatMediaUrl(supabaseAdmin, roomId, storagePath, userId)).url,
+  emitToRoom: async (roomId, event, payload, origin) => {
+    const recipients = [...(roomUsers.get(roomId) || [])];
+    const [allowed, canWrite] = await Promise.all([
+      store.allowedRoomReaders(roomId, recipients.map(([, user]) => user.id)),
+      canWriteRoomChat(origin.userId, roomId)
+    ]);
+    const sender = getMembership(origin.socketId);
+    if (!canWrite || !allowed.has(origin.userId) || sender?.room.id !== roomId || sender.user.id !== origin.userId) {
+      throw new Error("This room session has ended. Join again before sending chat.");
+    }
+    for (const [socketId, user] of recipients) {
+      const current = getMembership(socketId);
+      if (allowed.has(user.id) && current?.room.id === roomId && current.user.id === user.id) io.to(socketId).emit(event, payload);
+    }
+  }
+});
+mountChatHistoryRoutes(app, {
+  client: supabaseAdmin,
+  getUserId: getApiUserId,
+  canWriteRoom: canWriteRoomChat,
+  getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
+  canReadRoom: async (userId, roomSlug) => {
+    const access = await store.getRoomAccess(roomSlug, userId);
+    if (!access.exists || (!access.isPublic && !access.role)) return false;
+    if (access.isPublic && !access.passwordHash) return true;
+    // Protected/private history requires the same live admission as the room.
+    return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
+  }
+});
+
 app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
   response.set("Cache-Control", "no-store");
   if (!signupAdmin || !signupInvitePassword) {
@@ -469,8 +531,9 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
 
 /** Build the personalized state sent to one listener. */
 function snapshot(room: Room, userId: string): RoomSnapshot {
+  announcementExpiries.watch(room);
   return {
-    room: roomForListener(room, userId),
+    room: { ...roomForListener(room, userId), announcement: activeAnnouncement(room.announcement) },
     // Presence is socket-based internally, but listeners are unique accounts.
     users: uniqueUsers(roomUsers.get(room.id)?.values() || []),
     djUsers: [...(roomDjUsers.get(room.id)?.values() || [])]
@@ -638,6 +701,9 @@ io.on("connection", (socket) => {
       const access = await store.getRoomAccess(roomId, user.id);
       if (authEnabled && !access.exists) {
         return reply?.({ ok: false, error: "That room does not exist." });
+      }
+      if (authEnabled && !access.isPublic && !access.role) {
+        return reply?.({ ok: false, error: "You no longer have access to this private room." });
       }
       if (access.passwordHash && !passwordMatches(password, access.passwordHash)) {
         return reply?.({
@@ -860,19 +926,78 @@ io.on("connection", (socket) => {
     });
   });
 
+  for (const kind of ["message", "reaction", "typing"] as const) {
+    onAction(`chat:${kind}`, async (payload, reply) => { reply?.(await chatRelay.handle(socket.id, kind, payload)); });
+  }
+
+  onAction("queue:set-add", async (payload, reply) => {
+    const original = getMembership(socket.id);
+    const parsed = z.object({ setId: z.string().uuid(), requestId: z.string().uuid() }).safeParse(payload);
+    if (!original || !parsed.success) return reply?.({ ok: false, error: "Invalid saved set." });
+    if (!canJoinDjQueue(original.room, original.user.id) || !original.room.djQueueUserIds.includes(original.user.id)) {
+      return reply?.({ ok: false, error: "Join the DJ lineup with permission before adding a set." });
+    }
+    const result = await setImports.run(original.room, original.user.id, parsed.data.requestId, parsed.data.setId, async markCommitted => {
+      const library = await store.getPrivateLibrary(original.user.id);
+      const set = library.sets.find(value => value.id === parsed.data.setId);
+      if (!set) throw new Error("This saved set is no longer in your private library.");
+      const resolved = await resolveSavedSet(set.tracks, resolveSavedRecording);
+      const current = getMembership(socket.id);
+      if (!socket.connected || !current || current.room !== original.room || current.user.id !== original.user.id ||
+          !canJoinDjQueue(current.room, current.user.id) || !current.room.djQueueUserIds.includes(current.user.id)) {
+        throw new Error("Your room or DJ permission changed. Try again from your current room.");
+      }
+      const appended = resolved.tracks.length ? appendQueueSet(current.room, current.user, resolved.tracks) : { added: 0, skipped: [], started: false };
+      const outcome = { ...appended, skipped: [...resolved.skipped, ...appended.skipped] };
+      markCommitted(outcome);
+      return outcome;
+    });
+    // Retried ACKs save the committed result again without importing it twice.
+    await store.saveRoom(original.room);
+    broadcast(original.room);
+    reply?.({ ok: true, ...result });
+  });
+
   onAction("queue:remove", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = queueTrackSchema.safeParse(payload);
     if (!membership || !parsed.success) {
       return reply?.({ ok: false, error: "Invalid queue item." });
     }
-    const queue = privateQueue(membership.room, membership.user.id);
-    const index = queue.findIndex((track) => track.id === parsed.data.trackId);
-    if (index < 0) return reply?.({ ok: false, error: "Track not found." });
-    queue.splice(index, 1);
-    await store.saveRoom(membership.room);
+    const transaction = queueUndo.beginRemove(membership.room, membership.user.id, parsed.data.trackId);
+    try { await store.saveRoom(membership.room); }
+    catch {
+      const rollback = transaction.rollback();
+      broadcast(membership.room);
+      void store.saveRoom(membership.room).catch(error => console.error("Queue removal reconciliation failed", error));
+      return reply?.({ ok: false, error: rollback.status === "rolled-back"
+        ? "Removal could not be saved. Your waiting track was restored; try again."
+        : "Removal could not be saved and the queue changed meanwhile. The current room state is shown; check it before trying again." });
+    }
+    transaction.commit();
     broadcast(membership.room);
-    reply?.({ ok: true });
+    reply?.({ ok: true, undo: transaction.receipt });
+  });
+
+  onAction("queue:undo", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = z.object({ token: z.string().uuid() }).safeParse(payload);
+    if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid Undo request." });
+    const transaction = queueUndo.beginRestore(membership.room, membership.user.id, parsed.data.token);
+    try { await store.saveRoom(membership.room); }
+    catch {
+      const rollback = transaction.rollback();
+      broadcast(membership.room);
+      void store.saveRoom(membership.room).catch(error => console.error("Queue Undo reconciliation failed", error));
+      return reply?.({ ok: false, error: rollback.status === "rolled-back"
+        ? rollback.undoAvailable ? "Undo could not be saved. Your queue is unchanged; try Undo again before it expires."
+          : "Undo could not be saved and its receipt expired. Your current queue is shown."
+        : "Undo could not be saved and that item changed or played meanwhile. The current room state is shown; check it before adding again." });
+    }
+    transaction.commit();
+    broadcast(membership.room);
+    const currentIndex = privateQueue(membership.room, membership.user.id).findIndex(track => track.id === transaction.result.track.id);
+    reply?.({ ok: true, ...(currentIndex >= 0 ? { position: currentIndex + 1 } : {}) });
   });
 
   onAction("queue:play-next", async (payload, reply) => {
@@ -943,12 +1068,33 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
+  onAction("room:announcement", async (payload, reply) => {
+    const membership = getMembership(socket.id);
+    const parsed = announcementSchema.safeParse(payload);
+    if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid room note." });
+    const previous = membership.room.announcement;
+    let next;
+    try {
+      next = changeAnnouncement(membership.room, membership.user.id, parsed.data);
+      await store.saveRoom(membership.room);
+    } catch (error) {
+      if (next !== undefined && membership.room.announcement === next) membership.room.announcement = previous;
+      return reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not save the room note." });
+    }
+    announcementExpiries.watch(membership.room);
+    broadcast(membership.room);
+    reply?.({ ok: true });
+  });
+
   onAction("vibe:vote", async (payload, reply) => {
     const membership = getMembership(socket.id);
     const parsed = vibeVoteSchema.safeParse(payload);
     const track = membership?.room.playback.track;
     if (!membership || !track || !parsed.success) {
       return reply?.({ ok: false, error: "There is no track to vote on." });
+    }
+    if (parsed.data.trackId && parsed.data.trackId !== track.id) {
+      return reply?.({ ok: false, error: "The track changed. React to the current track instead." });
     }
     if (track.addedBy.id === membership.user.id) {
       return reply?.({ ok: false, error: "You cannot vote on a track you added." });
@@ -1172,7 +1318,7 @@ app.get("/api/rooms", async (request, response) => {
       [...roomUsers.entries()].map(([slug, users]) => [slug, uniqueUsers(users.values()).length])
     );
     const rooms = await store.listRooms(userId, listenerCounts);
-    response.json({ rooms });
+    response.json({ rooms: rooms.map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
   } catch (error) {
     response.status(500).json({ error: error instanceof Error ? error.message : "Could not load rooms." });
   }
@@ -1228,7 +1374,8 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
       name: parsed.data.name,
       isPublic: parsed.data.isPublic,
       passwordHash: parsed.data.password === undefined ? undefined : hashRoomPassword(parsed.data.password),
-      djAccess: parsed.data.djAccess
+      djAccess: parsed.data.djAccess,
+      description: parsed.data.description
     });
     if (room) {
       if (room.settings.djAccess === "roles") {
@@ -1742,6 +1889,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   djEvictions.clear();
+  announcementExpiries.clear();
   const deadline = setTimeout(() => process.exit(1), 10_000);
   deadline.unref();
   try {

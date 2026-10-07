@@ -20,7 +20,7 @@ interface MusicKitInstance {
 }
 
 interface MusicKitGlobal {
-  PlaybackStates?: { completed: number; ended: number; stopped: number };
+  PlaybackStates?: { completed: number; ended: number; stopped: number; playing: number; paused: number };
   configure(options: { developerToken: string; storefrontId: string; app: { name: string; build: string } }): Promise<unknown> | unknown;
   getInstance(): MusicKitInstance;
 }
@@ -208,8 +208,10 @@ export function AppleMusicPlayer({
       if (!music || loadedTrackRef.current !== `${track.id}:${mapping.providerId}`) return;
       const currentTime = Number(music.currentPlaybackTime || 0);
       const duration = Number(music.currentPlaybackDuration || track.durationMs && track.durationMs / 1000 || 0);
-      onStatusRef.current({ ready: true, buffering: playback.playing && currentTime === 0, currentTime, duration });
       const states = window.MusicKit?.PlaybackStates;
+      const playing = states && music.playbackState === states.playing ? true
+        : states && music.playbackState === states.paused ? false : undefined;
+      onStatusRef.current({ ready: true, buffering: playback.playing && currentTime === 0, currentTime, duration, playing, trackId: track.id });
       const stopped = Boolean(states && [states.completed, states.ended, states.stopped].includes(music.playbackState as number)) ||
         music.playbackState === "completed" || music.playbackState === "stopped" || music.playbackState === "ended";
       if (endTrackerRef.current.observe(`${track.id}:${mapping.providerId}:${playback.position}:${playback.updatedAt}`,

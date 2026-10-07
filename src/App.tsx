@@ -1,47 +1,24 @@
-import { FormEvent, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { NowPlaying, type NowPlayingControls, type NowPlayingLocalState } from "./components/NowPlaying";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toast } from "sonner";
-import {
-  Check,
-  ChevronDown,
-  Clock3,
-  GripVertical,
-  Heart,
-  House,
-  ListMusic,
-  LayoutDashboard,
-  LogOut,
-  Maximize2,
-  Minimize2,
-  RefreshCw,
-  Search,
-  Settings,
-  Shield,
-  Trash2,
-  ThumbsDown,
-  Volume2,
-  X
-} from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import { Avatar } from "./components/Avatar";
+import { MusicRail, type MusicRailControls } from "./components/MusicRail";
 import { LandingPage } from "./components/LandingPage";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { PanelErrorBoundary } from "./components/AppErrorBoundary";
 import { Brand } from "./components/app-primitives";
 import { AppVersion } from "./components/AppVersion";
-import {
-  CopyIcon,
-  MessageIcon,
-  PauseIcon,
-  PlayIcon,
-  PlusIcon,
-  SkipIcon,
-  UsersIcon
-} from "./components/Icons";
-import { SoundCloudPlayer } from "./components/SoundCloudPlayer";
-import { SpotifyPlayer } from "./components/SpotifyPlayer";
-import { AppleMusicPlayer } from "./components/AppleMusicPlayer";
-import { YouTubePlayer, type PlayerStatus } from "./components/YouTubePlayer";
+import { RoomHeader } from "./components/RoomHeader";
+import { RoomWorkspace } from "./components/RoomWorkspace";
+import { RoomMiniPlayer } from "./components/RoomMiniPlayer";
+import { ListeningChecklist } from "./components/ListeningChecklist";
+import { RoomAnnouncementBanner } from "./components/RoomAnnouncementBanner";
+import { RoomPeopleDialog } from "./components/RoomPeopleDialog";
+import { DeferredDialog } from "./components/DeferredDialog";
+import { MessageIcon, UsersIcon } from "./components/Icons";
 import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
@@ -51,79 +28,31 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./components/ui/input-group";
 import { Label } from "./components/ui/label";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./components/ui/empty";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup, useGroupRef } from "./components/ui/resizable";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
-import { Slider } from "./components/ui/slider";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { useGroupRef } from "./components/ui/resizable";
 import type { ChatMessage } from "./chat/model";
-import { loadChatHistory, saveChatMessage } from "./chat/persistence";
-import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
+import { createChatHistorySource } from "./chat/history-reader";
+import { createSocketChatSessionFactory } from "./chat/socket-transport";
+import { clearUserChatDrafts } from "./chat/drafts";
+import { useRoomLayoutPresets } from "./hooks/use-room-layout-presets";
+import { rememberNavigationFocus, useRouteFocus } from "./hooks/use-route-focus";
+import { useRoomNotificationMuted } from "./hooks/use-room-notifications";
+import { notifyWithAttention } from "./notifications";
 import { socket } from "./socket";
 import { useAppAuth } from "./hooks/use-app-auth";
 import { useRoomConnection } from "./hooks/use-room-connection";
-import { requestSocketAction } from "./socket-request";
+import { useMediaQuery } from "./hooks/use-media-query";
 import { readStoredValue, storeValue } from "./lib/browser-storage";
+import { recordRoomVisit } from "./lib/room-visits";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
-import type { Provider, RoomSnapshot, SoundSpinProfile, Track, User } from "./types";
+import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
 
 const AdminDashboard = lazy(() => import("./components/AdminDashboard").then((module) => ({ default: module.AdminDashboard })));
 const FeedbackButton = lazy(() => import("./components/FeedbackDialog").then((module) => ({ default: module.FeedbackButton })));
 const ProfilePage = lazy(() => import("./components/ProfilePage").then((module) => ({ default: module.ProfilePage })));
-const RoomSettingsDialog = lazy(() => import("./components/RoomSettingsDialog").then((module) => ({ default: module.RoomSettingsDialog })));
-const UserSettingsDialog = lazy(() => import("./components/UserSettingsDialog").then((module) => ({ default: module.UserSettingsDialog })));
-
-type SearchProvider = Provider;
-
-const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
-const ROOM_LAYOUT_STORAGE_KEY = "soundspin-room-layout";
-
-type RoomPanelLayout = Record<"radio" | "player" | "chat", number>;
-
-function roomPanelPreset(compact: boolean): RoomPanelLayout {
-  return compact
-    ? { radio: 16.5, player: 22.5, chat: 61 }
-    : { radio: 16.5, player: 46.5, chat: 37 };
-}
-
-function readRoomPanelLayout(compact: boolean): RoomPanelLayout {
-  try {
-    const value = readStoredValue(`${ROOM_LAYOUT_STORAGE_KEY}:${compact ? "chat" : "player"}`);
-    if (!value) return roomPanelPreset(compact);
-    const parsed = JSON.parse(value) as Partial<RoomPanelLayout>;
-    if ([parsed.radio, parsed.player, parsed.chat].every((size) => typeof size === "number" && size > 0)) {
-      return parsed as RoomPanelLayout;
-    }
-  } catch {
-    // Fall back to the tuned presets if an old saved layout is invalid.
-  }
-  return roomPanelPreset(compact);
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() => matchMedia(query).matches);
-
-  useEffect(() => {
-    const mediaQuery = matchMedia(query);
-    const update = () => setMatches(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener("change", update);
-    return () => mediaQuery.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
-
+const loadRoomSettings = () => import("./components/RoomSettingsDialog").then((module) => ({ default: module.RoomSettingsDialog }));
 function randomId() {
   return crypto.randomUUID();
-}
-
-function showSystemNotification(title: string, body: string) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const notification = new Notification(title, { body });
-  window.setTimeout(() => notification.close(), 7_000);
 }
 
 function slugify(value: string) {
@@ -165,55 +94,19 @@ function readProfile(): User {
   return { id: randomId(), name: "", avatarSeed: randomId(), avatarKey: "pulse", isAppAdmin: false };
 }
 
-function youtubeId(value: string) {
-  try {
-    const url = new URL(value);
-    if (url.hostname === "youtu.be") return url.pathname.slice(1).split("/")[0];
-    if (url.hostname.endsWith("youtube.com")) {
-      if (url.pathname.startsWith("/shorts/")) return url.pathname.split("/")[2];
-      return url.searchParams.get("v");
-    }
-  } catch {
-    if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
-  }
-  return null;
-}
-
-function providerLabel(provider: Provider) {
-  if (provider === "soundcloud") return "SoundCloud";
-  if (provider === "spotify") return "Spotify";
-  if (provider === "apple") return "Apple Music";
-  return "YouTube";
-}
-
-function readSearchProvider(): SearchProvider {
-  const provider = readStoredValue(SEARCH_PROVIDER_STORAGE_KEY);
-  return provider === "soundcloud" || provider === "spotify" || provider === "apple"
-    ? provider
-    : "youtube";
-}
-
-function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
-  return track.provider === "youtube"
-    ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`
-    : track.artworkUrl;
-}
-
-function TrackArtwork({ track, compact = false }: { track: Track; compact?: boolean }) {
-  const artwork = trackArtworkUrl(track);
-  return artwork
-    ? <img src={compact && track.provider === "youtube" ? artwork.replace("hqdefault", "default") : artwork} alt="" />
-    : <span className={`provider-artwork ${track.provider}`}>{track.provider === "soundcloud" ? "SC" : "♪"}</span>;
-}
-
 export function App() {
   const [userSettings, setUserSettings] = useState<SoundSpinUserSettings>(readUserSettings);
   const compactPlayer = userSettings.playback.compactPlayer;
   const roomPanelGroupRef = useGroupRef();
-  const previousCompactPlayerRef = useRef(compactPlayer);
+  const roomLayouts = useRoomLayoutPresets(roomPanelGroupRef);
+  const musicControls = useRef<MusicRailControls>(null);
+  const playerControls = useRef<NowPlayingControls>(null);
+  const chatControls = useRef<RealtimeChatHandle>(null);
+  const [localPlayback, setLocalPlayback] = useState<NowPlayingLocalState>({ providerName: "Player", providerState: "loading", audioState: "loading", statusText: "Preparing local playback…", statusTone: "pending", muted: false });
   const [mobileRoomPane, setMobileRoomPane] = useState<"radio" | "player" | "chat">("player");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const isNarrowRoomLayout = useMediaQuery("(max-width: 1024px)");
+  const isTabletDualRoomLayout = useMediaQuery("(min-width: 900px) and (max-width: 1024px) and (min-height: 560px)");
   const [profile, setProfile] = useState(readProfile);
   const [roomId, setRoomId] = useState(getRoomId);
   const [profilePageId, setProfilePageId] = useState(getProfilePageId);
@@ -228,7 +121,32 @@ export function App() {
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const previousDjUserIdRef = useRef<string | null>(null);
+  const djBaselineRef = useRef("");
   const { auth, setAuth, retryAuth } = useAppAuth();
+  const draftOwnerRef = useRef(auth.session?.user.id);
+  const [roomNotificationsMuted] = useRoomNotificationMuted(profile.id, roomId || "");
+  const routeContext = adminPage ? "admin" : profilePageId ? `profile:${profilePageId}` : roomId ? `room:${roomId}` : "lobby";
+  const navigationContext = `${auth.session?.user.id || "guest"}:${routeContext}`;
+  useRouteFocus(navigationContext, navigationContext);
+  const recordedVisitRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!roomId) { recordedVisitRef.current = null; return; }
+    const userId = auth.session?.user.id;
+    const key = `${userId}:${roomId}`;
+    if (connected && snapshot?.room.id === roomId && userId === profile.id && recordedVisitRef.current !== key) {
+      recordRoomVisit(userId, roomId);
+      recordedVisitRef.current = key;
+    }
+  }, [roomId, connected, snapshot?.room.id, auth.session?.user.id, profile.id]);
+  const focusMusicSearch = () => { setMobileRoomPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.focusSearch())); };
+  const openMusicQueue = () => { setMobileRoomPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.openQueue())); };
+  const focusChat = () => { setMobileRoomPane("chat"); requestAnimationFrame(() => requestAnimationFrame(() => chatControls.current?.focusComposer())); };
+
+  useEffect(() => {
+    const nextOwner = auth.session?.user.id;
+    if (draftOwnerRef.current && draftOwnerRef.current !== nextOwner) clearUserChatDrafts(draftOwnerRef.current);
+    draftOwnerRef.current = nextOwner;
+  }, [auth.session?.user.id]);
 
   const changeUserSettings = useCallback((next: SoundSpinUserSettings) => {
     setUserSettings(next);
@@ -246,11 +164,10 @@ export function App() {
     return () => window.removeEventListener("soundspin:theme-change", syncTheme);
   }, []);
 
-  useEffect(() => {
-    if (previousCompactPlayerRef.current === compactPlayer) return;
-    previousCompactPlayerRef.current = compactPlayer;
-    roomPanelGroupRef.current?.setLayout(readRoomPanelLayout(compactPlayer));
-  }, [compactPlayer, roomPanelGroupRef]);
+  const resetRoomLayout = () => {
+    roomLayouts.resetLayout();
+    setNotice("Room layout reset");
+  };
 
   useEffect(() => {
     setChatUnreadCount(0);
@@ -258,15 +175,21 @@ export function App() {
 
   useEffect(() => {
     const djUserId = snapshot?.room.djUserId || null;
+    const context = `${profile.id}:${roomId || ""}`;
+    if (!snapshot || djBaselineRef.current !== context) {
+      djBaselineRef.current = snapshot ? context : "";
+      previousDjUserIdRef.current = djUserId;
+      return;
+    }
     if (
       djUserId === profile.id &&
       previousDjUserIdRef.current !== profile.id &&
       userSettings.notifications.djTurn
     ) {
-      showSystemNotification("You’re on deck", "Your Lydman DJ turn has started.");
+      notifyWithAttention({ key: `${context}:dj-turn:${snapshot.room.playback.track?.id || snapshot.room.playback.updatedAt}`, title: "You’re on air", body: "Your Lydman DJ turn has started.", backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted, onInApp: () => setNotice("You’re on air · your DJ turn has started") });
     }
     previousDjUserIdRef.current = djUserId;
-  }, [snapshot?.room.djUserId, profile.id, userSettings.notifications.djTurn]);
+  }, [snapshot?.room.djUserId, profile.id, roomId, userSettings.notifications.djTurn, userSettings.notifications.backgroundOnly, roomNotificationsMuted]);
 
   useEffect(() => {
     const authUser = auth.session?.user;
@@ -347,7 +270,10 @@ export function App() {
 
   useEffect(() => {
     if (!notice) return;
-    toast(notice, { id: "lydman-notice" });
+    const options = { id: `lydman-notice:${notice}`, duration: 5000 };
+    if (/could not|unable|failed|error|unavailable|not allowed|denied/i.test(notice)) toast.error(notice, options);
+    else if (/copied|reset|saved|added|removed|left|joined|updated/i.test(notice)) toast.success(notice, options);
+    else toast.info(notice, options);
     const timer = window.setTimeout(() => setNotice(""), 2600);
     return () => window.clearTimeout(timer);
   }, [notice]);
@@ -382,6 +308,7 @@ export function App() {
   });
 
   const openRoom = (id: string, password?: string) => {
+    rememberNavigationFocus(navigationContext);
     setAdminPage(false);
     setProfilePageId(null);
     setSnapshot(null);
@@ -405,6 +332,7 @@ export function App() {
   };
 
   const goHome = () => {
+    rememberNavigationFocus(navigationContext);
     socket.disconnect();
     setSnapshot(null);
     setRoomPassword("");
@@ -451,11 +379,13 @@ export function App() {
   }
 
   const openProfile = (userId: string) => {
+    rememberNavigationFocus(navigationContext);
     history.pushState({ from: location.pathname }, "", `/profile/${userId}`);
     setProfilePageId(userId);
   };
 
   const openAdmin = () => {
+    rememberNavigationFocus(navigationContext);
     socket.disconnect();
     setSnapshot(null);
     setRoomId(null);
@@ -596,26 +526,19 @@ export function App() {
     snapshot.room.moderatorUserIds.includes(profile.id);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="app-brand-stack">
-          <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={goHome} title="Back to rooms" aria-label="Back to rooms"><Brand /></Button>
-          <AppVersion />
-        </div>
-        <div className="room-heading">
-          <div>
-            <strong>{snapshot.room.name}</strong>
-            <small><span className="live-dot" /> {snapshot.users.length} {snapshot.users.length === 1 ? "listener" : "listeners"}</small>
-          </div>
-        </div>
-        <div className="header-actions">
-          <Button variant="ghost" size="sm" onClick={goHome} title="Room directory"><House /><span>Rooms</span></Button>
-          <div className="header-tool-group">
-          {profile.isAppAdmin && <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-          <Suspense fallback={null}><FeedbackButton
-            userId={profile.id}
-            roomSlug={snapshot.room.id}
-            diagnosticContext={{
+    <main className={`app-shell ${connected ? "" : "room-is-reconnecting"}`}>
+      <RoomHeader roomName={snapshot.room.name} roomSlug={snapshot.room.id} listenerCount={snapshot.users.length}
+        currentUser={profile} onHome={goHome} onSettings={() => setUserSettingsOpen(true)}
+        onRoomSettings={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id) ? () => setRoomSettingsOpen(true) : undefined}
+        onAdmin={profile.isAppAdmin ? openAdmin : undefined} onProfile={() => openProfile(profile.id)}
+        onSignOut={auth.enabled ? () => { void auth.client?.auth.signOut(); } : undefined}
+        onResetLayout={resetRoomLayout} onNotice={setNotice}
+        layoutPreset={roomLayouts.layoutPreset} onLayoutPresetChange={roomLayouts.onLayoutPresetChange}
+        onFocusSearch={focusMusicSearch} onOpenQueue={openMusicQueue} onOpenPlayer={() => setMobileRoomPane("player")}
+        onToggleMute={() => playerControls.current?.toggleMute()} muted={userSettings.playback.defaultVolume === 0} onFocusChat={focusChat}
+        connected={connected} onReconnect={retryRoom}
+        participants={snapshot.users} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={openProfile}
+        diagnosticContext={{
               surface: "room",
               roomRole: snapshot.room.ownerUserId === profile.id
                 ? "owner"
@@ -630,63 +553,25 @@ export function App() {
                 ? snapshot.room.playback.playing ? "playing" : "paused"
                 : "idle",
               preferredPlayback: userSettings.playback.preference
-            }}
-          /></Suspense>
-          <Button variant="ghost" size="icon" onClick={() => setUserSettingsOpen(true)} title="Settings" aria-label="Settings"><Settings /></Button>
-          {(snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)) && (
-            <Button variant="ghost" size="icon" onClick={() => setRoomSettingsOpen(true)} title="Room settings" aria-label="Room settings"><Shield /></Button>
-          )}
-          </div>
-          <ThemeToggle compact />
-          <Button
-            variant="outline"
-            size="sm"
-            className="invite-button"
-            aria-label="Copy room invite link"
-            onClick={() => {
-              void navigator.clipboard.writeText(location.href)
-                .then(() => setNotice("Invite link copied"))
-                .catch(() => setNotice("Could not copy the link. Copy the room address from your browser."));
-            }}
-          >
-            <CopyIcon size={17} />
-            <span>Invite</span>
-          </Button>
-          <Button variant="ghost" size="icon" className="header-profile-button" onClick={() => openProfile(profile.id)} title="Open your profile" aria-label="Open your profile">
-            <Avatar user={profile} size={30} />
-          </Button>
-          {auth.enabled && (
-            <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={() => void auth.client?.auth.signOut()}>
-              <LogOut />
-            </Button>
-          )}
-        </div>
-      </header>
+        }} />
 
-      <section className={`room-layout ${compactPlayer ? "compact-player-layout" : ""}`}>
-        <ResizablePanelGroup
-          className="room-panels"
-          defaultLayout={readRoomPanelLayout(compactPlayer)}
+      <RoomWorkspace compact={compactPlayer} value={mobileRoomPane} onValueChange={setMobileRoomPane} unreadCount={chatUnreadCount}
+          defaultLayout={roomLayouts.defaultLayout}
           groupRef={roomPanelGroupRef}
-          orientation="horizontal"
-          onLayoutChanged={(layout, meta) => {
-            if (meta.isUserInteraction) {
-              storeValue(`${ROOM_LAYOUT_STORAGE_KEY}:${compactPlayer ? "chat" : "player"}`, JSON.stringify(layout));
-            }
-          }}
-        >
-          <ResizablePanel className="room-panel room-panel-radio" id="radio" minSize="260px" maxSize="340px" data-active={mobileRoomPane === "radio"}>
-            <MusicRail
+          onLayoutChanged={roomLayouts.onLayoutChanged}
+          miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={userSettings.playback.defaultVolume === 0} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
+          listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
+          roomNotice={<RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} />}
+          radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUserId={profile.id}
+              connected={connected}
               accessToken={auth.session?.access_token}
               setNotice={setNotice}
-            />
-          </ResizablePanel>
-          <ResizableHandle className="room-resize-handle" withHandle />
-          <ResizablePanel className="room-panel room-panel-player" id="player" minSize="340px" data-active={mobileRoomPane === "player"}>
-            <div className="player-column">
+              controlsRef={musicControls}
+            />}
+          player={<div className="player-column">
               <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Player"><NowPlaying
                 key={`${snapshot.room.id}:${profile.id}`}
                 snapshot={snapshot}
@@ -703,61 +588,28 @@ export function App() {
                 onCloseSettings={() => setUserSettingsOpen(false)}
                 userSettings={userSettings}
                 onUserSettingsChange={changeUserSettings}
+                roomConnected={connected}
+                onOpenSettings={() => setUserSettingsOpen(true)}
+                controlsRef={playerControls} onLocalStateChange={setLocalPlayback}
               /></PanelErrorBoundary>
-            </div>
-          </ResizablePanel>
-          <ResizableHandle className="room-resize-handle" withHandle />
-          <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="380px" data-active={mobileRoomPane === "chat"}>
-            <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Chat"><RoomChat
+            </div>}
+          chat={<PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Chat"><RoomChat
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUser={profile}
               client={auth.client!}
+              accessToken={auth.session!.access_token}
+              connected={connected}
               onOpenProfile={openProfile}
               notifications={userSettings.notifications}
-              isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat"}
+              isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat" || (isTabletDualRoomLayout && mobileRoomPane !== "radio")}
               onActivate={() => setMobileRoomPane("chat")}
               onUnreadCountChange={setChatUnreadCount}
-            /></PanelErrorBoundary>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-        <nav
-          className="room-mobile-tabs"
-          aria-label="Room panels"
-          role="tablist"
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-            event.preventDefault();
-            const panes = ["radio", "player", "chat"] as const;
-            const offset = event.key === "ArrowRight" ? 1 : -1;
-            const nextPane = panes[(panes.indexOf(mobileRoomPane) + offset + panes.length) % panes.length];
-            setMobileRoomPane(nextPane);
-            (event.currentTarget.querySelector(`[data-pane="${nextPane}"]`) as HTMLButtonElement | null)?.focus();
-          }}
-        >
-          <button data-pane="radio" role="tab" aria-selected={mobileRoomPane === "radio"} className={mobileRoomPane === "radio" ? "active" : ""} onClick={() => setMobileRoomPane("radio")}><ListMusic /> Radio</button>
-          <button data-pane="player" role="tab" aria-selected={mobileRoomPane === "player"} className={mobileRoomPane === "player" ? "active" : ""} onClick={() => setMobileRoomPane("player")}><PlayIcon /> Player</button>
-          <button
-            data-pane="chat"
-            role="tab"
-            aria-selected={mobileRoomPane === "chat"}
-            className={mobileRoomPane === "chat" ? "active" : ""}
-            aria-label={chatUnreadCount > 0 ? `Chat, ${chatUnreadCount} unread` : "Chat"}
-            onClick={() => setMobileRoomPane("chat")}
-          >
-            <MessageIcon /> Chat
-            {chatUnreadCount > 0 && <span className="room-mobile-unread">{chatUnreadCount}</span>}
-          </button>
-        </nav>
-      </section>
+              controlsRef={chatControls}
+            /></PanelErrorBoundary>}
+      />
       {roomSettingsOpen && auth.session && (
-        <Suspense fallback={null}><RoomSettingsDialog
-          snapshot={snapshot}
-          currentUserId={profile.id}
-          accessToken={auth.session.access_token}
-          onClose={() => setRoomSettingsOpen(false)}
-          onNotice={setNotice}
-        /></Suspense>
+        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
     </main>
   );
@@ -827,7 +679,7 @@ function AuthScreen({
         <div className="auth-intro">
           <Badge variant="outline">LYDMAN</Badge>
           <h1>Listen together,<br />wherever you are.</h1>
-          <p>Shared rooms, one queue, and playback that stays in sync.</p>
+          <p>Shared rooms, personal queues, and a DJ lineup that keeps the music moving.</p>
         </div>
         {form}
       </section>
@@ -882,7 +734,7 @@ function Welcome({
       <section className="welcome-content">
         <div className="welcome-copy">
           <Badge variant="outline">SHARED LISTENING</Badge>
-          <h1>One room.<br />One shared queue.</h1>
+          <h1>One room.<br />Everyone gets a turn.</h1>
           <p>Add a track, invite your people, and stay in sync.</p>
         </div>
         <Card className="welcome-card">
@@ -909,1084 +761,60 @@ function Welcome({
   );
 }
 
-function formatPlaybackTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const rounded = Math.floor(seconds);
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  const remaining = rounded % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
-    : `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
-
-function BangOMeter({
-  snapshot,
-  currentUserId
-}: {
-  snapshot: RoomSnapshot;
-  currentUserId: string;
-}) {
-  const track = snapshot.room.playback.track;
-  const vibe = track && snapshot.room.vibe?.trackId === track.id
-    ? snapshot.room.vibe
-    : null;
-  const eligibleUserIds = new Set(
-    snapshot.users
-      .filter((user) => user.id !== track?.addedBy.id)
-      .map((user) => user.id)
-  );
-  const votes = Object.entries(vibe?.votes || {})
-    .filter(([userId]) => eligibleUserIds.has(userId))
-    .map(([, vote]) => vote);
-  const eligibleListenerCount = eligibleUserIds.size;
-  const sentiment = votes.length
-    ? votes.reduce<number>((total, vote) => total + vote, 0) / votes.length
-    : 0;
-  const participation = eligibleListenerCount
-    ? votes.length / eligibleListenerCount
-    : 0;
-  const currentVote = vibe?.votes[currentUserId];
-  const addedByCurrentUser = track?.addedBy.id === currentUserId;
-  const positiveVotes = votes.filter((vote) => vote === 1).length;
-  const negativeVotes = votes.filter((vote) => vote === -1).length;
-  const label =
-    !votes.length ? "Waiting on the room" :
-    votes.length === 1 ? "First reaction is in" :
-    sentiment >= .6 ? "Certified banger" :
-    sentiment >= .2 ? "Room is feeling it" :
-    sentiment <= -.6 ? "Not landing" :
-    sentiment <= -.2 ? "Cooling off" :
-    "Split room";
-  const pulseTone = !votes.length
-    ? "idle"
-    : sentiment >= .2
-      ? "positive"
-      : sentiment <= -.2
-        ? "negative"
-        : "mixed";
-  const pulseShape = [9, 13, 18, 25, 31, 25, 18, 13, 9];
-  const pulseHeights = pulseShape.map((height, index) => {
-    const direction = (index - 4) / 4;
-    const lean = 1 + sentiment * direction * .65;
-    const energy = .56 + participation * .44;
-    return Math.max(4, Math.round(height * lean * energy));
-  });
-
-  const vote = (value: -1 | 1) => {
-    if (addedByCurrentUser) return;
-    socket.emit("vibe:vote", { value: currentVote === value ? 0 : value });
-  };
-
-  return (
-    <section className="bang-meter" aria-label="Bang-O-Meter for the current track">
-      <div className="bang-meter-heading">
-        <span>Bang-O-Meter</span>
-        <small>{votes.length} of {eligibleListenerCount} reacted</small>
-      </div>
-      <div
-        className={`bang-meter-body ${addedByCurrentUser ? "is-readonly" : ""}`}
-        role="group"
-        aria-label={addedByCurrentUser ? "Listener reactions" : "React to the current track"}
-      >
-        <button
-          type="button"
-          className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""}`}
-          aria-pressed={currentVote === -1}
-          disabled={addedByCurrentUser}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(-1)}
-        >
-          <ThumbsDown size={16} />
-          <span>Not it</span>
-          <strong>{negativeVotes}</strong>
-        </button>
-        <div className="bang-pulse-summary" aria-live="polite">
-          <div
-            key={`${positiveVotes}:${negativeVotes}`}
-            className={`bang-pulse bang-pulse-${pulseTone}`}
-            style={{ opacity: votes.length ? .58 + participation * .42 : .3 }}
-            aria-hidden="true"
-          >
-            {pulseHeights.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
-          </div>
-          <strong>{label}</strong>
-        </div>
-        <button
-          type="button"
-          className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""}`}
-          aria-pressed={currentVote === 1}
-          disabled={addedByCurrentUser}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(1)}
-        >
-          <Heart size={16} />
-          <span>Love it</span>
-          <strong>{positiveVotes}</strong>
-        </button>
-      </div>
-      {addedByCurrentUser && <small className="bang-owner-note">You added this track. Reactions stay with your listeners.</small>}
-    </section>
-  );
-}
-
-function NowPlaying({
-  snapshot,
-  isDj,
-  canControlPlayback,
-  currentUserId,
-  accessToken,
-  compact,
-  onToggleCompact,
-  settingsOpen,
-  onCloseSettings,
-  userSettings,
-  onUserSettingsChange
-}: {
-  snapshot: RoomSnapshot;
-  isDj: boolean;
-  canControlPlayback: boolean;
-  currentUserId: string;
-  accessToken?: string;
-  compact: boolean;
-  onToggleCompact: () => void;
-  settingsOpen: boolean;
-  onCloseSettings: () => void;
-  userSettings: SoundSpinUserSettings;
-  onUserSettingsChange: (settings: SoundSpinUserSettings) => void;
-}) {
-  const playback = snapshot.room.playback;
-  const track = playback.track;
-  const volume = userSettings.playback.defaultVolume;
-  const playbackPreference = userSettings.playback.preference;
-  const [spotifyWebStarted, setSpotifyWebStarted] = useState(false);
-  const [fallbackApprovedTrackId, setFallbackApprovedTrackId] = useState("");
-  const unavailableNotifiedTrackRef = useRef("");
-  const playbackErrorNotifiedRef = useRef("");
-  const [connections, setConnections] = useState({
-    loaded: false,
-    spotifyConfigured: false,
-    spotifyConnected: false,
-    spotifyProfile: null as { displayName: string; product?: string } | null,
-    appleConfigured: false
-  });
-  const [seekPreview, setSeekPreview] = useState<number | null>(null);
-  const [playerStatus, setPlayerStatus] = useState<PlayerStatus>({
-    ready: false,
-    buffering: false,
-    currentTime: 0,
-    duration: 0
-  });
-  const [syncRevision, setSyncRevision] = useState(0);
-  const [playbackError, setPlaybackError] = useState("");
-
-  useEffect(() => {
-    setSeekPreview(null);
-  }, [playback.updatedAt, playback.track?.id]);
-
-  useEffect(() => {
-    setFallbackApprovedTrackId("");
-    setPlaybackError("");
-    playbackErrorNotifiedRef.current = "";
-  }, [playback.track?.id]);
-
-  const loadConnections = useCallback(() => {
-    if (!accessToken) return;
-    void fetch("/api/music/connections", { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then(async (response) => {
-        const payload = await response.json() as {
-          spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
-          apple?: { configured?: boolean };
-        };
-        if (!response.ok) throw new Error("Could not load music connections.");
-        setConnections({
-          loaded: true,
-          spotifyConfigured: Boolean(payload.spotify?.configured),
-          spotifyConnected: Boolean(payload.spotify?.connected),
-          spotifyProfile: payload.spotify?.profile || null,
-          appleConfigured: Boolean(payload.apple?.configured)
-        });
-      })
-      .catch(() => setConnections((current) => ({ ...current, loaded: true })));
-  }, [accessToken]);
-
-  useEffect(loadConnections, [loadConnections]);
-
-  const handleSpotifyConnectionLost = useCallback((message: string) => {
-    loadConnections();
-    setPlaybackError(message);
-  }, [loadConnections]);
-
-  const connectSpotify = useCallback(() => {
-    if (!accessToken) return;
-    void fetch(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    }).then(async (response) => {
-      const payload = await response.json() as { url?: string; error?: string };
-      if (!response.ok || !payload.url) throw new Error(payload.error || "Could not connect Spotify.");
-      location.assign(payload.url);
-    }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
-  }, [accessToken]);
-
-  const disconnectSpotify = useCallback(() => {
-    if (!accessToken) return;
-    void fetch("/api/spotify/connection", {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${accessToken}` }
-    }).then((response) => {
-      if (!response.ok) throw new Error("Could not disconnect Spotify.");
-      setConnections((current) => ({ ...current, spotifyConnected: false, spotifyProfile: null }));
-    }).catch((error) => {
-      setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
-    });
-  }, [accessToken]);
-
-  const update = (playing: boolean) => {
-    const position = playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
-    requestSocketAction(socket, "playback:update", { trackId: track?.id, playing, position }, (result) => {
-      if (!result.ok) setPlaybackError(result.error || "Could not update playback.");
-    });
-  };
-
-  const commitSeek = (value: number | readonly number[]) => {
-    if (!canControlPlayback || !track) return;
-    const position = typeof value === "number" ? value : value[0];
-    if (!Number.isFinite(position)) return;
-    requestSocketAction(socket, "playback:update", { trackId: track.id, playing: playback.playing, position }, (result) => {
-      if (!result.ok) setPlaybackError(result.error || "Could not seek this track.");
-    });
-  };
-
-  const syncPlayback = () => {
-    window.dispatchEvent(new Event("soundspin:playback-sync"));
-    setSyncRevision((revision) => revision + 1);
-  };
-
-  const handleEnded = useCallback(() => {
-    if (track) requestSocketAction(socket, "queue:next", { trackId: track.id }, () => {});
-  }, [track?.id]);
-
-  const shownPosition = seekPreview ?? playerStatus.currentTime;
-  const preferredProvider: Provider = playbackPreference.startsWith("spotify")
-    ? "spotify"
-    : playbackPreference === "apple"
-      ? "apple"
-      : track?.provider || "youtube";
-  const mappedPreferredTrack = track?.mappings?.[preferredProvider];
-  const trustedPreferredMapping = mappedPreferredTrack && (
-    preferredProvider !== "spotify" ||
-    track?.provider === "spotify" ||
-    mappedPreferredTrack.matchMethod === "isrc" ||
-    mappedPreferredTrack.matchMethod === "exact-metadata"
-  )
-    ? mappedPreferredTrack
-    : undefined;
-  const preferredMapping = trustedPreferredMapping || (track?.provider === preferredProvider
-    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
-    : undefined);
-  const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;
-  const effectiveMapping = preferredMapping || (track
-    ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl }
-    : undefined);
-  const previewArtwork = effectiveMapping?.artworkUrl || (track ? trackArtworkUrl(track) : undefined);
-  const providerFallback = Boolean(track && preferredProvider !== effectiveProvider);
-  const fallbackNeedsApproval = providerFallback && userSettings.playback.fallback === "ask" && fallbackApprovedTrackId !== track?.id;
-  const fallbackIsSilent = providerFallback && userSettings.playback.fallback === "silent";
-  const spotifyReady = Boolean(accessToken && connections.spotifyConnected);
-  const webPlaybackAllowed = playbackPreference !== "spotify-desktop" && playbackPreference !== "apple";
-  const keepSpotifyWebMounted = spotifyReady && webPlaybackAllowed && (
-    effectiveProvider === "spotify" ||
-    (!track && spotifyWebStarted)
-  );
-
-  useEffect(() => {
-    if (!webPlaybackAllowed) setSpotifyWebStarted(false);
-    else if (effectiveProvider === "spotify") setSpotifyWebStarted(true);
-    else if (track && playbackPreference !== "spotify-web") setSpotifyWebStarted(false);
-  }, [effectiveProvider, playbackPreference, track?.id, webPlaybackAllowed]);
-
-  useEffect(() => {
-    if (!providerFallback || !track || !userSettings.notifications.unavailableTrack || unavailableNotifiedTrackRef.current === track.id) return;
-    unavailableNotifiedTrackRef.current = track.id;
-    showSystemNotification("Playback fallback needed", `${track.title} is not available on ${providerLabel(preferredProvider)}.`);
-  }, [providerFallback, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack]);
-
-  useEffect(() => {
-    const message = playbackError;
-    if (!message || !userSettings.notifications.playbackErrors || playbackErrorNotifiedRef.current === message) return;
-    playbackErrorNotifiedRef.current = message;
-    showSystemNotification("Lydman playback error", message);
-  }, [playbackError, userSettings.notifications.playbackErrors]);
-
-  return (
-    <>
-      <section className={`now-playing panel ${compact ? "compact" : ""}`}>
-      <div className="now-playing-heading">
-        <div className="section-kicker">Now playing</div>
-        <Button variant="ghost" size="sm" type="button" onClick={onToggleCompact} title={compact ? "Focus the player" : "Give chat more room"}>
-          {compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
-          <span>{compact ? "Focus player" : "Focus chat"}</span>
-        </Button>
-      </div>
-      {keepSpotifyWebMounted && (
-        <SpotifyPlayer
-          playback={playback}
-          mapping={effectiveProvider === "spotify" ? effectiveMapping : undefined}
-          mode="web"
-          isDj={isDj}
-          volume={volume}
-          accessToken={accessToken!}
-          preferredDeviceId={userSettings.playback.spotifyDeviceId}
-          resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
-          onEnded={handleEnded}
-          onStatus={setPlayerStatus}
-          onConnectionLost={handleSpotifyConnectionLost}
-          onError={setPlaybackError}
-        />
-      )}
-      {track ? (
-        <>
-          <div className="now-playing-main">
-          <div className="track-stage">
-            <TrackArtwork track={track} />
-            {effectiveProvider === "spotify" && previewArtwork && (
-              <img className="album-art-preview" src={previewArtwork} alt={`${track.title} album artwork`} />
-            )}
-            {fallbackNeedsApproval ? (
-              <div className="provider-player-shell fallback-player-shell">
-                <strong>Use the room source?</strong>
-                <small>No {providerLabel(preferredProvider)} match was found for this track.</small>
-                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</Button>
-              </div>
-            ) : fallbackIsSilent ? (
-              <div className="provider-player-shell fallback-player-shell">
-                <strong>Track unavailable</strong>
-                <small>No {providerLabel(preferredProvider)} match was found. Local playback is paused for this track.</small>
-              </div>
-            ) : effectiveProvider === "spotify" && effectiveMapping ? (
-              spotifyReady ? (
-                keepSpotifyWebMounted ? null : (
-                  <SpotifyPlayer
-                    playback={playback}
-                    mapping={effectiveMapping}
-                    mode={playbackPreference === "spotify-desktop" ? "desktop" : "web"}
-                    isDj={isDj}
-                    volume={volume}
-                    accessToken={accessToken!}
-                    preferredDeviceId={userSettings.playback.spotifyDeviceId}
-                    resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
-                    onEnded={handleEnded}
-                    onStatus={setPlayerStatus}
-                    onConnectionLost={handleSpotifyConnectionLost}
-                    onError={setPlaybackError}
-                  />
-                )
-              ) : (
-                <div className="provider-player-shell spotify-player-shell">
-                  <strong>Connect Spotify to listen</strong>
-                  <Button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>Connect Spotify</Button>
-                </div>
-              )
-            ) : effectiveProvider === "apple" && effectiveMapping && accessToken ? (
-              <AppleMusicPlayer
-                playback={playback}
-                syncRevision={syncRevision}
-                mapping={effectiveMapping}
-                isDj={isDj}
-                volume={volume}
-                accessToken={accessToken}
-                onEnded={handleEnded}
-                onStatus={setPlayerStatus}
-                onError={setPlaybackError}
-              />
-            ) : effectiveProvider === "soundcloud" ? (
-              <SoundCloudPlayer
-                playback={playback}
-                syncRevision={syncRevision}
-                isDj={isDj}
-                volume={volume}
-                onEnded={handleEnded}
-                onStatus={setPlayerStatus}
-                onError={setPlaybackError}
-              />
-            ) : effectiveProvider === "youtube" ? (
-              <YouTubePlayer
-                playback={playback}
-                syncRevision={syncRevision}
-                isDj={isDj}
-                volume={volume}
-                // The track ID lets the server reject duplicate/stale ended events.
-                onEnded={handleEnded}
-                onStatus={setPlayerStatus}
-                onError={setPlaybackError}
-              />
-            ) : (
-              <div className="provider-player-shell">
-                <strong>No playable version is available</strong>
-                <small>Choose another playback provider.</small>
-              </div>
-            )}
-            <div className="record-ring ring-one" />
-            <div className="record-ring ring-two" />
-          </div>
-          <div className="player-details">
-          <div className="current-track">
-            <div>
-              <h2>{track.title}</h2>
-              <p>
-                {track.artist ? `${track.artist} · ` : ""}Added by {track.addedBy.name} · {track.permalinkUrl ? (
-                  <a href={track.permalinkUrl} target="_blank" rel="noreferrer">{providerLabel(track.provider)}</a>
-                ) : providerLabel(track.provider)}
-              </p>
-            </div>
-            <div className="player-controls">
-              <Button disabled={!canControlPlayback} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause" : "Play"}>
-                {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-              </Button>
-              <Button variant="outline" className="round-button" size="icon" onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room">
-                <RefreshCw size={19} />
-              </Button>
-              <Button variant="outline" disabled={!canControlPlayback} className="round-button" size="icon" onClick={() => requestSocketAction(socket, "queue:next", { trackId: track.id }, (result) => { if (!result.ok) setPlaybackError(result.error || "Could not skip this track."); })} aria-label="Next track">
-                <SkipIcon size={20} />
-              </Button>
-            </div>
-          </div>
-          <div className="playback-progress">
-            <span>{formatPlaybackTime(shownPosition)}</span>
-            <Slider
-              min={0}
-              max={Math.max(playerStatus.duration, 1)}
-              step={1}
-              value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
-              disabled={!canControlPlayback || !playerStatus.duration}
-              aria-label="Playback position"
-              onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
-              onValueCommitted={commitSeek}
-            />
-            <span>{formatPlaybackTime(playerStatus.duration)}</span>
-          </div>
-          <div className="player-footer">
-            <div className="sync-status">
-              <span className={playback.playing ? "pulse" : ""} />
-              {playerStatus.buffering
-                ? "Buffering…"
-                : isDj
-                  ? "Your turn on the decks"
-                  : canControlPlayback
-                    ? "Moderator controls available"
-                    : "Synced with the current DJ"}
-            </div>
-            {providerFallback && <small className="provider-fallback">No {providerLabel(preferredProvider)} match · using {providerLabel(effectiveProvider!)}</small>}
-            <label className="volume-control">
-              <Volume2 size={14} />
-              <Slider
-                min={0}
-                max={100}
-                value={[volume]}
-                aria-label="Volume"
-                onValueChange={(value) => onUserSettingsChange({
-                  ...userSettings,
-                  playback: { ...userSettings.playback, defaultVolume: typeof value === "number" ? value : value[0] }
-                })}
-              />
-            </label>
-          </div>
-          </div>
-          </div>
-          <BangOMeter snapshot={snapshot} currentUserId={currentUserId} />
-        </>
-      ) : (
-        <div className="empty-player">
-          <span className="empty-disc"><PlayIcon size={28} /></span>
-          <h2>The room is quiet</h2>
-          <p>Add a track from any configured provider to start the radio.</p>
-        </div>
-      )}
-      </section>
-      {settingsOpen && (
-        <Suspense fallback={null}><UserSettingsDialog
-          settings={userSettings}
-          connections={connections}
-          accessToken={accessToken}
-          onSettingsChange={onUserSettingsChange}
-          onConnectSpotify={connectSpotify}
-          onDisconnectSpotify={disconnectSpotify}
-          onClose={onCloseSettings}
-        /></Suspense>
-      )}
-    </>
-  );
-}
-
-interface ProviderSearchResult {
-  provider: SearchProvider;
-  id: string;
-  title: string;
-  artist: string;
-  thumbnail?: string;
-  duration?: string;
-  durationMs?: number;
-  permalinkUrl?: string;
-}
-
-function MusicRail({
-  snapshot,
-  currentUserId,
-  accessToken,
-  setNotice
-}: {
-  snapshot: RoomSnapshot;
-  currentUserId: string;
-  accessToken?: string;
-  setNotice: (message: string) => void;
-}) {
-  const [tab, setTab] = useState<"history" | "search" | "queue">("queue");
-  const [provider, setProvider] = useState<SearchProvider>(readSearchProvider);
-  const [query, setQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<ProviderSearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState("");
-  const [addingResultId, setAddingResultId] = useState("");
-  const [manualOpen, setManualOpen] = useState(false);
-  const [draggedTrackId, setDraggedTrackId] = useState("");
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [resolvingUrl, setResolvingUrl] = useState(false);
-  const activeRailRef = useRef(true);
-  const addingTrackRef = useRef(false);
-  const searchRequestRef = useRef<AbortController | null>(null);
-  useEffect(() => {
-    activeRailRef.current = true;
-    return () => { activeRailRef.current = false; searchRequestRef.current?.abort(); };
-  }, []);
-  useEffect(() => {
-    searchRequestRef.current?.abort();
-    setSearching(false);
-    setSearchResults([]);
-    setSearchError("");
-  }, [provider]);
-  const joinedDjQueue = snapshot.room.djQueueUserIds.includes(currentUserId);
-  const canJoinDjQueue = snapshot.room.settings.djAccess !== "roles" ||
-    snapshot.room.ownerUserId === currentUserId ||
-    snapshot.room.moderatorUserIds.includes(currentUserId) ||
-    snapshot.room.djRoleUserIds.includes(currentUserId);
-  const currentDj = snapshot.djUsers.find((user) => user.id === snapshot.room.djUserId);
-  const upcomingDjs = snapshot.room.djQueueUserIds.filter((userId) => userId !== snapshot.room.djUserId);
-
-  const enqueueTrack = (track: {
-    provider: Provider;
-    providerId: string;
-    title: string;
-    artist?: string;
-    artworkUrl?: string;
-    permalinkUrl?: string;
-    durationMs?: number;
-  }) => {
-    if (!activeRailRef.current || addingTrackRef.current) return;
-    addingTrackRef.current = true;
-    requestSocketAction(socket,
-      "queue:add",
-      track,
-      (result: { ok: boolean; error?: string; started?: boolean; position?: number }) => {
-        addingTrackRef.current = false;
-        if (!activeRailRef.current) return;
-        setAddingResultId("");
-        if (!result.ok) return setNotice(result.error || "Could not add track");
-        setNotice(
-          result.started
-            ? "Started playing"
-            : `Added to your private queue${result.position ? ` · #${result.position}` : ""}`
-        );
-        setUrl("");
-        setTitle("");
-        setAdding(false);
-        setManualOpen(false);
-        setTab("queue");
-      }
-    );
-  };
-
-  const toggleDjQueue = () => {
-    requestSocketAction(socket, joinedDjQueue ? "dj:leave" : "dj:join", undefined, (result: { ok: boolean; error?: string }) => {
-      setNotice(result.ok
-        ? joinedDjQueue ? "Left the DJ queue" : "Joined the DJ queue"
-        : result.error || "Could not update the DJ queue.");
-    });
-  };
-
-  const addTrack = async (trackUrl: string, trackTitle?: string) => {
-    const providerId = youtubeId(trackUrl);
-    if (!providerId) return setNotice("Please enter a valid YouTube URL");
-
-    let resolvedTitle = trackTitle?.trim();
-    if (!resolvedTitle) {
-      try {
-        const response = await fetch(
-          `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${providerId}`)}&format=json`
-        );
-        if (response.ok) {
-          const metadata = await response.json() as { title?: string };
-          resolvedTitle = metadata.title;
-        }
-      } catch {
-        // Fall back to a generic title if YouTube metadata is unavailable.
-      }
-    }
-
-    enqueueTrack({ provider: "youtube", providerId, title: resolvedTitle || "YouTube track" });
-  };
-
-  const add = async (event: FormEvent) => {
-    event.preventDefault();
-    if (provider === "youtube") {
-      await addTrack(url, title);
-      return;
-    }
-
-    const trackUrl = url.trim();
-    if (!trackUrl) return setNotice(`Please enter a ${providerLabel(provider)} track URL`);
-    setResolvingUrl(true);
-    try {
-      const response = await fetch(`/api/${provider}/resolve?url=${encodeURIComponent(trackUrl)}`, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined
-      });
-      const payload = await response.json() as {
-        result?: ProviderSearchResult;
-        error?: string;
-      };
-      if (!response.ok || !payload.result) {
-        throw new Error(payload.error || `Could not resolve that ${providerLabel(provider)} URL.`);
-      }
-      enqueueTrack({
-        provider,
-        providerId: payload.result.id,
-        title: title.trim() || payload.result.title,
-        artist: payload.result.artist,
-        artworkUrl: payload.result.thumbnail,
-        permalinkUrl: payload.result.permalinkUrl,
-        durationMs: payload.result.durationMs
-      });
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : `Could not resolve that ${providerLabel(provider)} URL.`);
-    } finally {
-      setResolvingUrl(false);
-    }
-  };
-
-  const addAgain = (track: RoomSnapshot["room"]["history"][number]) => {
-    enqueueTrack({
-      provider: track.provider,
-      providerId: track.providerId,
-      title: track.title,
-      artist: track.artist,
-      artworkUrl: track.artworkUrl,
-      permalinkUrl: track.permalinkUrl,
-      durationMs: track.durationMs
-    });
-  };
-
-  const searchProvider = async (event: FormEvent) => {
-    event.preventDefault();
-    const searchQuery = query.trim();
-    if (searchQuery.length < 2) return setSearchError("Enter at least 2 characters.");
-
-    setSearching(true);
-    setSearchError("");
-    searchRequestRef.current?.abort();
-    const request = new AbortController();
-    searchRequestRef.current = request;
-    try {
-      const response = await fetch(`/api/${provider}/search?q=${encodeURIComponent(searchQuery)}`, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)])
-      });
-      const payload = await response.json() as {
-        results?: Array<ProviderSearchResult & { channel?: string }>;
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error || `Could not search ${providerLabel(provider)}.`);
-      if (!activeRailRef.current || request.signal.aborted) return;
-      setSearchResults((payload.results || []).map((result) => ({
-        ...result,
-        provider,
-        artist: result.artist || result.channel || providerLabel(provider)
-      })));
-    } catch (error) {
-      if (!activeRailRef.current || request.signal.aborted) return;
-      setSearchResults([]);
-      setSearchError(error instanceof Error ? error.message : `Could not search ${providerLabel(provider)}.`);
-    } finally {
-      if (activeRailRef.current && !request.signal.aborted) setSearching(false);
-    }
-  };
-
-  const addSearchResult = (result: ProviderSearchResult) => {
-    setAddingResultId(result.id);
-    enqueueTrack({
-      provider: result.provider,
-      providerId: result.id,
-      title: result.title,
-      artist: result.artist,
-      artworkUrl: result.thumbnail,
-      permalinkUrl: result.permalinkUrl,
-      durationMs: result.durationMs
-    });
-  };
-
-  const queueAction = (
-    event: "queue:remove",
-    trackId: string,
-    successMessage: string
-  ) => {
-    requestSocketAction(socket, event, { trackId }, (result: { ok: boolean; error?: string }) => {
-      setNotice(result.ok ? successMessage : result.error || "Could not update the queue.");
-    });
-  };
-
-  const moveQueueTrack = (trackId: string, toIndex: number) => {
-    requestSocketAction(socket, "queue:move", { trackId, toIndex }, (result: { ok: boolean; error?: string }) => {
-      if (!result.ok) setNotice(result.error || "Could not reorder the queue.");
-    });
-  };
-
-  return (
-    <aside className="music-rail panel">
-      <div className="music-rail-heading">
-        <span>Radio</span>
-      </div>
-
-      <section className="dj-lineup" aria-label="DJ queue">
-        <div className="dj-lineup-heading">
-          <div><span>DJ QUEUE</span><small>{snapshot.room.settings.djAccess === "roles" ? "Role restricted" : "Open to everyone"}</small></div>
-          <button type="button" className={joinedDjQueue ? "joined" : ""} disabled={!joinedDjQueue && !canJoinDjQueue} onClick={toggleDjQueue}>
-            {joinedDjQueue ? "Leave" : canJoinDjQueue ? "Join as DJ" : "DJ role required"}
-          </button>
-        </div>
-        <div className="dj-lineup-current">
-          {currentDj ? <><Avatar user={currentDj} size={30} /><span><small>ON AIR</small><strong>{currentDj.id === currentUserId ? "You" : currentDj.name}</strong></span></> : <span><small>ON AIR</small><strong>Waiting for a queued song</strong></span>}
-        </div>
-        {!!upcomingDjs.length && (
-          <div className="dj-lineup-next">
-            <small>UP NEXT</small>
-            {upcomingDjs.map((userId, index) => {
-              const user = snapshot.djUsers.find((candidate) => candidate.id === userId);
-              return user ? <span key={userId} title={`${index + 1}. ${user.name}`}><i>{index + 1}</i><Avatar user={user} size={24} /></span> : null;
-            })}
-          </div>
-        )}
-      </section>
-
-      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
-        <TabsList className="music-tabs" aria-label="Music tools">
-        <TabsTrigger value="history">
-          <Clock3 size={14} /> History
-        </TabsTrigger>
-        <TabsTrigger value="search">
-          <Search size={14} /> Search
-        </TabsTrigger>
-        <TabsTrigger value="queue">
-          <ListMusic size={14} /> Queue
-          {snapshot.room.queue.length > 0 && <i>{snapshot.room.queue.length}</i>}
-        </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {tab === "search" && (
-        <div className="rail-pane search-pane">
-          <div className="rail-pane-title">
-            <span>SEARCH MUSIC</span>
-            <small>{joinedDjQueue ? "Add results to your private queue" : "Join the DJ queue to add music"}</small>
-          </div>
-          <form className="provider-search-form" onSubmit={searchProvider}>
-            <InputGroup className="provider-search-group">
-              <InputGroupInput
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${providerLabel(provider)}`}
-                aria-label="Search music"
-                autoFocus
-              />
-              <InputGroupAddon align="inline-start"><Search /></InputGroupAddon>
-              <InputGroupAddon align="inline-end" className="provider-search-actions">
-                {query && (
-                  <InputGroupButton
-                    size="icon-xs"
-                    aria-label="Clear search"
-                    onClick={() => {
-                      searchRequestRef.current?.abort();
-                      setSearching(false);
-                      setQuery("");
-                      setSearchResults([]);
-                      setSearchError("");
-                    }}
-                  >
-                    <X />
-                  </InputGroupButton>
-                )}
-                <span className="provider-divider" />
-                <Select
-                  value={provider}
-                  onValueChange={(value) => {
-                    const nextProvider: SearchProvider = value === "soundcloud" || value === "spotify" || value === "apple"
-                      ? value
-                      : "youtube";
-                    setProvider(nextProvider);
-                    storeValue(SEARCH_PROVIDER_STORAGE_KEY, nextProvider);
-                    setSearchResults([]);
-                    setSearchError("");
-                  }}
-                >
-                  <SelectTrigger size="sm" className="provider-select" aria-label="Music provider"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="youtube">YouTube</SelectItem>
-                      <SelectItem value="spotify">Spotify</SelectItem>
-                      <SelectItem disabled value="apple">Apple Music (Coming Soon)</SelectItem>
-                      <SelectItem value="soundcloud">SoundCloud</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <InputGroupButton type="submit" size="sm" variant="default" className="search-submit" disabled={searching}>
-                  {searching ? "Searching…" : "Go"}
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </form>
-
-          <div className="search-result-list">
-            {searchError && <div className="rail-search-state error">{searchError}</div>}
-            {!searchError && searching && (
-              <div className="rail-search-state"><div className="equalizer"><i /><i /><i /><i /></div><span>Searching {providerLabel(provider)}…</span></div>
-            )}
-            {!searchError && !searching && searchResults.map((result) => (
-              (() => {
-                const queued =
-                  (snapshot.room.playback.track?.provider === result.provider && snapshot.room.playback.track.providerId === result.id) ||
-                  snapshot.room.queue.some((track) => track.provider === result.provider && track.providerId === result.id);
-                return (
-                  <div className="search-result-row" key={result.id}>
-                    <span className={`search-provider-mark ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : result.provider === "spotify" ? "S" : result.provider === "apple" ? "A" : "▶"}</span>
-                    {result.thumbnail
-                      ? <img src={result.thumbnail} alt="" />
-                      : <span className={`provider-artwork search-artwork ${result.provider}`}>{result.provider === "soundcloud" ? "SC" : providerLabel(result.provider).slice(0, 1)}</span>}
-                    <span className="search-result-copy">
-                      <strong>{result.title}</strong>
-                      <small>{result.artist}{result.duration ? ` · ${result.duration}` : ""}</small>
-                    </span>
-                    <button
-                      type="button"
-                      className={queued ? "added" : ""}
-                      title={queued ? "Already in your queue or playing" : joinedDjQueue ? "Add to your queue" : "Join the DJ queue first"}
-                      disabled={!joinedDjQueue || queued || addingResultId === result.id}
-                      onClick={() => addSearchResult(result)}
-                    >
-                      {queued ? <Check size={15} /> : addingResultId === result.id ? "…" : <PlusIcon size={15} />}
-                    </button>
-                  </div>
-                );
-              })()
-            ))}
-            {!searchError && !searching && !searchResults.length && (
-              <div className="rail-search-state">
-                <Search size={22} />
-                <span>Search {providerLabel(provider)} for a song or artist.</span>
-              </div>
-            )}
-          </div>
-
-          <div className={`manual-add ${manualOpen ? "open" : ""}`}>
-            <button className="manual-add-heading" type="button" onClick={() => setManualOpen((open) => !open)}>
-              <span>ADD BY URL</span>
-              <small>{provider === "youtube" ? "YouTube URL or video ID" : `${providerLabel(provider)} track URL`} <ChevronDown size={13} /></small>
-            </button>
-            {manualOpen && (
-              <form className="rail-manual-add" onSubmit={add}>
-                <input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder={provider === "youtube"
-                    ? "youtube.com/watch?v=…"
-                    : provider === "spotify"
-                      ? "open.spotify.com/track/…"
-                      : provider === "apple"
-                        ? "music.apple.com/…"
-                        : "soundcloud.com/artist/track"}
-                  autoFocus
-                />
-                <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Title (optional)"
-                />
-                <button type="submit" disabled={resolvingUrl}><PlusIcon size={14} /> {resolvingUrl ? "Resolving…" : "Add manually"}</button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === "history" && (
-        <div className="rail-pane">
-          <div className="rail-pane-title">
-            <span>RECENTLY PLAYED</span>
-            <small>{snapshot.room.history.length} tracks</small>
-          </div>
-          <div className="rail-track-list">
-            {snapshot.room.history.map((track, index) => (
-              <div className="rail-track-row" key={`${track.id}-${index}`}>
-                <TrackArtwork track={track} compact />
-                <span className="rail-track-copy">
-                  <strong>{track.title}</strong>
-                  <small>Added by {track.addedBy.name}</small>
-                </span>
-                <button disabled={!joinedDjQueue} title={joinedDjQueue ? "Add to your queue again" : "Join the DJ queue first"} onClick={() => addAgain(track)}>
-                  <PlusIcon size={14} />
-                </button>
-              </div>
-            ))}
-            {!snapshot.room.history.length && (
-              <div className="rail-empty"><Clock3 size={22} /><p>Played tracks will appear here.</p></div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === "queue" && (
-        <div className="rail-pane">
-          <div className="rail-pane-title queue-title">
-            <div>
-              <small>Private · other listeners cannot see these tracks</small>
-            </div>
-            {snapshot.room.queue.length > 0 && (
-              <button className="rail-add-button" disabled={!joinedDjQueue} title={joinedDjQueue ? "Add a track" : "Join the DJ queue first"} onClick={() => { setAdding(!adding); setTab("queue"); }}>
-                <PlusIcon size={14} /> Add
-              </button>
-            )}
-          </div>
-          {adding && (
-            <form className="rail-quick-add" onSubmit={add}>
-              <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder={`Paste ${providerLabel(provider)} link`} autoFocus />
-              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title (optional)" />
-              <button type="submit" disabled={resolvingUrl}>{resolvingUrl ? "Resolving…" : `Add ${providerLabel(provider)} to queue`}</button>
-            </form>
-          )}
-          <div className="rail-track-list">
-            {snapshot.room.queue.map((track, index) => {
-              return (
-              <div
-                className={`rail-track-row queue-track ${draggedTrackId === track.id ? "dragging" : ""}`}
-                key={track.id}
-                draggable
-                title={`Your queue position ${index + 1}`}
-                onDragStart={() => setDraggedTrackId(track.id)}
-                onDragEnd={() => setDraggedTrackId("")}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (draggedTrackId && draggedTrackId !== track.id) {
-                    moveQueueTrack(draggedTrackId, index);
-                  }
-                  setDraggedTrackId("");
-                }}
-              >
-                <span className="queue-drag-handle" title="Drag to reorder your queue">
-                  <GripVertical size={14} />
-                </span>
-                <TrackArtwork track={track} compact />
-                <span className="rail-track-copy">
-                  <strong>{track.title}</strong>
-                  <small>#{index + 1} · only visible to you</small>
-                </span>
-                <span className="queue-track-actions">
-                  <button
-                    type="button"
-                    title="Remove from your queue"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      queueAction("queue:remove", track.id, "Removed from your queue");
-                    }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </span>
-              </div>
-            )})}
-            {!snapshot.room.queue.length && (
-              <Empty className="rail-empty rail-empty-action">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon"><ListMusic size={20} /></EmptyMedia>
-                  <EmptyTitle>{joinedDjQueue ? "Your queue is empty" : "Join the DJ queue"}</EmptyTitle>
-                  <EmptyDescription>{joinedDjQueue ? "Add one song for your next turn on the decks." : "Join the lineup before adding your own music."}</EmptyDescription>
-                </EmptyHeader>
-                {joinedDjQueue && (
-                  <EmptyContent>
-                    <Button size="sm" onClick={() => setAdding(true)}><PlusIcon /> Add a song</Button>
-                  </EmptyContent>
-                )}
-              </Empty>
-            )}
-          </div>
-        </div>
-      )}
-    </aside>
-  );
-}
 
 function RoomChat({
   snapshot,
   currentUser,
   client,
+  accessToken,
+  connected,
   onOpenProfile,
   notifications,
   isVisible,
   onActivate,
-  onUnreadCountChange
+  onUnreadCountChange,
+  controlsRef
 }: {
   snapshot: RoomSnapshot;
   currentUser: User;
   client: SupabaseClient;
+  accessToken: string;
+  connected: boolean;
   onOpenProfile: (userId: string) => void;
   notifications: SoundSpinUserSettings["notifications"];
   isVisible: boolean;
   onActivate: () => void;
   onUnreadCountChange: (count: number) => void;
+  controlsRef?: RefObject<RealtimeChatHandle | null>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const historySource = useMemo(() => createChatHistorySource(accessToken, snapshot.room.id), [accessToken, snapshot.room.id]);
+  // RoomChat is keyed by account and room. An original-UUID retry keeps that
+  // identity while reading refreshed credentials from this same lifetime.
+  const historySourceRef = useRef(historySource);
+  historySourceRef.current = historySource;
+  const chatTransport = useMemo(() => createSocketChatSessionFactory(socket, snapshot.room.id), [snapshot.room.id]);
+  useEffect(() => { chatTransport.setAdmitted(connected); }, [chatTransport, connected]);
   const [error, setError] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(false);
   const historyRequestRef = useRef(0);
   const activeRef = useRef(true);
   const chatRef = useRef<RealtimeChatHandle>(null);
-  const seenMentionIdsRef = useRef(new Set<string>());
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const peopleButtonRef = useRef<HTMLButtonElement>(null);
   const adminUserIds = [...new Set(
     snapshot.users
       .filter((user) => user.isAppAdmin)
       .map((user) => user.id)
   )];
 
-  useKeyboardShortcuts([{
-    id: "focus-chat",
-    label: "Focus room chat",
-    key: "/",
-    run: () => {
-      onActivate();
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => chatRef.current?.focusComposer());
-      });
-    }
-  }]);
-
   const refreshHistory = useCallback(() => {
     const request = ++historyRequestRef.current;
     setLoadingHistory(true);
     void (async () => {
       try {
-        const history = await loadChatHistory(client, snapshot.room.id);
+        const history = (await historySource.loadPage()).messages;
         if (!activeRef.current || request !== historyRequestRef.current) return;
-        history.forEach((message) => seenMentionIdsRef.current.add(message.id));
         setMessages(history);
         setError("");
       } catch {
@@ -1998,46 +826,24 @@ function RoomChat({
       }
     })();
 
-  }, [client, snapshot.room.id]);
+  }, [historySource]);
 
   useEffect(() => {
     activeRef.current = true;
-    seenMentionIdsRef.current.clear();
     return () => {
       activeRef.current = false;
       ++historyRequestRef.current;
     };
   }, [client, snapshot.room.id]);
 
-  const persistMessage = async (message: ChatMessage) => {
-    try {
-      await saveChatMessage(client, snapshot.room.id, currentUser, message);
-      if (activeRef.current) setError("");
-    } catch {
-      if (activeRef.current) setError("The message was sent live but could not be saved to history.");
-    }
-  };
-
-  const handleMessages = useCallback((nextMessages: ChatMessage[]) => {
-    for (const message of nextMessages) {
-      if (seenMentionIdsRef.current.has(message.id)) continue;
-      seenMentionIdsRef.current.add(message.id);
-      if (
-        notifications.chatMentions &&
-        message.user.id !== currentUser.id &&
-        message.mentions?.some((mention) => mention.userId === currentUser.id)
-      ) {
-        showSystemNotification(`${message.user.name} mentioned you`, message.content || "New room chat mention");
-      }
-    }
-  }, [currentUser.id, currentUser.name, notifications.chatMentions]);
+  const persistMessage = useCallback((message: ChatMessage) => historySourceRef.current.saveMessage(message), []);
 
   return (
     <aside className="chat panel">
       <div className="chat-header">
         <div>
           <MessageIcon size={20} />
-          <strong>Room chat</strong>
+          <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: 700 }}>Room chat</h2>
           <span className="chat-shortcut-hint" title="Press / to focus chat"><kbd>/</kbd> Focus chat</span>
         </div>
         <div className="chat-presence">
@@ -2049,9 +855,11 @@ function RoomChat({
                 title={`${user.id === currentUser.id ? "You" : user.name}${user.id === snapshot.room.djUserId ? " · DJ" : ""}`}
                 role="button"
                 tabIndex={0}
+                aria-label={`Open ${user.id === currentUser.id ? "your" : user.name + "’s"} profile`}
+                data-navigation-focus={`profile:${user.id}`}
                 onClick={() => onOpenProfile(user.id)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") onOpenProfile(user.id);
+                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenProfile(user.id); }
                 }}
               >
                 <Avatar user={user} size={32} />
@@ -2059,18 +867,18 @@ function RoomChat({
             ))}
             {snapshot.users.length > 5 && <i>+{snapshot.users.length - 5}</i>}
           </div>
-          <span><UsersIcon size={16} /> {snapshot.users.length}</span>
+          <Button ref={peopleButtonRef} variant="ghost" size="sm" onClick={() => setPeopleOpen(true)} aria-label={`Show all ${snapshot.users.length} room listeners`}><UsersIcon size={16} /> {snapshot.users.length}</Button>
         </div>
       </div>
       <div className="supabase-chat-body">
         {error && <div className="chat-error" role="alert">{error} <Button size="sm" variant="ghost" onClick={refreshHistory} disabled={loadingHistory}>{loadingHistory ? "Loading…" : "Retry history"}</Button></div>}
         <RealtimeChat
-          ref={chatRef}
+          ref={controlsRef || chatRef}
           client={client}
+          transport={chatTransport}
           roomName={`soundspin:${snapshot.room.id}`}
           user={currentUser}
           messages={messages}
-          onMessage={handleMessages}
           onSend={persistMessage}
           onConnected={refreshHistory}
           onOpenProfile={onOpenProfile}
@@ -2078,8 +886,16 @@ function RoomChat({
           roomUsers={snapshot.users}
           isVisible={isVisible}
           onUnreadCountChange={onUnreadCountChange}
+          historyRoomSlug={snapshot.room.id}
+          historySource={historySource}
+          onPersistReaction={historySource.saveReaction}
+          onResolveMediaUrl={historySource.loadMediaUrl}
+          historyLoading={loadingHistory}
+          notifications={notifications}
+          onNotificationActivate={onActivate}
         />
       </div>
+      <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={snapshot.users} currentUserId={currentUser.id} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={onOpenProfile} finalFocus={peopleButtonRef} />
     </aside>
   );
 }

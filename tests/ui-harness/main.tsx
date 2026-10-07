@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { useState } from "react";
 import { Inbox, ListMusic, MessageSquare, Music2, Radio, Send, Settings, Volume2 } from "lucide-react";
 import "@fontsource-variable/geist";
 import "../../src/shadcn.css";
@@ -11,6 +12,9 @@ import { ChatMessageItem } from "../../src/components/chat-message";
 import { FeedbackButton } from "../../src/components/FeedbackDialog";
 import { ProfilePage } from "../../src/components/ProfilePage";
 import { RoomLobby } from "../../src/components/RoomLobby";
+import { RoomHeader } from "../../src/components/RoomHeader";
+import { RoomWorkspace } from "../../src/components/RoomWorkspace";
+import type { RoomPane } from "../../src/components/RoomPaneTabs";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { UserSettingsDialog } from "../../src/components/UserSettingsDialog";
 import { Button } from "../../src/components/ui/button";
@@ -59,6 +63,7 @@ const adminFeedbackData = {
 let boundaryShouldThrow = true;
 const rejectedAuthClient = { auth: { signInWithPassword: async () => ({ error: new Error("Email or password is incorrect.") }) } };
 
+let directoryRequests = 0;
 globalThis.fetch = async (input) => {
   const url = String(input);
   if (url.includes("/api/admin/dashboard")) return Response.json(scenario === "admin-feedback" ? adminFeedbackData : adminData);
@@ -66,10 +71,17 @@ globalThis.fetch = async (input) => {
     { key: "pulse", kind: "avatar", name: "Pulse", metadata: {} }, { key: "orbit", kind: "avatar", name: "Orbit", metadata: {} },
     { key: "afterglow", kind: "theme", name: "Afterglow", metadata: { description: "Warm neon accents" } }, { key: "deep-space", kind: "theme", name: "Deep Space", metadata: { description: "A cooler cosmic profile" } }
   ] });
-  if (url.endsWith("/api/rooms")) return Response.json({ rooms: scenario === "lobby-empty" ? [] : [
+  if (url.endsWith("/api/rooms")) {
+    directoryRequests += 1;
+    if (scenario === "lobby-membership") return Response.json({ rooms: [
+      { slug: "private-room", name: "Private Studio", ownerId: "host-2", isPublic: false, passwordProtected: false, isFavorite: true, role: "member", listenerCount: directoryRequests > 1 ? 4 : 0, createdAt: "2026-07-01", updatedAt: "2026-07-31" },
+      { slug: "public-room", name: "Public Radio", ownerId: "host-3", isPublic: true, passwordProtected: true, isFavorite: false, role: null, listenerCount: 7, createdAt: "2026-07-02", updatedAt: "2026-07-31" }
+    ] });
+    return Response.json({ rooms: scenario === "lobby-empty" ? [] : [
     { slug: "sunset-radio", name: "Sunset Radio", ownerId: user.id, isPublic: true, passwordProtected: false, isFavorite: true, role: "owner", listenerCount: 18, createdAt: "2026-07-01", updatedAt: "2026-07-31" },
     { slug: "deep-focus", name: "Deep Focus", ownerId: "host-2", isPublic: true, passwordProtected: false, isFavorite: false, role: null, listenerCount: 7, createdAt: "2026-07-02", updatedAt: "2026-07-31" }
-  ] });
+    ] });
+  }
   return Response.json({ profile, ...adminData });
 };
 
@@ -88,7 +100,31 @@ function RecoverableFixture() {
   return <div className="fixture-state"><AsyncState state="empty" title="Interface recovered" description="The error boundary remounted the surface." /></div>;
 }
 
+function WorkspaceControlsFixture() {
+  const [pane, setPane] = useState<RoomPane>("player");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [action, setAction] = useState("");
+  const listener = new URLSearchParams(location.search).get("role") === "listener";
+  const settings = readUserSettings();
+  return <main className="app-shell">
+    <RoomHeader roomName="A room with a longer name for testing mobile access" roomSlug="qa-room" listenerCount={18} currentUser={user}
+      onHome={() => setAction("Rooms opened")} onSettings={() => setSettingsOpen(true)}
+      onRoomSettings={listener ? undefined : () => setAction("Room settings opened")}
+      onAdmin={listener ? undefined : () => setAction("Admin opened")} onProfile={() => setAction("Profile opened")}
+      onSignOut={() => setAction("Signed out")} onResetLayout={() => setAction("Layout reset")} onNotice={setAction}
+      participants={[user, ...Array.from({ length: 8 }, (_, index) => ({ id: `listener-${index + 1}`, name: `Listener ${index + 1}`, avatarSeed: `listener-${index + 1}` }))]}
+      ownerUserId={user.id} djUserId="listener-8" onOpenProfile={(id) => setAction(`Profile opened: ${id}`)} />
+    <RoomWorkspace value={pane} onValueChange={setPane} unreadCount={3} defaultLayout={{ radio: 20, player: 40, chat: 40 }}
+      radio={<aside className="music-rail panel"><h2 className="music-rail-heading">Radio</h2><Input aria-label="Radio search" placeholder="Find music" /></aside>}
+      player={<div className="player-column"><section className="now-playing panel"><h2 className="now-playing-heading">Player</h2><div className="now-playing-main"><div className="track-stage">Artwork</div><div className="player-details">{Array.from({ length: 10 }, (_, index) => <p key={index}>Player context line {index + 1}</p>)}<Button onClick={() => setAction("Bottom control reached")}>Bottom player control</Button></div></div></section></div>}
+      chat={<aside className="chat panel"><h2 className="chat-header">Room chat</h2><Input aria-label="Draft message" placeholder="Message room" /></aside>} />
+    {settingsOpen && <UserSettingsDialog settings={settings} connections={{ loaded: true, spotifyConfigured: false, spotifyConnected: false, appleConfigured: false }} onSettingsChange={() => {}} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => setSettingsOpen(false)} />}
+    {action && <p className="sr-only" role="status">{action}</p>}
+  </main>;
+}
+
 function Harness() {
+  if (scenario === "workspace-controls") return <WorkspaceControlsFixture />;
   if (scenario.startsWith("lobby")) return <RoomLobby accessToken="fixture" currentUser={user} onOpenRoom={() => {}} onOpenProfile={() => {}} onSignOut={() => {}} feedbackButton={<FeedbackButton userId={user.id} />} adminButton={<Button>Admin</Button>} />;
   if (scenario === "profile") return <ProfilePage profileId={user.id} accessToken="fixture" currentUser={user} onBack={() => {}} onOwnProfileUpdated={() => {}} onOpenAdmin={() => {}} />;
   if (scenario === "admin" || scenario === "admin-feedback") return <AdminDashboard accessToken="fixture" currentUser={user} onBack={() => {}} onOpenRoom={() => {}} />;

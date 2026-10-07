@@ -43,6 +43,8 @@ export interface Track {
   mappings?: Partial<Record<Provider, ProviderTrackMapping>>;
   addedBy: User;
   addedAt: number;
+  /** Actual server time the track began playing; absent on legacy history. */
+  playedAt?: number;
 }
 
 export interface ProviderTrackMapping {
@@ -67,8 +69,17 @@ export interface VibeState {
 
 export type DjAccess = "everyone" | "roles";
 
+export interface RoomAnnouncement {
+  id: string;
+  text: string;
+  authorId: string;
+  updatedAt: number;
+  expiresAt: number | null;
+}
+
 export interface RoomSettings {
   djAccess?: DjAccess;
+  description?: string;
   [key: string]: unknown;
 }
 
@@ -81,6 +92,7 @@ export interface Room {
   isPublic: boolean;
   passwordProtected: boolean;
   settings: RoomSettings;
+  announcement?: RoomAnnouncement | null;
   /** User on air; having a DJ role or joining the lineup does not imply this. */
   djUserId: string | null;
   /** Rotation order, with the next candidate at index 0. */
@@ -106,6 +118,9 @@ export interface RoomDirectoryEntry {
   listenerCount: number;
   createdAt: string;
   updatedAt: string;
+  description?: string;
+  /** Bounded, public/unprotected room preview; never a private DJ queue. */
+  preview?: { title: string; artist?: string; artworkUrl?: string; provider?: Provider; playing: boolean; observedAt: number };
 }
 
 export interface RoomSnapshot {

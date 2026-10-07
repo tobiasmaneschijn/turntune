@@ -1,0 +1,107 @@
+import { expect, test } from '@playwright/test'
+
+type ChatQolHarness = { broadcastIds: string[]; saveIds: string[]; failSave: boolean; holdDelivery: boolean; releaseDelivery(): void; scrollBehaviors: string[] }
+declare global { interface Window { chatQolTest: ChatQolHarness } }
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false } }))
+  await page.goto('/tests/chat-qol-harness/index.html')
+  await expect(page.getByRole('textbox', { name: 'Message room chat' })).toBeEnabled()
+})
+
+test('multiline drafts survive navigation, reload and room changes without account leakage', async ({ page }) => {
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  await composer.fill('first line')
+  await composer.press('Shift+Enter')
+  await composer.pressSequentially('second line')
+  await expect(composer).toHaveValue('first line\nsecond line')
+  await page.getByRole('button', { name: 'Navigate away' }).click()
+  await page.getByRole('button', { name: 'Return to chat' }).click()
+  await expect(composer).toHaveValue('first line\nsecond line')
+  await expect(page.getByText('Draft restored')).toBeVisible()
+  await page.getByRole('button', { name: 'Switch room' }).click()
+  await expect(composer).toHaveValue('')
+  await composer.fill('other room')
+  await page.getByRole('button', { name: 'Switch room' }).click()
+  await expect(composer).toHaveValue('first line\nsecond line')
+  await page.getByRole('button', { name: 'Switch account' }).click()
+  await expect(composer).toHaveValue('')
+  await page.getByRole('button', { name: 'Switch account' }).click()
+  await expect(composer).toHaveValue('first line\nsecond line')
+  await page.reload()
+  await expect(composer).toHaveValue('first line\nsecond line')
+})
+
+test('failed history retry keeps the UUID and never rebroadcasts', async ({ page }) => {
+  await page.evaluate(() => { window.chatQolTest.failSave = true })
+  await page.getByRole('textbox', { name: 'Message room chat' }).fill('keep this message')
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
+  await expect(page.getByText('Sent live · history save failed')).toBeVisible()
+  await page.evaluate(() => { window.chatQolTest.failSave = false })
+  await page.getByRole('button', { name: 'Retry save' }).click()
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  const counts = await page.evaluate(() => ({ broadcasts: window.chatQolTest.broadcastIds, saves: window.chatQolTest.saveIds }))
+  expect(counts.broadcasts).toHaveLength(1)
+  expect(counts.saves).toEqual([counts.broadcasts[0], counts.broadcasts[0]])
+})
+
+test('typing during a slow send stays intact and composing Enter does not send', async ({ page }) => {
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  await composer.fill('first message')
+  await page.evaluate(() => { window.chatQolTest.holdDelivery = true })
+  await composer.press('Enter')
+  await expect(page.getByRole('button', { name: 'Sending message' })).toBeDisabled()
+  await composer.fill('next draft')
+  await page.evaluate(() => { window.chatQolTest.releaseDelivery() })
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect(composer).toHaveValue('next draft')
+  await composer.dispatchEvent('compositionstart')
+  await composer.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true })
+  expect(await page.evaluate(() => window.chatQolTest.broadcastIds.length)).toBe(1)
+  await composer.dispatchEvent('compositionend')
+})
+
+test('touch action menu provides reply and restores its valid context', async ({ page }) => {
+  await page.getByRole('button', { name: 'Message actions for Mira' }).first().click()
+  await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Cancel reply' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message room chat' })).toBeFocused()
+  await page.getByRole('textbox', { name: 'Message room chat' }).fill('reply draft')
+  await page.getByRole('button', { name: 'Navigate away' }).click()
+  await page.getByRole('button', { name: 'Return to chat' }).click()
+  await expect(page.getByRole('button', { name: 'Cancel reply' })).toBeVisible()
+})
+
+test('OS and app motion preferences govern reply jumps during a session', async ({ page }) => {
+  const jump = page.locator('#chat-message-history-2 .chat-message-reply')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await jump.click()
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.scrollBehaviors.at(-1))).toBe('auto')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.evaluate(() => document.documentElement.classList.add('reduced-motion'))
+  await jump.click()
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.scrollBehaviors.at(-1))).toBe('auto')
+  await page.evaluate(() => document.documentElement.classList.remove('reduced-motion'))
+  await jump.click()
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.scrollBehaviors.at(-1))).toBe('smooth')
+})
+
+test('sign out prevents the unmount flush from recreating sensitive account drafts', async ({ page }) => {
+  await page.getByRole('textbox', { name: 'Message room chat' }).fill('private draft')
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('soundspin-chat-draft:alice:')))).toEqual([])
+  await page.getByRole('button', { name: 'Return to chat' }).click()
+  await expect(page.getByRole('textbox', { name: 'Message room chat' })).toHaveValue('')
+})
+
+test('composer and message actions stay usable at 320px with multiline text', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 568 })
+  await page.getByRole('textbox', { name: 'Message room chat' }).fill('One line\nTwo lines\nThree lines\nFour lines')
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  expect((await composer.boundingBox())?.height).toBeGreaterThan(80)
+  const more = page.getByRole('button', { name: 'Message actions for Mira' }).first()
+  expect((await more.boundingBox())?.width).toBeGreaterThanOrEqual(44)
+  expect((await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox())?.height).toBeGreaterThanOrEqual(44)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath('chat-320.png') })
+})

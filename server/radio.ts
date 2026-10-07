@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Room, SnapshotRoom, Track, User } from "./types.js";
 
 export class GracePeriodRegistry {
@@ -138,7 +139,7 @@ export function archiveCurrentTrack(room: Room) {
  * consuming a track guarantees one song per turn. Empty queues are skipped for
  * this pass without removing their DJ, so adding music later restores their turn.
  */
-export function advanceRadio(room: Room) {
+export function advanceRadio(room: Room, now = Date.now()) {
   archiveCurrentTrack(room);
 
   const turnsToCheck = room.djQueueUserIds.length;
@@ -149,14 +150,16 @@ export function advanceRadio(room: Room) {
     const track = queue.shift();
     if (!track) continue;
 
+    track.playedAt = now;
+
     room.djUserId = userId;
-    room.playback = { track, playing: true, position: 0, updatedAt: Date.now() };
+    room.playback = { track, playing: true, position: 0, updatedAt: now };
     room.vibe = { trackId: track.id, votes: {} };
     return track;
   }
 
   room.djUserId = null;
-  room.playback = { track: null, playing: false, position: 0, updatedAt: Date.now() };
+  room.playback = { track: null, playing: false, position: 0, updatedAt: now };
   room.vibe = null;
   return null;
 }
@@ -166,6 +169,147 @@ export function privateQueue(room: Room, userId: string): Track[] {
     Object.defineProperty(room.djQueues, userId, { value: [], writable: true, enumerable: true, configurable: true });
   }
   return room.djQueues[userId];
+}
+
+export interface QueueUndoReceipt { token: string; expiresAt: number; title: string }
+export interface QueueRollbackResult {
+  status: "rolled-back" | "superseded" | "committed";
+  changed: boolean;
+  undoAvailable: boolean;
+}
+interface QueueUndoEntry {
+  room: Room; userId: string; track: Track; before?: string; after?: string; expiresAt: number;
+  phase: "removing" | "removed" | "restoring";
+}
+
+function insertAtSurvivingAnchor(queue: Track[], track: Track, entry: Pick<QueueUndoEntry, "before" | "after">) {
+  const after = queue.findIndex((item) => item.id === entry.after);
+  const before = queue.findIndex((item) => item.id === entry.before);
+  const index = after >= 0 ? after : before >= 0 ? before + 1 : queue.length;
+  queue.splice(index, 0, track);
+  return index + 1;
+}
+
+/** Ephemeral receipts stay outside persisted/shared room JSON and are single-use. */
+export class QueueUndoRegistry {
+  private entries = new Map<string, QueueUndoEntry>();
+  constructor(private readonly durationMs = 15_000) {}
+
+  remove(room: Room, userId: string, trackId: string, now = Date.now()): QueueUndoReceipt {
+    const transaction = this.beginRemove(room, userId, trackId, now);
+    transaction.commit();
+    return transaction.receipt;
+  }
+
+  beginRemove(room: Room, userId: string, trackId: string, now = Date.now()) {
+    const queue = privateQueue(room, userId);
+    const index = queue.findIndex((track) => track.id === trackId);
+    if (index < 0) throw new Error("That waiting track is no longer in your queue.");
+    for (const [token, entry] of this.entries) if (entry.expiresAt <= now || (entry.room === room && entry.userId === userId)) this.entries.delete(token);
+    const token = randomUUID();
+    const track = queue[index];
+    const expiresAt = now + this.durationMs;
+    const entry: QueueUndoEntry = { room, userId, track: structuredClone(track), before: queue[index - 1]?.id, after: queue[index + 1]?.id, expiresAt, phase: "removing" };
+    this.entries.set(token, entry);
+    queue.splice(index, 1);
+    let settled: QueueRollbackResult | undefined;
+    return {
+      receipt: { token, expiresAt, title: track.title },
+      commit: () => {
+        if (settled) return;
+        if (this.entries.get(token) === entry) entry.phase = "removed";
+        settled = { status: "committed", changed: false, undoAvailable: this.entries.get(token) === entry };
+      },
+      rollback: (): QueueRollbackResult => {
+        if (settled) return settled;
+        if (this.entries.get(token) === entry) this.entries.delete(token);
+        const current = privateQueue(room, userId);
+        const same = (item: Track) => item.id === track.id || sameRecording(item, track);
+        // A save can yield while another tab re-adds, reorders, or advances.
+        // Restore only this removal; never overwrite its current queue/turn.
+        if ((room.playback.track && same(room.playback.track)) || room.history.some((item) => item.id === track.id) || current.some(same)) {
+          return settled = { status: "superseded", changed: false, undoAvailable: false };
+        }
+        insertAtSurvivingAnchor(current, track, entry);
+        return settled = { status: "rolled-back", changed: true, undoAvailable: false };
+      },
+    };
+  }
+
+  restore(room: Room, userId: string, token: string, now = Date.now()) {
+    const transaction = this.beginRestore(room, userId, token, now);
+    transaction.commit();
+    return transaction.result;
+  }
+
+  beginRestore(room: Room, userId: string, token: string, now = Date.now()) {
+    const entry = this.entries.get(token);
+    if (!entry || entry.expiresAt <= now) {
+      if (entry?.expiresAt && entry.expiresAt <= now) this.entries.delete(token);
+      throw new Error("Undo expired. You can add the track again from your saved picks or search.");
+    }
+    if (entry.room !== room || entry.userId !== userId) throw new Error("This Undo belongs to a different room or account.");
+    if (entry.phase !== "removed") throw new Error("This queue change is still being saved. Wait before trying Undo again.");
+    if (!canJoinDjQueue(room, userId) || !room.djQueueUserIds.includes(userId)) throw new Error("Join the DJ lineup with permission before restoring this track.");
+    const queue = privateQueue(room, userId);
+    const same = (track: Track) => track.id === entry.track.id || sameRecording(track, entry.track);
+    if ((room.playback.track && same(room.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
+    if (room.history.some((track) => track.id === entry.track.id)) throw new Error("That queue item has already played and cannot be restored.");
+    // Stable surviving neighbors preserve current edits; no old numeric index.
+    entry.phase = "restoring";
+    const position = insertAtSurvivingAnchor(queue, entry.track, entry);
+    // Quiet-room Undo restores a waiting item without selecting a DJ or starting audio.
+    let settled: QueueRollbackResult | undefined;
+    return {
+      result: { track: entry.track, position },
+      commit: () => {
+        if (settled) return;
+        if (this.entries.get(token) === entry) this.entries.delete(token);
+        settled = { status: "committed", changed: false, undoAvailable: false };
+      },
+      rollback: (rollbackNow = Date.now()): QueueRollbackResult => {
+        if (settled) return settled;
+        const current = privateQueue(room, userId);
+        const index = current.indexOf(entry.track);
+        if (index < 0 || room.playback.track?.id === entry.track.id || room.history.some((track) => track.id === entry.track.id)) {
+          if (this.entries.get(token) === entry) this.entries.delete(token);
+          return settled = { status: "superseded", changed: false, undoAvailable: false };
+        }
+        // Object identity ensures a newer replacement/removal is never undone.
+        current.splice(index, 1);
+        const undoAvailable = this.entries.get(token) === entry && entry.expiresAt > rollbackNow;
+        if (undoAvailable) entry.phase = "removed";
+        else if (this.entries.get(token) === entry) this.entries.delete(token);
+        return settled = { status: "rolled-back", changed: true, undoAvailable };
+      },
+    };
+  }
+
+  revoke(token: string) { this.entries.delete(token); }
+}
+
+export function sameRecording(first: Pick<Track, "provider" | "providerId" | "canonicalId">, second: Pick<Track, "provider" | "providerId" | "canonicalId">) {
+  return (first.provider === second.provider && first.providerId === second.providerId) || Boolean(first.canonicalId && first.canonicalId === second.canonicalId);
+}
+
+/** Append a pre-resolved set in order and report every skipped item. */
+export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">>, now = Date.now()) {
+  if (!canJoinDjQueue(room, user.id) || !room.djQueueUserIds.includes(user.id)) throw new Error("Join the DJ lineup with permission before adding a set.");
+  if (inputs.length === 0 || inputs.length > 50) throw new Error("A set must contain between 1 and 50 tracks.");
+  const queue = privateQueue(room, user.id);
+  const skipped: Array<{ title: string; reason: string }> = [];
+  let added = 0;
+  for (const input of inputs) {
+    if ((room.playback.track && sameRecording(room.playback.track, input)) || queue.some((track) => sameRecording(track, input))) {
+      skipped.push({ title: input.title, reason: "Already playing or in your queue" });
+      continue;
+    }
+    queue.push({ ...input, id: randomUUID(), addedBy: user, addedAt: now });
+    added++;
+  }
+  const started = added > 0 && !room.playback.track;
+  if (started) advanceRadio(room, now);
+  return { added, skipped, started };
 }
 
 /**

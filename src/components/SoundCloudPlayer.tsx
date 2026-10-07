@@ -18,6 +18,7 @@ interface SoundCloudWidgetApi {
   setVolume(volume: number): void;
   getDuration(callback: (milliseconds: number) => void): void;
   getPosition(callback: (milliseconds: number) => void): void;
+  isPaused(callback: (paused: boolean) => void): void;
 }
 
 interface SoundCloudWidgetOptions {
@@ -145,23 +146,36 @@ export function SoundCloudPlayer({
       });
       widget.bind(events.LOAD_PROGRESS, (progress) => {
         if (!active || loadingTrackRef.current || loadedTrackIdRef.current !== playbackRef.current.track?.id) return;
-        onStatusRef.current({
-          ready: true,
-          buffering: (progress?.loadProgress || 0) < (progress?.relativePosition || 0),
-          currentTime: (progress?.currentPosition || 0) / 1000,
-          duration: 0
+        const trackId = loadedTrackIdRef.current;
+        const revision = commandRevisionRef.current;
+        widget.isPaused((paused) => {
+          if (!active || loadingTrackRef.current || revision !== commandRevisionRef.current || trackId !== loadedTrackIdRef.current || trackId !== playbackRef.current.track?.id) return;
+          onStatusRef.current({
+            ready: true,
+            buffering: (progress?.loadProgress || 0) < (progress?.relativePosition || 0),
+            currentTime: (progress?.currentPosition || 0) / 1000,
+            duration: 0,
+            playing: !paused,
+            trackId: trackId || undefined
+          });
         });
       });
       widget.bind(events.PLAY_PROGRESS, (progress) => {
         if (!active || loadingTrackRef.current || loadedTrackIdRef.current !== playbackRef.current.track?.id) return;
         const trackId = loadedTrackIdRef.current;
+        const revision = commandRevisionRef.current;
         widget.getDuration((duration) => {
-          if (!active || loadingTrackRef.current || trackId !== loadedTrackIdRef.current || trackId !== playbackRef.current.track?.id) return;
-          onStatusRef.current({
-            ready: true,
-            buffering: false,
-            currentTime: (progress?.currentPosition || 0) / 1000,
-            duration: duration / 1000
+          if (!active || loadingTrackRef.current || revision !== commandRevisionRef.current || trackId !== loadedTrackIdRef.current || trackId !== playbackRef.current.track?.id) return;
+          widget.isPaused((paused) => {
+            if (!active || loadingTrackRef.current || revision !== commandRevisionRef.current || trackId !== loadedTrackIdRef.current || trackId !== playbackRef.current.track?.id) return;
+            onStatusRef.current({
+              ready: true,
+              buffering: false,
+              currentTime: (progress?.currentPosition || 0) / 1000,
+              duration: duration / 1000,
+              playing: !paused,
+              trackId: trackId || undefined
+            });
           });
         });
       });
@@ -285,16 +299,25 @@ export function SoundCloudPlayer({
       const current = playbackRef.current;
       if (!widget || !current.track || loadingTrackRef.current || loadedTrackIdRef.current !== current.track.id) return;
       const trackId = current.track.id;
+      const revision = commandRevisionRef.current;
+      const valid = () => aliveRef.current && !loadingTrackRef.current &&
+        revision === commandRevisionRef.current && loadedTrackIdRef.current === trackId && playbackRef.current.track?.id === trackId;
       widget.getPosition((positionMs) => {
-        if (!aliveRef.current || loadingTrackRef.current || playbackRef.current.track?.id !== trackId) return;
+        if (!valid()) return;
         const currentTime = positionMs / 1000;
         widget.getDuration((durationMs) => {
-          if (!aliveRef.current || loadingTrackRef.current || playbackRef.current.track?.id !== trackId) return;
-          onStatusRef.current({
-            ready: true,
-            buffering: false,
-            currentTime,
-            duration: durationMs / 1000
+          if (!valid()) return;
+          // play()/pause() are commands; only the iframe can confirm its state.
+          widget.isPaused((paused) => {
+            if (!valid()) return;
+            onStatusRef.current({
+              ready: true,
+              buffering: false,
+              currentTime,
+              duration: durationMs / 1000,
+              playing: !paused,
+              trackId
+            });
           });
         });
       });

@@ -567,7 +567,7 @@ export function SpotifyPlayer({
           const currentTime = state.position / 1000;
           const duration = state.duration / 1000;
           const sameRecording = state.track_window.current_track.uri === spotifyUri;
-          onStatus({ ready: true, buffering: playback.playing && !sameRecording, currentTime: sameRecording ? currentTime : 0, duration: sameRecording ? duration : 0 });
+          onStatus({ ready: true, buffering: playback.playing && !sameRecording, currentTime: sameRecording ? currentTime : 0, duration: sameRecording ? duration : 0, playing: sameRecording && !state.paused, trackId: sameRecording ? track.id : undefined });
           if (endTrackerRef.current.observe(`${track.id}:${spotifyUri}:${playback.position}:${playback.updatedAt}`, sameRecording ? currentTime : 0,
             duration, sameRecording && state.paused, playback.playing && isDj)) {
             onEnded();
@@ -588,7 +588,9 @@ export function SpotifyPlayer({
             ready: Boolean(deviceId),
             buffering: Boolean(playback.playing && !sameRecording),
             currentTime: sameRecording ? currentTime : 0,
-            duration: sameRecording ? duration : 0
+            duration: sameRecording ? duration : 0,
+            playing: sameRecording && Boolean(state?.is_playing),
+            trackId: sameRecording ? track.id : undefined
           });
           if (endTrackerRef.current.observe(`${track.id}:${spotifyUri}:${playback.position}:${playback.updatedAt}`, sameRecording ? currentTime : 0,
             duration, sameRecording && !state?.is_playing, playback.playing && isDj)) {

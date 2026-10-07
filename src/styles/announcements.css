@@ -1,0 +1,9 @@
+.room-announcement-banner { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); color: var(--muted-foreground); font-size: 12px; }
+.room-announcement-banner > svg { flex: 0 0 auto; color: var(--primary); }
+.room-announcement-banner > span { flex: 1; }
+.room-announcement-text { flex: 1; min-width: 0; max-height: 44px; text-align: left; color: var(--foreground); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; background: transparent; border: 0; cursor: pointer; }
+.room-announcement-banner [data-slot="button"] { min-height: 44px; flex-shrink: 0; }
+.room-announcement-dialog form { display: grid; gap: 10px; min-width: 0; }
+.room-announcement-dialog select { min-height: 44px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); color: var(--foreground); padding: 8px; }
+.room-announcement-dialog small { color: var(--muted-foreground); }
+.room-note-full-text { white-space: pre-wrap; overflow-wrap: anywhere; }

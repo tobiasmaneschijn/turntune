@@ -148,6 +148,18 @@
 }
 
 .settings-tabs button { min-height: 40px; font-size: 13px; }
+.settings-tab-panel > [data-slot="tabs-content"] { min-width: 0; }
+.settings-tab-panel > [data-slot="tabs-content"][hidden] { display: none; }
+@media (max-width: 600px) {
+  .settings-tabs { position: relative; mask-image: linear-gradient(to right, transparent, black 7px, black calc(100% - 12px), transparent); scroll-padding-inline: 8px; }
+  .settings-tabs button { min-height: 44px; }
+  .user-settings-dialog { padding: 18px; }
+  .user-settings-dialog [data-slot="button"], .user-settings-dialog [data-slot="select-trigger"] { min-height: 44px; }
+}
+@media (max-height: 560px) {
+  .user-settings-layout { min-height: 0; }
+  .user-settings-dialog { height: calc(100dvh - 32px); }
+}
 .settings-section-heading strong { font-size: 15px; }
 .settings-section-heading small,
 .settings-switch-row small { font-size: 12px; }

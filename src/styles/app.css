@@ -496,3 +496,12 @@ a:focus-visible,
 .light .current-track h2 { color: var(--foreground); }
 .light .connection-logo.apple { background: var(--foreground); color: var(--background); }
 .light .dialog-error { color: var(--destructive); }
+
+@media (max-width: 640px), (pointer: coarse) {
+  .app-shell [data-slot="button"], [data-slot="dialog-content"] [data-slot="button"] { min-height: 44px; min-width: 44px; }
+  .app-shell .chat-composer-bar > [data-slot="button"] { width: 44px; height: 44px; flex-basis: 44px; }
+  .app-shell .chat-message-actions > button { width: 44px; height: 44px; }
+  .app-shell .chat-message-reactions > button { min-height: 44px; }
+  .app-shell .chat-composer-input { font-size: 16px; }
+  [data-slot="dialog-content"] [data-slot="input"], [data-slot="dialog-content"] textarea { font-size: 16px; }
+}

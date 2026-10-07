@@ -28,6 +28,7 @@ interface YouTubePlayerApi {
   getCurrentTime(): number;
   getDuration(): number;
   getPlayerState(): number;
+  getVideoUrl(): string;
   setVolume(volume: number): void;
   destroy(): void;
 }
@@ -37,6 +38,9 @@ export interface PlayerStatus {
   buffering: boolean;
   currentTime: number;
   duration: number;
+  /** Present only when the provider reports its actual playback state. */
+  playing?: boolean;
+  trackId?: string;
 }
 
 const loadApi = createPlayerApiLoader({
@@ -48,6 +52,19 @@ const loadApi = createPlayerApiLoader({
 
 function targetPosition(playback: Playback) {
   return playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
+}
+
+function loadedVideoId(player: YouTubePlayerApi) {
+  // getVideoUrl() describes the loaded video, while loadVideoById() is only a
+  // request. The old video's events can still arrive during that transition.
+  try {
+    const url = new URL(player.getVideoUrl());
+    return url.searchParams.get("v") || (url.hostname === "youtu.be" ? url.pathname.slice(1) : "");
+  } catch { return ""; }
+}
+
+function trackKey(playback: Playback) {
+  return playback.track ? `${playback.track.id}:${playback.track.providerId}` : "";
 }
 
 export function YouTubePlayer({
@@ -69,13 +86,17 @@ export function YouTubePlayer({
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerApi | null>(null);
-  const trackIdRef = useRef<string | null>(null);
+  const requestedTrackKeyRef = useRef("");
+  const confirmedTrackKeyRef = useRef("");
+  const playedTrackKeyRef = useRef("");
+  const endedCheckpointRef = useRef("");
   const playbackRef = useRef(playback);
   const onStatusRef = useRef(onStatus);
   const isDjRef = useRef(isDj);
   const onEndedRef = useRef(onEnded);
   const onErrorRef = useRef(onError);
   const [ready, setReady] = useState(false);
+  const [loadedRevision, setLoadedRevision] = useState(0);
 
   playbackRef.current = playback;
   onStatusRef.current = onStatus;
@@ -97,16 +118,32 @@ export function YouTubePlayer({
           onReady: () => { if (active) setReady(true); },
           onStateChange: (event) => {
             if (!active) return;
+            const player = playerRef.current;
             const current = playbackRef.current;
-            if (event.data === window.YT?.PlayerState.ENDED && isDjRef.current && current.playing &&
-              current.track?.id === trackIdRef.current) {
+            const key = trackKey(current);
+            if (!player || !current.track || key !== requestedTrackKeyRef.current || loadedVideoId(player) !== current.track.providerId) return;
+            const state = player.getPlayerState();
+            // Do not attribute an old ENDED event to a repeated video requested
+            // for a new room track until that request has actually started.
+            if (state === window.YT?.PlayerState.ENDED && playedTrackKeyRef.current !== key) return;
+            if (state !== window.YT?.PlayerState.ENDED && confirmedTrackKeyRef.current !== key) {
+              confirmedTrackKeyRef.current = key;
+              setLoadedRevision((revision) => revision + 1);
+            }
+            if (state === 1) playedTrackKeyRef.current = key;
+            const checkpoint = `${key}:${current.position}:${current.updatedAt}`;
+            if (event.data === window.YT?.PlayerState.ENDED && state === window.YT?.PlayerState.ENDED &&
+              isDjRef.current && current.playing && endedCheckpointRef.current !== checkpoint) {
+              endedCheckpointRef.current = checkpoint;
               onEndedRef.current();
             }
             onStatusRef.current({
               ready: true,
-              buffering: event.data === window.YT?.PlayerState.BUFFERING,
-              currentTime: playerRef.current?.getCurrentTime() || 0,
-              duration: playerRef.current?.getDuration() || 0
+              buffering: state === window.YT?.PlayerState.BUFFERING,
+              currentTime: player.getCurrentTime() || 0,
+              duration: player.getDuration() || 0,
+              playing: state === 1,
+              trackId: current.track.id
             });
           },
           onError: () => {
@@ -133,20 +170,30 @@ export function YouTubePlayer({
     const player = playerRef.current;
     if (!playback.track) {
       player.pauseVideo();
-      trackIdRef.current = null;
+      requestedTrackKeyRef.current = "";
+      confirmedTrackKeyRef.current = "";
+      playedTrackKeyRef.current = "";
       onStatusRef.current({ ready: true, buffering: false, currentTime: 0, duration: 0 });
       return;
     }
     const position = targetPosition(playback);
-    if (trackIdRef.current !== playback.track.id) {
-      trackIdRef.current = playback.track.id;
+    const key = trackKey(playback);
+    if (requestedTrackKeyRef.current !== key) {
+      requestedTrackKeyRef.current = key;
+      confirmedTrackKeyRef.current = "";
+      playedTrackKeyRef.current = "";
+      endedCheckpointRef.current = "";
+      onStatusRef.current({ ready: true, buffering: playback.playing, currentTime: 0, duration: 0 });
       const action = playback.playing ? "loadVideoById" : "cueVideoById";
       player[action]({ videoId: playback.track.providerId, startSeconds: position });
     } else {
+      // A room checkpoint may change before the requested video finishes
+      // loading. Apply its latest intent after the SDK confirms that video.
+      if (confirmedTrackKeyRef.current !== key || loadedVideoId(player) !== playback.track.providerId) return;
       player.seekTo(position, true);
       playback.playing ? player.playVideo() : player.pauseVideo();
     }
-  }, [ready, playback.track?.id, playback.playing, playback.position, playback.updatedAt, syncRevision]);
+  }, [ready, loadedRevision, playback.track?.id, playback.track?.providerId, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
     if (!ready || !playerRef.current) return;
@@ -158,15 +205,21 @@ export function YouTubePlayer({
     const timer = window.setInterval(() => {
       const player = playerRef.current;
       const current = playbackRef.current;
-      if (!player || !current.track) return;
+      const key = trackKey(current);
+      if (!player || !current.track || key !== requestedTrackKeyRef.current || key !== confirmedTrackKeyRef.current || loadedVideoId(player) !== current.track.providerId) return;
+      const state = player.getPlayerState();
+      if (state === window.YT?.PlayerState.ENDED && playedTrackKeyRef.current !== key) return;
+      if (state === 1) playedTrackKeyRef.current = key;
       const currentTime = player.getCurrentTime();
       onStatusRef.current({
         ready: true,
-        buffering: player.getPlayerState() === window.YT?.PlayerState.BUFFERING,
+        buffering: state === window.YT?.PlayerState.BUFFERING,
         currentTime,
-        duration: player.getDuration() || 0
+        duration: player.getDuration() || 0,
+        playing: state === 1,
+        trackId: current.track.id
       });
-      if (current.playing) {
+      if (current.playing && state !== window.YT?.PlayerState.ENDED) {
         const expected = targetPosition(current);
         if (Math.abs(currentTime - expected) > 2.5) player.seekTo(expected, true);
       }

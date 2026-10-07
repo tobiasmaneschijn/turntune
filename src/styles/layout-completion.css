@@ -1,0 +1,97 @@
+/* Available space is shared by context, mounted panes, and local controls. */
+.app-shell .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 64px); display: flex !important; flex-direction: column; gap: 8px; }
+.app-shell.room-is-reconnecting .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 120px); }
+.app-shell .room-panels { flex: 1; min-height: 0; height: auto !important; }
+.room-workspace-context { flex: 0 1 auto; min-height: 0; max-height: min(220px, 35%); overflow-y: auto; }
+.room-workspace-context:empty { display: none; }
+.room-mini-player { flex: 0 0 auto; min-height: 60px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.room-mini-player .room-mini-art { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; }
+.room-mini-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.room-mini-copy strong, .room-mini-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-mini-copy strong { font-size: 13px; }
+.room-mini-copy span { font-size: 11px; color: var(--muted-foreground); }
+.room-mini-player[data-status=error] .room-mini-copy span { color: var(--destructive); }
+.room-listening-checklist { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.room-listening-checklist.is-compact { padding: 6px; }
+.room-workspace-context { display: grid; gap: 6px; }
+.room-listening-dialog .listening-checklist-steps { grid-template-columns: 1fr; }
+.listening-checklist-heading { display: flex; gap: 8px; align-items: center; }
+.listening-checklist-heading > svg { width: 18px; height: 18px; color: var(--primary); }
+.listening-checklist-heading h2 { flex: 1; margin: 0; font-size: 14px; }
+.listening-checklist-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding-block: 8px; }
+.listening-checklist-steps strong { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+.listening-checklist-steps strong svg { width: 14px; height: 14px; color: var(--primary); }
+.listening-checklist-steps p { margin: 6px 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+.topbar .room-listener-count { justify-content: flex-start; padding: 0; max-width: 100%; height: 26px; min-height: 26px; gap: 5px; font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+.room-people-positioner { z-index: 60; }
+.room-people-popover { position: relative; width: min(390px, calc(100vw - 24px)); display: grid; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 12px 40px #0003; max-height: var(--available-height, calc(100dvh - 96px)); }
+.room-people-popover [data-slot=dialog-title], .room-people-popover h2 { margin: 0; font-size: 16px; }
+.room-people-popover [data-slot=dialog-description], .room-people-popover p { margin: 0; color: var(--muted-foreground); font-size: 13px; }
+.room-people-close { position: absolute; top: 8px; right: 8px; }
+.room-people-sheet { align-self: end; width: calc(100vw - 16px); max-width: none; max-height: calc(100dvh - 24px); margin-bottom: -16px; border-radius: 16px 16px 0 0; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+.room-people-sheet .room-people-list { max-height: 60dvh; }
+:is(.room-command-dialog, .room-keyboard-help, .room-settings-dialog, .feedback-dialog, .room-announcement-dialog, .room-listening-dialog)[data-slot=dialog-content] { max-height: calc(var(--room-viewport-height, 100dvh) - 32px); overflow-y: auto; }
+.user-settings-dialog[data-slot=dialog-content] { max-height: calc(var(--room-viewport-height, 100dvh) - 32px); }
+.user-settings-dialog .playback-option { height: auto; min-height: 66px; }
+.room-command-dialog { grid-template-rows: auto auto minmax(0, 1fr); }
+.room-command-list { min-height: 0; display: grid; gap: 4px; overflow-y: auto; }
+.room-command-list > button { width: 100%; justify-content: space-between; min-height: 44px; }
+.room-command-list kbd, .room-actions-menu kbd { margin-left: auto; color: var(--muted-foreground); font-size: 11px; }
+.room-shortcut-preference { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
+.room-description-help { margin: 0; font-size: 12px; color: var(--muted-foreground); }
+.settings-empty-devices { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
+.room-lobby .lobby-directory-tools { grid-template-columns: minmax(0, 1fr) 160px 160px auto; }
+.lobby-filter-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lobby-filter-summary p { margin: 0; }
+.lobby-return-room { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.lobby-return-room h2 { margin: 0; font-size: 12px; color: var(--muted-foreground); }
+.lobby-return-room p { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 600; }
+.room-card-preview { display: grid; gap: 12px; padding: 0 16px 12px; min-width: 0; }
+.room-card-description { margin: 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.room-preview-track { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.room-preview-track .room-preview-art { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; }
+.room-preview-track > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.room-preview-track small { color: var(--muted-foreground); font-size: 10px; }
+.room-preview-track strong, .room-preview-track span { overflow-wrap: anywhere; font-size: 12px; }
+.room-preview-track span { color: var(--muted-foreground); }
+@media (max-width: 640px) {
+  .listening-checklist-steps { grid-template-columns: 1fr; }
+  .room-mini-player { gap: 5px; padding-inline: 6px; }
+  .room-mini-player .room-mini-art { width: 28px; height: 28px; flex-basis: 28px; }
+  .room-mini-player > button:last-child { padding-inline: 8px; font-size: 12px; }
+  .room-lobby .lobby-directory-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .room-lobby .lobby-directory-tools > input, .room-lobby .lobby-directory-tools > button:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content], .room-people-popover) button, .topbar .room-listener-count { min-width: 44px; min-height: 44px; }
+  .topbar .app-brand-stack { flex-direction: row; align-items: center; gap: 4px; }
+  .topbar .app-brand-stack .header-home-logo { height: 44px; min-height: 44px; }
+  .topbar .changelog-trigger { width: 44px; height: 44px; padding: 2px; }
+  .topbar .changelog-trigger > span:not(.app-version-number) { display: none; }
+  :is([data-slot=select-item], [data-slot=dropdown-menu-item], [data-slot=dropdown-menu-radio-item]) { min-height: 44px; }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) :is([data-slot=select-trigger], [data-slot=select-item]) { min-height: 44px; }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) input[data-slot=input] { min-height: 44px; font-size: 16px; }
+  :is(.app-shell, [data-slot=dialog-content]) [data-slot=slider], :is(.app-shell, [data-slot=dialog-content]) [data-slot=slider] > div { min-height: 44px; }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) [data-slot=switch] { height: 44px; width: 52px; min-width: 52px; align-items: center; padding: 0 10px; background: transparent !important; border: 0; }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) [data-slot=switch]::before { content: ""; position: absolute; inset: 12px 8px; border-radius: 99px; background: var(--input); }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) [data-slot=switch][data-checked]::before { background: var(--primary); }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content]) [data-slot=switch] > span { position: relative; }
+}
+@media (max-height: 600px) {
+  .room-workspace-context { max-height: 120px; }
+  .room-mini-player { min-height: 52px; }
+  .room-mini-player .room-mini-art { display: none; }
+}
+.room-layout[data-keyboard-open=true] .room-workspace-context { max-height: 54px; }
+.room-layout[data-keyboard-open=true] .room-listening-checklist { display: none; }
+.room-layout[data-keyboard-open=true] .room-mini-player .room-mini-art, .room-layout[data-keyboard-open=true] .room-mini-copy span { display: none; }
+/* At high layout zoom/very short windows there is insufficient space for all
+   persistent controls. The workspace itself scrolls instead of clipping them. */
+@media (max-height: 400px) {
+  .app-shell .room-layout { overflow-y: auto; overscroll-behavior-y: contain; }
+  .app-shell .room-layout .room-panels { flex: 1 0 160px; min-height: 160px; }
+}
+.room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #player,
+.room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #chat { width: calc(50% - 4px) !important; opacity: 1; visibility: visible; pointer-events: auto; }
+.room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #player { left: 0 !important; right: auto !important; }
+.room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #chat { left: auto !important; right: 0 !important; }

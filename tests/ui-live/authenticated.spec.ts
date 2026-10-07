@@ -7,7 +7,7 @@ const listenerPassword = process.env.SOUNDSPIN_TEST_LISTENER_PASSWORD;
 const qaRoomSlug = process.env.SOUNDSPIN_TEST_ROOM_SLUG || "qa-ui-audit-852f93";
 
 async function signIn(page: Page, email: string, password: string) {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -76,8 +76,8 @@ async function contrastRatio(locator: Locator) {
 
 async function measureTypingFrameLatency(locator: Locator, text: string) {
   return locator.evaluate(async (input, typedText) => {
-    if (!(input instanceof HTMLInputElement)) throw new Error("Expected a chat input element.");
-    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!(input instanceof HTMLTextAreaElement)) throw new Error("Expected a chat composer textarea.");
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     if (!valueSetter) throw new Error("The native input value setter is unavailable.");
     const setValue = (value: string, data: string | null = null) => {
       valueSetter.call(input, value);
@@ -219,7 +219,7 @@ test.describe("authenticated UI acceptance", () => {
     await page.mouse.move(handleBox!.x + 48, handleBox!.y + handleBox!.height / 2, { steps: 6 });
     await page.mouse.up();
     const resizedWidth = (await radioPanel.boundingBox())!.width;
-    await expect.poll(() => page.evaluate(() => localStorage.getItem("soundspin-room-layout:player"))).not.toBeNull();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("soundspin-room-layout:v2:balanced"))).not.toBeNull();
     await page.reload();
     await expect(page.getByText("QA UI Audit").first()).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await radioPanel.boundingBox())?.width || 0).toBeGreaterThan(resizedWidth - 3);
@@ -235,6 +235,12 @@ test.describe("authenticated UI acceptance", () => {
       await page.setViewportSize(viewport);
       await expectNoHorizontalOverflow(page);
     }
+
+    await page.setViewportSize({ width: 960, height: 768 });
+    await expect(page.getByRole("region", { name: "Player", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Room chat", exact: true })).toBeVisible();
+    await expect(page.locator(".chat-composer-input")).toBeVisible();
+    await expect(page.locator("[data-chat-surface]")).toHaveAttribute("data-chat-visible", "true");
 
     await page.setViewportSize({ width: 390, height: 844 });
     const chatTab = page.getByRole("tab", { name: /^Chat(?:, \d+ unread)?$/ });

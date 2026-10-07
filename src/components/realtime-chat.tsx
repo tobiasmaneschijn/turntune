@@ -1,4 +1,5 @@
-import { ArrowDown, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
+import { toast } from 'sonner'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 import {
   forwardRef,
@@ -11,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -43,6 +45,10 @@ import {
   type GiphyGif,
 } from '@/chat/media'
 import { persistReactionChange } from '@/chat/persistence'
+import { createChatDraftStore, type ChatDraft } from '@/chat/drafts'
+import { createChatSaveTracker, type ChatSaveStates } from '@/chat/delivery'
+import type { ChatHistorySource } from '@/chat/history-reader'
+import type { ChatSessionFactory } from '@/chat/realtime'
 import { cn } from '@/lib/utils'
 import { ChatMessageItem } from '@/components/chat-message'
 import { Avatar } from '@/components/Avatar'
@@ -54,9 +60,15 @@ import {
   saveEmojiSkinTone,
 } from '@/components/platform-emoji-text'
 import { useChatScroll } from '@/hooks/use-chat-scroll'
+import { useChatHistory } from '@/hooks/use-chat-history'
+import { useRoomNotificationMuted } from '@/hooks/use-room-notifications'
+import { useChatPickerBounds } from '@/hooks/use-chat-picker-bounds'
+import { createChatAttentionTracker, isAppInBackground, notifyWithAttention } from '@/notifications'
+import type { SoundSpinUserSettings } from '@/playback-settings'
+import { effectiveScrollBehavior, useEffectiveMotion } from '@/hooks/use-effective-motion'
 import { useRealtimeChat } from '@/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
-import { InputGroup, InputGroupInput } from '@/components/ui/input-group'
+import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group'
 import { Input } from '@/components/ui/input'
 import type { User } from '@/types'
 
@@ -75,6 +87,15 @@ interface RealtimeChatProps {
   isVisible?: boolean
   onUnreadCountChange?: (count: number) => void
   onConnected?: () => void
+  historyRoomSlug?: string
+  historySource?: ChatHistorySource
+  historyLoading?: boolean
+  onHistoricalMessages?: (messages: ChatMessage[]) => void
+  notifications?: SoundSpinUserSettings['notifications']
+  onNotificationActivate?: () => void
+  transport?: ChatSessionFactory
+  onPersistReaction?: (change: { action: 'add' | 'remove'; messageId: string; userId: string; emoji: string }) => Promise<void>
+  onResolveMediaUrl?: (storagePath: string) => Promise<string>
 }
 
 export interface RealtimeChatHandle {
@@ -85,9 +106,13 @@ const TYPING_ROOM_LIMIT = 20
 const TYPING_BROADCAST_THROTTLE_MS = 2_000
 const TYPING_IDLE_MS = 3_000
 const GIPHY_SEARCH_DEBOUNCE_MS = 500
+const EMPTY_MESSAGES: ChatMessage[] = []
+const EMPTY_USERS: User[] = []
+const EMPTY_ADMIN_IDS: string[] = []
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
+  onResolveMediaUrl?: (storagePath: string) => Promise<string>
   currentUserId: string
   liveAdminUserIds: ReadonlySet<string>
   unreadMessageId?: string
@@ -95,10 +120,14 @@ interface ChatMessageListProps {
   onReply: (message: ChatMessage) => void
   onReact: (message: ChatMessage, emoji: string) => void
   onJumpToMessage: (messageId: string) => void
+  saveStates: ChatSaveStates
+  onRetrySave: (messageId: string) => void
+  onRetrySend: (messageId: string) => void
 }
 
 const ChatMessageList = memo(function ChatMessageList({
   messages,
+  onResolveMediaUrl,
   currentUserId,
   liveAdminUserIds,
   unreadMessageId,
@@ -106,7 +135,12 @@ const ChatMessageList = memo(function ChatMessageList({
   onReply,
   onReact,
   onJumpToMessage,
+  saveStates,
+  onRetrySave,
+  onRetrySend,
 }: ChatMessageListProps) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [openPickerId, setOpenPickerId] = useState<string | null>(null)
   return (
     <div className="chat-message-list space-y-1">
       {messages.map((message, index) => {
@@ -117,7 +151,7 @@ const ChatMessageList = memo(function ChatMessageList({
         return (
           <div
             key={message.id}
-            className="animate-in fade-in slide-in-from-bottom-4 duration-300"
+            className="chat-message-wrapper"
           >
             {beginsNewDay && (
               <div className="chat-date-divider">
@@ -146,6 +180,14 @@ const ChatMessageList = memo(function ChatMessageList({
               onReply={onReply}
               onReact={onReact}
               onJumpToMessage={onJumpToMessage}
+              saveStatus={message.user.id === currentUserId ? saveStates[message.id] : undefined}
+              onRetrySave={onRetrySave}
+              onRetrySend={onRetrySend}
+              onResolveMediaUrl={onResolveMediaUrl}
+              actionMenuOpen={openMenuId === message.id}
+              onActionMenuOpenChange={(open) => { setOpenMenuId(open ? message.id : null); if (open) setOpenPickerId(null) }}
+              reactionPickerOpen={openPickerId === message.id}
+              onReactionPickerOpenChange={(open) => { setOpenPickerId(open ? message.id : null); if (open) setOpenMenuId(null) }}
             />
           </div>
         )
@@ -166,24 +208,38 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   onMessage,
   onSend,
   onOpenProfile,
-  adminUserIds = [],
-  roomUsers = [],
+  adminUserIds = EMPTY_ADMIN_IDS,
+  roomUsers = EMPTY_USERS,
   isVisible = true,
   onUnreadCountChange,
   onConnected,
-  messages: initialMessages = [],
+  historyRoomSlug,
+  historySource,
+  historyLoading = false,
+  onHistoricalMessages,
+  notifications,
+  onNotificationActivate,
+  transport,
+  onPersistReaction,
+  onResolveMediaUrl,
+  messages: initialMessages = EMPTY_MESSAGES,
 }, ref) {
+  const reducedMotion = useEffectiveMotion()
+  const draftStore = useMemo(() => createChatDraftStore(user.id, roomName), [user.id, roomName])
+  const initialDraft = useMemo(() => draftStore.read(), [draftStore])
   const {
     containerRef,
     scrollToBottom,
     refreshPosition,
     isNearBottom,
     scrollRevision,
+    preserveAnchor,
   } = useChatScroll()
 
   const {
     messages: realtimeMessages,
-    sendMessage,
+    prepareMessage,
+    sendExistingMessage,
     broadcastReaction,
     reactionEvents,
     broadcastTyping,
@@ -194,8 +250,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     roomName,
     user,
     onConnected,
+    transport,
   })
-  const [hasDraft, setHasDraft] = useState(false)
+  const [draftText, setDraftText] = useState(initialDraft?.text || '')
+  const [hasDraft, setHasDraft] = useState(Boolean(initialDraft?.text.trim()))
+  const [draftRestored, setDraftRestored] = useState(Boolean(initialDraft))
+  const [replyRestoreNotice, setReplyRestoreNotice] = useState('')
+  const [saveStates, setSaveStates] = useState<ChatSaveStates>({})
+  const [outboxMessages, setOutboxMessages] = useState<ChatMessage[]>([])
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
@@ -207,12 +269,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [uploading, setUploading] = useState(false)
   const [sending, setSending] = useState(false)
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
-  const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>([])
+  const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>(initialDraft?.mentions || [])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [unreadMessageIds, setUnreadMessageIds] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const messageInputRef = useRef<HTMLInputElement>(null)
-  const draftMessageRef = useRef('')
+  const composerRef = useRef<HTMLFormElement>(null)
+  const mediaPickerBounds = useChatPickerBounds(showEmoji || showGiphy, composerRef, 'composer')
+  const messageInputRef = useRef<HTMLTextAreaElement>(null)
+  const draftMessageRef = useRef(initialDraft?.text || '')
+  const composingRef = useRef(false)
+  const restoredReplyIdRef = useRef(initialDraft?.replyToId)
+  const draftSnapshotRef = useRef<{ store: typeof draftStore; draft: ChatDraft }>({ store: draftStore, draft: initialDraft || { text: '', mentions: [] } })
+  const saveTrackerRef = useRef<ReturnType<typeof createChatSaveTracker> | null>(null)
   const pendingReactionsRef = useRef(new Set<string>())
   const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
@@ -229,6 +297,21 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const uploadingRef = useRef(false)
   const lifetimeRef = useRef({ active: true })
   const [giphyConfigured, setGiphyConfigured] = useState(false)
+  const [showHistorySearch, setShowHistorySearch] = useState(false)
+  const [historySearchText, setHistorySearchText] = useState('')
+  const [pageAttended, setPageAttended] = useState(() => !isAppInBackground())
+  const [roomMuted, setRoomMuted] = useRoomNotificationMuted(user.id, historyRoomSlug || roomName)
+  const joinedAt = useMemo(() => Date.now(), [user.id, roomName])
+  const attentionTracker = useMemo(() => createChatAttentionTracker(user.id, joinedAt), [user.id, joinedAt])
+  const liveScrollTopRef = useRef(0)
+  const pendingJumpRef = useRef<string | null>(null)
+  const jumpHighlightRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const seedHistoricalMessages = useCallback((messages: ChatMessage[]) => {
+    attentionTracker.seed(messages)
+    onHistoricalMessages?.(messages)
+  }, [attentionTracker, onHistoricalMessages])
+  const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, initialMessages, seedHistoricalMessages, historySource)
+  const attendingLive = isVisible && pageAttended && !history.context
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
   const reactionNamesByUserId = useMemo(
     () => new Map(roomUsers.map((roomUser) => [roomUser.id, roomUser.name])),
@@ -250,8 +333,60 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   useEffect(() => {
     const lifetime = { active: true }
     lifetimeRef.current = lifetime
-    return () => { lifetime.active = false }
-  }, [roomName, user.id])
+    const tracker = createChatSaveTracker(setSaveStates)
+    saveTrackerRef.current = tracker
+    setSaveStates({})
+    setOutboxMessages([])
+    sendingRef.current = false
+    uploadingRef.current = false
+    setSending(false)
+    setUploading(false)
+    setComposerError('')
+    setDraftText(initialDraft?.text || '')
+    draftMessageRef.current = initialDraft?.text || ''
+    setHasDraft(Boolean(initialDraft?.text.trim()))
+    setSelectedMentions(initialDraft?.mentions || [])
+    setReplyingTo(null)
+    setDraftRestored(Boolean(initialDraft))
+    setReplyRestoreNotice('')
+    restoredReplyIdRef.current = initialDraft?.replyToId
+    return () => { lifetime.active = false; tracker.dispose() }
+  }, [roomName, user.id, initialDraft])
+
+  // Debounce session storage, then flush the latest scoped draft on navigation/reload.
+  useEffect(() => {
+    if (draftMessageRef.current !== draftText) return
+    draftSnapshotRef.current = { store: draftStore, draft: { text: draftText, mentions: selectedMentions,
+      replyToId: replyingTo?.id || restoredReplyIdRef.current } }
+    const timer = setTimeout(() => draftStore.save(draftSnapshotRef.current.draft), 200)
+    return () => clearTimeout(timer)
+  }, [draftStore, draftText, selectedMentions, replyingTo])
+
+  useEffect(() => {
+    const flush = () => {
+      if (draftSnapshotRef.current.store === draftStore) draftStore.save(draftSnapshotRef.current.draft)
+    }
+    window.addEventListener('pagehide', flush)
+    return () => { window.removeEventListener('pagehide', flush); flush() }
+  }, [draftStore])
+
+  useEffect(() => {
+    const composer = messageInputRef.current
+    if (!composer) return
+    composer.style.height = 'auto'
+    composer.style.height = `${Math.min(Math.max(composer.scrollHeight, 40), 128)}px`
+  }, [draftText, isVisible])
+
+  useEffect(() => {
+    const composer = composerRef.current
+    const body = composer?.parentElement
+    if (!composer || !body) return
+    const update = () => body.style.setProperty('--chat-composer-height', `${composer.offsetHeight}px`)
+    const observer = new ResizeObserver(update)
+    observer.observe(composer)
+    update()
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     void fetch('/api/config')
@@ -265,8 +400,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [])
 
   const baseMessages = useMemo(
-    () => mergeChatMessages(initialMessages, realtimeMessages),
-    [initialMessages, realtimeMessages]
+    () => mergeChatMessages(mergeChatMessages(initialMessages, history.olderMessages), mergeChatMessages(realtimeMessages, outboxMessages)),
+    [initialMessages, history.olderMessages, realtimeMessages, outboxMessages]
   )
   const profiledMessages = useMemo(
     () => applyChatUserProfiles(baseMessages, roomUsers),
@@ -276,6 +411,87 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     () => applyReactionEvents(profiledMessages, reactionEvents, reactionNamesByUserId),
     [profiledMessages, reactionEvents, reactionNamesByUserId]
   )
+  const visibleMessages = useMemo(() => history.context
+    ? applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId)
+    : allMessages, [history.context, roomUsers, reactionEvents, reactionNamesByUserId, allMessages])
+
+  useEffect(() => {
+    const refresh = () => setPageAttended(!isAppInBackground())
+    window.addEventListener('focus', refresh); window.addEventListener('blur', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('blur', refresh); document.removeEventListener('visibilitychange', refresh) }
+  }, [])
+  useEffect(() => { attentionTracker.seed(initialMessages) }, [attentionTracker, initialMessages])
+  useEffect(() => {
+    if (historyLoading) return
+    for (const message of realtimeMessages) {
+      if (!attentionTracker.consume(message) || !notifications?.chatMentions || roomMuted || attendingLive) continue
+      const key = `mention:${user.id}:${historyRoomSlug || roomName}:${message.id}`
+      const lifetime = lifetimeRef.current
+      const activate = () => {
+        if (!lifetime.active) return
+        history.closeContext()
+        setShowHistorySearch(false)
+        onNotificationActivate?.()
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (!lifetime.active) return
+          const row = document.getElementById(`chat-message-${message.id}`)
+          if (row) {
+            row.scrollIntoView({ behavior: 'auto', block: 'center' })
+            row.focus({ preventScroll: true })
+            row.classList.add('chat-message-jump-target')
+            if (jumpHighlightRef.current) clearTimeout(jumpHighlightRef.current)
+            jumpHighlightRef.current = setTimeout(() => row.classList.remove('chat-message-jump-target'), 1_500)
+          } else messageInputRef.current?.focus({ preventScroll: true })
+        }))
+      }
+      notifyWithAttention({ key, title: `${message.user.name} mentioned you`, body: message.content || 'New room chat mention',
+        backgroundOnly: notifications.backgroundOnly,
+        onClick: activate,
+        onInApp: () => toast.info(`${message.user.name} mentioned you`, { id: key, description: message.content,
+          action: { label: 'View', onClick: activate } }) })
+    }
+  }, [attentionTracker, attendingLive, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
+  useEffect(() => {
+    const original = document.title.replace(/^\(\d+\) /, '')
+    let ownedTitle = document.title
+    const update = () => { ownedTitle = unreadMessageIds.length ? `(${unreadMessageIds.length}) ${original}` : original; document.title = ownedTitle }
+    update()
+    return () => { if (document.title === ownedTitle) document.title = original }
+  }, [unreadMessageIds.length])
+  useEffect(() => {
+    const replyId = restoredReplyIdRef.current
+    if (!replyId) return
+    const original = allMessages.find((message) => message.id === replyId)
+    if (original) {
+      restoredReplyIdRef.current = undefined
+      setReplyingTo(createReplySnapshot(original))
+    }
+  }, [allMessages])
+  useEffect(() => {
+    const replyId = restoredReplyIdRef.current
+    if (!replyId || historyLoading) return
+    let active = true
+    const restore = async () => {
+      try {
+        const original = historySource ? await historySource.loadMessage(replyId) : null
+        if (!active || restoredReplyIdRef.current !== replyId) return
+        restoredReplyIdRef.current = undefined
+        if (original) setReplyingTo(createReplySnapshot(original))
+        else {
+          draftSnapshotRef.current.draft.replyToId = undefined
+          setReplyRestoreNotice('The previous reply is unavailable. Your draft text is still here.')
+        }
+      } catch {
+        if (!active || restoredReplyIdRef.current !== replyId) return
+        restoredReplyIdRef.current = undefined
+        draftSnapshotRef.current.draft.replyToId = undefined
+        setReplyRestoreNotice('The previous reply could not be restored. Your draft text is still here.')
+      }
+    }
+    void restore()
+    return () => { active = false }
+  }, [client, historyLoading, historyRoomSlug, historySource, initialDraft])
   const typingNames = useMemo(() => {
     if (roomUsers.length > TYPING_ROOM_LIMIT) return []
     const typingIds = new Set(typingUserIds)
@@ -323,12 +539,15 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       initializedScrollRef.current = true
       requestAnimationFrame(() => scrollToBottom('auto'))
     } else if (addedMessages.length > 0) {
-      const newestMessage = addedMessages.at(-1)
-      if (isVisible && (isNearBottom || newestMessage?.user.id === user.id)) {
-        requestAnimationFrame(() => scrollToBottom())
+      // Only realtime arrivals can change unread/attention; older pages and reconnect hydration are baseline.
+      const liveIds = new Set(realtimeMessages.map((message) => message.id))
+      const arrivals = addedMessages.filter((message) => liveIds.has(message.id) && Date.parse(message.createdAt) >= joinedAt - 5_000)
+      const newestMessage = arrivals.at(-1)
+      if (arrivals.length > 0 && attendingLive && (isNearBottom || newestMessage?.user.id === user.id)) {
+        requestAnimationFrame(() => scrollToBottom('auto'))
         clearUnread()
       } else {
-        const receivedIds = addedMessages
+        const receivedIds = arrivals
           .filter((message) => message.user.id !== user.id)
           .map((message) => message.id)
         if (receivedIds.length > 0) {
@@ -341,7 +560,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     }
 
     previousMessageIdsRef.current = currentIds
-  }, [allMessages, clearUnread, isNearBottom, isVisible, scrollToBottom, user.id])
+  }, [allMessages, attendingLive, clearUnread, isNearBottom, joinedAt, realtimeMessages, scrollToBottom, user.id])
 
   useEffect(() => {
     const becameVisible = isVisible && !previousVisibilityRef.current
@@ -355,9 +574,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       ignoreNextVisibleScrollRef.current = false
       return
     }
-    if (!isVisible || !isNearBottom) return
+    if (!attendingLive || !isNearBottom) return
     clearUnread()
-  }, [clearUnread, isNearBottom, isVisible, refreshPosition, scrollRevision])
+  }, [attendingLive, clearUnread, isNearBottom, isVisible, refreshPosition, scrollRevision])
 
   const stopTyping = useCallback(() => {
     if (typingIdleTimeoutRef.current) clearTimeout(typingIdleTimeoutRef.current)
@@ -395,41 +614,43 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       const content = draft.trim()
       if (!content || !isConnected || sendingRef.current || uploadingRef.current) return
       const lifetime = lifetimeRef.current
+      const saveTracker = saveTrackerRef.current
       sendingRef.current = true
       setSending(true)
       setComposerError('')
       try {
-        const sentMessage = await sendMessage(
+        const sentMessage = prepareMessage(
           content,
           undefined,
           replyingTo || undefined,
           activeMentions(content, selectedMentions)
         )
-        if (lifetime.active) {
+        setOutboxMessages((current) => mergeChatMessages(current, [sentMessage]))
+        requestAnimationFrame(() => { if (lifetime.active && !history.context) scrollToBottom('auto') })
+        const sent = await saveTracker?.send(sentMessage, sendExistingMessage, onSend)
+        if (sent && lifetime.active) {
           // Keep text typed while delivery was pending.
           if (draftMessageRef.current === draft) {
             draftMessageRef.current = ''
-            if (messageInputRef.current) messageInputRef.current.value = ''
+            draftSnapshotRef.current.draft = { text: '', mentions: [] }
+            setDraftText('')
             setHasDraft(false)
             setSelectedMentions([])
             setMentionQuery(null)
+            setDraftRestored(false)
+            restoredReplyIdRef.current = undefined
+            draftStore.save({ text: '', mentions: [] })
             stopTyping()
           }
           setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
         }
-        try {
-          await onSend?.(sentMessage)
-        } catch {
-          if (lifetime.active) setComposerError('Message delivered live, but it could not be saved to history.')
-        }
       } catch (error) {
         if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this message. Please try again.')
       } finally {
-        sendingRef.current = false
-        if (lifetime.active) setSending(false)
+        if (lifetime.active) { sendingRef.current = false; setSending(false) }
       }
     },
-    [isConnected, sendMessage, onSend, replyingTo, selectedMentions, stopTyping]
+    [isConnected, prepareMessage, sendExistingMessage, onSend, replyingTo, selectedMentions, stopTyping, draftStore, history.context, scrollToBottom]
   )
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
@@ -437,7 +658,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     const inserted = insertMention(draftMessageRef.current, mentionQuery, option.mention)
     if (inserted.text.length > 500) return
     draftMessageRef.current = inserted.text
-    if (messageInputRef.current) messageInputRef.current.value = inserted.text
+    draftSnapshotRef.current.draft = { ...draftSnapshotRef.current.draft, text: inserted.text,
+      mentions: [...selectedMentions.filter((mention) => mention.userId !== option.mention.userId), option.mention] }
+    setDraftText(inserted.text)
+    setDraftRestored(false)
     setHasDraft(Boolean(inserted.text.trim()))
     setSelectedMentions((current) => [
       ...current.filter((mention) => mention.userId !== option.mention.userId),
@@ -449,7 +673,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       messageInputRef.current?.focus()
       messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
     })
-  }, [mentionQuery])
+  }, [mentionQuery, selectedMentions])
 
   const sendMediaMessage = useCallback(
     async (
@@ -460,34 +684,33 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     ) => {
       if (!isConnected || sendingRef.current || (uploadingRef.current && !storagePath)) return false
       const lifetime = lifetimeRef.current
+      const saveTracker = saveTrackerRef.current
       sendingRef.current = true
       setSending(true)
       setComposerError('')
       try {
-        const sentMessage = await sendMessage(
+        const sentMessage = prepareMessage(
           content.slice(0, 500) || 'Shared image',
           { type, mediaUrl, storagePath },
           replyingTo || undefined
         )
-        if (lifetime.active) setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
-        try {
-          await onSend?.(sentMessage)
-        } catch {
-          if (lifetime.active) setComposerError('Image delivered live, but it could not be saved to history.')
-        }
-        return true
+        setOutboxMessages((current) => mergeChatMessages(current, [sentMessage]))
+        const sent = await saveTracker?.send(sentMessage, sendExistingMessage, onSend)
+        if (sent && lifetime.active) setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
+        return Boolean(sent)
       } catch (error) {
         if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this image. Please try again.')
         return false
       } finally {
-        sendingRef.current = false
-        if (lifetime.active) setSending(false)
+        if (lifetime.active) { sendingRef.current = false; setSending(false) }
       }
     },
-    [isConnected, onSend, replyingTo, sendMessage]
+    [isConnected, onSend, replyingTo, prepareMessage, sendExistingMessage]
   )
 
   const selectReply = useCallback((message: ChatMessage) => {
+    restoredReplyIdRef.current = undefined
+    draftSnapshotRef.current.draft.replyToId = message.id
     setReplyingTo(createReplySnapshot({
       ...message,
       user: {
@@ -500,11 +723,34 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     requestAnimationFrame(() => messageInputRef.current?.focus())
   }, [liveAdminUserIds])
 
-  const jumpToMessage = useCallback((messageId: string) => {
+  const markJumpTarget = useCallback((messageId: string) => {
     const messageElement = document.getElementById(`chat-message-${messageId}`)
-    messageElement?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    messageElement?.focus({ preventScroll: true })
-  }, [])
+    if (!messageElement) return false
+    messageElement.scrollIntoView({ behavior: effectiveScrollBehavior('smooth', reducedMotion), block: 'center' })
+    messageElement.focus({ preventScroll: true })
+    document.querySelector('.chat-message-jump-target')?.classList.remove('chat-message-jump-target')
+    messageElement.classList.add('chat-message-jump-target')
+    if (jumpHighlightRef.current) clearTimeout(jumpHighlightRef.current)
+    jumpHighlightRef.current = setTimeout(() => messageElement.classList.remove('chat-message-jump-target'), 1_500)
+    return true
+  }, [reducedMotion])
+  const jumpToMessage = useCallback((messageId: string) => {
+    if (markJumpTarget(messageId)) return
+    if (!historyRoomSlug) { setComposerError('That message is not in the loaded history.'); return }
+    liveScrollTopRef.current = containerRef.current?.scrollTop || 0
+    pendingJumpRef.current = messageId
+    void history.revealContext(messageId).then((found) => { if (!found) pendingJumpRef.current = null })
+  }, [containerRef, history.revealContext, historyRoomSlug, markJumpTarget])
+  useEffect(() => {
+    const messageId = pendingJumpRef.current
+    if (!messageId || !history.context) return
+    requestAnimationFrame(() => { if (markJumpTarget(messageId)) pendingJumpRef.current = null })
+  }, [history.context, markJumpTarget])
+  useEffect(() => () => { if (jumpHighlightRef.current) clearTimeout(jumpHighlightRef.current) }, [])
+  const returnToLive = useCallback(() => {
+    history.closeContext()
+    requestAnimationFrame(() => { if (containerRef.current) containerRef.current.scrollTop = liveScrollTopRef.current; refreshPosition() })
+  }, [containerRef, history.closeContext, refreshPosition])
 
   const toggleReaction = useCallback(async (message: ChatMessage, emoji: string) => {
     if (!isConnected) return
@@ -515,16 +761,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     const hasReacted = (message.reactions || []).some(
       (reaction) => reaction.userId === user.id && reaction.emoji === emoji
     )
-    const action = hasReacted ? 'remove' : 'add'
+    const action = hasReacted ? 'remove' as const : 'add' as const
     const lifetime = lifetimeRef.current
 
     try {
-      await persistReactionChange(client, {
+      const change = {
         action,
         messageId: message.id,
         userId: user.id,
         emoji,
-      })
+      }
+      if (onPersistReaction) await onPersistReaction(change)
+      else await persistReactionChange(client, change)
       if (!lifetime.active) return
       setComposerError('')
       await broadcastReaction({
@@ -538,11 +786,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     } finally {
       pendingReactionsRef.current.delete(key)
     }
-  }, [broadcastReaction, client, isConnected, user.id])
+  }, [broadcastReaction, client, isConnected, onPersistReaction, user.id])
 
   const handleReaction = useCallback((message: ChatMessage, emoji: string) => {
     void toggleReaction(message, emoji)
   }, [toggleReaction])
+
+  const handleRetrySave = useCallback((messageId: string) => {
+    void saveTrackerRef.current?.retry(messageId)
+  }, [])
+  const handleRetrySend = useCallback((messageId: string) => {
+    void saveTrackerRef.current?.retrySend(messageId)
+  }, [])
 
   const uploadImage = async (file: File) => {
     if (!isConnected || uploadingRef.current || sendingRef.current) return
@@ -553,7 +808,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     const lifetime = lifetimeRef.current
     uploadingRef.current = true
     setUploading(true)
-    const storagePath = createChatStoragePath(user.id, roomName, file)
+    const storagePath = createChatStoragePath(user.id, historyRoomSlug || roomName, file)
     try {
       const { error } = await client.storage.from('chat-media').upload(storagePath, file, {
         contentType: file.type,
@@ -566,17 +821,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         return
       }
 
-      const { data } = client.storage.from('chat-media').getPublicUrl(storagePath)
-      await sendMediaMessage('image', data.publicUrl, file.name, storagePath)
+      if (!onResolveMediaUrl) throw new Error('Private chat image delivery is unavailable.')
+      const mediaUrl = await onResolveMediaUrl(storagePath)
+      if (!lifetime.active) return
+      await sendMediaMessage('image', mediaUrl, file.name, storagePath)
     } catch (error) {
       if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not upload this image. Please try again.')
     } finally {
-      uploadingRef.current = false
-      if (lifetime.active) setUploading(false)
+      if (lifetime.active) { uploadingRef.current = false; setUploading(false) }
     }
   }
 
-  const pasteMedia = async (event: React.ClipboardEvent<HTMLInputElement>) => {
+  const pasteMedia = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (!isConnected || uploadingRef.current || sendingRef.current) return
     const pastedMedia = readPastedChatMedia(event.clipboardData)
     if (!pastedMedia) return
@@ -671,24 +927,52 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }
 
   return (
-    <div className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
+    <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
+      {(historyRoomSlug || notifications) && <div className="chat-history-toolbar">
+        {historyRoomSlug && <Button variant="ghost" size="sm" aria-expanded={showHistorySearch} onClick={() => setShowHistorySearch((current) => !current)}><Search size={15} /> Search room messages</Button>}
+        {notifications && <Button variant="ghost" size="sm" aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title="Mute notifications for this room and account">{roomMuted ? <BellOff size={15} /> : <Bell size={15} />}{roomMuted ? 'Room muted' : 'Mute room'}</Button>}
+      </div>}
+      {showHistorySearch && <section className="chat-history-search" aria-label="Search room history">
+        <form onSubmit={(event) => { event.preventDefault(); void history.search(historySearchText) }}>
+          <Input aria-label="Search all saved room messages" value={historySearchText} maxLength={100} placeholder="Search message text" onChange={(event) => setHistorySearchText(event.target.value)} />
+          <Button size="sm" type="submit" disabled={history.searchLoading || historySearchText.trim().length < 2}>Search</Button>
+          <Button size="icon-sm" variant="ghost" aria-label="Close room message search" onClick={() => { setShowHistorySearch(false); history.clearSearch() }}><X size={15} /></Button>
+        </form>
+        {history.searchLoading && <p role="status">Searching saved room messages…</p>}
+        {history.searchError && <p role="alert">{history.searchError}</p>}
+        {!history.searchLoading && history.searchTerm && !history.searchError && history.searchResults.length === 0 && <p>No saved messages match “{history.searchTerm}”.</p>}
+        <div className="chat-history-results">{[...history.searchResults].reverse().map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={`View message from ${message.user.name}: ${getMessagePreview(message)}`}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString()}</time><span>{getMessagePreview(message)}</span></button>)}</div>
+        {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>More search results</Button>}
+      </section>}
+      {history.context && <div className="chat-context-banner"><span>Message context · earlier conversation</span><Button variant="ghost" size="sm" onClick={returnToLive}>Back to live messages</Button></div>}
       {/* Messages */}
       <div ref={containerRef} className="chat-message-scroll flex-1 overflow-y-auto p-4 space-y-4">
-        {allMessages.length === 0 ? (
+        {(history.context ? history.context.hasOlder : history.hasOlder) && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.loadingOlder || history.contextLoading || historyLoading} onClick={() => {
+          const restore = preserveAnchor()
+          void (history.context ? history.extendContext('older') : history.loadOlder()).finally(restore)
+        }}>{history.loadingOlder ? 'Loading older messages…' : 'Load older messages'}</Button></div>}
+        {history.contextLoading && <p role="status">Loading message context…</p>}
+        {history.historyError && <p role="alert" className="chat-history-error">{history.historyError}</p>}
+        {visibleMessages.length === 0 && !historyLoading ? (
           <div className="text-center text-sm text-muted-foreground">
             No messages yet. Start the conversation!
           </div>
         ) : null}
         <ChatMessageList
-          messages={allMessages}
+          messages={visibleMessages}
+          onResolveMediaUrl={onResolveMediaUrl}
           currentUserId={user.id}
           liveAdminUserIds={liveAdminUserIds}
-          unreadMessageId={unreadMessageIds[0]}
+          unreadMessageId={history.context ? undefined : unreadMessageIds[0]}
           onOpenProfile={onOpenProfile}
           onReply={selectReply}
           onReact={handleReaction}
           onJumpToMessage={jumpToMessage}
+          saveStates={saveStates}
+          onRetrySave={handleRetrySave}
+          onRetrySend={handleRetrySend}
         />
+        {history.context?.hasNewer && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.contextLoading} onClick={() => void history.extendContext('newer')}>Load newer messages</Button></div>}
       </div>
 
       {(!isNearBottom || unreadMessageIds.length > 0) && (
@@ -709,7 +993,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         <div className={cn('chat-picker-popover', {
           'chat-picker-with-reply': Boolean(replyingTo),
           'chat-picker-with-typing': Boolean(typingLabel),
-        })}>
+        })} style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
           <div className="chat-picker-tabs" role="tablist" aria-label="Message media">
             <button
               type="button"
@@ -740,7 +1024,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               type="button"
               className="chat-picker-close"
               aria-label="Close media picker"
-              onClick={() => { setShowEmoji(false); setShowGiphy(false) }}
+              onClick={() => { setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) }}
             >
               <X size={15} />
             </button>
@@ -751,7 +1035,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                 <EmojiPicker
                   theme={'dark' as Theme}
                   width="100%"
-                  height={390}
+                  height={Math.max(180, mediaPickerBounds.height - 64)}
                   lazyLoadEmojis
                   emojiStyle={chatPickerEmojiStyle}
                   defaultSkinTone={skinTone}
@@ -765,7 +1049,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                     const nextMessage = `${draftMessageRef.current}${emoji.emoji}`
                     if (nextMessage.length > 500) return
                     draftMessageRef.current = nextMessage
-                    if (messageInputRef.current) messageInputRef.current.value = nextMessage
+                    draftSnapshotRef.current.draft.text = nextMessage
+                    setDraftText(nextMessage)
+                    setDraftRestored(false)
                     setHasDraft(Boolean(nextMessage.trim()))
                     noteTyping()
                     requestAnimationFrame(() => {
@@ -843,7 +1129,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         </div>
       )}
       {composerError && <p role="alert" className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
+      {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
       <form
+        ref={composerRef}
         onSubmit={handleSendMessage}
         className={cn('chat-composer', { 'chat-composer-replying': Boolean(replyingTo) })}
         autoComplete="off"
@@ -874,7 +1162,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               variant="ghost"
               size="icon-sm"
               aria-label="Cancel reply"
-              onClick={() => setReplyingTo(null)}
+              onClick={() => { restoredReplyIdRef.current = undefined; draftSnapshotRef.current.draft.replyToId = undefined; setReplyingTo(null) }}
             >
               <X className="size-3.5" />
             </Button>
@@ -914,10 +1202,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           >
             <Plus className="size-5" />
           </Button>
-          <InputGroupInput
+          <InputGroupTextarea
             ref={messageInputRef}
             className="chat-composer-input"
-            type="text"
+            rows={1}
+            value={draftText}
+            aria-label="Message room chat"
+            aria-describedby="chat-composer-hint"
             autoComplete="off"
             autoCorrect="off"
             aria-autocomplete="list"
@@ -929,6 +1220,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             onChange={(event) => {
               const nextMessage = event.target.value
               draftMessageRef.current = nextMessage
+              draftSnapshotRef.current.draft.text = nextMessage
+              draftSnapshotRef.current.draft.mentions = activeMentions(nextMessage, selectedMentions)
+              setDraftText(nextMessage)
+              setDraftRestored(false)
               const nextHasDraft = Boolean(nextMessage.trim())
               setHasDraft((current) => current === nextHasDraft ? current : nextHasDraft)
               setSelectedMentions((current) => current.length > 0
@@ -940,21 +1235,26 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               else stopTyping()
             }}
             onKeyDown={(event) => {
-              if (!mentionQuery || mentionCandidates.length === 0) return
-              if (event.key === 'ArrowDown') {
+              if (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229) return
+              if (mentionQuery && mentionCandidates.length > 0 && event.key === 'ArrowDown') {
                 event.preventDefault()
                 setActiveMentionIndex((current) => (current + 1) % mentionCandidates.length)
-              } else if (event.key === 'ArrowUp') {
+              } else if (mentionQuery && mentionCandidates.length > 0 && event.key === 'ArrowUp') {
                 event.preventDefault()
                 setActiveMentionIndex((current) => (current - 1 + mentionCandidates.length) % mentionCandidates.length)
-              } else if (event.key === 'Enter' || event.key === 'Tab') {
+              } else if (mentionQuery && mentionCandidates.length > 0 && !event.shiftKey && (event.key === 'Enter' || event.key === 'Tab')) {
                 event.preventDefault()
                 chooseMention(mentionCandidates[activeMentionIndex] || mentionCandidates[0])
               } else if (event.key === 'Escape') {
                 event.preventDefault()
                 setMentionQuery(null)
+              } else if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
               }
             }}
+            onCompositionStart={() => { composingRef.current = true }}
+            onCompositionEnd={() => { composingRef.current = false }}
             onClick={(event) => setMentionQuery(findMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart))}
             onBlur={() => {
               setMentionQuery(null)
@@ -962,7 +1262,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             }}
             onPaste={(event) => void pasteMedia(event)}
             placeholder={uploading ? 'Uploading image…' : `Message #${roomName.replace(/^soundspin:/, '')}`}
-            disabled={!isConnected || uploading}
+            disabled={uploading}
           />
           <Button
             className="chat-composer-gif"
@@ -970,8 +1270,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             variant="ghost"
             size="icon"
             disabled={!isConnected || !giphyConfigured || uploading || sending}
-            aria-label={giphyConfigured ? 'Add GIF' : 'Add a GIPHY API key to enable GIFs'}
-            title={giphyConfigured ? 'Add GIF' : 'Set GIPHY_API_KEY to enable GIFs'}
+            aria-label={giphyConfigured ? 'Add GIF' : 'GIFs unavailable'}
+            title={giphyConfigured ? 'Add GIF' : 'GIFs are unavailable in this room'}
             onClick={toggleGiphy}
           >
             <span>GIF</span>
@@ -992,12 +1292,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="submit"
             size="icon"
             disabled={!isConnected || uploading || sending || !hasDraft}
-            aria-label="Send message"
+            aria-label={sending ? 'Sending message' : 'Send message'}
             title="Send message"
           >
             <Send className="size-4" />
           </Button>
         </InputGroup>
+        <div id="chat-composer-hint" className="chat-composer-hint">
+          <span>{uploading ? 'Uploading image…' : sending ? 'Sending…' : !isConnected ? 'Chat reconnecting · your draft stays here' : draftRestored ? 'Draft restored' : 'Enter to send · Shift+Enter for a new line'}</span>
+          <span>{draftText.length}/500</span>
+        </div>
       </form>
     </div>
   )

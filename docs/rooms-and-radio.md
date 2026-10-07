@@ -305,6 +305,8 @@ Every command accepts an acknowledgement callback shaped like
 | `dj:leave` | none | DJ explicitly leaves immediately. |
 | `queue:add` | `{ provider, providerId, title }` | Add a unique track instance to the sender's private queue. |
 | `queue:remove` | `{ trackId }` | Remove from the sender's queue. |
+| `queue:undo` | `{ token }` | Restore one acknowledged removal within 15 seconds, retaining its identity and surviving neighbors; never start a quiet room. |
+| `queue:set-add` | `{ setId, requestId }` | Verify the sender's private saved set and append its available, nonduplicate tracks in order. Retried request UUIDs reuse the committed outcome. |
 | `queue:play-next` | `{ trackId }` | Move a sender-owned queued track to index 0. |
 | `queue:move` | `{ trackId, toIndex }` | Reorder the sender's queue. |
 | `queue:next` | `{ trackId }` | End the matching current track and rotate. |
@@ -312,6 +314,8 @@ Every command accepts an acknowledgement callback shaped like
 | `vibe:vote` | `{ value: -1 \| 0 \| 1 }` | Set/remove the listener's vote for the current track. |
 | `room:snapshot` | server event | Personalized room, presence, DJ identities, and server time. |
 | `room:presence` | server event | Presence and DJ identities without replaying unchanged room/playback state. |
+| `room:announcement` | `{ expectedId, text, expiresInMinutes? }` | Owner/moderator replaces or removes one bounded plain-text note with revision checks and optional expiry. `"keep"` retains the current expiry. |
+| `chat:message`, `chat:reaction`, `chat:typing` | `{ roomId, message/reaction/typing }` | Relay bounded chat events only between freshly authorized admitted sockets; authenticated sender identity is stamped by the server. |
 
 Add new events in this order: define a Zod schema, resolve membership from the
 socket, authorize on the server, mutate authoritative state, await persistence,
@@ -323,10 +327,14 @@ Authenticated requests use the Supabase access token as a bearer token.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/rooms` | Visible/favorite/member room directory plus live listener counts. |
+| `GET /api/rooms` | All accessible memberships/favorites/owned rooms, bounded public discovery, live listener counts, descriptions, and safe previews for active public unprotected rooms. |
 | `POST /api/rooms` | Create a room, hash an optional password, and favorite it for the owner. |
 | `PUT /api/rooms/:slug/favorite` | Add or remove the current user's favorite. |
-| `PATCH /api/rooms/:slug` | Owner/moderator changes name, visibility, password, or DJ access mode. |
+| `PATCH /api/rooms/:slug` | Owner/moderator changes name, description, visibility, password, or DJ access mode. |
+| `GET /api/library`, `POST /api/library` | Verified account's private picks and named sets, with explicit deletion and revision-aware concurrent saves. |
+| `GET /api/rooms/:slug/chat/history`, `/search`, `/context/:id`, `/messages/:id` | Authorized history pages, room search, and reply context. Timestamp/ID cursors preserve same-time entries. |
+| `POST /api/rooms/:slug/chat/messages`, `/reactions` | Freshly admitted durable chat writes and original-UUID retry; room/account/message checks precede database writes. |
+| `POST /api/rooms/:slug/chat/media-url` | Fresh room authorization for a five-minute uploaded-image URL; persisted same-room references gate legacy paths. |
 | `GET /api/youtube/search` | Authenticated, cached server-side YouTube search; the API key stays secret. |
 | `GET /api/soundcloud/search` | Authenticated, cached server-side SoundCloud search; client credentials and OAuth tokens stay secret. |
 | `GET /api/soundcloud/resolve` | Authenticated SoundCloud URL resolution; only playable public tracks are returned. |
@@ -358,6 +366,9 @@ Room data is split deliberately:
 - `soundspin_room_favorites` stores each user's directory favorites.
 - `soundspin_music_connections` stores encrypted, server-only Spotify refresh
   tokens. Browser roles have no grants or RLS policies for this table.
+- `soundspin_private_libraries` stores account-owned saved metadata separately
+  from room history and queues. Owner RLS, collection bounds, revision checks,
+  explicit deletion, and account-deletion cascade govern its lifetime.
 
 On load, first-class columns and membership rows override duplicated fields in
 the JSON document. They are the authorization and directory source of truth.
@@ -369,8 +380,13 @@ otherwise a slow older write could win over a newer radio transition.
 The server uses a secret Supabase client. The secret key must never be exposed
 through a `VITE_` variable, browser bundle, snapshot, or log. Browser access to
 room state tables is restricted; server-side handlers enforce room permissions.
-Chat is the exception: authenticated browser clients access its tables through
-the publishable key and RLS, as described in `docs/chat.md`.
+Chat history and writes use authenticated, admission-checked server routes;
+live chat uses the admitted room socket. Browser table reads are limited to the
+author's own rows, and direct browser mutations are revoked by the chat
+authorization migration. Media uploads use owner-scoped Storage rules and a
+private bucket. The server issues bounded signed URLs after checking room
+access; an already issued URL remains a bearer capability until its expiry.
+See `docs/chat.md` for the transport and persistence contracts.
 
 Never edit a migration already deployed to production. Add a new timestamped
 file under `supabase/migrations` and deploy it through the configured Supabase

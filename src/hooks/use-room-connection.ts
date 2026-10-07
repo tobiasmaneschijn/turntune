@@ -5,6 +5,8 @@ import { requestSocketAction } from "../socket-request";
 import type { RoomPresence, RoomSnapshot, User } from "../types";
 
 interface RoomConnectionOptions {
+  /** Allows the real hook to be exercised with deterministic transport timing. */
+  transport?: Pick<typeof socket, "auth" | "connected" | "active" | "connect" | "disconnect" | "on" | "off" | "timeout">;
   roomId: string | null;
   password: string;
   profile: User;
@@ -18,38 +20,55 @@ interface RoomConnectionOptions {
 }
 
 export function useRoomConnection({ roomId, password, profile, ready, accessToken,
-  onConnected, onSnapshot, onPasswordRequired, onJoinError, onNotice }: RoomConnectionOptions) {
+  onConnected, onSnapshot, onPasswordRequired, onJoinError, onNotice, transport = socket }: RoomConnectionOptions) {
   const [retryRevision, setRetryRevision] = useState(0);
   const playbackClockRef = useRef(new RoomPlaybackClock());
   useEffect(() => {
     if (!roomId || !profile.name || !ready) {
-      socket.disconnect();
+      transport.disconnect();
       onConnected(false);
       return;
     }
     let active = true;
-    const previousAuth = socket.auth as { accessToken?: string };
+    let admitted = false;
+    let hasFreshSnapshot = false;
+    let joinRevision = 0;
+    const previousAuth = transport.auth as { accessToken?: string };
     // Authentication is checked during the handshake, so updated credentials need a new one.
-    if (socket.connected && previousAuth.accessToken !== accessToken) socket.disconnect();
-    socket.auth = accessToken ? { accessToken } : {};
+    if (transport.connected && previousAuth.accessToken !== accessToken) transport.disconnect();
+    transport.auth = accessToken ? { accessToken } : {};
     const onConnect = () => {
-      onConnected(true);
-      requestSocketAction(socket, "room:join", {
+      const revision = ++joinRevision;
+      admitted = false;
+      hasFreshSnapshot = false;
+      onConnected(false);
+      requestSocketAction(transport, "room:join", {
         roomId, roomName: history.state?.roomName, password: password || undefined, user: profile
       }, (result) => {
-        if (!active) return;
+        if (!active || revision !== joinRevision) return;
+        admitted = result.ok;
+        onConnected(admitted && hasFreshSnapshot);
         onPasswordRequired(Boolean(result.requiresPassword));
         onJoinError(result.ok ? "" : result.error || "Could not join the room.");
       });
     };
-    const onDisconnect = () => onConnected(false);
+    const onDisconnect = () => {
+      ++joinRevision;
+      admitted = false;
+      hasFreshSnapshot = false;
+      onConnected(false);
+    };
     const onConnectError = (error: Error) => {
       onConnected(false);
       onNotice(error.message);
-      if (!socket.active) onJoinError(error.message || "Could not connect. Please try again.");
+      if (!transport.active) onJoinError(error.message || "Could not connect. Please try again.");
     };
     const receiveSnapshot = (next: RoomSnapshot) => {
-      if (active && next.room.id === roomId) onSnapshot(playbackClockRef.current.normalize(next));
+      if (active && next.room.id === roomId) {
+        hasFreshSnapshot = true;
+        onSnapshot(playbackClockRef.current.normalize(next));
+        if (admitted) onConnected(true);
+      }
     };
     const receivePresence = (next: RoomPresence) => {
       if (!active || next.roomId !== roomId) return;
@@ -57,25 +76,25 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
         ? { ...current, users: next.users, djUsers: next.djUsers, serverTime: next.serverTime }
         : current);
     };
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onConnectError);
-    socket.on("room:snapshot", receiveSnapshot);
-    socket.on("room:presence", receivePresence);
-    if (socket.connected) onConnect();
-    else socket.connect();
+    transport.on("connect", onConnect);
+    transport.on("disconnect", onDisconnect);
+    transport.on("connect_error", onConnectError);
+    transport.on("room:snapshot", receiveSnapshot);
+    transport.on("room:presence", receivePresence);
+    if (transport.connected) onConnect();
+    else transport.connect();
     return () => {
       active = false;
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onConnectError);
-      socket.off("room:snapshot", receiveSnapshot);
-      socket.off("room:presence", receivePresence);
+      transport.off("connect", onConnect);
+      transport.off("disconnect", onDisconnect);
+      transport.off("connect_error", onConnectError);
+      transport.off("room:snapshot", receiveSnapshot);
+      transport.off("room:presence", receivePresence);
     };
   }, [roomId, password, profile.id, profile.name, profile.avatarSeed, profile.avatarKey,
     profile.avatarUrl, profile.isAppAdmin, ready, accessToken, onConnected, onSnapshot,
-    onPasswordRequired, onJoinError, onNotice, retryRevision]);
+    onPasswordRequired, onJoinError, onNotice, retryRevision, transport]);
 
-  useEffect(() => () => { socket.disconnect(); }, []);
+  useEffect(() => () => { transport.disconnect(); }, [transport]);
   return () => setRetryRevision((current) => current + 1);
 }

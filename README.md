@@ -12,7 +12,7 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - One-minute reconnect grace period before an offline DJ is removed and skipped
 - Room-level DJ access: open to everyone or restricted to DJ roles and moderators
 - Real-time room chat
-- Supabase Realtime Broadcast chat with persisted history, replies, and reactions
+- Admitted Socket.IO chat with authorized persisted history, replies, reactions, and private uploaded images
 - Deterministic, privacy-friendly avatars
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
@@ -21,6 +21,15 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - Provider-neutral tracks with per-listener synchronized playback
 - Visible app version and in-app changelog
 - Single-container deployment for Dokploy
+- Search that stays open while adding music, with accessible queue actions
+- Room actions and participant search on phones, keyboard tab navigation, and layout reset
+- Local mute, visible playback recovery, and observed provider status
+- Room/account chat drafts, multiline messages, and durable-save retry
+- Artwork transitions and shared OS/app reduced-motion behavior
+- Waiting-track Undo, private saved picks and named sets, and played-at history
+- A compact current-track strip, named layouts, room commands, and listening guidance
+- Room descriptions, safe public previews, account-scoped recent rooms, and host notes
+- Older chat pages, room message search, and attention-aware notification controls
 
 ## Local development
 
@@ -49,6 +58,16 @@ Supabase configuration.
   replies, reactions, media, and RLS.
 - [`docs/codebase-review.md`](docs/codebase-review.md) records the stability review,
   module boundaries, validation, and remaining risks.
+
+## Product improvement proposals
+
+[`docs/qol-and-feel-suggestions.md`](docs/qol-and-feel-suggestions.md) contains the
+coordinated review and prioritized suggestions for quality-of-life features,
+layout, responsiveness, playback confidence, chat, and motion, with implementation
+scope and acceptance criteria.
+
+[`docs/qol-implementation.md`](docs/qol-implementation.md) records the implemented
+features, proposal-by-proposal status, verification results, and remaining work.
 
 ## Release notes
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CircleCheck, Link2, MonitorSpeaker, Music2, Palette, Radio, RefreshCw, Unplug } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { PlaybackPreference, SoundSpinUserSettings } from "../playback-settings";
@@ -9,8 +9,10 @@ import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Slider } from "./ui/slider";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { useMediaQuery } from "../hooks/use-media-query";
+import { notificationPermissionDescription, readNotificationPermission, requestNotificationPermission } from "../notifications";
 
 interface SpotifyDevice {
   id: string | null;
@@ -47,6 +49,8 @@ export function UserSettingsDialog({
   onSettingsChange,
   onConnectSpotify,
   onDisconnectSpotify,
+  connectionError,
+  onRetryConnections,
   onClose
 }: {
   settings: SoundSpinUserSettings;
@@ -55,17 +59,42 @@ export function UserSettingsDialog({
   onSettingsChange: (settings: SoundSpinUserSettings) => void;
   onConnectSpotify: () => void;
   onDisconnectSpotify: () => void;
+  connectionError?: string;
+  onRetryConnections?: () => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance">("playback");
+  const isMobile = useMediaQuery("(max-width: 600px)");
+  const categoriesRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const frame = requestAnimationFrame(() => {
+      const list = categoriesRef.current;
+      const selected = list?.querySelector<HTMLElement>(`[data-settings-category="${tab}"]`);
+      if (!list || !selected) return;
+      const bounds = list.getBoundingClientRect();
+      const target = selected.getBoundingClientRect();
+      const inset = 8;
+      if (target.left < bounds.left + inset) list.scrollLeft += target.left - bounds.left - inset;
+      else if (target.right > bounds.right - inset) list.scrollLeft += target.right - bounds.right + inset;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [tab, isMobile]);
   const { theme = settings.appearance.theme, setTheme } = useTheme();
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [deviceError, setDeviceError] = useState("");
   const [appleAuthorized, setAppleAuthorized] = useState(() => localStorage.getItem("soundspin-apple-authorized") === "true");
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() =>
-    "Notification" in window ? Notification.permission : "denied"
-  );
+  const [notificationPermission, setNotificationPermission] = useState(readNotificationPermission);
+  const [requestingPermission, setRequestingPermission] = useState(false);
+  useEffect(() => {
+    const refresh = () => setNotificationPermission(readNotificationPermission());
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
   const spotifyUnavailable = connections.loaded && !connections.spotifyConfigured;
   const appleUnavailable = connections.loaded && !connections.appleConfigured;
   const selectedSpotifyDevice = devices.find((device) => device.id === settings.playback.spotifyDeviceId) ||
@@ -93,6 +122,7 @@ export function UserSettingsDialog({
         const payload = await response.json() as { devices?: SpotifyDevice[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Could not load Spotify devices.");
         setDevices((payload.devices || []).filter((device) => device.id && !device.is_restricted));
+        setDevicesLoaded(true);
       })
       .catch((error) => setDeviceError(error instanceof Error ? error.message : "Could not load Spotify devices."))
       .finally(() => setLoadingDevices(false));
@@ -108,12 +138,7 @@ export function UserSettingsDialog({
     return () => window.removeEventListener("soundspin:apple-authorization", update);
   }, []);
 
-  const updateNotification = async (key: keyof SoundSpinUserSettings["notifications"], enabled: boolean) => {
-    if (enabled && "Notification" in window && Notification.permission === "default") {
-      const permission = await Notification.requestPermission();
-      setNotificationPermission(permission);
-      if (permission !== "granted") return;
-    }
+  const updateNotification = (key: keyof SoundSpinUserSettings["notifications"], enabled: boolean) => {
     onSettingsChange({
       ...settings,
       notifications: { ...settings.notifications, [key]: enabled }
@@ -122,22 +147,26 @@ export function UserSettingsDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="user-settings-dialog max-w-3xl">
+      <DialogContent className="user-settings-dialog max-w-3xl" finalFocus={() => {
+        const previous = returnFocusRef.current;
+        return previous?.isConnected && previous !== document.body ? previous
+          : document.querySelector<HTMLButtonElement>(".room-more-actions") ?? true;
+      }}>
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>Customize playback, connected services, notifications, and appearance.</DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation="vertical" className="user-settings-layout">
-          <TabsList className="settings-tabs" aria-label="Setting categories">
-            <TabsTrigger value="playback"><Radio /> Playback</TabsTrigger>
-            <TabsTrigger value="connections"><Link2 /> Connections</TabsTrigger>
-            <TabsTrigger value="notifications"><Bell /> Notifications</TabsTrigger>
-            <TabsTrigger value="appearance"><Palette /> Appearance</TabsTrigger>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation={isMobile ? "horizontal" : "vertical"} className="user-settings-layout">
+          <TabsList ref={categoriesRef} className="settings-tabs" aria-label="Setting categories" activateOnFocus>
+            <TabsTrigger value="playback" data-settings-category="playback"><Radio /> Playback</TabsTrigger>
+            <TabsTrigger value="connections" data-settings-category="connections"><Link2 /> Connections</TabsTrigger>
+            <TabsTrigger value="notifications" data-settings-category="notifications"><Bell /> Notifications</TabsTrigger>
+            <TabsTrigger value="appearance" data-settings-category="appearance"><Palette /> Appearance</TabsTrigger>
           </TabsList>
 
-          <div className="settings-tab-panel" role="tabpanel">
-            {tab === "playback" && (
+          <div className="settings-tab-panel">
+            <TabsContent value="playback">
               <div className="settings-panel-stack">
                 <section>
                   <div className="settings-section-heading"><strong>Default playback device</strong><small>Used whenever a matching version of the room track is available.</small></div>
@@ -165,7 +194,7 @@ export function UserSettingsDialog({
 
                 <section className="settings-control-group">
                   <Label htmlFor="default-volume">Default volume <strong>{settings.playback.defaultVolume}%</strong></Label>
-                  <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label="Default volume" />
+                  <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label="Default volume" getAriaValueText={(_formatted, value) => `${value} percent`} />
                 </section>
 
                 {settings.playback.preference === "spotify-desktop" && (
@@ -173,22 +202,23 @@ export function UserSettingsDialog({
                     <Label htmlFor="spotify-device">Spotify Connect device</Label>
                     <div className="settings-select-row">
                       <Select value={settings.playback.spotifyDeviceId || "automatic"} onValueChange={(value) => updatePlayback({ spotifyDeviceId: !value || value === "automatic" ? "" : value })}>
-                        <SelectTrigger id="spotify-device" className="w-full" disabled={!devices.length}><SelectValue /></SelectTrigger>
+                        <SelectTrigger id="spotify-device" className="w-full" disabled={!devices.length}><SelectValue>{settings.playback.spotifyDeviceId ? devices.find(device => device.id === settings.playback.spotifyDeviceId)?.name || "Selected device unavailable" : "Automatic selection"}</SelectValue></SelectTrigger>
                         <SelectContent><SelectGroup>
                           <SelectItem value="automatic">Automatic selection</SelectItem>
                           {devices.map((device) => <SelectItem key={device.id!} value={device.id!}>{device.name} · {device.type}{device.is_active ? " · Active" : ""}</SelectItem>)}
                         </SelectGroup></SelectContent>
                       </Select>
-                      <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
+                      <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices" aria-label="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
                     </div>
                     {deviceError && <small className="settings-field-error">{deviceError}</small>}
+                    {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No available Spotify devices yet. Open Spotify on a device, then Refresh devices.</p>}
                   </section>
                 )}
 
                 <section className="settings-control-group">
                   <Label htmlFor="fallback-behavior">When the preferred provider has no match</Label>
                   <Select value={settings.playback.fallback} onValueChange={(value) => updatePlayback({ fallback: value as SoundSpinUserSettings["playback"]["fallback"] })}>
-                    <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue>{settings.playback.fallback === "ask" ? "Ask for each unavailable track" : settings.playback.fallback === "silent" ? "Keep local playback silent" : "Use the room source automatically"}</SelectValue></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="source">Use the room source automatically</SelectItem>
                       <SelectItem value="ask">Ask for each unavailable track</SelectItem>
@@ -199,10 +229,11 @@ export function UserSettingsDialog({
 
                 <SettingSwitch title="Resume after reconnecting" description="Catch up to the room automatically when the playback device reconnects." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />
               </div>
-            )}
+            </TabsContent>
 
-            {tab === "connections" && (
+            <TabsContent value="connections">
               <div className="connection-list">
+                {connectionError && <div className="settings-inline-notice" role="alert"><span>{connectionError}</span>{onRetryConnections && <Button size="sm" variant="outline" onClick={onRetryConnections}>Retry connection check</Button>}</div>}
                 <div className="connection-row connection-row-expanded">
                   <span className="connection-logo spotify">S</span>
                   <span><strong>{connections.spotifyProfile?.displayName || "Spotify"}</strong><small>{connections.spotifyConnected ? `${connections.spotifyProfile?.product === "premium" ? "Premium" : "Connected"} · ${selectedSpotifyDevice ? `Selected: ${selectedSpotifyDevice.name}` : `${devices.length} playback device${devices.length === 1 ? "" : "s"} found`}` : spotifyUnavailable ? "Not configured by the host" : "Connect for web and desktop playback"}</small></span>
@@ -218,25 +249,30 @@ export function UserSettingsDialog({
                   <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
                 </div>
                 {deviceError && <div className="dialog-error">{deviceError}</div>}
+                {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No available Spotify devices yet. Open Spotify on a device, then Refresh devices.</p>}
               </div>
-            )}
+            </TabsContent>
 
-            {tab === "notifications" && (
+            <TabsContent value="notifications">
               <div className="settings-panel-stack">
-                {notificationPermission !== "granted" && <div className="settings-inline-notice"><span>Browser permission is required for system notifications.</span><Button size="sm" onClick={() => void Notification.requestPermission().then(setNotificationPermission)} disabled={!("Notification" in window)}>Enable notifications</Button></div>}
-                <SettingSwitch title="DJ turn" description="Notify me when my turn on the decks begins." checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
+                <div className="settings-inline-notice"><span>{notificationPermissionDescription(notificationPermission)}</span>{notificationPermission === "default" && <Button size="sm" disabled={requestingPermission} onClick={() => {
+                  setRequestingPermission(true);
+                  void requestNotificationPermission().then(setNotificationPermission).finally(() => setRequestingPermission(false));
+                }}>{requestingPermission ? "Requesting permission…" : "Enable notifications"}</Button>}</div>
+                <SettingSwitch title="Notify when Lydman is in the background" description="Use system notifications when this tab is hidden or unfocused. In-app feedback remains available while you are here." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
+                <SettingSwitch title="DJ turn" description="Notify me when my on-air turn begins." checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
                 <SettingSwitch title="Unavailable tracks" description="Notify me when my preferred provider has no matching recording." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
                 <SettingSwitch title="Chat mentions" description="Notify me when another listener mentions my display name." checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
                 <SettingSwitch title="Playback errors" description="Notify me when the selected playback device fails." checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
               </div>
-            )}
+            </TabsContent>
 
-            {tab === "appearance" && (
+            <TabsContent value="appearance">
               <div className="settings-panel-stack">
                 <section className="settings-control-group">
                   <Label htmlFor="color-theme">Color theme</Label>
                   <Select value={theme} onValueChange={(value) => updateTheme(value as SoundSpinUserSettings["appearance"]["theme"])}>
-                    <SelectTrigger id="color-theme" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectTrigger id="color-theme" className="w-full"><SelectValue>{theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}</SelectValue></SelectTrigger>
                     <SelectContent><SelectGroup><SelectItem value="dark">Dark</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="system">System</SelectItem></SelectGroup></SelectContent>
                   </Select>
                   <small>Dark stays the default. System follows your device preference.</small>
@@ -248,7 +284,7 @@ export function UserSettingsDialog({
                   <Slider id="artwork-blur" min={0} max={60} value={[settings.appearance.artworkBlur]} onValueChange={(value) => updateAppearance({ artworkBlur: typeof value === "number" ? value : value[0] })} aria-label="Artwork background blur" />
                 </section>
               </div>
-            )}
+            </TabsContent>
           </div>
         </Tabs>
       </DialogContent>

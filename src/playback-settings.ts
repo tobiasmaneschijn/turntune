@@ -14,6 +14,7 @@ export interface SoundSpinUserSettings {
     compactPlayer: boolean;
   };
   notifications: {
+    backgroundOnly?: boolean;
     djTurn: boolean;
     unavailableTrack: boolean;
     chatMentions: boolean;
@@ -40,6 +41,7 @@ const defaults: SoundSpinUserSettings = {
     compactPlayer: false
   },
   notifications: {
+    backgroundOnly: true,
     djTurn: true,
     unavailableTrack: true,
     chatMentions: true,
@@ -97,6 +99,7 @@ export function readUserSettings(): SoundSpinUserSettings {
       compactPlayer: boolean(playback.compactPlayer, defaults.playback.compactPlayer)
     },
     notifications: {
+      backgroundOnly: boolean(notifications.backgroundOnly, true),
       djTurn: boolean(notifications.djTurn, defaults.notifications.djTurn),
       unavailableTrack: boolean(notifications.unavailableTrack, defaults.notifications.unavailableTrack),
       chatMentions: boolean(notifications.chatMentions, defaults.notifications.chatMentions),

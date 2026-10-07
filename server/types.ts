@@ -43,6 +43,8 @@ export interface Track {
   mappings?: Partial<Record<Provider, ProviderTrackMapping>>;
   addedBy: User;
   addedAt: number;
+  /** Set by the authoritative radio when a track starts, never from enqueue time. */
+  playedAt?: number;
 }
 
 export interface ProviderTrackMapping {
@@ -77,6 +79,14 @@ export interface VibeState {
 
 export type DjAccess = "everyone" | "roles";
 
+export interface RoomAnnouncement {
+  id: string;
+  text: string;
+  authorId: string;
+  updatedAt: number;
+  expiresAt: number | null;
+}
+
 export interface RoomSettings {
   djAccess?: DjAccess;
   [key: string]: unknown;
@@ -91,6 +101,7 @@ export interface Room {
   isPublic: boolean;
   passwordProtected: boolean;
   settings: RoomSettings;
+  announcement?: RoomAnnouncement | null;
   /** User currently on air. Normally matches playback.track.addedBy.id. */
   djUserId: string | null;
   /** Rotating lineup. The next candidate is at index 0. */
@@ -113,6 +124,7 @@ export type SnapshotRoom = Omit<Room, "djQueues" | "queue"> & {
 };
 
 export interface RoomDirectoryEntry {
+  description?: string;
   slug: string;
   name: string;
   ownerId: string;
@@ -123,6 +135,7 @@ export interface RoomDirectoryEntry {
   listenerCount: number;
   createdAt: string;
   updatedAt: string;
+  preview?: { title: string; artist?: string; artworkUrl?: string; provider?: Provider; playing: boolean; observedAt: number };
 }
 
 export interface RoomSnapshot {

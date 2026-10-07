@@ -1,4 +1,5 @@
 node_modules/
+test-results-*.png
 dist/
 dist-server/
 data/
@@ -9,3 +10,4 @@ supabase/.temp/
 npm-debug.log*
 playwright-report/
 test-results/
+test-results-*/

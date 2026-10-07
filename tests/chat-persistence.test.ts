@@ -27,7 +27,7 @@ function fakeDatabase(results: Array<{ data?: unknown; error?: unknown }>) {
           return Promise.resolve(result).then(resolve, reject)
         },
       }
-      for (const operation of ['select', 'eq', 'in', 'order', 'limit', 'insert', 'delete']) {
+      for (const operation of ['select', 'eq', 'in', 'order', 'limit', 'insert', 'delete', 'maybeSingle']) {
         builder[operation] = (...args: unknown[]) => { call.operations.push([operation, ...args]); return builder }
       }
       return builder
@@ -110,4 +110,35 @@ test('removing a reaction is scoped to the message, listener and emoji', async (
   assert.deepEqual(database.calls[0].operations, [
     ['delete'], ['eq', 'message_id', 'message-1'], ['eq', 'user_id', 'listener-1'], ['eq', 'emoji', '❤️'],
   ])
+})
+
+test('retry confirms an already inserted identical owned message without updating it', async () => {
+  const message: ChatMessage = { id: 'retry-id', content: 'Already sent', type: 'text', user: { id: 'listener-1', name: 'Listener', avatarSeed: 'seed' }, createdAt: '2026-10-06T10:00:00.000Z' }
+  const database = fakeDatabase([
+    { error: { code: '23505', message: 'Duplicate key' } },
+    { data: row(message.id, { content: message.content, room_slug: 'lounge' }), error: null },
+  ])
+  await saveChatMessage(database.client, 'lounge', message.user, message)
+  assert.deepEqual(database.calls[1].operations.filter(([operation]) => operation === 'eq'), [
+    ['eq', 'id', message.id], ['eq', 'room_slug', 'lounge'], ['eq', 'user_id', message.user.id],
+  ])
+  assert.equal(database.calls.filter(call => call.operations.some(([operation]) => operation === 'insert')).length, 1)
+})
+
+test('retry rejects a conflicting message id or inaccessible original message', async () => {
+  const message: ChatMessage = { id: 'retry-id', content: 'New content', type: 'text', user: { id: 'listener-1', name: 'Listener', avatarSeed: 'seed' }, createdAt: '2026-10-06T10:00:00.000Z' }
+  const duplicate = { code: '23505', message: 'Duplicate key' }
+  for (const data of [null, row(message.id, { content: 'Different original' })]) {
+    const database = fakeDatabase([{ error: duplicate }, { data, error: null }])
+    await assert.rejects(saveChatMessage(database.client, 'lounge', message.user, message), error => error === duplicate)
+  }
+})
+
+test('idempotent message retry compares mention fields independently of JSONB object key order', async () => {
+  const message: ChatMessage = { id: 'retry-id', content: 'Hello @Taylor', type: 'text', user: { id: 'listener-1', name: 'Listener', avatarSeed: 'seed' }, mentions: [{ userId: 'other', userName: 'Taylor', handle: 'Taylor' }], createdAt: '2026-10-06T10:00:00.000Z' }
+  const database = fakeDatabase([
+    { error: { code: '23505', message: 'Duplicate key' } },
+    { data: row(message.id, { content: message.content, room_slug: 'lounge', mentions: [{ handle: 'Taylor', userName: 'Taylor', userId: 'other' }] }), error: null },
+  ])
+  await saveChatMessage(database.client, 'lounge', message.user, message)
 })
