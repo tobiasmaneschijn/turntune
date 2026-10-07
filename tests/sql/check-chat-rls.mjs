@@ -2,10 +2,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
-// Supply an installed PGlite module path. This checks SQL with real PostgreSQL entirely offline.
+// Optional external module path; CI uses the exact-pinned project dependency.
 const modulePath = process.argv[2]
-if (!modulePath) throw new Error('Pass the absolute path to @electric-sql/pglite/dist/index.js')
-const { PGlite } = await import(pathToFileURL(modulePath).href)
+const { PGlite } = await import(modulePath ? pathToFileURL(modulePath).href : '@electric-sql/pglite')
 const database = new PGlite()
 try {
   await database.exec(`create role authenticated; create role anon; create role service_role bypassrls;

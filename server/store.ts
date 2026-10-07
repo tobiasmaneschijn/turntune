@@ -1,8 +1,10 @@
+import { RoomCommandError } from "./socket-handler.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeRadioState } from "./radio.js";
+import { normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
+import { runtimeMetrics } from "./runtime-metrics.js";
 import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, type LibraryMutation, type PrivateLibrary } from "./private-library.js";
 import type {
   DjAccess,
@@ -18,6 +20,7 @@ const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, a
 
 interface Database {
   rooms: Record<string, Room>;
+  roomPasswords?: Record<string, string | null>;
   musicConnections?: Record<string, MusicProviderConnection>;
   privateLibraries?: Record<string, PrivateLibrary>;
 }
@@ -28,12 +31,24 @@ interface StoreOptions {
   supabase?: SupabaseClient | null;
 }
 
+export interface RoomChange<T> {
+  result: T;
+  /** Authoritative metadata and membership are committed in the same SQL transaction. */
+  metadata?: Record<string, unknown>;
+  member?: { user_id: string; role: RoomRole };
+  committed?: () => void;
+  rejected?: () => void;
+}
+
 export class Store {
   // The cache is the live room object graph used by Socket.IO handlers. Supabase
   // is durable storage, not a replacement for the process's coordination state.
   private data: Database = { rooms: {} };
   // Serialize writes so a slower save cannot overwrite a newer radio state.
   private writeChain: Promise<void> = Promise.resolve();
+  private roomWrites = new Map<string, Promise<void>>();
+  private roomChanges = new Map<string, Promise<unknown>>();
+  private queuedRoomChanges = new Map<string, number>();
   private supabase: SupabaseClient | null = null;
   private roomLoads = new Map<string, Promise<Room | undefined>>();
   private libraryWrites = new Map<string, Promise<PrivateLibrary>>();
@@ -57,6 +72,8 @@ export class Store {
   get usesSupabase() {
     return Boolean(this.supabase);
   }
+
+  get cachedRoomCount() { return Object.keys(this.data.rooms).length; }
 
   async init() {
     if (this.supabase) return;
@@ -147,6 +164,92 @@ export class Store {
 
   getRoom(id: string) {
     return Object.hasOwn(this.data.rooms, id) ? this.data.rooms[id] : undefined;
+  }
+
+  /** One room's entire validate/persist/commit sequence is ordered, including timers. */
+  changeRoom<T>(room: Room, operation: (draft: Room) => RoomChange<T> | Promise<RoomChange<T>>): Promise<T> {
+    const queued = this.queuedRoomChanges.get(room.id) || 0;
+    if (queued >= 100) return Promise.reject(new Error("Too many room changes are pending. Try again shortly."));
+    this.queuedRoomChanges.set(room.id, queued + 1);
+    runtimeMetrics.pendingRoomCommands++;
+    const previous = this.roomChanges.get(room.id) || Promise.resolve();
+    const result = previous.catch(() => {}).then(async () => {
+      const started = performance.now();
+      let change: RoomChange<T> | undefined;
+      try {
+        if (this.getRoom(room.id) !== room) throw new Error("This room session changed. Join the room again.");
+        const draft = structuredClone(room);
+        change = await operation(draft);
+        await this.commitRoom(room, draft, change);
+        // Persistence succeeded. A diagnostic/receipt hook cannot turn that into a failed command.
+        try { change.committed?.(); } catch (error) { console.error("Room commit notification failed", error); }
+        runtimeMetrics.observe("room_command", performance.now() - started);
+        return change.result;
+      } catch (error) {
+        try { change?.rejected?.(); } catch (rollbackError) { console.error("Room rollback notification failed", rollbackError); }
+        runtimeMetrics.observe("room_command", performance.now() - started, true);
+        throw error;
+      }
+    });
+    this.roomChanges.set(room.id, result);
+    void result.finally(() => {
+      runtimeMetrics.pendingRoomCommands--;
+      const remaining = (this.queuedRoomChanges.get(room.id) || 1) - 1;
+      if (remaining) this.queuedRoomChanges.set(room.id, remaining); else this.queuedRoomChanges.delete(room.id);
+      if (this.roomChanges.get(room.id) === result) this.roomChanges.delete(room.id);
+    }).catch(() => {});
+    return result;
+  }
+
+  private async commitRoom(current: Room, draft: Room, change: RoomChange<unknown>) {
+    const started = performance.now();
+    try {
+      if (!this.supabase) {
+        await this.enqueueWrite(async () => {
+          const roomPasswords = { ...this.data.roomPasswords };
+          if (change.metadata && Object.hasOwn(change.metadata, "password_hash")) roomPasswords[draft.id] = change.metadata.password_hash as string | null;
+          const serialized = JSON.stringify({ ...this.data, rooms: { ...this.data.rooms, [draft.id]: draft }, roomPasswords }, null, 2);
+          await writeFile(this.tempFile, serialized, "utf8");
+          await rename(this.tempFile, this.dataFile);
+          Object.assign(current, draft);
+          this.data.roomPasswords = roomPasswords;
+        });
+      } else {
+        const supabase = this.supabase;
+        await this.enqueueWrite(async () => {
+          if (change.member || change.metadata) {
+            const { data, error } = await supabase.rpc("soundspin_commit_room", {
+              p_slug: draft.id, p_state: draft, p_metadata: change.metadata || {}, p_member: change.member || null
+            });
+            if (error) throw new Error(`Could not save room: ${error.message}`);
+            if (!data) throw new Error("Could not save room: the room no longer exists.");
+          } else {
+            const { data, error } = await supabase.from("soundspin_rooms").update({ state: draft, updated_at: new Date().toISOString() })
+              .eq("slug", draft.id).select("slug").maybeSingle();
+            if (error) throw new Error(`Could not save room: ${error.message}`);
+            if (!data) throw new Error("Could not save room: the room no longer exists.");
+          }
+          Object.assign(current, draft);
+        }, draft.id);
+      }
+      runtimeMetrics.observe("room_save", performance.now() - started);
+    } catch (error) {
+      runtimeMetrics.observe("room_save", performance.now() - started, true);
+      throw error;
+    }
+  }
+
+  /** Supabase is durable storage, so inactive process cache entries can be released. */
+  releaseRoom(id: string) {
+    if (!this.supabase || this.roomChanges.has(id) || this.roomWrites.has(id)) return false;
+    delete this.data.rooms[id];
+    return true;
+  }
+
+  async isReady() {
+    if (!this.supabase) return true;
+    const { error } = await this.supabase.from("soundspin_rooms").select("slug").limit(0).abortSignal(AbortSignal.timeout(5_000));
+    return !error;
   }
 
   async getPrivateLibrary(userId: string): Promise<PrivateLibrary> {
@@ -341,7 +444,17 @@ export class Store {
   }
 
   async createRoom(room: Room, passwordHash: string | null) {
-    if (!this.supabase) return this.saveRoom(room);
+    if (!this.supabase) {
+      await this.enqueueWrite(async () => {
+        if (this.getRoom(room.id)) throw new Error("That room address is already in use.");
+        const roomPasswords = { ...this.data.roomPasswords, [room.id]: passwordHash };
+        await writeFile(this.tempFile, JSON.stringify({ ...this.data, rooms: { ...this.data.rooms, [room.id]: room }, roomPasswords }, null, 2), "utf8");
+        await rename(this.tempFile, this.dataFile);
+        this.data.rooms[room.id] = room;
+        this.data.roomPasswords = roomPasswords;
+      });
+      return;
+    }
     const { error } = await this.supabase.from("soundspin_rooms").insert({
       slug: room.id,
       name: room.name,
@@ -365,7 +478,7 @@ export class Store {
       return room ? {
         exists: true,
         isPublic: room.isPublic ?? true,
-        passwordHash: null,
+        passwordHash: this.data.roomPasswords?.[roomSlug] || null,
         role: room.ownerUserId === userId ? "owner" as const : room.moderatorUserIds.includes(userId) ? "moderator" as const : room.djRoleUserIds.includes(userId) ? "dj" as const : null
       } : { exists: false, isPublic: false, passwordHash: null, role: null };
     }
@@ -437,147 +550,73 @@ export class Store {
     userId: string,
     update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string }
   ) {
-    if (update.description !== undefined && update.description.trim().length > 240) throw new Error("Room descriptions can contain at most 240 characters.");
-    if (!this.supabase) {
-      const room = this.getRoom(roomSlug);
-      if (!room || (room.ownerUserId !== userId && !room.moderatorUserIds?.includes(userId))) {
-        throw new Error("Only the owner or a moderator can change room settings.");
-      }
-      if (update.name !== undefined) room.name = update.name;
-      if (update.isPublic !== undefined) room.isPublic = update.isPublic;
-      if (update.passwordHash !== undefined) room.passwordProtected = Boolean(update.passwordHash);
-      if (update.djAccess !== undefined) room.settings.djAccess = update.djAccess;
-      if (update.description !== undefined) room.settings.description = update.description.trim();
-      await this.saveRoom(room);
-      return room;
-    }
-    const [{ data: membership, error: membershipError }, { data: metadata, error: metadataError }] = await Promise.all([
-      this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle(),
-      this.supabase.from("soundspin_rooms").select("owner_id, settings").eq("slug", roomSlug).maybeSingle()
-    ]);
-    if (membershipError) throw new Error(`Could not verify room role: ${membershipError.message}`);
-    if (metadataError) throw new Error(`Could not verify room owner: ${metadataError.message}`);
-    if (metadata?.owner_id !== userId && (!membership || !["owner", "moderator"].includes(membership.role))) {
-      throw new Error("Only the owner or a moderator can change room settings.");
-    }
-
-    const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (update.name !== undefined) values.name = update.name;
-    if (update.isPublic !== undefined) values.is_public = update.isPublic;
-    if (update.passwordHash !== undefined) values.password_hash = update.passwordHash;
-    if (update.djAccess !== undefined || update.description !== undefined) {
-      values.settings = { ...(metadata?.settings || {}), ...(update.djAccess !== undefined ? { djAccess: update.djAccess } : {}), ...(update.description !== undefined ? { description: update.description.trim() } : {}) };
-    }
-    const { data, error } = await this.supabase
-      .from("soundspin_rooms")
-      .update(values)
-      .eq("slug", roomSlug)
-      .select("name, is_public, password_hash, settings")
-      .single();
-    if (error) throw new Error(`Could not update room: ${error.message}`);
-
-    const room = await this.loadRoom(roomSlug) || this.getRoom(roomSlug);
-    if (room) {
-      room.name = data.name;
-      room.isPublic = data.is_public;
-      room.passwordProtected = Boolean(data.password_hash);
-      room.settings = data.settings || {};
-      await this.saveRoom(room);
-    }
+    if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError("Room descriptions can contain at most 240 characters.");
+    const room = await this.loadRoom(roomSlug);
+    if (!room) throw new RoomCommandError("This room no longer exists.");
+    await this.changeRoom(room, async draft => {
+      const access = await this.getRoomAccess(roomSlug, userId);
+      if (access.role !== "owner" && access.role !== "moderator") throw new RoomCommandError("Only the owner or a moderator can change room settings.");
+      const metadata: Record<string, unknown> = {};
+      if (update.name !== undefined) { draft.name = update.name; metadata.name = update.name; }
+      if (update.isPublic !== undefined) { draft.isPublic = update.isPublic; metadata.is_public = update.isPublic; }
+      if (update.passwordHash !== undefined) { draft.passwordProtected = Boolean(update.passwordHash); metadata.password_hash = update.passwordHash; }
+      if (update.djAccess !== undefined) draft.settings.djAccess = update.djAccess;
+      if (update.description !== undefined) draft.settings.description = update.description.trim();
+      if (update.djAccess !== undefined || update.description !== undefined) metadata.settings = draft.settings;
+      pruneUnauthorizedDjs(draft);
+      return { result: undefined, metadata };
+    });
     return room;
   }
 
-  async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean) {
+  private async verifyRoomOwner(roomSlug: string, userId: string) {
     if (!this.supabase) {
-      const room = this.getRoom(roomSlug);
-      if (!room || room.ownerUserId !== ownerUserId) throw new Error("Only the room owner can manage moderators.");
-      if (targetUserId === ownerUserId) throw new Error("The owner already has full room access.");
-      room.moderatorUserIds = moderator
-        ? [...new Set([...room.moderatorUserIds, targetUserId])]
-        : room.moderatorUserIds.filter((id) => id !== targetUserId);
-      if (moderator) room.djRoleUserIds = room.djRoleUserIds.filter((id) => id !== targetUserId);
-      await this.saveRoom(room);
+      if (this.getRoom(roomSlug)?.ownerUserId !== userId) throw new RoomCommandError("Only the room owner can manage room roles.");
       return;
     }
-    const { data: room, error: roomError } = await this.supabase
-      .from("soundspin_rooms")
-      .select("owner_id")
-      .eq("slug", roomSlug)
-      .single();
-    if (roomError) throw new Error(`Could not load room owner: ${roomError.message}`);
-    if (room.owner_id !== ownerUserId) throw new Error("Only the room owner can manage moderators.");
-    if (targetUserId === ownerUserId) throw new Error("The owner already has full room access.");
-    const { error } = await this.supabase.from("soundspin_room_members").upsert(
-      {
-        room_slug: roomSlug,
-        user_id: targetUserId,
-        role: moderator ? "moderator" : "member",
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "room_slug,user_id" }
-    );
-    if (error) throw new Error(`Could not update moderator: ${error.message}`);
-    const cached = this.getRoom(roomSlug);
-    if (cached) {
-      cached.moderatorUserIds = moderator
-        ? [...new Set([...(cached.moderatorUserIds || []), targetUserId])]
-        : (cached.moderatorUserIds || []).filter((id) => id !== targetUserId);
-      if (moderator) cached.djRoleUserIds = (cached.djRoleUserIds || []).filter((id) => id !== targetUserId);
-      await this.saveRoom(cached);
-    }
+    const { data, error } = await this.supabase.from("soundspin_rooms").select("owner_id").eq("slug", roomSlug).single();
+    if (error) throw new Error(`Could not verify room owner: ${error.message}`);
+    if (data.owner_id !== userId) throw new RoomCommandError("Only the room owner can manage room roles.");
   }
 
-  async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean) {
-    if (!this.supabase) {
-      const room = this.getRoom(roomSlug);
-      if (!room || room.ownerUserId !== ownerUserId) throw new Error("Only the room owner can manage DJ roles.");
-      if (targetUserId === ownerUserId) throw new Error("The owner can always join the DJ queue.");
-      if (room.moderatorUserIds.includes(targetUserId)) throw new Error("Moderators can already join the DJ queue.");
-      room.djRoleUserIds = dj
-        ? [...new Set([...room.djRoleUserIds, targetUserId])]
-        : room.djRoleUserIds.filter((id) => id !== targetUserId);
-      await this.saveRoom(room);
-      return;
-    }
-
-    const { data: room, error: roomError } = await this.supabase
-      .from("soundspin_rooms")
-      .select("owner_id")
-      .eq("slug", roomSlug)
-      .single();
-    if (roomError) throw new Error(`Could not load room owner: ${roomError.message}`);
-    if (room.owner_id !== ownerUserId) throw new Error("Only the room owner can manage DJ roles.");
-    if (targetUserId === ownerUserId) throw new Error("The owner can always join the DJ queue.");
-
-    const { data: targetMembership, error: targetMembershipError } = await this.supabase
-      .from("soundspin_room_members")
-      .select("role")
-      .eq("room_slug", roomSlug)
-      .eq("user_id", targetUserId)
-      .maybeSingle();
-    if (targetMembershipError) throw new Error(`Could not verify target role: ${targetMembershipError.message}`);
-    if (targetMembership?.role === "moderator") {
-      throw new Error("Moderators can already join the DJ queue.");
-    }
-    const { error } = await this.supabase.from("soundspin_room_members").upsert(
-      {
-        room_slug: roomSlug,
-        user_id: targetUserId,
-        role: dj ? "dj" : "member",
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "room_slug,user_id" }
-    );
-    if (error) throw new Error(`Could not update DJ role: ${error.message}`);
-    const cached = this.getRoom(roomSlug);
-    if (cached) {
-      cached.djRoleUserIds = dj
-        ? [...new Set([...(cached.djRoleUserIds || []), targetUserId])]
-        : (cached.djRoleUserIds || []).filter((id) => id !== targetUserId);
-      await this.saveRoom(cached);
-    }
+  async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean, authorize?: () => void) {
+    await this.verifyRoomOwner(roomSlug, ownerUserId);
+    if (targetUserId === ownerUserId) throw new RoomCommandError("The owner already has full room access.");
+    const room = await this.loadRoom(roomSlug);
+    if (!room) throw new RoomCommandError("This room no longer exists.");
+    await this.changeRoom(room, async draft => {
+      authorize?.();
+      await this.verifyRoomOwner(roomSlug, ownerUserId);
+      authorize?.();
+      draft.moderatorUserIds = moderator ? [...new Set([...draft.moderatorUserIds, targetUserId])] : draft.moderatorUserIds.filter(id => id !== targetUserId);
+      if (moderator) draft.djRoleUserIds = draft.djRoleUserIds.filter(id => id !== targetUserId);
+      pruneUnauthorizedDjs(draft);
+      return { result: undefined, member: { user_id: targetUserId, role: moderator ? "moderator" : "member" } };
+    });
   }
 
+  async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean, authorize?: () => void) {
+    await this.verifyRoomOwner(roomSlug, ownerUserId);
+    if (targetUserId === ownerUserId) throw new RoomCommandError("The owner can always join the DJ queue.");
+    const verifyTarget = async () => {
+      if (this.supabase) {
+        const { data, error } = await this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", targetUserId).maybeSingle();
+        if (error) throw new Error(`Could not verify target role: ${error.message}`);
+        if (data?.role === "moderator") throw new RoomCommandError("Moderators can already join the DJ queue.");
+      } else if (this.getRoom(roomSlug)?.moderatorUserIds.includes(targetUserId)) throw new RoomCommandError("Moderators can already join the DJ queue.");
+    };
+    await verifyTarget();
+    const room = await this.loadRoom(roomSlug);
+    if (!room) throw new RoomCommandError("This room no longer exists.");
+    await this.changeRoom(room, async draft => {
+      authorize?.();
+      await this.verifyRoomOwner(roomSlug, ownerUserId); await verifyTarget();
+      authorize?.();
+      draft.djRoleUserIds = dj ? [...new Set([...draft.djRoleUserIds, targetUserId])] : draft.djRoleUserIds.filter(id => id !== targetUserId);
+      pruneUnauthorizedDjs(draft);
+      return { result: undefined, member: { user_id: targetUserId, role: dj ? "dj" : "member" } };
+    });
+  }
   async loadOrCreateProfile(userId: string, displayName: string) {
     if (!this.supabase) return null;
     const current = await this.getProfile(userId);
@@ -692,8 +731,8 @@ export class Store {
   }
 
   /**
-   * Updates the live cache immediately, then persists saves in call order.
-   * Callers should await the returned chain before acknowledging a mutation.
+   * Bootstrap/fixture compatibility only: publishes the supplied object immediately.
+   * All admitted mutations must use changeRoom to keep uncommitted state private.
    */
   saveRoom(room: Room) {
     this.data.rooms[room.id] = room;
@@ -719,27 +758,33 @@ export class Store {
         throw new Error(`Could not save room: ${error.message}`);
       }
       if (!data) throw new Error("Could not save room: the room no longer exists.");
-    });
+    }, room.id);
   }
 
   /** Waits for writes already scheduled, for graceful server shutdown. */
-  flush() {
-    return this.writeChain;
+  async flush() {
+    await Promise.allSettled([...this.roomChanges.values()]);
+    await Promise.all([this.writeChain, ...this.roomWrites.values()]);
   }
 
-  private enqueueWrite(write: () => Promise<void>) {
-    const result = this.writeChain.then(write);
+  private enqueueWrite(write: () => Promise<void>, roomId?: string) {
+    const previous = roomId ? this.roomWrites.get(roomId) || Promise.resolve() : this.writeChain;
+    const result = previous.then(write);
     // The caller still sees its failure. Future writes can recover after a
     // temporary database outage or a failed rename instead of staying poisoned.
-    this.writeChain = result.catch(() => {});
+    const recovered = result.catch(() => {});
+    if (roomId) {
+      this.roomWrites.set(roomId, recovered);
+      void recovered.finally(() => { if (this.roomWrites.get(roomId) === recovered) this.roomWrites.delete(roomId); });
+    } else this.writeChain = recovered;
     return result;
   }
 
   private persistFile() {
-    const serialized = JSON.stringify(this.data, null, 2);
     // Room saves and provider credentials share one file and temporary path.
     // They must use the same write queue to avoid racing renames or losing data.
     return this.enqueueWrite(async () => {
+      const serialized = JSON.stringify(this.data, null, 2);
       await writeFile(this.tempFile, serialized, "utf8");
       await rename(this.tempFile, this.dataFile);
     });

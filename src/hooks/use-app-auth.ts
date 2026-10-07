@@ -3,7 +3,7 @@ import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseClient } from "../supabase";
 import { recoveryAfterAuthEvent } from "../auth-state";
 
-interface AppAuth {
+export interface AppAuth {
   loading: boolean;
   client: SupabaseClient | null;
   session: Session | null;

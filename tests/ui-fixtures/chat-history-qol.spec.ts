@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 type Row = { id: string; room_slug: string; created_at: string; reply_to_id: string | null; content: string; user_id: string; user_name: string; avatar_seed: string; message_type: string; mentions: unknown[]; soundspin_message_reactions: unknown[] }
-type Database = { rows: Row[]; allowed: boolean; holdOlder: boolean; releaseOlder: (() => void) | null; searches: string[]; mediaRequests: string[] }
+type Database = { rows: Row[]; allowed: boolean; holdOlder: boolean; releaseOlder: (() => void) | null; holdSearch: boolean; releaseSearch: (() => void) | null; searches: string[]; mediaRequests: string[] }
 const databases = new WeakMap<Page, Database>()
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 declare global { interface Window {
@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
     content: index >= 4 && index < 50 ? `needle message ${index + 1}` : `Room message ${index + 1}`, user_id: 'mira', user_name: 'Mira', avatar_seed: 'mira', message_type: 'text',
     mentions: [{ userId: 'alice', userName: 'Alice', handle: 'Alice' }], soundspin_message_reactions: [] }))
   rows.push({ ...rows[0], id: id(800), room_slug: 'other-room', content: 'Other room message' }, { ...rows[0], id: id(900), room_slug: 'secret-room', content: 'needle private message' })
-  const database: Database = { rows, allowed: true, holdOlder: false, releaseOlder: null, searches: [], mediaRequests: [] }
+  const database: Database = { rows, allowed: true, holdOlder: false, releaseOlder: null, holdSearch: false, releaseSearch: null, searches: [], mediaRequests: [] }
   databases.set(page, database)
   const enrich = (selected: Row[]) => ({ rows: selected, replies: rows.filter((row) => selected.some((message) => message.reply_to_id === row.id) && row.room_slug === selected[0]?.room_slug), profiles: [] })
   await page.route('**/api/rooms/*/chat/**', async (route) => {
@@ -59,6 +59,7 @@ test.beforeEach(async ({ page }) => {
     const query = url.searchParams.get('q')
     if (action === 'search') database.searches.push(query || '')
     if (database.holdOlder && action === 'history' && url.searchParams.has('beforeId')) await new Promise<void>((resolve) => { database.releaseOlder = resolve })
+    if (database.holdSearch && action === 'search') await new Promise<void>((resolve) => { database.releaseSearch = resolve })
     const direction = url.searchParams.get('direction') || 'older'
     const cursor = url.searchParams.get('beforeId')
     const matches = scope.filter((row) => (!query || row.content.toLowerCase().includes(query.toLowerCase())) && (!cursor || (direction === 'older' ? row.id < cursor : row.id > cursor)))
@@ -146,6 +147,59 @@ test('retry send reuses its UUID and one durable save while preserving a separat
   const ids = await page.evaluate(() => ({ sends: window.chatHistoryTest.sendIds, saves: window.chatHistoryTest.saveIds }))
   expect(ids.sends).toEqual([ids.saves[0], ids.saves[0]])
   expect(ids.saves).toHaveLength(1)
+})
+
+test('successful retry clears its unchanged draft and pressing Enter cannot duplicate the message', async ({ page }) => {
+  await page.evaluate(() => { window.chatHistoryTest.failSend = true })
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  await composer.fill('original outgoing message')
+  await composer.press('Enter')
+  await expect(page.getByText('Could not confirm send', { exact: true })).toBeVisible()
+  await page.evaluate(() => { window.chatHistoryTest.failSend = false })
+  await page.getByRole('button', { name: 'Retry send', exact: true }).click()
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect(composer).toHaveValue('')
+  await composer.press('Enter')
+  expect(await page.evaluate(() => window.chatHistoryTest.saveIds)).toHaveLength(1)
+})
+
+test('a long live session keeps its reader anchored while the retained window rolls forward', async ({ page }) => {
+  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
+  const anchor = page.locator(`#chat-message-${id(221)}`)
+  await expect(anchor).toBeVisible()
+  const before = (await anchor.boundingBox())!.y
+  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 200 }, (_, index) => incoming(1800 + index, false)))
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await expect(anchor).toBeVisible()
+  await expect.poll(async () => (await anchor.boundingBox())!.y).toBeCloseTo(before, 0)
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(200)
+  await page.getByRole('button', { name: '200 new', exact: true }).click()
+  await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
+  await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(1)
+})
+
+test('returning to a rolled live window keeps an independent saved search request responsive', async ({ page }) => {
+  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
+  await expect(page.locator(`#chat-message-${id(221)}`)).toBeVisible()
+  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 200 }, (_, index) => incoming(1800 + index, false)))
+  const database = databases.get(page)!
+  database.holdSearch = true
+  await page.getByRole('button', { name: 'Search room messages', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Search all saved room messages' }).fill('needle')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect.poll(() => Boolean(database.releaseSearch)).toBe(true)
+  await page.getByRole('button', { name: '200 new', exact: true }).click()
+  await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
+  database.holdSearch = false; database.releaseSearch!()
+  await expect(page.locator('.chat-history-results > button')).toHaveCount(40)
+  await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled()
+  await expect(page.getByText('Searching saved room messages…')).toHaveCount(0)
 })
 
 test('background mentions use one system notification, duplicates/reconnect/history do not replay, and room mute is scoped', async ({ page }) => {

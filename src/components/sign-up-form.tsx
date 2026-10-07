@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { requestJson } from '@/lib/authenticated-http'
 
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -38,13 +39,11 @@ export function SignUpForm({
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/signup', {
+      await requestJson('/api/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, invitePassword }),
+        errorMessage: 'Could not create the account',
       })
-      const result = await response.json().catch(() => ({})) as { error?: string }
-      if (!response.ok) throw new Error(result.error || 'Could not create the account')
       setSuccess(true)
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')

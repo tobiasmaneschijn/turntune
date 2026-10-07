@@ -21,6 +21,7 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
   const pagedRef = useRef(false)
   const generationRef = useRef(0)
   const olderPendingRef = useRef(false)
+  const olderRequestRef = useRef(0)
   const searchRequestRef = useRef(0)
   const contextRequestRef = useRef(0)
   const searchCursorRef = useRef<ChatHistoryCursor | undefined>(undefined)
@@ -49,17 +50,18 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
   const loadOlder = useCallback(async () => {
     if (!roomSlug || !source || olderPendingRef.current || !cursorRef.current) return
     const generation = generationRef.current
+    const request = ++olderRequestRef.current
     olderPendingRef.current = true; setLoadingOlder(true); setHistoryError('')
     try {
       const page = await source.loadPage(cursorRef.current)
-      if (generation !== generationRef.current) return
+      if (generation !== generationRef.current || request !== olderRequestRef.current) return
       notifyRef.current?.(page.messages)
       pagedRef.current = true
       cursorRef.current = page.cursor || cursorRef.current
       setOlderMessages((current) => mergeChatMessages(current, page.messages))
       setHasOlder(page.hasMore)
-    } catch { if (generation === generationRef.current) setHistoryError('Older messages could not be loaded. Try again.') }
-    finally { if (generation === generationRef.current) { olderPendingRef.current = false; setLoadingOlder(false) } }
+    } catch { if (generation === generationRef.current && request === olderRequestRef.current) setHistoryError('Older messages could not be loaded. Try again.') }
+    finally { if (generation === generationRef.current && request === olderRequestRef.current) { olderPendingRef.current = false; setLoadingOlder(false) } }
   }, [client, roomSlug, source])
 
   const search = useCallback(async (term: string, more = false) => {
@@ -117,6 +119,11 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
 
   const closeContext = useCallback(() => { contextRequestRef.current++; setContext(null); setContextLoading(false); setHistoryError('') }, [])
   const clearSearch = useCallback(() => { searchRequestRef.current++; setSearchLoading(false); setSearchResults([]); setSearchHasMore(false); setSearchError(''); setSearchTerm('') }, [])
+  const resetPages = useCallback((messages: ChatMessage[]) => {
+    olderRequestRef.current++; olderPendingRef.current = false; pagedRef.current = false
+    cursorRef.current = messages[0] ? chatHistoryCursor(messages[0]) : undefined
+    setOlderMessages([]); setLoadingOlder(false); setHistoryError(''); setHasOlder(messages.length >= CHAT_HISTORY_LIMIT)
+  }, [])
   return { olderMessages, hasOlder, loadingOlder, historyError, loadOlder, context, contextLoading, revealContext, extendContext, closeContext,
-    searchResults, searchHasMore, searchLoading, searchError, searchTerm, search, clearSearch }
+    searchResults, searchHasMore, searchLoading, searchError, searchTerm, search, clearSearch, resetPages }
 }

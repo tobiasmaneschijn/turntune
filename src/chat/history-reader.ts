@@ -1,5 +1,6 @@
 import type { ChatMessage } from './model'
 import { chatHistoryCursorFilter, chatMessagesFromRows, type ChatHistoryCursor, type ChatHistoryPage, type ChatHistoryRow } from './persistence'
+import { requestJson } from '../lib/authenticated-http'
 
 export interface ChatMessageContext { messages: ChatMessage[]; olderCursor: ChatHistoryCursor; newerCursor: ChatHistoryCursor; hasOlder: boolean; hasNewer: boolean }
 export interface ChatHistorySource {
@@ -8,7 +9,7 @@ export interface ChatHistorySource {
   loadContext(messageId: string): Promise<ChatMessageContext | null>
   loadMessage(messageId: string): Promise<ChatMessage | null>
   saveMessage(message: ChatMessage): Promise<void>
-  saveReaction(change: { action: 'add' | 'remove'; messageId: string; userId?: string; emoji: string }): Promise<void>
+  saveReaction(change: { id?: string; action: 'add' | 'remove'; messageId: string; userId?: string; emoji: string }): Promise<void>
   loadMediaUrl(storagePath: string): Promise<string>
 }
 interface RowsPayload { rows: ChatHistoryRow[]; replies?: ChatHistoryRow[]; profiles?: Parameters<typeof chatMessagesFromRows>[2] }
@@ -17,16 +18,10 @@ interface RowsPayload { rows: ChatHistoryRow[]; replies?: ChatHistoryRow[]; prof
 export function createChatHistorySource(accessToken: string, roomSlug: string, fetchImpl: typeof fetch = fetch): ChatHistorySource {
   const prefix = `/api/rooms/${encodeURIComponent(roomSlug)}/chat`
   const request = async <T>(path: string, params = new URLSearchParams(), body?: unknown): Promise<T> => {
-    try {
-      const response = await fetchImpl(`${prefix}${path}${params.size ? `?${params}` : ''}`, { method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.timeout(15_000),
-        headers: { Authorization: `Bearer ${accessToken}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-      const payload = await response.json()
-      if (!response.ok) throw new Error(payload.error || 'Room chat could not be loaded or saved. Try again.')
-      return payload as T
-    } catch (error) {
-      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) throw new Error('The room chat request timed out. Please try again.')
-      throw error
-    }
+    return requestJson<T>(`${prefix}${path}${params.size ? `?${params}` : ''}`, {
+      accessToken, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      errorMessage: 'Room chat could not be loaded or saved. Try again.', validate: (value): value is T => value === null || typeof value === 'object'
+    }, fetchImpl)
   }
   const cursorParams = (cursor?: ChatHistoryCursor) => {
     const params = new URLSearchParams()
@@ -56,7 +51,7 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
       return payload ? messages(payload)[0] || null : null
     },
     async saveMessage(message) { await request('/messages', undefined, message) },
-    async saveReaction(change) { await request('/reactions', undefined, { action: change.action, messageId: change.messageId, emoji: change.emoji }) },
+    async saveReaction(change) { await request('/reactions', undefined, { id: change.id, action: change.action, messageId: change.messageId, emoji: change.emoji }) },
     async loadMediaUrl(storagePath) { return (await request<{ url: string }>('/media-url', undefined, { storagePath })).url },
   }
 }

@@ -1,5 +1,8 @@
 type Reply = (result: { ok: boolean; error?: string; [key: string]: unknown }) => void;
 
+/** A deliberate command rejection may be shown; persistence/internal errors are sanitized. */
+export class RoomCommandError extends Error {}
+
 /** Socket.IO does not await listener promises. Every listener must handle rejection. */
 export function safeSocketHandler(
   handler: (payload: unknown, reply?: Reply) => unknown | Promise<unknown>,
@@ -10,8 +13,8 @@ export function safeSocketHandler(
     try {
       await handler(payload, reply);
     } catch (error) {
-      reportError(error);
-      reply?.({ ok: false, error: "Could not save this change. Please reconnect to check the room and try again." });
+      if (!(error instanceof RoomCommandError)) reportError(error);
+      reply?.({ ok: false, error: error instanceof RoomCommandError ? error.message : "Could not save this change. Please reconnect to check the room and try again." });
     }
   };
 }

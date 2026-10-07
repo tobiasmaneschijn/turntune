@@ -1,3 +1,16 @@
+import { mountAdminRoutes } from "./admin-routes.js";
+import { mountMusicRoutes } from "./music-routes.js";
+import { mountRoomActions } from "./room-actions.js";
+import { RoomCommandService } from "./room-command-service.js";
+import { hashRoomPassword, passwordMatches } from "./room-password.js";
+import { RoomEntryLimiter } from "./room-entry-limiter.js";
+import { IdleRoomRegistry } from "./idle-rooms.js";
+import { reconcileDjPresence } from "./dj-presence.js";
+import { runtimeMetrics } from "./runtime-metrics.js";
+import { mountSpotifyOAuthRoutes } from "./spotify-oauth-routes.js";
+import { createSocketCredentialLease, type SocketCredentialLease } from "./socket-credentials.js";
+import { createChatWritePolicy } from "./chat-write-policy.js";
+import { joinSchema } from "../shared/room-protocol.js";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +26,12 @@ import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./
 import { createChatRelay } from "./chat-relay.js";
 import { resolveChatMediaUrl } from "./chat-media.js";
 import { withPublicRoomPreview } from "./directory-preview.js";
-import { createSavedSetResolver, resolveSavedSet, SetImportRegistry } from "./saved-set.js";
+import { createSavedSetResolver, SetImportRegistry } from "./saved-set.js";
 import { validateServerConfig } from "./config.js";
-import { safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
+import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
 import { roomPresence, uniqueUsers } from "./presence.js";
-import { activeAnnouncement, announcementSchema, AnnouncementExpiryRegistry, changeAnnouncement } from "./announcements.js";
-import { SoundCloudApi, type SoundCloudSearchResult } from "./soundcloud.js";
+import { activeAnnouncement, AnnouncementExpiryRegistry } from "./announcements.js";
+import { SoundCloudApi } from "./soundcloud.js";
 import { AppleMusicApi } from "./apple-music.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
 import { SpotifyAccounts } from "./spotify-accounts.js";
@@ -31,16 +44,13 @@ import {
 } from "./invite-signup.js";
 import {
   advanceRadio,
-  appendQueueSet,
-  canJoinDjQueue,
   GracePeriodRegistry,
   QueueUndoRegistry,
   normalizeRadioState,
-  privateQueue,
   removeDj,
   roomForListener
 } from "./radio.js";
-import type { Room, RoomSnapshot, Track, User } from "./types.js";
+import type { Room, RoomSnapshot, User } from "./types.js";
 
 validateServerConfig(process.env);
 
@@ -49,6 +59,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: true } });
 const store = new Store();
+const roomCommands = new RoomCommandService(store, broadcast);
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
@@ -85,158 +96,27 @@ const DJ_DISCONNECT_GRACE_MS = 60_000;
 const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const queueUndo = new QueueUndoRegistry();
 const setImports = new SetImportRegistry();
+const roomEntryLimiter = new RoomEntryLimiter();
 const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi });
 const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
-  await store.saveRoom(room);
-  broadcast(room);
+  await roomCommands.execute(room, draft => {
+    if (draft.announcement?.expiresAt !== null && draft.announcement?.expiresAt !== undefined && draft.announcement.expiresAt <= Date.now()) draft.announcement = null;
+    return { result: undefined };
+  });
 });
-const youtubeSearchCache = new Map<string, {
-  expiresAt: number;
-  results: YouTubeSearchResult[];
-}>();
-const youtubeSearchLimits = new Map<string, { count: number; resetAt: number }>();
-const soundCloudSearchCache = new Map<string, {
-  expiresAt: number;
-  results: SoundCloudSearchResult[];
-}>();
-const soundCloudSearchLimits = new Map<string, { count: number; resetAt: number }>();
-const spotifySearchCache = new Map<string, { expiresAt: number; results: Awaited<ReturnType<SpotifyApi["searchTracks"]>> }>();
-const appleMusicSearchCache = new Map<string, { expiresAt: number; results: Awaited<ReturnType<AppleMusicApi["searchTracks"]>> }>();
-const providerSearchLimits = new Map<string, { count: number; resetAt: number }>();
 const signupAttemptLimiter = new SignupAttemptLimiter(10, 15 * 60 * 1000);
-const spotifyOauthStates = new Map<string, {
-  userId: string;
-  returnTo: string;
-  redirectUri: string;
-  expiresAt: number;
-}>();
-
-interface YouTubeSearchResult {
-  id: string;
-  title: string;
-  channel: string;
-  thumbnail: string;
-  duration?: string;
-  durationMs?: number;
-}
-
-const userSchema = z.object({
-  id: z.string().min(1).max(100),
-  name: z.string().trim().min(1).max(32),
-  avatarSeed: z.string().min(1).max(100)
+const idleRooms = new IdleRoomRegistry(roomId => {
+  if (roomUsers.get(roomId)?.size) return true;
+  const room = store.getRoom(roomId);
+  if (room?.djQueueUserIds.some(id => hasPendingDjEviction(roomId, id))) return false;
+  if (!store.releaseRoom(roomId)) return false;
+  announcementExpiries.cancel(roomId);
+  queueUndo.releaseRoom(roomId);
+  setImports.releaseRoom(roomId);
+  roomDjUsers.delete(roomId);
+  return true;
 });
-
-const joinSchema = z.object({
-  roomId: z.string().regex(/^[a-z0-9-]{3,48}$/),
-  roomName: z.string().trim().min(1).max(48).optional(),
-  password: z.string().max(128).optional(),
-  user: userSchema
-});
-
-const trackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
-  providerId: z.string().min(1).max(200),
-  title: z.string().trim().min(1).max(120),
-  artist: z.string().trim().min(1).max(120).optional(),
-  artworkUrl: z.string().url().max(2048).optional(),
-  permalinkUrl: z.string().url().max(2048).optional(),
-  durationMs: z.number().int().positive().max(60 * 60 * 24 * 1000).optional()
-}).superRefine((track, context) => {
-  if (track.artworkUrl && !track.artworkUrl.startsWith("https://")) {
-    context.addIssue({ code: "custom", path: ["artworkUrl"], message: "Artwork must use HTTPS." });
-  }
-  if (track.provider === "spotify" && !/^[A-Za-z0-9]{22}$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid Spotify track ID." });
-  }
-  if (track.provider === "apple" && !/^\d+$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid Apple Music song ID." });
-  }
-  if (track.provider !== "soundcloud") return;
-  if (!/^soundcloud:tracks:\d+$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid SoundCloud track URN." });
-  }
-  if (!track.permalinkUrl) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A SoundCloud permalink is required." });
-    return;
-  }
-  const hostname = new URL(track.permalinkUrl).hostname.toLowerCase();
-  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "Invalid SoundCloud permalink." });
-  }
-});
-
-const playbackSchema = z.object({
-  trackId: z.string().uuid(),
-  playing: z.boolean(),
-  position: z.number().min(0).max(60 * 60 * 24)
-});
-
-const queueTrackSchema = z.object({
-  trackId: z.string().uuid()
-});
-
-const queueMoveSchema = queueTrackSchema.extend({
-  toIndex: z.number().int().min(0).max(999)
-});
-
-const queueNextSchema = z.object({
-  trackId: z.string().uuid()
-});
-
-const vibeVoteSchema = z.object({
-  trackId: z.string().min(1).optional(),
-  value: z.union([z.literal(-1), z.literal(0), z.literal(1)])
-});
-
-const youtubeSearchSchema = z.object({
-  q: z.string().trim().min(2).max(100)
-});
-
-const soundCloudSearchSchema = youtubeSearchSchema;
-const spotifySearchSchema = youtubeSearchSchema;
-const appleMusicSearchSchema = youtubeSearchSchema.extend({
-  storefront: z.string().regex(/^[a-z]{2}$/i).optional()
-});
-const giphySearchSchema = z.object({
-  q: z.string().trim().max(100).optional().default("")
-});
-
-const spotifyResolveSchema = z.object({
-  url: z.string().trim().max(2048)
-});
-
-const appleMusicResolveSchema = z.object({
-  url: z.string().trim().url().max(2048),
-  storefront: z.string().regex(/^[a-z]{2}$/i).optional()
-});
-
-const spotifyPlaybackSchema = z.object({
-  action: z.enum(["transfer", "play", "pause", "resume", "seek", "volume"]),
-  deviceId: z.string().min(1).max(200).optional(),
-  spotifyUri: z.string().regex(/^spotify:track:[A-Za-z0-9]{22}$/).optional(),
-  positionMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).optional(),
-  volumePercent: z.number().int().min(0).max(100).optional()
-}).superRefine((value, context) => {
-  if (value.action === "play" && !value.spotifyUri) {
-    context.addIssue({ code: "custom", path: ["spotifyUri"], message: "A Spotify track is required." });
-  }
-  if (value.action === "transfer" && !value.deviceId) {
-    context.addIssue({ code: "custom", path: ["deviceId"], message: "A Spotify device is required." });
-  }
-  if (value.action === "volume" && value.volumePercent === undefined) {
-    context.addIssue({ code: "custom", path: ["volumePercent"], message: "A volume level is required." });
-  }
-});
-
-const soundCloudResolveSchema = z.object({
-  url: z.string().trim().url().max(2048)
-}).superRefine((value, context) => {
-  const hostname = new URL(value.url).hostname.toLowerCase();
-  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
-    context.addIssue({ code: "custom", path: ["url"], message: "Enter a valid SoundCloud track URL." });
-  }
-});
-
+function watchIdleRoom(roomId: string) { if (store.usesSupabase && !roomUsers.get(roomId)?.size) idleRooms.schedule(roomId); }
 const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
   bio: z.string().trim().max(160).optional(),
@@ -262,21 +142,6 @@ const roomSettingsSchema = z.object({
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
 
-const moderatorSchema = z.object({
-  userId: z.string().uuid(),
-  moderator: z.boolean()
-});
-
-const djRoleSchema = z.object({
-  userId: z.string().uuid(),
-  dj: z.boolean()
-});
-
-const feedbackStatusSchema = z.object({
-  status: z.enum(["new", "reviewing", "planned", "resolved", "closed"]),
-  adminNote: z.string().trim().max(2000).default("")
-});
-
 function roomSlug(name: string) {
   const base = name
     .toLowerCase()
@@ -298,110 +163,11 @@ console.log("Signup configuration:", {
   signupAdmin: Boolean(signupAdmin)
 });
 
-function hashRoomPassword(password?: string | null) {
-  if (!password?.trim()) return null;
-  const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, 64);
-  return `scrypt$${salt.toString("base64")}$${hash.toString("base64")}`;
-}
-
-function passwordMatches(password: string | undefined, encoded: string | null) {
-  if (!encoded) return true;
-  if (!password) return false;
-  const [algorithm, saltValue, hashValue] = encoded.split("$");
-  if (algorithm !== "scrypt" || !saltValue || !hashValue) return false;
-  try {
-    const expected = Buffer.from(hashValue, "base64");
-    const actual = crypto.scryptSync(password, Buffer.from(saltValue, "base64"), expected.length);
-    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-  } catch {
-    return false;
-  }
-}
-
-function decodeYouTubeText(value: string) {
-  return value
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", "\"")
-    .replaceAll("&#39;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
-}
-
-function formatYouTubeDuration(value?: string) {
-  if (!value) return undefined;
-  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
-  if (!match) return undefined;
-  const hours = Number(match[1] || 0);
-  const minutes = Number(match[2] || 0);
-  const seconds = Number(match[3] || 0);
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function youtubeDurationMs(value?: string) {
-  if (!value) return undefined;
-  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
-  if (!match) return undefined;
-  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
-}
-
-function spotifyTrackId(value: string) {
-  if (/^[A-Za-z0-9]{22}$/.test(value)) return value;
-  const uri = value.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
-  if (uri) return uri;
-  try {
-    const url = new URL(value);
-    if (url.hostname === "open.spotify.com" || url.hostname.endsWith(".spotify.com")) {
-      return url.pathname.match(/^\/(?:intl-[a-z]{2}\/)?track\/([A-Za-z0-9]{22})/i)?.[1] || null;
-    }
-  } catch {
-    // Not a Spotify URL.
-  }
-  return null;
-}
-
-function appleMusicTrack(value: string) {
-  try {
-    const url = new URL(value);
-    if (url.hostname !== "music.apple.com" && !url.hostname.endsWith(".music.apple.com")) return null;
-    const storefront = url.pathname.split("/").filter(Boolean)[0]?.toLowerCase();
-    const id = url.searchParams.get("i") || url.pathname.match(/\/(?:song|album)\/[^/]+\/(\d+)$/)?.[1];
-    return id && /^\d+$/.test(id) ? { id, storefront } : null;
-  } catch {
-    return null;
-  }
-}
-
-function consumeProviderSearchLimit(request: express.Request) {
-  const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
-  const current = providerSearchLimits.get(rateKey);
-  const limit = !current || current.resetAt <= now
-    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-    : current;
-  if (limit.count >= 40) return false;
-  limit.count += 1;
-  providerSearchLimits.set(rateKey, limit);
-  return true;
-}
-
 function spotifyRedirectUri(request: express.Request) {
   if (process.env.SPOTIFY_REDIRECT_URI) return process.env.SPOTIFY_REDIRECT_URI;
   const host = request.get("host") || "127.0.0.1:5173";
   const spotifySafeHost = host.replace(/^localhost(?=:|$)/i, "127.0.0.1");
   return `${request.protocol}://${spotifySafeHost}/api/spotify/callback`;
-}
-
-async function spotifyForUser<T>(userId: string, operation: (accessToken: string) => Promise<T>) {
-  try {
-    return await operation(await spotifyAccounts.getAccessToken(userId));
-  } catch (error) {
-    if ((error as Error & { status?: number }).status !== 401) throw error;
-    spotifyAccounts.invalidate(userId);
-    return operation(await spotifyAccounts.getAccessToken(userId));
-  }
 }
 
 async function getApiUserId(request: express.Request) {
@@ -433,7 +199,9 @@ async function canWriteRoomChat(userId: string, roomSlug: string) {
   return access.exists && (access.isPublic || Boolean(access.role)) &&
     [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
 }
+const chatWritePolicy = createChatWritePolicy();
 const chatRelay = createChatRelay({
+  writePolicy: chatWritePolicy,
   getMembership,
   canWriteRoom: canWriteRoomChat,
   // The standalone JSON mode has no durable chat table. Configured production
@@ -458,6 +226,7 @@ const chatRelay = createChatRelay({
   }
 });
 mountChatHistoryRoutes(app, {
+  writePolicy: chatWritePolicy,
   client: supabaseAdmin,
   getUserId: getApiUserId,
   canWriteRoom: canWriteRoomChat,
@@ -560,12 +329,6 @@ function broadcast(room: Room) {
   }
 }
 
-function canControlPlayback(room: Room, userId: string) {
-  return room.djUserId === userId ||
-    room.ownerUserId === userId ||
-    room.moderatorUserIds.includes(userId);
-}
-
 function djEvictionKey(roomId: string, userId: string) {
   return `${roomId}:${userId}`;
 }
@@ -573,6 +336,12 @@ function djEvictionKey(roomId: string, userId: string) {
 function rememberDjUser(roomId: string, user: User) {
   if (!roomDjUsers.has(roomId)) roomDjUsers.set(roomId, new Map());
   roomDjUsers.get(roomId)!.set(user.id, user);
+}
+
+function reconcileDjUser(roomId: string, user: User) {
+  const room = store.getRoom(roomId);
+  if (room) reconcileDjPresence(room, user, { onlineUsers: roomUsers.get(roomId)?.values() || [],
+    remember: rememberDjUser, scheduleEviction: scheduleDjEviction, cancelEviction: cancelDjEviction });
 }
 
 function forgetDjUser(roomId: string, userId: string) {
@@ -605,17 +374,23 @@ function scheduleDjEviction(room: Room, user: User) {
         .some((roomUser) => roomUser.id === user.id);
       if (!currentRoom || reconnected) return;
 
-      const wasCurrentDj = currentRoom.djUserId === user.id;
-      removeDj(currentRoom, user.id);
-      forgetDjUser(currentRoom.id, user.id);
-      if (wasCurrentDj) advanceRadio(currentRoom);
-      await store.saveRoom(currentRoom);
-      broadcast(currentRoom);
-    })().catch(console.error);
+      await roomCommands.execute(currentRoom, draft => {
+        if ([...(roomUsers.get(room.id)?.values() || [])].some(roomUser => roomUser.id === user.id)) return { result: undefined };
+        const wasCurrentDj = draft.djUserId === user.id;
+        removeDj(draft, user.id);
+        if (wasCurrentDj) advanceRadio(draft);
+        return { result: undefined, committed: () => forgetDjUser(currentRoom.id, user.id) };
+      });
+    })().catch(error => {
+      console.error("Could not persist offline DJ removal", error);
+      if (!shuttingDown && ![...(roomUsers.get(room.id)?.values() || [])].some(roomUser => roomUser.id === user.id)) scheduleDjEviction(room, user);
+    });
   });
 }
 
 function getMembership(socketId: string) {
+  const lease = io.sockets.sockets.get(socketId)?.data.credentialLease as SocketCredentialLease | undefined;
+  if (lease && Date.now() >= lease.expiresAt) return null;
   const roomId = socketRooms.get(socketId);
   if (!roomId) return null;
   const room = store.getRoom(roomId);
@@ -640,6 +415,7 @@ async function leaveCurrentRoom(socketId: string) {
   }
   if (users?.size === 0) roomUsers.delete(roomId);
   broadcastPresence(room);
+  watchIdleRoom(roomId);
 }
 
 io.use(async (socket, next) => {
@@ -652,13 +428,23 @@ io.use(async (socket, next) => {
     { auth: "user" }
   );
   if (error || !data.userClaims) return next(new Error("Your session has expired."));
+  try {
+    socket.data.credentialLease = createSocketCredentialLease(data.userClaims.id, data.jwtClaims?.exp);
+  } catch { return next(new Error("Your session has expired.")); }
   socket.data.authUserId = data.userClaims.id;
   next();
 });
 
 io.on("connection", (socket) => {
+  const lease = socket.data.credentialLease as SocketCredentialLease | undefined;
+  const assertAuthorized = () => {
+    try { lease?.assertActive(); }
+    catch (error) { throw new RoomCommandError((error as Error).message); }
+  };
+  const cancelCredentialExpiry = lease?.scheduleExpiry(() => socket.disconnect(true));
+  socket.once("disconnect", () => cancelCredentialExpiry?.());
   const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => {
-    const safe = safeSocketHandler(handler);
+    const safe = safeSocketHandler(async (payload, reply) => { assertAuthorized(); await handler(payload, reply); });
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
     socket.on(event, (payload: unknown, reply?: unknown) => {
       if (shuttingDown) return;
@@ -677,6 +463,8 @@ io.on("connection", (socket) => {
       id: authEnabled ? socket.data.authUserId : parsed.data.user.id
     };
     const previousRoomId = socketRooms.get(socket.id);
+    const previousUser = previousRoomId ? roomUsers.get(previousRoomId)?.get(socket.id) : undefined;
+    if (!roomEntryLimiter.join(user.id, socket.handshake.address)) return reply?.({ ok: false, error: "Too many room entries. Wait a minute before trying again." });
 
     // Auth refreshes and profile updates can cause the browser to re-emit join
     // on an already connected socket. Do not turn that harmless refresh into a
@@ -705,7 +493,8 @@ io.on("connection", (socket) => {
       if (authEnabled && !access.isPublic && !access.role) {
         return reply?.({ ok: false, error: "You no longer have access to this private room." });
       }
-      if (access.passwordHash && !passwordMatches(password, access.passwordHash)) {
+      if (access.passwordHash && !roomEntryLimiter.password(user.id, roomId)) return reply?.({ ok: false, error: "Too many room password attempts. Wait five minutes before trying again.", requiresPassword: true });
+      if (access.passwordHash && !await passwordMatches(password, access.passwordHash)) {
         return reply?.({
           ok: false,
           error: password ? "That room password is incorrect." : "This room needs a password.",
@@ -715,17 +504,6 @@ io.on("connection", (socket) => {
 
       const room = await store.loadRoom(roomId) ||
         store.getOrCreateLocalRoom(roomId, () => createRoom(roomId, user.id, roomName));
-      const roomStateBeforeJoin = JSON.stringify(room);
-      if (!room.ownerUserId) room.ownerUserId = user.id;
-      if (!room.moderatorUserIds) room.moderatorUserIds = [];
-      normalizeRadioState(room);
-      if (room.isPublic === undefined) room.isPublic = true;
-      if (room.passwordProtected === undefined) room.passwordProtected = Boolean(access.passwordHash);
-      if (!room.history) room.history = [];
-      if (room.vibe === undefined) room.vibe = null;
-      if (room.vibe && room.playback.track && room.vibe.trackId === room.playback.track.id) {
-        delete room.vibe.votes[room.playback.track.addedBy.id];
-      }
       await store.recordRoomMember(roomId, user.id);
       if (!socket.connected) return;
 
@@ -739,22 +517,28 @@ io.on("connection", (socket) => {
       }
 
       if (!socket.connected) return;
+      idleRooms.cancel(roomId);
       if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
       roomUsers.get(roomId)!.set(socket.id, user);
       cancelDjEviction(roomId, user.id);
-      // Grace timers are intentionally process-local. After a server restart,
-      // persisted lineup entries have no timer, so remove them unless online.
-      const onlineUserIds = new Set([...roomUsers.get(roomId)!.values()].map((roomUser) => roomUser.id));
-      room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) =>
-        onlineUserIds.has(djUserId) || hasPendingDjEviction(roomId, djUserId)
-      );
-      if (room.djQueueUserIds.includes(user.id)) rememberDjUser(roomId, user);
-      if (room.djUserId && !room.djQueueUserIds.includes(room.djUserId)) advanceRadio(room);
       socketRooms.set(socket.id, roomId);
       await socket.join(roomId);
-      await store.saveRoom(room);
+      const changed = await store.changeRoom(room, draft => {
+        assertAuthorized();
+        if (!socket.connected || socketRooms.get(socket.id) !== roomId) throw new RoomCommandError("This room session has ended.");
+        if (!draft.ownerUserId) draft.ownerUserId = user.id;
+        normalizeRadioState(draft);
+        if (draft.vibe && draft.playback.track) delete draft.vibe.votes[draft.playback.track.addedBy.id];
+        // Restarted lineups have no grace timers; only admitted or grace-period DJs remain.
+        const online = new Set([...(roomUsers.get(roomId)?.values() || [])].map(roomUser => roomUser.id));
+        draft.djQueueUserIds = draft.djQueueUserIds.filter(id => online.has(id) || hasPendingDjEviction(roomId, id));
+        if (draft.djUserId && !draft.djQueueUserIds.includes(draft.djUserId)) advanceRadio(draft);
+        return { result: JSON.stringify(draft) !== JSON.stringify(room), committed: () => {
+          if (room.djQueueUserIds.includes(user.id)) reconcileDjUser(roomId, user);
+        } };
+      });
       if (!socket.connected) return;
-      if (JSON.stringify(room) !== roomStateBeforeJoin) {
+      if (changed) {
         // Legacy normalization or stale-lineup cleanup changed shared radio state.
         broadcast(room);
       } else {
@@ -767,9 +551,14 @@ io.on("connection", (socket) => {
     } catch (error) {
       console.error(error);
       if (socketRooms.get(socket.id) === roomId) {
-        await leaveCurrentRoom(socket.id);
-        await socket.leave(roomId);
+        if (previousRoomId === roomId && previousUser && socket.connected) {
+          roomUsers.get(roomId)?.set(socket.id, previousUser);
+        } else {
+          await leaveCurrentRoom(socket.id);
+          await socket.leave(roomId);
+        }
       }
+      watchIdleRoom(roomId);
       const message = error instanceof Error ? error.message : "Could not load this room.";
       reply?.({
         ok: false,
@@ -780,516 +569,38 @@ io.on("connection", (socket) => {
     }
   });
 
-  onAction("room:moderator:set", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = moderatorSchema.safeParse(payload);
-    if (!membership || !parsed.success) {
-      return reply?.({ ok: false, error: "Invalid moderator change." });
-    }
-    try {
-      await store.setModerator(
-        membership.room.id,
-        membership.user.id,
-        parsed.data.userId,
-        parsed.data.moderator
-      );
-      if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
-        const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
-        cancelDjEviction(membership.room.id, parsed.data.userId);
-        removeDj(membership.room, parsed.data.userId);
-        forgetDjUser(membership.room.id, parsed.data.userId);
-        if (wasCurrentDj) advanceRadio(membership.room);
-        await store.saveRoom(membership.room);
-      }
-      broadcast(membership.room);
-      reply?.({ ok: true });
-    } catch (error) {
-      reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not update moderator." });
-    }
+  mountRoomActions({
+    socket, onAction, store, commands: roomCommands, getMembership, assertAuthorized,
+    broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
+    watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
+    resolveTrack: track => resolveTrackMappings(track, spotifyApi, appleMusicApi), resolveSavedRecording
   });
-
-  onAction("room:dj-role:set", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = djRoleSchema.safeParse(payload);
-    if (!membership || !parsed.success) {
-      return reply?.({ ok: false, error: "Invalid DJ role change." });
-    }
-    try {
-      await store.setDjRole(
-        membership.room.id,
-        membership.user.id,
-        parsed.data.userId,
-        parsed.data.dj
-      );
-      if (membership.room.settings.djAccess === "roles" && !canJoinDjQueue(membership.room, parsed.data.userId)) {
-        const wasCurrentDj = membership.room.djUserId === parsed.data.userId;
-        cancelDjEviction(membership.room.id, parsed.data.userId);
-        removeDj(membership.room, parsed.data.userId);
-        forgetDjUser(membership.room.id, parsed.data.userId);
-        if (wasCurrentDj) advanceRadio(membership.room);
-        await store.saveRoom(membership.room);
-      }
-      broadcast(membership.room);
-      reply?.({ ok: true });
-    } catch (error) {
-      reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not update DJ role." });
-    }
-  });
-
-  onAction("dj:join", async (_payload, reply) => {
-    const membership = getMembership(socket.id);
-    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
-    if (!canJoinDjQueue(membership.room, membership.user.id)) {
-      return reply?.({ ok: false, error: "This room requires a DJ role or moderator access." });
-    }
-    if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
-      // advanceRadio leaves the current DJ at the back of the ring. Inserting
-      // before them gives a newcomer a turn after the already-waiting DJs,
-      // rather than making the current DJ play again first.
-      const currentDjIndex = membership.room.djUserId
-        ? membership.room.djQueueUserIds.indexOf(membership.room.djUserId)
-        : -1;
-      if (currentDjIndex >= 0) membership.room.djQueueUserIds.splice(currentDjIndex, 0, membership.user.id);
-      else membership.room.djQueueUserIds.push(membership.user.id);
-    }
-    rememberDjUser(membership.room.id, membership.user);
-    privateQueue(membership.room, membership.user.id);
-    if (!membership.room.playback.track) advanceRadio(membership.room);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("dj:leave", async (_payload, reply) => {
-    const membership = getMembership(socket.id);
-    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
-    const wasCurrentDj = membership.room.djUserId === membership.user.id;
-    cancelDjEviction(membership.room.id, membership.user.id);
-    removeDj(membership.room, membership.user.id);
-    forgetDjUser(membership.room.id, membership.user.id);
-    if (wasCurrentDj) advanceRadio(membership.room);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("queue:add", async (payload, reply) => {
-    let membership = getMembership(socket.id);
-    const parsed = trackSchema.safeParse(payload);
-    if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid track." });
-    if (!membership.room.djQueueUserIds.includes(membership.user.id)) {
-      return reply?.({ ok: false, error: "Join the DJ queue before adding tracks." });
-    }
-    const originalMembership = membership;
-    const resolved = await resolveTrackMappings(parsed.data, spotifyApi, appleMusicApi);
-    membership = getMembership(socket.id);
-    if (!socket.connected || !membership || membership.room !== originalMembership.room ||
-        membership.user.id !== originalMembership.user.id ||
-        !membership.room.djQueueUserIds.includes(membership.user.id)) {
-      return reply?.({ ok: false, error: "Your room or DJ membership changed. Try again from your current room." });
-    }
-    if (
-      (membership.room.playback.track?.provider === parsed.data.provider &&
-      membership.room.playback.track.providerId === parsed.data.providerId) ||
-      (resolved.canonicalId && membership.room.playback.track?.canonicalId === resolved.canonicalId)
-    ) {
-      return reply?.({ ok: false, error: "That track is already playing." });
-    }
-    const queue = privateQueue(membership.room, membership.user.id);
-    const duplicateIndex = queue.findIndex(
-      (track) =>
-        (track.provider === parsed.data.provider && track.providerId === parsed.data.providerId) ||
-        Boolean(resolved.canonicalId && track.canonicalId === resolved.canonicalId)
-    );
-    if (duplicateIndex >= 0) {
-      return reply?.({
-        ok: false,
-        error: `That track is already #${duplicateIndex + 1} in the queue.`
-      });
-    }
-    const track: Track = {
-      id: crypto.randomUUID(),
-      ...parsed.data,
-      ...resolved,
-      addedBy: membership.user,
-      addedAt: Date.now()
-    };
-    queue.push(track);
-    const startedPlaying = !membership.room.playback.track;
-    if (startedPlaying) advanceRadio(membership.room);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({
-      ok: true,
-      started: startedPlaying,
-      position: startedPlaying ? 0 : queue.length
-    });
-  });
-
   for (const kind of ["message", "reaction", "typing"] as const) {
     onAction(`chat:${kind}`, async (payload, reply) => { reply?.(await chatRelay.handle(socket.id, kind, payload)); });
   }
-
-  onAction("queue:set-add", async (payload, reply) => {
-    const original = getMembership(socket.id);
-    const parsed = z.object({ setId: z.string().uuid(), requestId: z.string().uuid() }).safeParse(payload);
-    if (!original || !parsed.success) return reply?.({ ok: false, error: "Invalid saved set." });
-    if (!canJoinDjQueue(original.room, original.user.id) || !original.room.djQueueUserIds.includes(original.user.id)) {
-      return reply?.({ ok: false, error: "Join the DJ lineup with permission before adding a set." });
-    }
-    const result = await setImports.run(original.room, original.user.id, parsed.data.requestId, parsed.data.setId, async markCommitted => {
-      const library = await store.getPrivateLibrary(original.user.id);
-      const set = library.sets.find(value => value.id === parsed.data.setId);
-      if (!set) throw new Error("This saved set is no longer in your private library.");
-      const resolved = await resolveSavedSet(set.tracks, resolveSavedRecording);
-      const current = getMembership(socket.id);
-      if (!socket.connected || !current || current.room !== original.room || current.user.id !== original.user.id ||
-          !canJoinDjQueue(current.room, current.user.id) || !current.room.djQueueUserIds.includes(current.user.id)) {
-        throw new Error("Your room or DJ permission changed. Try again from your current room.");
-      }
-      const appended = resolved.tracks.length ? appendQueueSet(current.room, current.user, resolved.tracks) : { added: 0, skipped: [], started: false };
-      const outcome = { ...appended, skipped: [...resolved.skipped, ...appended.skipped] };
-      markCommitted(outcome);
-      return outcome;
-    });
-    // Retried ACKs save the committed result again without importing it twice.
-    await store.saveRoom(original.room);
-    broadcast(original.room);
-    reply?.({ ok: true, ...result });
-  });
-
-  onAction("queue:remove", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = queueTrackSchema.safeParse(payload);
-    if (!membership || !parsed.success) {
-      return reply?.({ ok: false, error: "Invalid queue item." });
-    }
-    const transaction = queueUndo.beginRemove(membership.room, membership.user.id, parsed.data.trackId);
-    try { await store.saveRoom(membership.room); }
-    catch {
-      const rollback = transaction.rollback();
-      broadcast(membership.room);
-      void store.saveRoom(membership.room).catch(error => console.error("Queue removal reconciliation failed", error));
-      return reply?.({ ok: false, error: rollback.status === "rolled-back"
-        ? "Removal could not be saved. Your waiting track was restored; try again."
-        : "Removal could not be saved and the queue changed meanwhile. The current room state is shown; check it before trying again." });
-    }
-    transaction.commit();
-    broadcast(membership.room);
-    reply?.({ ok: true, undo: transaction.receipt });
-  });
-
-  onAction("queue:undo", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = z.object({ token: z.string().uuid() }).safeParse(payload);
-    if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid Undo request." });
-    const transaction = queueUndo.beginRestore(membership.room, membership.user.id, parsed.data.token);
-    try { await store.saveRoom(membership.room); }
-    catch {
-      const rollback = transaction.rollback();
-      broadcast(membership.room);
-      void store.saveRoom(membership.room).catch(error => console.error("Queue Undo reconciliation failed", error));
-      return reply?.({ ok: false, error: rollback.status === "rolled-back"
-        ? rollback.undoAvailable ? "Undo could not be saved. Your queue is unchanged; try Undo again before it expires."
-          : "Undo could not be saved and its receipt expired. Your current queue is shown."
-        : "Undo could not be saved and that item changed or played meanwhile. The current room state is shown; check it before adding again." });
-    }
-    transaction.commit();
-    broadcast(membership.room);
-    const currentIndex = privateQueue(membership.room, membership.user.id).findIndex(track => track.id === transaction.result.track.id);
-    reply?.({ ok: true, ...(currentIndex >= 0 ? { position: currentIndex + 1 } : {}) });
-  });
-
-  onAction("queue:play-next", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = queueTrackSchema.safeParse(payload);
-    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
-    if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue item." });
-    const queue = privateQueue(membership.room, membership.user.id);
-    const index = queue.findIndex((track) => track.id === parsed.data.trackId);
-    if (index < 0) return reply?.({ ok: false, error: "Track not found." });
-    const [track] = queue.splice(index, 1);
-    queue.unshift(track);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("queue:move", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = queueMoveSchema.safeParse(payload);
-    if (!membership) return reply?.({ ok: false, error: "Join a room first." });
-    if (!parsed.success) return reply?.({ ok: false, error: "Invalid queue move." });
-    const queue = privateQueue(membership.room, membership.user.id);
-    const fromIndex = queue.findIndex((track) => track.id === parsed.data.trackId);
-    if (fromIndex < 0) return reply?.({ ok: false, error: "Track not found." });
-    const [track] = queue.splice(fromIndex, 1);
-    const toIndex = Math.min(parsed.data.toIndex, queue.length);
-    queue.splice(toIndex, 0, track);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("queue:next", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = queueNextSchema.safeParse(payload);
-    if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
-      return reply?.({ ok: false, error: "Only the current DJ or a room moderator can skip tracks." });
-    }
-    // Track IDs make "ended" idempotent across retries and multiple tabs. A
-    // stale event must not advance the newly started song as well.
-    if (!parsed.success || membership.room.playback.track?.id !== parsed.data.trackId) {
-      return reply?.({ ok: false, error: "That track has already ended." });
-    }
-    advanceRadio(membership.room);
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("playback:update", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = playbackSchema.safeParse(payload);
-    if (!membership || !canControlPlayback(membership.room, membership.user.id)) {
-      return reply?.({ ok: false, error: "Only the current DJ or a room moderator controls playback." });
-    }
-    if (!parsed.success || !membership.room.playback.track || membership.room.playback.track.id !== parsed.data.trackId) {
-      return reply?.({ ok: false, error: "Invalid playback update." });
-    }
-    membership.room.playback = {
-      ...membership.room.playback,
-      playing: parsed.data.playing,
-      position: parsed.data.position,
-      updatedAt: Date.now()
-    };
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("room:announcement", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = announcementSchema.safeParse(payload);
-    if (!membership || !parsed.success) return reply?.({ ok: false, error: "Invalid room note." });
-    const previous = membership.room.announcement;
-    let next;
-    try {
-      next = changeAnnouncement(membership.room, membership.user.id, parsed.data);
-      await store.saveRoom(membership.room);
-    } catch (error) {
-      if (next !== undefined && membership.room.announcement === next) membership.room.announcement = previous;
-      return reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not save the room note." });
-    }
-    announcementExpiries.watch(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
-  onAction("vibe:vote", async (payload, reply) => {
-    const membership = getMembership(socket.id);
-    const parsed = vibeVoteSchema.safeParse(payload);
-    const track = membership?.room.playback.track;
-    if (!membership || !track || !parsed.success) {
-      return reply?.({ ok: false, error: "There is no track to vote on." });
-    }
-    if (parsed.data.trackId && parsed.data.trackId !== track.id) {
-      return reply?.({ ok: false, error: "The track changed. React to the current track instead." });
-    }
-    if (track.addedBy.id === membership.user.id) {
-      return reply?.({ ok: false, error: "You cannot vote on a track you added." });
-    }
-    if (!membership.room.vibe || membership.room.vibe.trackId !== track.id) {
-      membership.room.vibe = { trackId: track.id, votes: {} };
-    }
-    if (parsed.data.value === 0) {
-      delete membership.room.vibe.votes[membership.user.id];
-    } else {
-      membership.room.vibe.votes[membership.user.id] = parsed.data.value;
-    }
-    await store.saveRoom(membership.room);
-    broadcast(membership.room);
-    reply?.({ ok: true });
-  });
-
   socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(console.error); });
 });
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
-
-app.get("/api/admin/dashboard", async (request, response) => {
+app.get("/api/ready", async (_request, response) => {
   response.set("Cache-Control", "no-store");
   try {
-    const admin = await getApiAdminUserId(request);
-    if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
-    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
-
-    const activityStart = new Date();
-    activityStart.setUTCHours(0, 0, 0, 0);
-    activityStart.setUTCDate(activityStart.getUTCDate() - 13);
-    const activityStartIso = activityStart.toISOString();
-
-    const [
-      userCount,
-      roomCount,
-      feedbackCount,
-      openFeedbackCount,
-      messageCount,
-      feedbackResult,
-      roomResult,
-      recentUsers,
-      recentFeedback,
-      recentMessages
-    ] = await Promise.all([
-      supabaseAdmin.from("soundspin_profiles").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_rooms").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }).in("status", ["new", "reviewing", "planned"]),
-      supabaseAdmin.from("soundspin_messages").select("*", { count: "exact", head: true }),
-      supabaseAdmin
-        .from("soundspin_feedback")
-        .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, category, impact, diagnostics, status, admin_note, created_at, updated_at")
-        .order("created_at", { ascending: false })
-        .limit(100),
-      supabaseAdmin
-        .from("soundspin_rooms")
-        .select("slug, name, owner_id, is_public, created_at, updated_at")
-        .order("updated_at", { ascending: false })
-        .limit(50),
-      supabaseAdmin.from("soundspin_profiles").select("created_at").gte("created_at", activityStartIso),
-      supabaseAdmin.from("soundspin_feedback").select("created_at").gte("created_at", activityStartIso),
-      supabaseAdmin.from("soundspin_messages").select("created_at").gte("created_at", activityStartIso)
-    ]);
-
-    const queryError = [
-      userCount.error,
-      roomCount.error,
-      feedbackCount.error,
-      openFeedbackCount.error,
-      messageCount.error,
-      feedbackResult.error,
-      roomResult.error,
-      recentUsers.error,
-      recentFeedback.error,
-      recentMessages.error
-    ].find(Boolean);
-    if (queryError) throw queryError;
-
-    const feedback = feedbackResult.data || [];
-    const userIds = [...new Set(feedback.map((item) => item.user_id))];
-    const profileResult = userIds.length
-      ? await supabaseAdmin.from("soundspin_profiles").select("user_id, display_name, avatar_key, avatar_url").in("user_id", userIds)
-      : { data: [], error: null };
-    if (profileResult.error) throw profileResult.error;
-    const profiles = new Map((profileResult.data || []).map((item) => [item.user_id, item]));
-
-    const screenshotPaths = feedback.flatMap((item) => item.screenshot_paths || []);
-    const signedResult = screenshotPaths.length
-      ? await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrls(screenshotPaths, 15 * 60)
-      : { data: [], error: null };
-    if (signedResult.error) throw signedResult.error;
-    const signedUrls = new Map((signedResult.data || []).map((item) => [item.path, item.signedUrl]));
-
-    const activity = Array.from({ length: 14 }, (_, index) => {
-      const date = new Date(activityStart);
-      date.setUTCDate(activityStart.getUTCDate() + index);
-      return { date: date.toISOString().slice(0, 10), users: 0, feedback: 0, messages: 0 };
-    });
-    const activityByDate = new Map(activity.map((item) => [item.date, item]));
-    for (const item of recentUsers.data || []) {
-      const bucket = activityByDate.get(item.created_at.slice(0, 10));
-      if (bucket) bucket.users += 1;
-    }
-    for (const item of recentFeedback.data || []) {
-      const bucket = activityByDate.get(item.created_at.slice(0, 10));
-      if (bucket) bucket.feedback += 1;
-    }
-    for (const item of recentMessages.data || []) {
-      const bucket = activityByDate.get(item.created_at.slice(0, 10));
-      if (bucket) bucket.messages += 1;
-    }
-
-    response.json({
-      metrics: {
-        users: userCount.count || 0,
-        rooms: roomCount.count || 0,
-        feedback: feedbackCount.count || 0,
-        openFeedback: openFeedbackCount.count || 0,
-        messages: messageCount.count || 0
-      },
-      activity,
-      feedback: feedback.map((item) => ({
-        id: item.id,
-        userId: item.user_id,
-        userName: profiles.get(item.user_id)?.display_name || "Unknown listener",
-        userAvatarUrl: profiles.get(item.user_id)?.avatar_url || null,
-        message: item.message,
-        roomSlug: item.room_slug,
-        pagePath: item.page_path,
-        viewport: item.viewport,
-        category: item.category,
-        impact: item.impact,
-        diagnostics: item.diagnostics,
-        status: item.status,
-        adminNote: item.admin_note,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-        screenshots: (item.screenshot_paths || []).map((path: string) => ({ path, url: signedUrls.get(path) || null }))
-      })),
-      rooms: (roomResult.data || []).map((room) => ({
-        slug: room.slug,
-        name: room.name,
-        isPublic: room.is_public,
-        listenerCount: uniqueUsers(roomUsers.get(room.slug)?.values() || []).length,
-        createdAt: room.created_at,
-        updatedAt: room.updated_at
-      }))
-    });
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load admin data." });
-  }
+    const ready = !shuttingDown && await store.isReady();
+    response.status(ready ? 200 : 503).json({ ok: ready });
+  } catch { response.status(503).json({ ok: false }); }
 });
-
-app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), async (request, response) => {
+app.get("/api/admin/runtime", async (request, response) => {
   response.set("Cache-Control", "no-store");
-  try {
-    const admin = await getApiAdminUserId(request);
-    if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
-    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
-
-    const feedbackId = z.string().uuid().safeParse(request.params.feedbackId);
-    const update = feedbackStatusSchema.safeParse(request.body);
-    if (!feedbackId.success || !update.success) {
-      return response.status(400).json({ error: update.success ? "Invalid feedback item." : update.error.issues[0]?.message });
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from("soundspin_feedback")
-      .update({
-        status: update.data.status,
-        admin_note: update.data.adminNote,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", feedbackId.data)
-      .select("id, status, admin_note, updated_at")
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return response.status(404).json({ error: "Feedback item not found." });
-    response.json({
-      feedback: {
-        id: data.id,
-        status: data.status,
-        adminNote: data.admin_note,
-        updatedAt: data.updated_at
-      }
-    });
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not update feedback." });
-  }
+  const access = await getApiAdminUserId(request);
+  if (!access.ok) return response.status(access.status).json({ error: access.error });
+  response.json({ coordination: "single-instance", cachedRooms: store.cachedRoomCount, activeRooms: roomUsers.size,
+    connectedSockets: io.engine.clientsCount, ...runtimeMetrics.snapshot() });
 });
 
+mountAdminRoutes(app, { client: supabaseAdmin, getAdminUserId: getApiAdminUserId,
+  listenerCount: slug => uniqueUsers(roomUsers.get(slug)?.values() || []).length });
 app.get("/api/profiles/:userId", async (request, response) => {
   if (!(await getApiUserId(request))) {
     return response.status(401).json({ error: "Authentication required." });
@@ -1335,7 +646,8 @@ app.post("/api/rooms", express.json(), async (request, response) => {
     const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
     room.isPublic = parsed.data.isPublic;
     room.passwordProtected = Boolean(parsed.data.password?.trim());
-    await store.createRoom(room, hashRoomPassword(parsed.data.password));
+    await store.createRoom(room, await hashRoomPassword(parsed.data.password));
+    watchIdleRoom(room.id);
     await store.setFavorite(room.id, userId, true);
     response.status(201).json({ room: { slug: room.id, name: room.name } });
   } catch (error) {
@@ -1370,30 +682,25 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
     return response.status(400).json({ error: parsed.success ? "Invalid room." : parsed.error.issues[0]?.message });
   }
   try {
+    const previousDjs = [...(store.getRoom(slug.data)?.djQueueUserIds || [])];
     const room = await store.updateRoomSettings(slug.data, userId, {
       name: parsed.data.name,
       isPublic: parsed.data.isPublic,
-      passwordHash: parsed.data.password === undefined ? undefined : hashRoomPassword(parsed.data.password),
+      passwordHash: parsed.data.password === undefined ? undefined : await hashRoomPassword(parsed.data.password),
       djAccess: parsed.data.djAccess,
       description: parsed.data.description
     });
     if (room) {
-      if (room.settings.djAccess === "roles") {
-        const previousDj = room.djUserId;
-        const previousDjQueue = [...room.djQueueUserIds];
-        room.djQueueUserIds = room.djQueueUserIds.filter((djUserId) => canJoinDjQueue(room, djUserId));
-        for (const removedUserId of previousDjQueue.filter((djUserId) => !room.djQueueUserIds.includes(djUserId))) {
-          cancelDjEviction(room.id, removedUserId);
-          forgetDjUser(room.id, removedUserId);
-        }
-        if (previousDj && !room.djQueueUserIds.includes(previousDj)) advanceRadio(room);
-        await store.saveRoom(room);
+      for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {
+        cancelDjEviction(room.id, id); forgetDjUser(room.id, id);
       }
       broadcast(room);
     }
     response.json({ room: room ? { id: room.id, name: room.name } : null });
   } catch (error) {
     response.status(403).json({ error: error instanceof Error ? error.message : "Could not update room." });
+  } finally {
+    watchIdleRoom(slug.data);
   }
 });
 
@@ -1414,437 +721,10 @@ app.patch("/api/profile", express.json(), async (request, response) => {
   }
 });
 
-app.get("/api/youtube/search", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!youtubeApiKey) {
-    return response.status(503).json({ error: "YouTube search is not configured yet." });
-  }
-
-  const parsed = youtubeSearchSchema.safeParse(request.query);
-  if (!parsed.success) {
-    return response.status(400).json({ error: "Enter at least 2 characters to search." });
-  }
-
-  const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
-  const currentLimit = youtubeSearchLimits.get(rateKey);
-  const limit = !currentLimit || currentLimit.resetAt <= now
-    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-    : currentLimit;
-  if (limit.count >= 30) {
-    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
-  }
-  limit.count += 1;
-  youtubeSearchLimits.set(rateKey, limit);
-
-  const cacheKey = parsed.data.q.toLocaleLowerCase();
-  const cached = youtubeSearchCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return response.json({ results: cached.results });
-  }
-
-  try {
-    const searchParams = new URLSearchParams({
-      key: youtubeApiKey,
-      part: "snippet",
-      type: "video",
-      videoEmbeddable: "true",
-      safeSearch: "moderate",
-      maxResults: "12",
-      q: parsed.data.q
-    });
-    const searchResponse = await fetch(`https://www.googleapis.com/youtube/v3/search?${searchParams}`);
-    const searchPayload = await searchResponse.json() as {
-      error?: { message?: string };
-      items?: Array<{
-        id: { videoId?: string };
-        snippet: {
-          title: string;
-          channelTitle: string;
-          thumbnails: {
-            medium?: { url: string };
-            default?: { url: string };
-          };
-        };
-      }>;
-    };
-    if (!searchResponse.ok) {
-      throw new Error(searchPayload.error?.message || "YouTube search failed.");
-    }
-
-    const items = (searchPayload.items || []).filter((item) => item.id.videoId);
-    const ids = items.map((item) => item.id.videoId!).join(",");
-    const durations = new Map<string, { label: string; milliseconds?: number }>();
-    if (ids) {
-      const videoParams = new URLSearchParams({
-        key: youtubeApiKey,
-        part: "contentDetails",
-        id: ids
-      });
-      const videoResponse = await fetch(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`);
-      if (videoResponse.ok) {
-        const videoPayload = await videoResponse.json() as {
-          items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
-        };
-        for (const video of videoPayload.items || []) {
-          const duration = formatYouTubeDuration(video.contentDetails?.duration);
-          if (duration) durations.set(video.id, { label: duration, milliseconds: youtubeDurationMs(video.contentDetails?.duration) });
-        }
-      }
-    }
-
-    const results: YouTubeSearchResult[] = items.map((item) => ({
-      id: item.id.videoId!,
-      title: decodeYouTubeText(item.snippet.title),
-      channel: decodeYouTubeText(item.snippet.channelTitle),
-      thumbnail:
-        item.snippet.thumbnails.medium?.url ||
-        item.snippet.thumbnails.default?.url ||
-        `https://i.ytimg.com/vi/${item.id.videoId}/mqdefault.jpg`,
-      duration: durations.get(item.id.videoId!)?.label,
-      durationMs: durations.get(item.id.videoId!)?.milliseconds
-    }));
-    youtubeSearchCache.set(cacheKey, {
-      expiresAt: now + 5 * 60 * 1000,
-      results
-    });
-    response.json({ results });
-  } catch (error) {
-    console.error("YouTube search failed", error);
-    response.status(502).json({
-      error: error instanceof Error ? error.message : "YouTube search failed."
-    });
-  }
-});
-
-app.get("/api/soundcloud/search", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!soundCloudApi.configured) {
-    return response.status(503).json({ error: "SoundCloud search is not configured yet." });
-  }
-
-  const parsed = soundCloudSearchSchema.safeParse(request.query);
-  if (!parsed.success) {
-    return response.status(400).json({ error: "Enter at least 2 characters to search." });
-  }
-
-  const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
-  const currentLimit = soundCloudSearchLimits.get(rateKey);
-  const limit = !currentLimit || currentLimit.resetAt <= now
-    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-    : currentLimit;
-  if (limit.count >= 30) {
-    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
-  }
-  limit.count += 1;
-  soundCloudSearchLimits.set(rateKey, limit);
-
-  const cacheKey = parsed.data.q.toLocaleLowerCase();
-  const cached = soundCloudSearchCache.get(cacheKey);
-  if (cached && cached.expiresAt > now) {
-    return response.json({ results: cached.results });
-  }
-
-  try {
-    const results = await soundCloudApi.searchTracks(parsed.data.q);
-    soundCloudSearchCache.set(cacheKey, {
-      expiresAt: now + 5 * 60 * 1000,
-      results
-    });
-    response.json({ results });
-  } catch (error) {
-    console.error("SoundCloud search failed", error);
-    response.status(502).json({
-      error: error instanceof Error ? error.message : "SoundCloud search failed."
-    });
-  }
-});
-
-app.get("/api/soundcloud/resolve", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!soundCloudApi.configured) {
-    return response.status(503).json({ error: "SoundCloud is not configured yet." });
-  }
-
-  const parsed = soundCloudResolveSchema.safeParse(request.query);
-  if (!parsed.success) {
-    return response.status(400).json({ error: "Enter a valid SoundCloud track URL." });
-  }
-
-  try {
-    response.json({ result: await soundCloudApi.resolveTrack(parsed.data.url) });
-  } catch (error) {
-    console.error("SoundCloud URL resolution failed", error);
-    response.status(400).json({
-      error: error instanceof Error ? error.message : "Could not resolve that SoundCloud URL."
-    });
-  }
-});
-
-app.get("/api/spotify/search", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!spotifyApi.configured) return response.status(503).json({ error: "Spotify is not configured yet." });
-  const parsed = spotifySearchSchema.safeParse(request.query);
-  if (!parsed.success) return response.status(400).json({ error: "Enter at least 2 characters to search." });
-  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many searches. Please try again shortly." });
-  const key = parsed.data.q.toLocaleLowerCase();
-  const cached = spotifySearchCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
-  try {
-    const results = await spotifyApi.searchTracks(parsed.data.q);
-    spotifySearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
-    response.json({ results });
-  } catch (error) {
-    console.error("Spotify search failed", error);
-    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify search failed." });
-  }
-});
-
-app.get("/api/spotify/resolve", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!spotifyApi.configured) return response.status(503).json({ error: "Spotify is not configured yet." });
-  const parsed = spotifyResolveSchema.safeParse(request.query);
-  const id = parsed.success ? spotifyTrackId(parsed.data.url) : null;
-  if (!id) return response.status(400).json({ error: "Enter a valid Spotify track URL or URI." });
-  try {
-    response.json({ result: await spotifyApi.getTrack(id) });
-  } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Spotify URL." });
-  }
-});
-
-app.get("/api/apple/search", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
-  const parsed = appleMusicSearchSchema.safeParse(request.query);
-  if (!parsed.success) return response.status(400).json({ error: "Enter at least 2 characters to search." });
-  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many searches. Please try again shortly." });
-  const storefront = parsed.data.storefront?.toLowerCase() || appleMusicApi.storefront;
-  const key = `${storefront}:${parsed.data.q.toLocaleLowerCase()}`;
-  const cached = appleMusicSearchCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
-  try {
-    const results = await appleMusicApi.searchTracks(parsed.data.q, 12, storefront);
-    appleMusicSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
-    response.json({ results });
-  } catch (error) {
-    console.error("Apple Music search failed", error);
-    response.status(502).json({ error: error instanceof Error ? error.message : "Apple Music search failed." });
-  }
-});
-
-app.get("/api/apple/resolve", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
-  const parsed = appleMusicResolveSchema.safeParse(request.query);
-  const resolved = parsed.success ? appleMusicTrack(parsed.data.url) : null;
-  if (!resolved) return response.status(400).json({ error: "Enter a valid Apple Music song URL." });
-  try {
-    response.json({
-      result: await appleMusicApi.getTrack(
-        resolved.id,
-        parsed.success ? parsed.data.storefront?.toLowerCase() || resolved.storefront || appleMusicApi.storefront : appleMusicApi.storefront
-      )
-    });
-  } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Apple Music URL." });
-  }
-});
-
-app.get("/api/giphy", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!giphyApi.configured) {
-    return response.status(503).json({ error: "GIPHY is not configured yet." });
-  }
-  const parsed = giphySearchSchema.safeParse(request.query);
-  if (!parsed.success) {
-    return response.status(400).json({ error: "GIF searches must be 100 characters or fewer." });
-  }
-  if (!consumeProviderSearchLimit(request)) {
-    return response.status(429).json({ error: "Too many searches. Please try again shortly." });
-  }
-
-  try {
-    response.json({ results: await giphyApi.gifs(parsed.data.q) });
-  } catch (error) {
-    console.error("GIPHY request failed", error);
-    response.status(502).json({
-      error: error instanceof Error ? error.message : "Could not load GIFs."
-    });
-  }
-});
-
-app.get("/api/music/connections", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  try {
-    const spotifyConnected = spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false;
-    let spotifyProfile: { displayName: string; product?: string } | null = null;
-    if (spotifyConnected) {
-      try {
-        const profile = await spotifyForUser(userId, (token) => spotifyApi.request<{
-          display_name?: string;
-          product?: string;
-        }>(token, "/me"));
-        spotifyProfile = { displayName: profile.display_name || "Spotify account", product: profile.product };
-      } catch {
-        // The saved connection remains useful even when profile metadata is temporarily unavailable.
-      }
-    }
-    response.json({
-      spotify: {
-        configured: spotifyAccounts.configured,
-        connected: spotifyConnected,
-        profile: spotifyProfile
-      },
-      apple: { configured: appleMusicApi.configured }
-    });
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load music connections." });
-  }
-});
-
-app.get("/api/spotify/connect", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  if (!spotifyAccounts.configured) {
-    return response.status(503).json({ error: "Spotify OAuth or provider-token encryption is not configured yet." });
-  }
-  const returnToValue = z.string().max(2048).safeParse(request.query.returnTo);
-  const returnTo = returnToValue.success && returnToValue.data.startsWith("/") && !returnToValue.data.startsWith("//")
-    ? returnToValue.data
-    : "/";
-  const state = crypto.randomBytes(24).toString("base64url");
-  const redirectUri = spotifyRedirectUri(request);
-  spotifyOauthStates.set(state, { userId, returnTo, redirectUri, expiresAt: Date.now() + 10 * 60 * 1000 });
-  response.json({ url: spotifyApi.authorizationUrl(redirectUri, state) });
-});
-
-app.get("/api/spotify/callback", async (request, response) => {
-  const stateValue = z.string().min(1).safeParse(request.query.state);
-  const codeValue = z.string().min(1).safeParse(request.query.code);
-  const oauth = stateValue.success ? spotifyOauthStates.get(stateValue.data) : undefined;
-  if (stateValue.success) spotifyOauthStates.delete(stateValue.data);
-  if (!oauth || oauth.expiresAt < Date.now()) return response.status(400).send("Spotify authorization expired. Return to Lydman and try again.");
-  if (!codeValue.success) return response.redirect(`${oauth.returnTo}${oauth.returnTo.includes("?") ? "&" : "?"}spotify=denied`);
-  try {
-    await spotifyAccounts.connect(oauth.userId, codeValue.data, oauth.redirectUri);
-    response.redirect(`${oauth.returnTo}${oauth.returnTo.includes("?") ? "&" : "?"}spotify=connected`);
-  } catch (error) {
-    console.error("Spotify callback failed", error);
-    response.redirect(`${oauth.returnTo}${oauth.returnTo.includes("?") ? "&" : "?"}spotify=error`);
-  }
-});
-
-app.delete("/api/spotify/connection", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  try {
-    await spotifyAccounts.disconnect(userId);
-    response.status(204).end();
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not disconnect Spotify." });
-  }
-});
-
-app.get("/api/spotify/token", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  try {
-    response.json({ accessToken: await spotifyAccounts.getAccessToken(userId) });
-  } catch (error) {
-    response.status(401).json({ error: error instanceof Error ? error.message : "Connect Spotify first." });
-  }
-});
-
-app.get("/api/spotify/devices", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  try {
-    response.json(await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player/devices")));
-  } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Could not load Spotify devices." });
-  }
-});
-
-app.get("/api/spotify/playback", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  try {
-    const state = await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player"));
-    response.json({ state });
-  } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Could not read Spotify playback." });
-  }
-});
-
-app.post("/api/spotify/playback", express.json(), async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: "Authentication required." });
-  const parsed = spotifyPlaybackSchema.safeParse(request.body);
-  if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid playback command." });
-  const { action, deviceId, spotifyUri, positionMs, volumePercent } = parsed.data;
-  const device = deviceId ? `?${new URLSearchParams({ device_id: deviceId })}` : "";
-  try {
-    await spotifyForUser(userId, async (token) => {
-      if (action === "transfer") {
-        return spotifyApi.request(token, "/me/player", {
-          method: "PUT",
-          body: JSON.stringify({ device_ids: [deviceId], play: false })
-        });
-      }
-      if (action === "play") {
-        return spotifyApi.request(token, `/me/player/play${device}`, {
-          method: "PUT",
-          body: JSON.stringify({ uris: [spotifyUri], position_ms: positionMs || 0 })
-        });
-      }
-      if (action === "pause") return spotifyApi.request(token, `/me/player/pause${device}`, { method: "PUT" });
-      if (action === "resume") return spotifyApi.request(token, `/me/player/play${device}`, { method: "PUT" });
-      if (action === "volume") {
-        const params = new URLSearchParams({ volume_percent: String(volumePercent) });
-        if (deviceId) params.set("device_id", deviceId);
-        return spotifyApi.request(token, `/me/player/volume?${params}`, { method: "PUT" });
-      }
-      const params = new URLSearchParams({ position_ms: String(positionMs || 0) });
-      if (deviceId) params.set("device_id", deviceId);
-      return spotifyApi.request(token, `/me/player/seek?${params}`, { method: "PUT" });
-    });
-    response.status(204).end();
-  } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify playback failed." });
-  }
-});
-
-app.get("/api/apple/token", async (request, response) => {
-  if (authEnabled && !(await getApiUserId(request))) {
-    return response.status(401).json({ error: "Authentication required." });
-  }
-  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
-  try {
-    response.json({ developerToken: appleMusicApi.getDeveloperToken(), storefront: appleMusicApi.storefront });
-  } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not create an Apple Music token." });
-  }
-});
-
+mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,
+  soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
+mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,
+  authorizationUrl: (redirectUri, state) => spotifyApi.authorizationUrl(redirectUri, state), redirectUri: spotifyRedirectUri });
 app.get("/api/config", (_request, response) => {
   response.json({
     giphyConfigured: giphyApi.configured,
@@ -1874,7 +754,7 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
 
 if (process.env.NODE_ENV === "production") {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
-  const publicDir = path.resolve(dirname, "../dist");
+  const publicDir = path.resolve(dirname, "../../dist");
   app.use(express.static(publicDir));
   app.get("/{*splat}", (_request, response) => response.sendFile(path.join(publicDir, "index.html")));
 }
@@ -1890,6 +770,7 @@ async function shutdown() {
   shuttingDown = true;
   djEvictions.clear();
   announcementExpiries.clear();
+  idleRooms.clear();
   const deadline = setTimeout(() => process.exit(1), 10_000);
   deadline.unref();
   try {

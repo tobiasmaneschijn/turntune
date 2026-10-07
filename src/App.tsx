@@ -35,14 +35,15 @@ import { createChatHistorySource } from "./chat/history-reader";
 import { createSocketChatSessionFactory } from "./chat/socket-transport";
 import { clearUserChatDrafts } from "./chat/drafts";
 import { useRoomLayoutPresets } from "./hooks/use-room-layout-presets";
-import { rememberNavigationFocus, useRouteFocus } from "./hooks/use-route-focus";
+import { useRouteFocus } from "./hooks/use-route-focus";
 import { useRoomNotificationMuted } from "./hooks/use-room-notifications";
 import { notifyWithAttention } from "./notifications";
 import { socket } from "./socket";
 import { useAppAuth } from "./hooks/use-app-auth";
-import { useRoomConnection } from "./hooks/use-room-connection";
+import { useRoomSession } from "./hooks/use-room-session";
+import { useAppProfile } from "./hooks/use-app-profile";
 import { useMediaQuery } from "./hooks/use-media-query";
-import { readStoredValue, storeValue } from "./lib/browser-storage";
+import { storeValue } from "./lib/browser-storage";
 import { recordRoomVisit } from "./lib/room-visits";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
 import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
@@ -51,10 +52,6 @@ const AdminDashboard = lazy(() => import("./components/AdminDashboard").then((mo
 const FeedbackButton = lazy(() => import("./components/FeedbackDialog").then((module) => ({ default: module.FeedbackButton })));
 const ProfilePage = lazy(() => import("./components/ProfilePage").then((module) => ({ default: module.ProfilePage })));
 const loadRoomSettings = () => import("./components/RoomSettingsDialog").then((module) => ({ default: module.RoomSettingsDialog }));
-function randomId() {
-  return crypto.randomUUID();
-}
-
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -62,36 +59,6 @@ function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40);
-}
-
-function getRoomId() {
-  const match = location.pathname.match(/^\/room\/([a-z0-9-]+)/);
-  return match?.[1] || null;
-}
-
-function getProfilePageId() {
-  const match = location.pathname.match(/^\/profile\/([0-9a-f-]{36})$/i);
-  return match?.[1] || null;
-}
-
-function getAdminPage() {
-  return location.pathname === "/admin";
-}
-
-function readProfile(): User {
-  const stored = readStoredValue("soundspin-profile");
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored) as Partial<User> | null;
-      if (parsed && typeof parsed.id === "string" && parsed.id &&
-          typeof parsed.name === "string" && typeof parsed.avatarSeed === "string") {
-        return { avatarKey: "pulse", ...parsed, isAppAdmin: false } as User;
-      }
-    } catch {
-      // Create a fresh profile below.
-    }
-  }
-  return { id: randomId(), name: "", avatarSeed: randomId(), avatarKey: "pulse", isAppAdmin: false };
 }
 
 export function App() {
@@ -107,26 +74,18 @@ export function App() {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const isNarrowRoomLayout = useMediaQuery("(max-width: 1024px)");
   const isTabletDualRoomLayout = useMediaQuery("(min-width: 900px) and (max-width: 1024px) and (min-height: 560px)");
-  const [profile, setProfile] = useState(readProfile);
-  const [roomId, setRoomId] = useState(getRoomId);
-  const [profilePageId, setProfilePageId] = useState(getProfilePageId);
-  const [adminPage, setAdminPage] = useState(getAdminPage);
-  const [profileReady, setProfileReady] = useState(false);
-  const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [roomPassword, setRoomPassword] = useState("");
-  const [roomPasswordRequired, setRoomPasswordRequired] = useState(false);
-  const [roomJoinError, setRoomJoinError] = useState("");
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const previousDjUserIdRef = useRef<string | null>(null);
   const djBaselineRef = useRef("");
   const { auth, setAuth, retryAuth } = useAppAuth();
+  const { profile, setProfile, profileReady } = useAppProfile(auth);
+  const { roomId, profilePageId, adminPage, navigationContext, snapshot, connected, roomPasswordRequired, roomJoinError,
+    setRoomPassword, setRoomPasswordRequired, setRoomJoinError, retryRoom, openRoom, openProfile, openAdmin,
+    goHome: leaveRoom, backFromProfile } = useRoomSession({ auth, profile, profileReady, onNotice: setNotice });
   const draftOwnerRef = useRef(auth.session?.user.id);
   const [roomNotificationsMuted] = useRoomNotificationMuted(profile.id, roomId || "");
-  const routeContext = adminPage ? "admin" : profilePageId ? `profile:${profilePageId}` : roomId ? `room:${roomId}` : "lobby";
-  const navigationContext = `${auth.session?.user.id || "guest"}:${routeContext}`;
   useRouteFocus(navigationContext, navigationContext);
   const recordedVisitRef = useRef<string | null>(null);
   useEffect(() => {
@@ -192,83 +151,6 @@ export function App() {
   }, [snapshot?.room.djUserId, profile.id, roomId, userSettings.notifications.djTurn, userSettings.notifications.backgroundOnly, roomNotificationsMuted]);
 
   useEffect(() => {
-    const authUser = auth.session?.user;
-    if (!authUser || profile.id === authUser.id) return;
-    const nextProfile = {
-      id: authUser.id,
-      name: String(authUser.user_metadata.display_name || authUser.email?.split("@")[0] || ""),
-      avatarSeed: authUser.id,
-      avatarKey: "pulse",
-      isAppAdmin: false
-    };
-    storeValue("soundspin-profile", JSON.stringify(nextProfile));
-    setProfile(nextProfile);
-  }, [auth.session?.user.id, profile.id]);
-
-  useEffect(() => {
-    const session = auth.session;
-    if (!auth.enabled) {
-      setProfileReady(true);
-      return;
-    }
-    if (!session || !auth.client) {
-      setProfileReady(false);
-      return;
-    }
-
-    let active = true;
-    if (profile.id !== session.user.id) setProfileReady(false);
-    void fetch(`/api/profiles/${session.user.id}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-      signal: AbortSignal.timeout(10_000)
-    })
-      .then(async (response) => {
-        const payload = await response.json() as { profile?: SoundSpinProfile };
-        if (!response.ok || !payload.profile) return;
-        const nextProfile: User = {
-          id: payload.profile.user_id,
-          name: payload.profile.display_name,
-          avatarSeed: payload.profile.user_id,
-          avatarKey: payload.profile.avatar_key,
-          avatarUrl: payload.profile.avatar_url || undefined,
-          isAppAdmin: payload.profile.is_app_admin
-        };
-        if (active) {
-          storeValue("soundspin-profile", JSON.stringify(nextProfile));
-          setProfile(nextProfile);
-        }
-      })
-      .catch(() => {
-        // The room join path will create a missing profile after migrations deploy.
-      })
-      .finally(() => {
-        if (active) setProfileReady(true);
-      });
-    return () => { active = false; };
-    // A refreshed access token does not change the profile. Refetching here
-    // would briefly unmount the room (and its player) whenever a tab wakes.
-  }, [auth.enabled, auth.client, auth.session?.user.id]);
-
-  useEffect(() => {
-    if (auth.enabled && !auth.session) {
-      socket.disconnect();
-      setSnapshot(null);
-    }
-  }, [auth.enabled, auth.session]);
-
-  useEffect(() => {
-    if (!auth.enabled || !auth.session) return;
-    if (!auth.recovery && ["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) {
-      history.replaceState({}, "", "/");
-    }
-    // PublicEntry manages its own navigation while signed out. Restore the
-    // authenticated route from the current address when that entry unmounts.
-    setRoomId(getRoomId());
-    setProfilePageId(getProfilePageId());
-    setAdminPage(getAdminPage());
-  }, [auth.enabled, auth.session?.user.id, auth.recovery]);
-
-  useEffect(() => {
     if (!notice) return;
     const options = { id: `lydman-notice:${notice}`, duration: 5000 };
     if (/could not|unable|failed|error|unavailable|not allowed|denied/i.test(notice)) toast.error(notice, options);
@@ -278,47 +160,6 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  useEffect(() => {
-    const onPopState = () => {
-      const nextRoomId = getRoomId();
-      setRoomId((currentRoomId) => {
-        if (currentRoomId !== nextRoomId) {
-          setSnapshot(null);
-          setRoomPassword("");
-          setRoomPasswordRequired(false);
-          setRoomJoinError("");
-        }
-        return nextRoomId;
-      });
-      setProfilePageId(getProfilePageId());
-      setAdminPage(getAdminPage());
-    };
-    addEventListener("popstate", onPopState);
-    return () => removeEventListener("popstate", onPopState);
-  }, []);
-
-  const retryRoom = useRoomConnection({
-    roomId, password: roomPassword, profile,
-    ready: !auth.loading && !auth.error && Boolean(
-      auth.client && auth.session && profile.id === auth.session.user.id && profileReady
-    ),
-    accessToken: auth.session?.access_token,
-    onConnected: setConnected, onSnapshot: setSnapshot,
-    onPasswordRequired: setRoomPasswordRequired, onJoinError: setRoomJoinError, onNotice: setNotice
-  });
-
-  const openRoom = (id: string, password?: string) => {
-    rememberNavigationFocus(navigationContext);
-    setAdminPage(false);
-    setProfilePageId(null);
-    setSnapshot(null);
-    setRoomPassword(password || "");
-    setRoomPasswordRequired(false);
-    setRoomJoinError("");
-    history.pushState({}, "", `/room/${id}`);
-    setRoomId(id);
-  };
-
   const enterRoom = (name: string, roomName?: string) => {
     const nextProfile = { ...profile, name: name.trim() };
     storeValue("soundspin-profile", JSON.stringify(nextProfile));
@@ -327,23 +168,13 @@ export function App() {
       void auth.client.auth.updateUser({ data: { display_name: nextProfile.name } });
     }
     const id = roomId || `${slugify(roomName || "room")}-${Math.random().toString(36).slice(2, 7)}`;
-    history.pushState({ roomName: roomId ? undefined : roomName?.trim() }, "", `/room/${id}`);
-    setRoomId(id);
+    openRoom(id, undefined, roomId ? undefined : roomName?.trim());
   };
 
   const goHome = () => {
-    rememberNavigationFocus(navigationContext);
-    socket.disconnect();
-    setSnapshot(null);
-    setRoomPassword("");
-    setRoomPasswordRequired(false);
-    setRoomJoinError("");
     setRoomSettingsOpen(false);
     setUserSettingsOpen(false);
-    setAdminPage(false);
-    setProfilePageId(null);
-    history.pushState({}, "", "/");
-    setRoomId(null);
+    leaveRoom();
   };
 
   if (auth.error) {
@@ -378,39 +209,14 @@ export function App() {
     );
   }
 
-  const openProfile = (userId: string) => {
-    rememberNavigationFocus(navigationContext);
-    history.pushState({ from: location.pathname }, "", `/profile/${userId}`);
-    setProfilePageId(userId);
-  };
-
-  const openAdmin = () => {
-    rememberNavigationFocus(navigationContext);
-    socket.disconnect();
-    setSnapshot(null);
-    setRoomId(null);
-    setRoomPassword("");
-    setRoomPasswordRequired(false);
-    setRoomJoinError("");
-    history.pushState({ from: location.pathname }, "", "/admin");
-    setProfilePageId(null);
-    setAdminPage(true);
-  };
-
   if (adminPage && auth.session && profile.isAppAdmin) {
     return (
       <Suspense fallback={<LoadingScreen label="Loading admin console…" />}>
         <AdminDashboard
           accessToken={auth.session.access_token}
           currentUser={profile}
-          onBack={() => {
-            history.pushState({}, "", "/");
-            setAdminPage(false);
-          }}
-          onOpenRoom={(slug) => {
-            setAdminPage(false);
-            openRoom(slug);
-          }}
+          onBack={goHome}
+          onOpenRoom={openRoom}
         />
       </Suspense>
     );
@@ -439,13 +245,7 @@ export function App() {
           profileId={profilePageId}
           accessToken={auth.session.access_token}
           currentUser={profile}
-          onBack={() => {
-            if (history.state?.from) history.back();
-            else {
-              history.pushState({}, "", "/");
-              setProfilePageId(null);
-            }
-          }}
+          onBack={backFromProfile}
           onOwnProfileUpdated={(updated) => {
             const nextProfile = {
               id: updated.user_id,
@@ -609,7 +409,7 @@ export function App() {
             /></PanelErrorBoundary>}
       />
       {roomSettingsOpen && auth.session && (
-        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
+        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
     </main>
   );

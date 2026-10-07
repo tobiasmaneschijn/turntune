@@ -14,7 +14,7 @@ export const chatMessageSchema = z.object({
 }).superRefine((message, context) => {
   if (message.type === 'text' ? !message.content.trim() : !message.mediaUrl) context.addIssue({ code: 'custom', message: 'Enter a message or choose an image.' })
 })
-export const chatReactionSchema = z.object({ action: z.enum(['add', 'remove']), messageId: z.string().uuid(), emoji: z.string().min(1).max(32) })
+export const chatReactionSchema = z.object({ id: z.string().uuid().optional(), action: z.enum(['add', 'remove']), messageId: z.string().uuid(), emoji: z.string().min(1).max(16) })
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>
 export interface ChatReply { id: string; content: string; type: ChatMessageInput['type']; mediaUrl?: string; mentions?: ChatMessageInput['mentions']; user: Pick<User, 'id' | 'name'> }
 export type RelayMessage = Omit<ChatMessageInput, 'replyTo'> & { user: User; replyTo?: ChatReply }

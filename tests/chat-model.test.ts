@@ -7,6 +7,7 @@ import {
   groupReactions,
   reactionLabel,
   mergeChatMessages,
+  recentChatMessages,
   shouldShowMessageHeader,
   type ChatMessage,
 } from '../src/chat/model.js'
@@ -94,4 +95,12 @@ test('same-author messages show a new header after midnight', () => {
   const previous = { ...message, createdAt: '2026-07-19T23:59:00' }
   const next = { ...message, id: 'next', createdAt: '2026-07-20T00:01:00' }
   assert.equal(shouldShowMessageHeader(next, previous), true)
+})
+
+test('the live window retains the latest chronological rows while persisted history remains independent', () => {
+  const rows = Array.from({ length: 1010 }, (_, index) => ({ ...message, id: String(index) }))
+  assert.equal(recentChatMessages(rows).length, 1000)
+  assert.equal(recentChatMessages(rows)[0].id, '10')
+  assert.equal(recentChatMessages(rows).at(-1)?.id, '1009')
+  assert.equal(rows.length, 1010)
 })

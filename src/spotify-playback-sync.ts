@@ -1,4 +1,5 @@
 import type { Playback, ProviderTrackMapping } from "./types";
+import { playbackNeedsSeek, playbackTargetPosition } from "./provider-playback";
 
 export interface SpotifyPlaybackObservation {
   uri: string;
@@ -16,8 +17,7 @@ export function spotifyPlaybackSignature(playback: Playback, mapping: ProviderTr
 }
 
 export function spotifyTargetPositionMs(playback: Playback, now = Date.now()) {
-  return Math.max(0, Math.floor((playback.position +
-    (playback.playing ? Math.max(0, now - playback.updatedAt) / 1000 : 0)) * 1000));
+  return Math.floor(playbackTargetPosition(playback, now) * 1000);
 }
 
 /** Reading a healthy player must never interrupt it. Only load a new recording
@@ -32,7 +32,7 @@ export function spotifySyncActions(playback: Playback, spotifyUri: string, state
     return playback.playing ? [{ action: "play", spotifyUri, positionMs }] : state?.paused ? [] : [{ action: "pause" }];
   }
   const actions: SpotifySyncAction[] = [];
-  const seek = force || !Number.isFinite(state.positionMs) || Math.abs(state.positionMs - positionMs) > toleranceMs;
+  const seek = force || playbackNeedsSeek(state.positionMs, positionMs, "health", toleranceMs);
   if (!playback.playing && !state.paused) actions.push({ action: "pause" });
   if (seek) actions.push({ action: "seek", positionMs });
   if (playback.playing && state.paused) actions.push({ action: "resume" });

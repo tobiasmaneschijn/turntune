@@ -1,4 +1,4 @@
-import type { PlayerStatus } from "./components/YouTubePlayer";
+import type { PlayerStatus } from "./provider-playback";
 
 export interface PlaybackFeedbackInput {
   connected: boolean;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Playback } from "../types";
 import { createPlayerApiLoader } from "../player-api-loader";
+import { playbackNeedsSeek, playbackTargetPosition, type CheckpointProviderPlaybackProps } from "../provider-playback";
+export type { PlayerStatus } from "../provider-playback";
 
 declare global {
   interface Window {
@@ -33,26 +34,12 @@ interface YouTubePlayerApi {
   destroy(): void;
 }
 
-export interface PlayerStatus {
-  ready: boolean;
-  buffering: boolean;
-  currentTime: number;
-  duration: number;
-  /** Present only when the provider reports its actual playback state. */
-  playing?: boolean;
-  trackId?: string;
-}
-
 const loadApi = createPlayerApiLoader({
   src: "https://www.youtube.com/iframe_api",
   label: "the YouTube player",
   readApi: () => window.YT?.Player ? window.YT : undefined,
   readyCallback: "onYouTubeIframeAPIReady"
 });
-
-function targetPosition(playback: Playback) {
-  return playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
-}
 
 function loadedVideoId(player: YouTubePlayerApi) {
   // getVideoUrl() describes the loaded video, while loadVideoById() is only a
@@ -63,7 +50,7 @@ function loadedVideoId(player: YouTubePlayerApi) {
   } catch { return ""; }
 }
 
-function trackKey(playback: Playback) {
+function trackKey(playback: CheckpointProviderPlaybackProps["playback"]) {
   return playback.track ? `${playback.track.id}:${playback.track.providerId}` : "";
 }
 
@@ -75,15 +62,7 @@ export function YouTubePlayer({
   onEnded,
   onStatus,
   onError
-}: {
-  playback: Playback;
-  syncRevision: number;
-  isDj: boolean;
-  volume: number;
-  onEnded: () => void;
-  onStatus: (status: PlayerStatus) => void;
-  onError?: (message: string) => void;
-}) {
+}: CheckpointProviderPlaybackProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerApi | null>(null);
   const requestedTrackKeyRef = useRef("");
@@ -131,6 +110,7 @@ export function YouTubePlayer({
               setLoadedRevision((revision) => revision + 1);
             }
             if (state === 1) playedTrackKeyRef.current = key;
+            if (state === 1 || state === 2 || state === 5) onErrorRef.current?.("");
             const checkpoint = `${key}:${current.position}:${current.updatedAt}`;
             if (event.data === window.YT?.PlayerState.ENDED && state === window.YT?.PlayerState.ENDED &&
               isDjRef.current && current.playing && endedCheckpointRef.current !== checkpoint) {
@@ -176,7 +156,7 @@ export function YouTubePlayer({
       onStatusRef.current({ ready: true, buffering: false, currentTime: 0, duration: 0 });
       return;
     }
-    const position = targetPosition(playback);
+    const position = playbackTargetPosition(playback);
     const key = trackKey(playback);
     if (requestedTrackKeyRef.current !== key) {
       requestedTrackKeyRef.current = key;
@@ -220,8 +200,8 @@ export function YouTubePlayer({
         trackId: current.track.id
       });
       if (current.playing && state !== window.YT?.PlayerState.ENDED) {
-        const expected = targetPosition(current);
-        if (Math.abs(currentTime - expected) > 2.5) player.seekTo(expected, true);
+        const expected = playbackTargetPosition(current);
+        if (playbackNeedsSeek(currentTime, expected, "health")) player.seekTo(expected, true);
       }
     }, 750);
     return () => window.clearInterval(timer);

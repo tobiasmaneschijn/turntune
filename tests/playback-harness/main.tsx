@@ -30,6 +30,8 @@ let sdkUpdatedAt = Date.now();
 let deferredState: { state: MockState | null; resolve: (state: MockState | null) => void } | undefined;
 let deferNextState = false;
 let sdkPlayer: MockSpotifyPlayer | undefined;
+let deferNextPlay = false;
+let deferredPlay: (() => void) | undefined;
 
 function readState(): MockState | null {
   if (!sdkState) return null;
@@ -147,6 +149,10 @@ window.fetch = async (input, init) => {
   const command = JSON.parse(String(init.body)) as Omit<Command, "source">;
   commands.push({ source: "api", ...command });
   if (command.action === "play") {
+    if (deferNextPlay) {
+      deferNextPlay = false;
+      await new Promise<void>((resolve) => { deferredPlay = resolve; });
+    }
     setState({
       paused: false,
       position: command.positionMs || 0,
@@ -179,9 +185,10 @@ const onStatus = (status: PlayerStatus) => { statuses.push(status); };
 const onEnded = () => { errors.push("unexpected track end"); };
 const onConnectionLost = (message: string) => { connectionsLost.push(message); };
 const onError = (message: string) => { errors.push(message); };
+let mounted = true;
 
 function render() {
-  root.render(<SpotifyPlayer
+  root.render(mounted ? <SpotifyPlayer
     playback={playback}
     mapping={mapping}
     mode={mode}
@@ -193,11 +200,11 @@ function render() {
     onStatus={onStatus}
     onConnectionLost={onConnectionLost}
     onError={onError}
-  />);
+  /> : <div>Following room source</div>);
 }
 
 export interface PlaybackHarness {
-  inspect(): { commands: Command[]; state: MockState | null; playback: Playback; statuses: PlayerStatus[]; errors: string[]; connectionsLost: string[]; pendingState: boolean };
+  inspect(): { commands: Command[]; state: MockState | null; playback: Playback; statuses: PlayerStatus[]; errors: string[]; connectionsLost: string[]; pendingState: boolean; pendingPlay: boolean };
   resetCommands(): void;
   setSdkState(state: { uri?: string; positionMs?: number; paused?: boolean } | null): void;
   updatePlayback(update: { trackId?: string; playing?: boolean; position?: number; updatedAt?: number; resumeAfterReconnect?: boolean }): void;
@@ -208,6 +215,10 @@ export interface PlaybackHarness {
   sync(): void;
   refreshAccessToken(token: string): void;
   requestSdkToken(): Promise<string | undefined>;
+  deferNextPlay(): void;
+  resolvePendingPlay(): void;
+  fallback(): void;
+  mount(): void;
 }
 
 declare global {
@@ -215,7 +226,7 @@ declare global {
 }
 
 window.playbackHarness = {
-  inspect: () => ({ commands: [...commands], state: readState(), playback, statuses: [...statuses], errors: [...errors], connectionsLost: [...connectionsLost], pendingState: Boolean(deferredState) }),
+  inspect: () => ({ commands: [...commands], state: readState(), playback, statuses: [...statuses], errors: [...errors], connectionsLost: [...connectionsLost], pendingState: Boolean(deferredState), pendingPlay: Boolean(deferredPlay) }),
   resetCommands: () => { commands.length = 0; },
   setSdkState: (state) => {
     if (!state) { setState(null); return; }
@@ -258,7 +269,11 @@ window.playbackHarness = {
   },
   sync: () => { window.dispatchEvent(new Event("soundspin:playback-sync")); },
   refreshAccessToken: (token) => { accessToken = token; render(); },
-  requestSdkToken: async () => sdkPlayer?.requestToken()
+  requestSdkToken: async () => sdkPlayer?.requestToken(),
+  deferNextPlay: () => { deferNextPlay = true; },
+  resolvePendingPlay: () => { const resolve = deferredPlay; deferredPlay = undefined; resolve?.(); },
+  fallback: () => { mounted = false; render(); },
+  mount: () => { mounted = true; render(); }
 };
 
 render();

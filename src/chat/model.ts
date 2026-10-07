@@ -61,6 +61,10 @@ export type ChatUserProfile = Pick<
 >
 
 const reactionKey = (reaction: ChatReaction) => `${reaction.userId}\u0000${reaction.emoji}`
+export const CHAT_LIVE_WINDOW_LIMIT = 1000
+export function recentChatMessages(messages: ChatMessage[], limit = CHAT_LIVE_WINDOW_LIMIT): ChatMessage[] {
+  return messages.length > limit ? messages.slice(-limit) : messages
+}
 
 export function createReplySnapshot(message: ChatMessage): ChatReply {
   return {

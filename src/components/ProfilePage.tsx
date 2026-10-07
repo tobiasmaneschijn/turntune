@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ImageUp, LayoutDashboard, Palette } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { AppVersion } from "./AppVersion";
@@ -11,6 +11,8 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { getSupabaseClient } from "../supabase";
+import { requestJson } from "../lib/authenticated-http";
+import { isProfileResponse, type ProfileResponse } from "../lib/profile-response";
 import type { SoundSpinProfile, SoundSpinProfileOption, User } from "../types";
 
 const AVATAR_MIME_EXTENSIONS = new Map([
@@ -45,22 +47,26 @@ export function ProfilePage({
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [error, setError] = useState("");
   const isOwnProfile = profileId === currentUser.id;
+  const tokenRef = useRef(accessToken);
+  tokenRef.current = accessToken;
+  const lifetimeRef = useRef({ active: true });
+  const requestControllers = useRef(new Set<AbortController>());
+  const fieldsRef = useRef({ displayName, bio });
+  fieldsRef.current = { displayName, bio };
 
   useEffect(() => {
+    const lifetime = { active: true };
+    lifetimeRef.current = lifetime;
+    const controller = new AbortController();
     let cancelled = false;
     const loadProfile = async () => {
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`/api/profiles/${profileId}`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
+        const payload = await requestJson<ProfileResponse>(`/api/profiles/${profileId}`, {
+          accessToken: tokenRef.current, signal: controller.signal,
+          errorMessage: "Could not load this profile.", validate: isProfileResponse
         });
-        const payload = await response.json() as {
-          profile?: SoundSpinProfile;
-          options?: SoundSpinProfileOption[];
-          error?: string;
-        };
-        if (!response.ok || !payload.profile) throw new Error(payload.error || "Could not load this profile.");
         if (cancelled) return;
         setProfile(payload.profile);
         setOptions(payload.options || []);
@@ -73,8 +79,12 @@ export function ProfilePage({
       }
     };
     void loadProfile();
-    return () => { cancelled = true; };
-  }, [profileId, accessToken]);
+    return () => {
+      cancelled = true; lifetime.active = false; controller.abort();
+      requestControllers.current.forEach((request) => request.abort());
+      requestControllers.current.clear();
+    };
+  }, [profileId, currentUser.id]);
 
   const updateProfile = async (update: {
     displayName?: string;
@@ -83,26 +93,29 @@ export function ProfilePage({
     customAvatarPath?: string;
     themeKey?: string;
   }) => {
+    const lifetime = lifetimeRef.current;
+    const controller = new AbortController();
+    requestControllers.current.add(controller);
+    const initialFields = fieldsRef.current;
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(update)
+      const payload = await requestJson<ProfileResponse>("/api/profile", {
+        method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
+        body: JSON.stringify(update), errorMessage: "Could not update your profile.", validate: isProfileResponse
       });
-      const payload = await response.json() as { profile?: SoundSpinProfile; error?: string };
-      if (!response.ok || !payload.profile) throw new Error(payload.error || "Could not update your profile.");
+      if (!lifetime.active) return false;
       setProfile(payload.profile);
-      setDisplayName(payload.profile.display_name);
-      setBio(payload.profile.bio);
+      if (update.displayName !== undefined && fieldsRef.current.displayName === initialFields.displayName) setDisplayName(payload.profile.display_name);
+      if (update.bio !== undefined && fieldsRef.current.bio === initialFields.bio) setBio(payload.profile.bio);
       onOwnProfileUpdated(payload.profile);
       return true;
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not update your profile.");
+      if (lifetime.active) setError(saveError instanceof Error ? saveError.message : "Could not update your profile.");
       return false;
     } finally {
-      setSaving(false);
+      requestControllers.current.delete(controller);
+      if (lifetime.active) setSaving(false);
     }
   };
 
@@ -122,6 +135,7 @@ export function ProfilePage({
     if (file.size > AVATAR_MAX_BYTES) return setError("Avatar images must be 5 MB or smaller.");
 
     setUploadingAvatar(true);
+    const lifetime = lifetimeRef.current;
     setError("");
     const oldPath = profile?.avatar_path;
     let newPath = "";
@@ -135,6 +149,7 @@ export function ProfilePage({
         upsert: false
       });
       if (uploadError) throw new Error(uploadError.message);
+      if (!lifetime.active) { await deleteAvatarObject(newPath); return; }
       if (!(await updateProfile({ customAvatarPath: newPath }))) {
         await deleteAvatarObject(newPath);
         return;
@@ -142,9 +157,9 @@ export function ProfilePage({
       if (oldPath && oldPath !== newPath) await deleteAvatarObject(oldPath);
     } catch (uploadError) {
       if (newPath) await deleteAvatarObject(newPath);
-      setError(uploadError instanceof Error ? uploadError.message : "Could not upload your avatar.");
+      if (lifetime.active) setError(uploadError instanceof Error ? uploadError.message : "Could not upload your avatar.");
     } finally {
-      setUploadingAvatar(false);
+      if (lifetime.active) setUploadingAvatar(false);
     }
   };
 

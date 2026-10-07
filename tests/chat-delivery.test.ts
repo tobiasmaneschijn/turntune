@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createChatSaveTracker, type ChatSaveStates } from '../src/chat/delivery'
+import { CHAT_COMPLETED_STATUS_LIMIT, createChatSaveTracker, type ChatSaveStates } from '../src/chat/delivery'
 import type { ChatMessage } from '../src/chat/model'
 
 const message: ChatMessage = { id: 'original-id', content: 'hello', type: 'text',
@@ -67,4 +67,35 @@ test('late acknowledged send saves only its original callback while a disposed r
   const pending = tracker.send(message, () => new Promise<void>((resolve) => { release = resolve }), (item) => { assert.equal(item, message); saved++ })
   await Promise.resolve(); tracker.dispose(); const before = changes
   release(); assert.equal(await pending, true); assert.equal(saved, 1); assert.equal(changes, before)
+})
+
+test('completed delivery state stays bounded without discarding failed recovery records', async () => {
+  let states: ChatSaveStates = {}
+  const tracker = createChatSaveTracker((value) => { states = value })
+  let fail = true
+  await tracker.save(message, () => { if (fail) throw new Error('Still needs recovery') })
+  for (let index = 0; index < CHAT_COMPLETED_STATUS_LIMIT + 10; index++) {
+    await tracker.send({ ...message, id: `completed-${index}` }, async () => {}, async () => {})
+  }
+  assert.equal(Object.keys(states).length, CHAT_COMPLETED_STATUS_LIMIT + 1)
+  assert.equal(states[message.id].state, 'failed')
+  fail = false
+  await tracker.retry(message.id)
+  assert.equal(states[message.id].state, 'saved')
+  assert.equal(Object.keys(states).length, CHAT_COMPLETED_STATUS_LIMIT)
+})
+
+test('live-only completions publish their bounded status window after pruning', async () => {
+  let states: ChatSaveStates = {}, largestCompletedWindow = 0
+  const tracker = createChatSaveTracker((value) => {
+    states = value
+    largestCompletedWindow = Math.max(largestCompletedWindow, Object.values(value).filter((entry) => entry.state === 'sent-live').length)
+  })
+  for (let index = 0; index < CHAT_COMPLETED_STATUS_LIMIT + 10; index++) {
+    assert.equal(await tracker.send({ ...message, id: `live-only-${index}` }, async () => {}), true)
+  }
+  assert.equal(largestCompletedWindow, CHAT_COMPLETED_STATUS_LIMIT)
+  assert.equal(Object.keys(states).length, CHAT_COMPLETED_STATUS_LIMIT)
+  assert.equal(states['live-only-0'], undefined)
+  assert.equal(states[`live-only-${CHAT_COMPLETED_STATUS_LIMIT + 9}`].state, 'sent-live')
 })

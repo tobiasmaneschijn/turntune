@@ -3,6 +3,7 @@ import type { ChatMessage } from './model'
 export type ChatSaveState = 'sending' | 'send-failed' | 'sent-live' | 'saving' | 'saved' | 'failed'
 export type ChatSaveStates = Record<string, { state: ChatSaveState; error?: string }>
 type PersistMessage = (message: ChatMessage) => Promise<void> | void
+export const CHAT_COMPLETED_STATUS_LIMIT = 200
 
 /** Durable retries reuse the original callback and message, never the broadcast transport. */
 export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void) {
@@ -10,6 +11,16 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
   const records = new Map<string, { message: ChatMessage; persist: PersistMessage; pending?: Promise<void> }>()
   const states: ChatSaveStates = {}
   const sendRecords = new Map<string, { message: ChatMessage; deliver: (message: ChatMessage) => Promise<unknown>; persist?: PersistMessage; pending?: Promise<boolean> }>()
+  const completed = new Set<string>()
+  const releaseCompleted = (id: string) => {
+    if (states[id]?.state !== 'saved' && states[id]?.state !== 'sent-live') return
+    records.delete(id); sendRecords.delete(id)
+    completed.delete(id); completed.add(id)
+    while (completed.size > CHAT_COMPLETED_STATUS_LIMIT) {
+      const oldest = completed.values().next().value!
+      completed.delete(oldest); delete states[oldest]
+    }
+  }
   const publish = () => { if (active) onChange({ ...states }) }
   const save = (id: string): Promise<void> => {
     const record = records.get(id)
@@ -21,7 +32,7 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
       states[id] = { state: 'saved' }
     }, (error: unknown) => {
       states[id] = { state: 'failed', error: error instanceof Error ? error.message : 'History could not be saved.' }
-    }).finally(() => { record.pending = undefined; publish() })
+    }).finally(() => { record.pending = undefined; releaseCompleted(id); publish() })
     return record.pending
   }
   const send = (id: string): Promise<boolean> => {
@@ -33,12 +44,12 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
       if (record.persist) {
         if (!active) await Promise.resolve(record.persist(record.message)).catch(() => {})
         else { if (!records.has(id)) records.set(id, { message: record.message, persist: record.persist }); await save(id) }
-      } else { states[id] = { state: 'sent-live' }; publish() }
+      } else { states[id] = { state: 'sent-live' }; releaseCompleted(id); publish() }
       return true
     }, (error: unknown) => {
       states[id] = { state: 'send-failed', error: error instanceof Error ? error.message : 'Could not confirm this send.' }; publish()
       return false
-    }).finally(() => { record.pending = undefined })
+    }).finally(() => { record.pending = undefined; releaseCompleted(id) })
     return record.pending
   }
   return {
@@ -55,6 +66,6 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
       return save(message.id)
     },
     retry: save,
-    dispose() { active = false; records.clear(); sendRecords.clear() },
+    dispose() { active = false; records.clear(); sendRecords.clear(); completed.clear() },
   }
 }

@@ -3,5 +3,6 @@ dist
 dist-server
 data
 .git
-.env
+.env*
+!.env.example
 npm-debug.log*

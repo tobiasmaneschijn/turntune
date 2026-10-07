@@ -1,13 +1,6 @@
-export interface SocketReply {
-  ok: boolean;
-  error?: string;
-  requiresPassword?: boolean;
-  started?: boolean;
-  position?: number;
-  undo?: { token: string; expiresAt: number; title: string };
-  added?: number;
-  skipped?: Array<{ title: string; reason: string }>;
-}
+import type { SocketReply } from '../shared/types.js';
+import { validateRoomCommand } from '../shared/room-protocol.js';
+export type { SocketReply } from '../shared/types.js';
 
 interface RequestSocket {
   connected: boolean;
@@ -25,6 +18,10 @@ export function requestSocketAction(
 ) {
   if (!socket.connected) {
     reply({ ok: false, error: "You are offline. Reconnect and try again." });
+    return;
+  }
+  if (!validateRoomCommand(event, payload)) {
+    reply({ ok: false, error: "This room command is invalid. Refresh the room and try again." });
     return;
   }
   socket.timeout(15_000).emit(event, payload, (error, result) => {

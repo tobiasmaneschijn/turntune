@@ -24,12 +24,17 @@ the database source of truth.
 | `server/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
 | `server/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
 | `server/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
+| `server/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
 | `server/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
 | `src/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
 | `src/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
 | `src/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
 | `src/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
 | `src/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
+| `src/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
+| `src/lib/authenticated-http.ts` | Shared HTTP deadlines, cancellation, JSON/error handling and caller-supplied response validation. |
+| `src/hooks/use-room-session.ts` | Single route state, navigation, underlying room lifetime, admission and reconnect coordination. |
+| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration without restarting room providers when credentials rotate. |
 | `src/hooks/use-chat-history.ts` | Independent live pagination, bounded saved-room search, chronological context pages, and stale-request guards. |
 | `src/hooks/use-chat-scroll.tsx` | Stable reader anchors across prepends and arrivals, unread positioning and effective motion scrolling. |
 | `src/hooks/use-chat-picker-bounds.ts` | Actual pane/visual-viewport/composer geometry for media and portaled reaction controls. |
@@ -73,6 +78,11 @@ A duplicate ID with conflicting content is rejected rather than overwritten.
 
 Only one send or upload can run at a time. Text edited while a send is pending
 is preserved, and completion from a departed room cannot update a new room.
+Successful initial sends and retries use the same completion path: an unchanged
+composer snapshot is cleared, while a newly typed draft or changed reply remains.
+Completed delivery payloads are released; at most 200 completed status labels are
+retained. Failed send/save rows retain their original recovery records, with a
+100-row recovery limit before another new send is accepted.
 The stable socket factory exposes `setAdmitted(boolean)`. Reconnects update
 connection state without replacing the transport or erasing unsaved live rows.
 Fresh admission reloads durable history and clears obsolete reaction overlays.
@@ -115,6 +125,15 @@ overlaid on the visible timeline so an avatar change updates messages that are
 already on screen.
 
 ## History and search
+
+The automatic live transcript retains the latest 1,000 messages. If that window
+rolls forward while someone is reading above the bottom, a bounded snapshot keeps
+their displayed rows and scroll anchor in place while unread arrivals accumulate.
+Reaching the bottom or jumping to latest switches to the current window and
+resets older-page cursors to its first row. Load older messages, saved search and
+reply context remain the way to retrieve earlier durable messages; explicitly
+requested older pages are separate from the automatic live buffer. Failed local
+outbox rows remain available for recovery even outside the live window.
 
 Load older messages uses stable `(created_at, id)` keyset pages, preserving
 Postgres microsecond precision and a UUID tie-breaker. The room/created/id index
@@ -169,6 +188,9 @@ Reactions are durable-first:
    and adds/removes one row in `soundspin_message_reactions` idempotently.
 2. After that succeeds, it sends an admitted `chat:reaction` live event.
 3. Connected clients apply the event over their last durable reaction state.
+
+One operation UUID is carried through the durable mutation and its live relay,
+so the two delivery stages refer to the same logical reaction change.
 
 The table primary key is `(message_id, user_id, emoji)`, so one user can add a
 given emoji to a message only once. The realtime hook coalesces repeated events
@@ -246,6 +268,16 @@ checks sender socket identity again after awaited validation, filters recipients
 through fresh access and current socket membership, and checks the original
 sender after recipient queries before synchronous emits. Room joins themselves
 must reject private-room users without membership before recording a new member.
+
+Live delivery and durable HTTP writes use the same bounded content schemas and
+server canonicalization, and share one `chat-write-policy.ts` instance. New
+messages must satisfy timestamp and per-room/account rate limits on either
+transport. The same immutable operation UUID spends rate capacity once across
+the live ACK and durable save; a conflicting account, room or payload is rejected.
+An identical durable original proves an older message retry without treating it
+as a new send. Reactions carry their operation UUID through both stages for the
+same reason. These receipts are bounded process-local state; the database's
+immutable-original check remains the authority after a restart.
 
 Never edit a migration that has already reached production. Create a new
 timestamped migration and let the configured Supabase GitHub integration apply

@@ -22,6 +22,8 @@ import {
   createReplySnapshot,
   getMessagePreview,
   mergeChatMessages,
+  CHAT_LIVE_WINDOW_LIMIT,
+  recentChatMessages,
   shouldShowMessageHeader,
   startsNewDay,
   type ChatMessage,
@@ -46,10 +48,12 @@ import {
 } from '@/chat/media'
 import { persistReactionChange } from '@/chat/persistence'
 import { createChatDraftStore, type ChatDraft } from '@/chat/drafts'
-import { createChatSaveTracker, type ChatSaveStates } from '@/chat/delivery'
+import type { ChatSaveStates } from '@/chat/delivery'
+import { useChatDelivery } from '@/hooks/use-chat-delivery'
 import type { ChatHistorySource } from '@/chat/history-reader'
 import type { ChatSessionFactory } from '@/chat/realtime'
 import { cn } from '@/lib/utils'
+import { requestJson } from '@/lib/authenticated-http'
 import { ChatMessageItem } from '@/components/chat-message'
 import { Avatar } from '@/components/Avatar'
 import { DevFlair } from '@/components/DevFlair'
@@ -94,7 +98,7 @@ interface RealtimeChatProps {
   notifications?: SoundSpinUserSettings['notifications']
   onNotificationActivate?: () => void
   transport?: ChatSessionFactory
-  onPersistReaction?: (change: { action: 'add' | 'remove'; messageId: string; userId: string; emoji: string }) => Promise<void>
+  onPersistReaction?: (change: { id?: string; action: 'add' | 'remove'; messageId: string; userId: string; emoji: string }) => Promise<void>
   onResolveMediaUrl?: (storagePath: string) => Promise<string>
 }
 
@@ -235,6 +239,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     scrollRevision,
     preserveAnchor,
   } = useChatScroll()
+  const liveWindowRef = useRef<ChatMessage[]>([])
+  const readingRef = useRef(false)
+  readingRef.current = !isNearBottom
+  const [readerWindow, setReaderWindow] = useState<ChatMessage[] | null>(null)
+  const readerWindowRef = useRef<ChatMessage[] | null>(null)
 
   const {
     messages: realtimeMessages,
@@ -251,13 +260,20 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     user,
     onConnected,
     transport,
+    onBeforeMessage: (message, messages) => {
+      const window = liveWindowRef.current
+      if (readingRef.current && !readerWindowRef.current && mergeChatMessages(initialMessages, messages).length > CHAT_LIVE_WINDOW_LIMIT && !window.some((row) => row.id === message.id)) {
+        readerWindowRef.current = window
+        setReaderWindow(window)
+      }
+    },
   })
+  const liveWindow = useMemo(() => recentChatMessages(mergeChatMessages(initialMessages, realtimeMessages)), [initialMessages, realtimeMessages])
+  liveWindowRef.current = liveWindow
   const [draftText, setDraftText] = useState(initialDraft?.text || '')
   const [hasDraft, setHasDraft] = useState(Boolean(initialDraft?.text.trim()))
   const [draftRestored, setDraftRestored] = useState(Boolean(initialDraft))
   const [replyRestoreNotice, setReplyRestoreNotice] = useState('')
-  const [saveStates, setSaveStates] = useState<ChatSaveStates>({})
-  const [outboxMessages, setOutboxMessages] = useState<ChatMessage[]>([])
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
@@ -266,8 +282,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [gifs, setGifs] = useState<GiphyGif[]>([])
   const [gifsLoading, setGifsLoading] = useState(false)
   const [composerError, setComposerError] = useState('')
-  const [uploading, setUploading] = useState(false)
-  const [sending, setSending] = useState(false)
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
   const [selectedMentions, setSelectedMentions] = useState<ChatMention[]>(initialDraft?.mentions || [])
   const [activeMentionIndex, setActiveMentionIndex] = useState(0)
@@ -280,7 +294,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const composingRef = useRef(false)
   const restoredReplyIdRef = useRef(initialDraft?.replyToId)
   const draftSnapshotRef = useRef<{ store: typeof draftStore; draft: ChatDraft }>({ store: draftStore, draft: initialDraft || { text: '', mentions: [] } })
-  const saveTrackerRef = useRef<ReturnType<typeof createChatSaveTracker> | null>(null)
   const pendingReactionsRef = useRef(new Set<string>())
   const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
@@ -293,9 +306,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const giphyRequestRef = useRef(0)
   const giphyAbortRef = useRef<AbortController | null>(null)
   const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const sendingRef = useRef(false)
-  const uploadingRef = useRef(false)
-  const lifetimeRef = useRef({ active: true })
   const [giphyConfigured, setGiphyConfigured] = useState(false)
   const [showHistorySearch, setShowHistorySearch] = useState(false)
   const [historySearchText, setHistorySearchText] = useState('')
@@ -310,7 +320,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     attentionTracker.seed(messages)
     onHistoricalMessages?.(messages)
   }, [attentionTracker, onHistoricalMessages])
-  const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, initialMessages, seedHistoricalMessages, historySource)
+  const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, readerWindow || liveWindow, seedHistoricalMessages, historySource)
+  useEffect(() => {
+    if (!readerWindow || !isNearBottom) return
+    readerWindowRef.current = null; setReaderWindow(null)
+    history.resetPages(liveWindow)
+    requestAnimationFrame(() => scrollToBottom('auto'))
+  }, [readerWindow, isNearBottom, history.resetPages, liveWindow, scrollToBottom])
+  useEffect(() => { readerWindowRef.current = null; setReaderWindow(null) }, [roomName, user.id])
   const attendingLive = isVisible && pageAttended && !history.context
   const liveAdminUserIds = useMemo(() => new Set(adminUserIds), [adminUserIds])
   const reactionNamesByUserId = useMemo(
@@ -330,17 +347,27 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     ).slice(0, 8)
   }, [mentionQuery, roomMentionOptions])
 
+  const { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef,
+    sendText, sendMedia: sendMediaMessage, retrySend, retrySave } = useChatDelivery({
+    scope: `${user.id}:${roomName}`, isConnected, prepareMessage, deliver: sendExistingMessage, persist: onSend,
+    composer: () => ({ text: draftMessageRef.current, mentions: activeMentions(draftMessageRef.current.trim(), selectedMentions), replyTo: replyingTo }),
+    onError: setComposerError,
+    beforeTextSend: () => requestAnimationFrame(() => { if (lifetimeRef.current.active && !history.context) scrollToBottom('auto') }),
+    confirmed: (snapshot, text) => {
+      if (text && draftMessageRef.current === snapshot.text && replyingTo?.id === snapshot.replyTo?.id &&
+          JSON.stringify(activeMentions(draftMessageRef.current.trim(), selectedMentions)) === JSON.stringify(snapshot.mentions)) {
+        draftMessageRef.current = ''
+        draftSnapshotRef.current.draft = { text: '', mentions: [] }
+        setDraftText(''); setHasDraft(false); setSelectedMentions([]); setMentionQuery(null); setDraftRestored(false)
+        restoredReplyIdRef.current = undefined
+        draftStore.save({ text: '', mentions: [] })
+        stopTyping()
+      }
+      setReplyingTo((current) => current?.id === snapshot.replyTo?.id ? null : current)
+    },
+  })
+
   useEffect(() => {
-    const lifetime = { active: true }
-    lifetimeRef.current = lifetime
-    const tracker = createChatSaveTracker(setSaveStates)
-    saveTrackerRef.current = tracker
-    setSaveStates({})
-    setOutboxMessages([])
-    sendingRef.current = false
-    uploadingRef.current = false
-    setSending(false)
-    setUploading(false)
     setComposerError('')
     setDraftText(initialDraft?.text || '')
     draftMessageRef.current = initialDraft?.text || ''
@@ -350,7 +377,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setDraftRestored(Boolean(initialDraft))
     setReplyRestoreNotice('')
     restoredReplyIdRef.current = initialDraft?.replyToId
-    return () => { lifetime.active = false; tracker.dispose() }
   }, [roomName, user.id, initialDraft])
 
   // Debounce session storage, then flush the latest scoped draft on navigation/reload.
@@ -389,19 +415,20 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [])
 
   useEffect(() => {
-    void fetch('/api/config')
-      .then((response) => response.json())
+    const controller = new AbortController()
+    void requestJson<{ giphyConfigured?: boolean }>('/api/config', { signal: controller.signal })
       .then((config: { giphyConfigured?: boolean }) => {
         setGiphyConfigured(Boolean(config.giphyConfigured))
       })
       .catch(() => {
         // GIF support remains disabled when runtime configuration is unavailable.
       })
+    return () => controller.abort()
   }, [])
 
   const baseMessages = useMemo(
-    () => mergeChatMessages(mergeChatMessages(initialMessages, history.olderMessages), mergeChatMessages(realtimeMessages, outboxMessages)),
-    [initialMessages, history.olderMessages, realtimeMessages, outboxMessages]
+    () => mergeChatMessages(mergeChatMessages(readerWindow || liveWindow, history.olderMessages), outboxMessages),
+    [readerWindow, liveWindow, history.olderMessages, outboxMessages]
   )
   const profiledMessages = useMemo(
     () => applyChatUserProfiles(baseMessages, roomUsers),
@@ -530,15 +557,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [onUnreadCountChange, unreadMessageIds.length])
 
   useEffect(() => {
-    const currentIds = new Set(allMessages.map((message) => message.id))
-    const addedMessages = allMessages.filter(
+    const currentIds = new Set(realtimeMessages.map((message) => message.id))
+    const addedMessages = realtimeMessages.filter(
       (message) => !previousMessageIdsRef.current.has(message.id)
     )
 
     if (!initializedScrollRef.current && allMessages.length > 0) {
       initializedScrollRef.current = true
-      requestAnimationFrame(() => scrollToBottom('auto'))
-    } else if (addedMessages.length > 0) {
+      if (attendingLive && isNearBottom) requestAnimationFrame(() => scrollToBottom('auto'))
+    }
+    if (addedMessages.length > 0) {
       // Only realtime arrivals can change unread/attention; older pages and reconnect hydration are baseline.
       const liveIds = new Set(realtimeMessages.map((message) => message.id))
       const arrivals = addedMessages.filter((message) => liveIds.has(message.id) && Date.parse(message.createdAt) >= joinedAt - 5_000)
@@ -607,51 +635,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
   useEffect(() => () => stopTyping(), [stopTyping])
 
-  const handleSendMessage = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault()
-      const draft = draftMessageRef.current
-      const content = draft.trim()
-      if (!content || !isConnected || sendingRef.current || uploadingRef.current) return
-      const lifetime = lifetimeRef.current
-      const saveTracker = saveTrackerRef.current
-      sendingRef.current = true
-      setSending(true)
-      setComposerError('')
-      try {
-        const sentMessage = prepareMessage(
-          content,
-          undefined,
-          replyingTo || undefined,
-          activeMentions(content, selectedMentions)
-        )
-        setOutboxMessages((current) => mergeChatMessages(current, [sentMessage]))
-        requestAnimationFrame(() => { if (lifetime.active && !history.context) scrollToBottom('auto') })
-        const sent = await saveTracker?.send(sentMessage, sendExistingMessage, onSend)
-        if (sent && lifetime.active) {
-          // Keep text typed while delivery was pending.
-          if (draftMessageRef.current === draft) {
-            draftMessageRef.current = ''
-            draftSnapshotRef.current.draft = { text: '', mentions: [] }
-            setDraftText('')
-            setHasDraft(false)
-            setSelectedMentions([])
-            setMentionQuery(null)
-            setDraftRestored(false)
-            restoredReplyIdRef.current = undefined
-            draftStore.save({ text: '', mentions: [] })
-            stopTyping()
-          }
-          setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
-        }
-      } catch (error) {
-        if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this message. Please try again.')
-      } finally {
-        if (lifetime.active) { sendingRef.current = false; setSending(false) }
-      }
-    },
-    [isConnected, prepareMessage, sendExistingMessage, onSend, replyingTo, selectedMentions, stopTyping, draftStore, history.context, scrollToBottom]
-  )
+  const handleSendMessage = useCallback((event: React.FormEvent) => {
+    event.preventDefault()
+    void sendText()
+  }, [sendText])
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
     if (!mentionQuery) return
@@ -674,39 +661,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
     })
   }, [mentionQuery, selectedMentions])
-
-  const sendMediaMessage = useCallback(
-    async (
-      type: 'image' | 'gif',
-      mediaUrl: string,
-      content: string,
-      storagePath?: string
-    ) => {
-      if (!isConnected || sendingRef.current || (uploadingRef.current && !storagePath)) return false
-      const lifetime = lifetimeRef.current
-      const saveTracker = saveTrackerRef.current
-      sendingRef.current = true
-      setSending(true)
-      setComposerError('')
-      try {
-        const sentMessage = prepareMessage(
-          content.slice(0, 500) || 'Shared image',
-          { type, mediaUrl, storagePath },
-          replyingTo || undefined
-        )
-        setOutboxMessages((current) => mergeChatMessages(current, [sentMessage]))
-        const sent = await saveTracker?.send(sentMessage, sendExistingMessage, onSend)
-        if (sent && lifetime.active) setReplyingTo((current) => current?.id === replyingTo?.id ? null : current)
-        return Boolean(sent)
-      } catch (error) {
-        if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not send this image. Please try again.')
-        return false
-      } finally {
-        if (lifetime.active) { sendingRef.current = false; setSending(false) }
-      }
-    },
-    [isConnected, onSend, replyingTo, prepareMessage, sendExistingMessage]
-  )
 
   const selectReply = useCallback((message: ChatMessage) => {
     restoredReplyIdRef.current = undefined
@@ -766,6 +720,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
     try {
       const change = {
+        id: crypto.randomUUID(),
         action,
         messageId: message.id,
         userId: user.id,
@@ -776,6 +731,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       if (!lifetime.active) return
       setComposerError('')
       await broadcastReaction({
+        id: change.id,
         messageId: message.id,
         userId: user.id,
         emoji,
@@ -792,12 +748,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     void toggleReaction(message, emoji)
   }, [toggleReaction])
 
-  const handleRetrySave = useCallback((messageId: string) => {
-    void saveTrackerRef.current?.retry(messageId)
-  }, [])
-  const handleRetrySend = useCallback((messageId: string) => {
-    void saveTrackerRef.current?.retrySend(messageId)
-  }, [])
+  const handleRetrySave = retrySave
+  const handleRetrySend = useCallback((messageId: string) => { void retrySend(messageId) }, [retrySend])
 
   const uploadImage = async (file: File) => {
     if (!isConnected || uploadingRef.current || sendingRef.current) return

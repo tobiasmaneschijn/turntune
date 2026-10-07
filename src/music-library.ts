@@ -1,4 +1,5 @@
 import type { Provider, Track } from "./types";
+import { requestJson } from "./lib/authenticated-http";
 
 export interface LibraryTrack {
   provider: Provider; providerId: string; title: string; artist?: string;
@@ -15,10 +16,9 @@ export function libraryTrack(track: LibraryTrack | Track): LibraryTrack {
     artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs };
 }
 export async function requestPrivateLibrary(accessToken: string, mutation?: LibraryMutation, signal?: AbortSignal): Promise<PrivateLibrary> {
-  const response = await fetch("/api/library", { method: mutation ? "POST" : "GET",
-    headers: { Authorization: `Bearer ${accessToken}`, ...(mutation ? { "Content-Type": "application/json" } : {}) },
-    body: mutation ? JSON.stringify(mutation) : undefined, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
-  const body = await response.json() as { library?: PrivateLibrary; error?: string };
-  if (!response.ok || !body.library) throw new Error(body.error || "Could not load your private picks and sets.");
+  const body = await requestJson<{ library: PrivateLibrary }>("/api/library", { method: mutation ? "POST" : "GET", accessToken,
+    body: mutation ? JSON.stringify(mutation) : undefined, signal, errorMessage: "Could not load your private picks and sets.",
+    validate: (value): value is { library: PrivateLibrary } => Boolean(value && typeof value === "object" && "library" in value && value.library &&
+      typeof value.library === "object" && "picks" in value.library && Array.isArray(value.library.picks) && "sets" in value.library && Array.isArray(value.library.sets)) });
   return body.library;
 }

@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rmdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import test from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type { RoomPresence, RoomSnapshot } from "../src/types.js";
+import { hashRoomPassword } from "../server/room-password.js";
 
 test("two listeners can join, manage private queues, skip idempotently and reconnect", { timeout: 20_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-integration-"));
   const setId = "00000000-0000-4000-8000-000000000011";
-  await writeFile(path.join(directory, "soundspin.json"), JSON.stringify({ rooms: {}, privateLibraries: { alice: { picks: [], sets: [{ id: setId, name: "Fixture set", savedAt: 1, tracks: [
+  const lockedRoom = { id: "locked-room", name: "Locked fixture", ownerUserId: "password-user", moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
+    passwordProtected: true, settings: {}, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
+    playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
+  await writeFile(path.join(directory, "soundspin.json"), JSON.stringify({ rooms: { "locked-room": lockedRoom }, roomPasswords: { "locked-room": await hashRoomPassword("correct-secret") }, privateLibraries: { alice: { picks: [], sets: [{ id: setId, name: "Fixture set", savedAt: 1, tracks: [
     { provider: "youtube", providerId: "abcdefghijk", title: "Existing" },
     { provider: "youtube", providerId: "savedTrack1", title: "First saved pick" },
     { provider: "youtube", providerId: "unavailable", title: "Unavailable pick" },
@@ -48,6 +52,8 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     server.once("exit", (code) => { clearTimeout(timer); reject(new Error(`Local test server exited (${code})`)); });
   });
   assert.equal((await fetch(`${url}/api/health`)).status, 200);
+  assert.deepEqual(await (await fetch(`${url}/api/ready`)).json(), { ok: true });
+  assert.equal((await fetch(`${url}/api/admin/runtime`)).status, 401);
   const missing = await fetch(`${url}/api/not-a-real-endpoint`);
   assert.equal(missing.status, 404);
   assert.ok((await missing.json() as { error: string }).error);
@@ -77,6 +83,21 @@ test("two listeners can join, manage private queues, skip idempotently and recon
   assert.ok(joins.every((result) => result.ok));
   assert.equal(aliceState.room.ownerUserId, bobState.room.ownerUserId);
   assert.equal(bobState.users.length, 2);
+  await t.test("room password attempt capacity survives another socket and reconnect", async () => {
+    const first = await connect(); const second = await connect();
+    const attempt = (client: Socket, id: string, password: string) => action(client, "room:join", {
+      roomId: "locked-room", password, user: { id, name: id, avatarSeed: id }
+    });
+    for (let index = 0; index < 20; index++) {
+      const rejected = await attempt(index % 2 ? first : second, "password-user", "wrong-secret");
+      assert.equal(rejected.ok, false); assert.match(rejected.error || "", /incorrect/);
+    }
+    first.disconnect(); const reconnected = await connect();
+    const limited = await attempt(reconnected, "password-user", "correct-secret");
+    assert.equal(limited.ok, false); assert.match(limited.error || "", /five minutes/);
+    assert.equal((await attempt(second, "different-account", "correct-secret")).ok, true);
+    second.disconnect(); reconnected.disconnect();
+  });
   await t.test("live chat uses admitted room sockets, stamps authors and deduplicates uncertain retries", async (t) => {
     const outsider = await connect();
     let outsiderMessages = 0; let ownMessages = 0;
@@ -200,6 +221,20 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     assert.deepEqual(bobState.room, bobRoomBefore);
   });
   const endedTrack = aliceState.room.playback.track!.id;
+  await t.test("a failed skip never changes live playback or becomes persisted on rejoin", async () => {
+    const before = structuredClone(aliceState.room);
+    const blockedWriter = path.join(directory, "soundspin.tmp.json");
+    await mkdir(blockedWriter);
+    assert.equal((await join(alice, "alice")).ok, false);
+    assert.equal((await action(alice, "chat:typing", { roomId: "integration-room", typing: { active: true } })).ok, true);
+    try {
+      assert.equal((await action(alice, "queue:next", { trackId: endedTrack })).ok, false);
+    } finally { await rmdir(blockedWriter); }
+    assert.equal((await join(alice, "alice")).ok, true);
+    assert.deepEqual(aliceState.room, before);
+    assert.equal((await join(bob, "bob")).ok, true);
+    assert.equal(bobState.room.playback.track!.id, endedTrack);
+  });
   assert.equal((await action(bob, "vibe:vote", { trackId: endedTrack, value: 1 })).ok, true);
   assert.equal(bobState.room.vibe?.votes.bob, 1);
   assert.equal((await action(alice, "playback:update", { trackId: endedTrack, playing: false, position: 4 })).ok, true);

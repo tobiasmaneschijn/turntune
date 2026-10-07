@@ -4,6 +4,7 @@ import express from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadStoredChatMessage, mountChatHistoryRoutes } from './chat-history.js'
 import { createChatRelay } from './chat-relay.js'
+import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
 
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 const rows = Array.from({ length: 45 }, (_, index) => ({ id: id(index + 1), created_at: '2026-10-06T10:00:00.000001+00:00',
@@ -55,14 +56,14 @@ function database() {
     } } }) as SupabaseClient,
   }))
 }
-async function withRoutes(run: (base: string, db: Awaited<ReturnType<typeof database>>, admission: { allowed: boolean; checks: number }) => Promise<void>) {
+async function withRoutes(run: (base: string, db: Awaited<ReturnType<typeof database>>, admission: { allowed: boolean; checks: number }) => Promise<void>, writePolicy?: ChatWritePolicy) {
   const app = express()
   const db = await database()
   const admission = { allowed: true, checks: 0 }
   mountChatHistoryRoutes(app, { client: db.client, getUserId: async (request) => request.headers.authorization === 'Bearer valid' ? 'alice' : null,
     canReadRoom: async (_user, room) => { admission.checks++; return admission.allowed && room === 'lounge' },
     canWriteRoom: async (_user, room) => { admission.checks++; return admission.allowed && room === 'lounge' },
-    getUser: async () => ({ id: 'alice', name: 'Trusted Alice', avatarSeed: 'alice' }) })
+    getUser: async () => ({ id: 'alice', name: 'Trusted Alice', avatarSeed: 'alice' }), writePolicy })
   const server = app.listen(0, '127.0.0.1')
   await new Promise<void>((resolve) => server.once('listening', resolve))
   const address = server.address() as { port: number }
@@ -129,7 +130,7 @@ test('fresh admission is rechecked after access is revoked, and absent authorize
 })
 
 const post = (body: unknown, token = 'valid') => ({ method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-const message = () => ({ id: id(100), content: 'Stored original', type: 'text', createdAt: '2026-10-06T10:00:00.001Z', user: { id: 'forged', name: 'Spoofed admin', isAppAdmin: true }, mentions: [] })
+const message = () => ({ id: id(100), content: 'Stored original', type: 'text', createdAt: new Date().toISOString(), user: { id: 'forged', name: 'Spoofed admin', isAppAdmin: true }, mentions: [] })
 
 test('message and reaction writes own their JSON parser and gate every mutation before database queries', async () => {
   await withRoutes(async (base, db, admission) => {
@@ -265,3 +266,41 @@ test('durable UUID lookup distinguishes an absent row from unavailable storage a
     await assert.rejects(loadStoredChatMessage(broken, id(999)), /Database lookup failed/)
   })
 })
+
+test('HTTP timestamps cannot bypass relay bounds, but verified old durable retries survive without inserting again', async () => {
+  await withRoutes(async (base, db) => {
+    const endpoint = `${base}/api/rooms/lounge/chat/messages`;
+    for (const date of ['9999-12-31T00:00:00.000Z', new Date(Date.now() - 86_400_001).toISOString()]) {
+      assert.equal((await fetch(endpoint, post({ ...message(), createdAt: date }))).status, 400);
+    }
+    assert.equal(db.writes.length, 0);
+    const original = { ...message(), createdAt: '2000-01-01T00:00:00.000Z' };
+    db.records.push({ ...rows[0], id: original.id, user_id: 'alice', content: original.content, message_type: 'text', created_at: original.createdAt, mentions: [] });
+    assert.equal((await fetch(endpoint, post(original))).status, 200);
+    assert.equal(db.writes.length, 0);
+  });
+});
+
+test('HTTP and live transports share rate capacity without double charging accepted messages and reaction UUIDs', async () => {
+  const policy = createChatWritePolicy();
+  await withRoutes(async (base, db) => {
+    const relay = createChatRelay({ writePolicy: policy, getMembership: () => ({ room: { id: 'lounge' }, user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' } }),
+      canWriteRoom: async () => true, loadReply: async () => ({ id: id(1), content: 'Original', type: 'text', user: { id: 'alice', name: 'Alice' } }),
+      loadMessageById: messageId => loadStoredChatMessage(db.client, messageId), emitToRoom: () => {} });
+    const originals = Array.from({ length: 20 }, (_, n) => ({ ...message(), id: id(300 + n) }));
+    for (const original of originals) {
+      assert.equal((await relay.handle('socket', 'message', { roomId: 'lounge', message: original })).ok, true);
+      assert.equal((await fetch(`${base}/api/rooms/lounge/chat/messages`, post(original))).status, 200);
+    }
+    assert.equal((await fetch(`${base}/api/rooms/lounge/chat/messages`, post({ ...message(), id: id(400) }))).status, 429);
+    assert.equal((await fetch(`${base}/api/rooms/lounge/chat/messages`, post(originals[0]))).status, 200);
+    assert.equal((await relay.handle('socket', 'message', { roomId: 'lounge', message: originals[0] })).ok, true);
+    for (let n = 0; n < 60; n++) {
+      const reaction = { id: id(500 + n), action: 'add', messageId: id(1), emoji: '❤️' };
+      assert.equal((await fetch(`${base}/api/rooms/lounge/chat/reactions`, post(reaction))).status, 200);
+      assert.equal((await relay.handle('socket', 'reaction', { roomId: 'lounge', reaction })).ok, true);
+    }
+    assert.equal((await fetch(`${base}/api/rooms/lounge/chat/reactions`, post({ id: id(600), action: 'add', messageId: id(1), emoji: '❤️' }))).status, 429);
+    assert.equal((await fetch(`${base}/api/rooms/lounge/chat/reactions`, post({ id: id(500), action: 'add', messageId: id(1), emoji: '❤️' }))).status, 200);
+  }, policy);
+});

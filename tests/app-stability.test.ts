@@ -37,13 +37,13 @@ test("socket requests report timeouts and malformed replies and retain success m
       assert.equal(ms, 15_000);
       return { emit(_event: string, _payload: unknown, callback: Function) { callback(null, response); } };
     } };
-    requestSocketAction(client, "queue:add", {}, (reply) => { result = reply; });
+    requestSocketAction(client, "queue:add", { provider: "youtube", providerId: "abcdefghijk", title: "Track" }, (reply) => { result = reply; });
     assert.equal((result as { ok: boolean }).ok, Boolean(response && "ok" in response));
   }
   let timeoutResult: { ok: boolean } | undefined;
   requestSocketAction({ connected: true, timeout() {
     return { emit(_event: string, _payload: unknown, callback: Function) { callback(new Error("timeout")); } };
-  } }, "queue:add", {}, (reply) => { timeoutResult = reply; });
+  } }, "queue:add", { provider: "youtube", providerId: "abcdefghijk", title: "Track" }, (reply) => { timeoutResult = reply; });
   assert.equal(timeoutResult?.ok, false);
 });
 

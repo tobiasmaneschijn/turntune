@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { requestJson } from "../lib/authenticated-http";
 import {
   ArrowLeft,
   Archive,
@@ -107,17 +108,7 @@ const impactLabels: Record<AdminFeedback["impact"], string> = {
 };
 
 async function adminApi<T>(path: string, accessToken: string, init?: RequestInit) {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers
-    }
-  });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "The admin request failed.");
-  return payload;
+  return requestJson<T>(path, { ...init, accessToken, errorMessage: "The admin request failed." });
 }
 
 function formatDate(value: string, includeTime = true) {
@@ -154,22 +145,30 @@ export function AdminDashboard({
   const [draftNote, setDraftNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const tokenRef = useRef(accessToken); tokenRef.current = accessToken;
+  const loadControllerRef = useRef<AbortController | null>(null);
+  const activeRef = useRef(true);
 
   const loadDashboard = async () => {
+    loadControllerRef.current?.abort();
+    const controller = new AbortController(); loadControllerRef.current = controller;
     setLoading(true);
     setError("");
     try {
-      const payload = await adminApi<AdminDashboardData>("/api/admin/dashboard", accessToken);
+      const payload = await requestJson<AdminDashboardData>("/api/admin/dashboard", { accessToken: tokenRef.current, signal: controller.signal,
+        validate: (value): value is AdminDashboardData => Boolean(value && typeof value === "object" && "metrics" in value && value.metrics &&
+          "feedback" in value && Array.isArray(value.feedback) && "rooms" in value && Array.isArray(value.rooms) && "activity" in value && Array.isArray(value.activity)) });
+      if (!activeRef.current || controller !== loadControllerRef.current) return;
       setData(payload);
       setSelectedId((current) => current && payload.feedback.some((item) => item.id === current) ? current : null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
+      if (activeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
     } finally {
-      setLoading(false);
+      if (activeRef.current && controller === loadControllerRef.current) setLoading(false);
     }
   };
 
-  useEffect(() => { void loadDashboard(); }, [accessToken]);
+  useEffect(() => { activeRef.current = true; void loadDashboard(); return () => { activeRef.current = false; loadControllerRef.current?.abort(); }; }, [currentUser.id]);
 
   const filteredFeedback = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -214,10 +213,11 @@ export function AdminDashboard({
     try {
       const payload = await adminApi<{
         feedback: { id: string; status: FeedbackStatus; adminNote: string; updatedAt: string };
-      }>(`/api/admin/feedback/${selectedFeedback.id}`, accessToken, {
+      }>(`/api/admin/feedback/${selectedFeedback.id}`, tokenRef.current, {
         method: "PATCH",
         body: JSON.stringify({ status: draftStatus, adminNote: draftNote })
       });
+      if (!activeRef.current) return;
       setData((current) => current ? {
         ...current,
         metrics: {
@@ -233,9 +233,9 @@ export function AdminDashboard({
           : item)
       } : current);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not update feedback.");
+      if (activeRef.current) setError(saveError instanceof Error ? saveError.message : "Could not update feedback.");
     } finally {
-      setSaving(false);
+      if (activeRef.current) setSaving(false);
     }
   };
 

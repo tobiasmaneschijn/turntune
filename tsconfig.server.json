@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist-server",
-    "rootDir": "server"
+    "rootDir": "."
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "shared/**/*.ts"]
 }

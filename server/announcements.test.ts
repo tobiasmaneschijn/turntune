@@ -22,7 +22,7 @@ test("expiry registry cancels superseded notes and persists the current expiry",
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
   const state = { ...room(), id: "room" };
   const expired: string[] = [];
-  const registry = new AnnouncementExpiryRegistry(async (value) => { expired.push(value.id); });
+  const registry = new AnnouncementExpiryRegistry(async (value) => { value.announcement = null; expired.push(value.id); });
   t.after(() => registry.clear());
   const first = changeAnnouncement(state, "owner", { expectedId: null, text: "First", expiresInMinutes: 1 });
   registry.watch(state);

@@ -13,7 +13,9 @@ import "../styles/playback-qol.css";
 import { SoundCloudPlayer } from "./SoundCloudPlayer";
 import { SpotifyPlayer } from "./SpotifyPlayer";
 import { AppleMusicPlayer } from "./AppleMusicPlayer";
-import { YouTubePlayer, type PlayerStatus } from "./YouTubePlayer";
+import { YouTubePlayer } from "./YouTubePlayer";
+import type { PlayerStatus } from "../provider-playback";
+import { requestJson } from "../lib/authenticated-http";
 import { socket } from "../socket";
 import { requestSocketAction } from "../socket-request";
 import type { Provider, RoomSnapshot } from "../types";
@@ -274,6 +276,8 @@ export function NowPlaying({
   });
   const [syncRevision, setSyncRevision] = useState(0);
   const [playbackError, setPlaybackError] = useState("");
+  const [providerPlaybackError, setProviderPlaybackError] = useState("");
+  const localPlaybackError = playbackError || providerPlaybackError;
   const [connectionError, setConnectionError] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
   const [syncFeedback, setSyncFeedback] = useState("");
@@ -287,6 +291,7 @@ export function NowPlaying({
   const identityRef = useRef(identity);
   const statusIdentityRef = useRef("");
   const accessTokenRef = useRef(accessToken);
+  const connectionRequestRef = useRef<AbortController | null>(null);
   accessTokenRef.current = accessToken;
   identityRef.current = identity;
   const Youtube = providerPlayers?.youtube || YouTubePlayer;
@@ -295,10 +300,12 @@ export function NowPlaying({
   const Apple = providerPlayers?.apple || AppleMusicPlayer;
 
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
+  useEffect(() => () => connectionRequestRef.current?.abort(), []);
   useEffect(() => { if (volume > 0) lastAudibleVolumeRef.current = volume; }, [volume]);
   useEffect(() => {
     pendingCommandRef.current = "";
     setPendingCommand("");
+    setProviderPlaybackError("");
     syncStartedRef.current = null;
     setSyncFeedback("");
     if (statusIdentityRef.current !== identity) setPlayerStatus({ ready: false, buffering: false, currentTime: 0, duration: 0 });
@@ -317,7 +324,7 @@ export function NowPlaying({
     }
   }, [identity, playback.position, playback.playing, playback.updatedAt, track?.id]);
   const handleError = useCallback((message: string) => {
-    if (aliveRef.current && identityRef.current === identity) setPlaybackError(message);
+    if (aliveRef.current && identityRef.current === identity) setProviderPlaybackError(message);
   }, [identity]);
 
   useEffect(() => {
@@ -336,20 +343,22 @@ export function NowPlaying({
   useEffect(() => {
     setFallbackApprovedTrackId("");
     setPlaybackError("");
+    setProviderPlaybackError("");
     playbackErrorNotifiedRef.current = "";
   }, [playback.track?.id]);
 
   const loadConnections = useCallback(() => {
     if (!accessToken) return;
     const requestToken = accessToken;
+    connectionRequestRef.current?.abort();
+    const controller = new AbortController();
+    connectionRequestRef.current = controller;
     setConnectionError("");
-    void fetch("/api/music/connections", { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then(async (response) => {
-        const payload = await response.json() as {
-          spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
-          apple?: { configured?: boolean };
-        };
-        if (!response.ok) throw new Error("Could not load music connections.");
+    void requestJson<{
+      spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
+      apple?: { configured?: boolean };
+    }>("/api/music/connections", { accessToken, signal: controller.signal, errorMessage: "Could not load music connections." })
+      .then((payload) => {
         if (!aliveRef.current || accessTokenRef.current !== requestToken) return;
         setConnections({
           loaded: true,
@@ -360,7 +369,7 @@ export function NowPlaying({
         });
       })
       .catch(() => {
-        if (aliveRef.current && accessTokenRef.current === requestToken) setConnectionError("Could not check your music connections. Try again.");
+        if (!controller.signal.aborted && aliveRef.current && accessTokenRef.current === requestToken) setConnectionError("Could not check your music connections. Try again.");
       });
   }, [accessToken]);
 
@@ -368,16 +377,15 @@ export function NowPlaying({
 
   const handleSpotifyConnectionLost = useCallback((message: string) => {
     loadConnections();
-    setPlaybackError(message);
+    setProviderPlaybackError(message);
   }, [loadConnections]);
 
   const connectSpotify = useCallback(() => {
     if (!accessToken) return;
-    void fetch(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    }).then(async (response) => {
-      const payload = await response.json() as { url?: string; error?: string };
-      if (!response.ok || !payload.url) throw new Error(payload.error || "Could not connect Spotify.");
+    void requestJson<{ url?: string }>(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
+      accessToken, errorMessage: "Could not connect Spotify."
+    }).then((payload) => {
+      if (!payload.url) throw new Error("Could not connect Spotify.");
       location.assign(payload.url);
     }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
   }, [accessToken]);
@@ -386,6 +394,7 @@ export function NowPlaying({
     if (!accessToken) return;
     void fetch("/api/spotify/connection", {
       method: "DELETE",
+      signal: AbortSignal.timeout(15_000),
       headers: { Authorization: `Bearer ${accessToken}` }
     }).then((response) => {
       if (!response.ok) throw new Error("Could not disconnect Spotify.");
@@ -426,6 +435,7 @@ export function NowPlaying({
 
   const syncPlayback = () => {
     setPlaybackError("");
+    setProviderPlaybackError("");
     syncStartedRef.current = Date.now();
     setSyncFeedback("Sync requested…");
     window.dispatchEvent(new Event("soundspin:playback-sync"));
@@ -472,7 +482,7 @@ export function NowPlaying({
   const providerName = effectiveProvider ? providerLabel(effectiveProvider) : playbackPreference === "source" ? "Room source" : providerLabel(preferredProvider);
   const feedback = playbackFeedback({
     connected: roomConnected, roomPlaying: playback.playing, status: playerStatus,
-    error: playbackError, provider: providerName, muted: volume === 0,
+    error: localPlaybackError, provider: providerName, muted: volume === 0,
     fallback: fallbackNeedsApproval ? "ask" : fallbackSuppressed ? "silent" : undefined,
     needsConnection: effectiveProvider === "spotify" && !spotifyReady
   });
@@ -493,7 +503,7 @@ export function NowPlaying({
     checkedProvider === "spotify" && connections.loaded && !spotifyReady ? "needs-connection" :
     !track ? "idle" : playerStatus.ready ? "ready" : "loading";
   const audioState: NowPlayingLocalState["audioState"] = !track ? "quiet" : volume === 0 ? "muted" : fallbackSuppressed ? "suppressed" :
-    Boolean(playbackError) ? "error" : fallbackNeedsApproval || (playback.playing && playerStatus.playing === false) ? "needs-activation" :
+    Boolean(localPlaybackError) ? "error" : fallbackNeedsApproval || (playback.playing && playerStatus.playing === false) ? "needs-activation" :
     playerStatus.playing === true && !playerStatus.buffering ? "playing" :
     !playback.playing ? "paused" : "loading";
   useEffect(() => {
@@ -512,11 +522,11 @@ export function NowPlaying({
   }, [providerFallback, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id]);
 
   useEffect(() => {
-    const message = playbackError;
+    const message = localPlaybackError;
     if (!message || !userSettings.notifications.playbackErrors || playbackErrorNotifiedRef.current === message) return;
     playbackErrorNotifiedRef.current = message;
     notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:playback-error:${track?.id}:${message}`, title: "Lydman playback error", body: message, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
-  }, [playbackError, userSettings.notifications.playbackErrors, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id, track?.id]);
+  }, [localPlaybackError, userSettings.notifications.playbackErrors, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id, track?.id]);
 
   return (
     <>
@@ -688,7 +698,7 @@ export function NowPlaying({
           <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to change room playback." : isDj ? "You’re on air · your controls affect the room." : canControlPlayback ? "Moderator controls affect the room." : "The current DJ controls the room. Volume and mute affect only your device."}</p>
           {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" onClick={onOpenSettings}><SettingsIcon /> Playback source: {providerName}{playbackPreference === "spotify-desktop" ? " Desktop" : ""} · Settings</Button>}
           {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
-          {playbackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{playbackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
+          {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
           {connectionError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>Retry connection check</Button></div>}
           </div>
           </div>

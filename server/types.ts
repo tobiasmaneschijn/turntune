@@ -1,60 +1,13 @@
-export type Provider = "youtube" | "spotify" | "apple" | "soundcloud";
+import type { RoomBase, Track, Room as PublicRoom } from "../shared/types.js";
+export * from "../shared/types.js";
 
-export interface User {
-  id: string;
-  name: string;
-  avatarSeed: string;
-  avatarKey?: string;
-  avatarUrl?: string;
-  isAppAdmin?: boolean;
+/** Authoritative room state. Its private queues must never cross the snapshot boundary. */
+export interface Room extends RoomBase {
+  djQueues: Record<string, Track[]>;
+  /** Legacy persisted shape, consumed by normalization. */
+  queue?: Track[];
 }
-
-export interface SoundSpinProfile {
-  user_id: string;
-  display_name: string;
-  is_app_admin: boolean;
-  bio: string;
-  avatar_key: string;
-  avatar_url: string | null;
-  avatar_path: string | null;
-  theme_key: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface SoundSpinProfileOption {
-  key: string;
-  kind: "avatar" | "theme";
-  name: string;
-  metadata: { gradient?: string; imageUrl?: string; description?: string };
-}
-
-export interface Track {
-  id: string;
-  canonicalId?: string;
-  isrc?: string;
-  provider: Provider;
-  providerId: string;
-  title: string;
-  artist?: string;
-  artworkUrl?: string;
-  permalinkUrl?: string;
-  durationMs?: number;
-  mappings?: Partial<Record<Provider, ProviderTrackMapping>>;
-  addedBy: User;
-  addedAt: number;
-  /** Set by the authoritative radio when a track starts, never from enqueue time. */
-  playedAt?: number;
-}
-
-export interface ProviderTrackMapping {
-  providerId: string;
-  permalinkUrl?: string;
-  artworkUrl?: string;
-  storefront?: string;
-  matchMethod?: "source" | "isrc" | "exact-metadata" | "fuzzy";
-}
-
+export type SnapshotRoom = PublicRoom;
 export interface MusicProviderConnection {
   userId: string;
   provider: "spotify";
@@ -63,96 +16,4 @@ export interface MusicProviderConnection {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface Playback {
-  track: Track | null;
-  playing: boolean;
-  position: number;
-  updatedAt: number;
-}
-
-export interface VibeState {
-  trackId: string;
-  votes: Record<string, -1 | 1>;
-}
-
-export type DjAccess = "everyone" | "roles";
-
-export interface RoomAnnouncement {
-  id: string;
-  text: string;
-  authorId: string;
-  updatedAt: number;
-  expiresAt: number | null;
-}
-
-export interface RoomSettings {
-  djAccess?: DjAccess;
-  [key: string]: unknown;
-}
-
-export interface Room {
-  id: string;
-  name: string;
-  ownerUserId: string;
-  moderatorUserIds: string[];
-  djRoleUserIds: string[];
-  isPublic: boolean;
-  passwordProtected: boolean;
-  settings: RoomSettings;
-  announcement?: RoomAnnouncement | null;
-  /** User currently on air. Normally matches playback.track.addedBy.id. */
-  djUserId: string | null;
-  /** Rotating lineup. The next candidate is at index 0. */
-  djQueueUserIds: string[];
-  /** Authoritative private queues. Server-only; never serialize this map. */
-  djQueues: Record<string, Track[]>;
-  /** Legacy shared queue, consumed once by normalizeRadioState. */
-  queue?: Track[];
-  history: Track[];
-  playback: Playback;
-  vibe: VibeState | null;
-  createdAt: number;
-}
-
-export type RoomRole = "owner" | "moderator" | "dj" | "member";
-
-export type SnapshotRoom = Omit<Room, "djQueues" | "queue"> & {
-  /** The requesting listener's private queue. */
-  queue: Track[];
-};
-
-export interface RoomDirectoryEntry {
-  description?: string;
-  slug: string;
-  name: string;
-  ownerId: string;
-  isPublic: boolean;
-  passwordProtected: boolean;
-  isFavorite: boolean;
-  role: RoomRole | null;
-  listenerCount: number;
-  createdAt: string;
-  updatedAt: string;
-  preview?: { title: string; artist?: string; artworkUrl?: string; provider?: Provider; playing: boolean; observedAt: number };
-}
-
-export interface RoomSnapshot {
-  /** Personalized room state; `room.queue` belongs to the recipient only. */
-  room: SnapshotRoom;
-  /** Users with a live socket. Used for presence/listener count. */
-  users: User[];
-  /** DJ identities, including disconnected DJs during their grace period. */
-  djUsers: User[];
-  serverTime: number;
-}
-
-export interface RoomPresence {
-  roomId: string;
-  /** Users with a live socket. Used for presence/listener count. */
-  users: User[];
-  /** DJ identities, including disconnected DJs during their grace period. */
-  djUsers: User[];
-  serverTime: number;
 }

@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   coalesceReactionEvent,
   mergeChatMessages,
+  recentChatMessages,
   type ChatMedia,
   type ChatMention,
   type ChatMessage,
@@ -24,9 +25,10 @@ interface UseRealtimeChatProps {
   user: User
   onConnected?: () => void
   transport?: ChatSessionFactory
+  onBeforeMessage?: (message: ChatMessage, messages: ChatMessage[]) => void
 }
 
-export function useRealtimeChat({ client, roomName, user, onConnected, transport }: UseRealtimeChatProps) {
+export function useRealtimeChat({ client, roomName, user, onConnected, transport, onBeforeMessage }: UseRealtimeChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
@@ -34,15 +36,24 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const sessionRef = useRef<RealtimeChatSession | null>(null)
   const connectedCallbackRef = useRef(onConnected)
   connectedCallbackRef.current = onConnected
+  const beforeMessageRef = useRef(onBeforeMessage)
+  beforeMessageRef.current = onBeforeMessage
+  const messageBufferRef = useRef<ChatMessage[]>([])
 
   useEffect(() => {
     setMessages([])
+    messageBufferRef.current = []
     setReactionEvents([])
     setTypingUserIds([])
     setIsConnected(false)
     const callbacks: RealtimeChatCallbacks = {
-      onMessage: (message) => setMessages((current) => mergeChatMessages(current, [message])),
-      onReaction: (event) => setReactionEvents((current) => coalesceReactionEvent(current, event)),
+      onMessage: (message) => {
+        const next = mergeChatMessages(messageBufferRef.current, [message])
+        beforeMessageRef.current?.(message, next)
+        messageBufferRef.current = recentChatMessages(next)
+        setMessages(messageBufferRef.current)
+      },
+      onReaction: (event) => setReactionEvents((current) => coalesceReactionEvent(current, event).slice(-4000)),
       onTyping: setTypingUserIds,
       onConnection: (connected) => {
         if (connected) {
@@ -91,8 +102,8 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     return message
   }, [user.id])
 
-  const broadcastReaction = useCallback(async (event: Omit<ChatReactionEvent, 'id'>) => {
-    await sessionRef.current?.sendReaction({ ...event, id: crypto.randomUUID() })
+  const broadcastReaction = useCallback(async (event: Omit<ChatReactionEvent, 'id'> & { id?: string }) => {
+    await sessionRef.current?.sendReaction({ ...event, id: event.id || crypto.randomUUID() })
   }, [])
 
   const broadcastTyping = useCallback(async (active: boolean) => {

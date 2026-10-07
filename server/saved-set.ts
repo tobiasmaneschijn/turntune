@@ -77,6 +77,7 @@ export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: L
 export class SetImportRegistry {
   private entries = new Map<string, { room: Room; userId: string; setId: string; expiresAt: number; result: Promise<SetImportOutcome> }>();
   constructor(private readonly ttlMs = 10 * 60_000) {}
+  releaseRoom(roomId: string) { for (const [key, entry] of this.entries) if (entry.room.id === roomId) this.entries.delete(key); }
   run(room: Room, userId: string, requestId: string, setId: string, operation: (markCommitted: (outcome: SetImportOutcome) => void) => Promise<SetImportOutcome>, now = Date.now()) {
     for (const [key, value] of this.entries) if (value.expiresAt <= now) this.entries.delete(key);
     const key = `${room.id}:${userId}:${requestId}`;

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Music2 } from "lucide-react";
-import type { Playback, ProviderTrackMapping } from "../types";
+import type { ProviderTrackMapping } from "../types";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
-import type { PlayerStatus } from "./YouTubePlayer";
+import { PlaybackCommandLifecycle, type PlaybackCommandLease, type ProviderPlaybackProps } from "../provider-playback";
 import { createPlayerApiLoader } from "../player-api-loader";
 import { PlaybackEndTracker } from "../playback-progress";
 import { spotifyPlaybackSignature, spotifySyncActions, spotifyTargetPositionMs, type SpotifyPlaybackObservation } from "../spotify-playback-sync";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
+import { requestJson } from "../lib/authenticated-http";
 
 interface SpotifySdkState {
   paused: boolean;
@@ -47,6 +48,7 @@ let spotifyWebDeviceIdSingleton = "";
 let spotifyWebOwner: object | null = null;
 let spotifyWebPauseTimer: number | undefined;
 let spotifyWebTokenProvider: ((callback: (token: string) => void) => void) | null = null;
+const spotifyDesktopLifecycles = new Map<string, PlaybackCommandLifecycle>();
 
 function removeSpotifyListeners(player: SpotifySdkPlayer | null) {
   for (const event of ["ready", "not_ready", "initialization_error", "authentication_error", "account_error", "playback_error", "autoplay_failed"]) {
@@ -74,6 +76,7 @@ if (import.meta.hot) {
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
+  if (!init?.method || init.method === "GET") return requestJson<T>(path, { ...init, accessToken, errorMessage: "Spotify request failed." });
   const response = await fetch(path, {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(15_000),
@@ -129,19 +132,13 @@ export function SpotifyPlayer({
   onStatus,
   onConnectionLost,
   onError
-}: {
-  playback: Playback;
+}: ProviderPlaybackProps & {
   mapping?: ProviderTrackMapping;
   mode: "web" | "desktop";
-  isDj: boolean;
-  volume: number;
   accessToken: string;
   preferredDeviceId?: string;
   resumeAfterReconnect: boolean;
-  onEnded: () => void;
-  onStatus: (status: PlayerStatus) => void;
   onConnectionLost: (message: string) => void;
-  onError?: (message: string) => void;
 }) {
   const playerRef = useRef<SpotifySdkPlayer | null>(null);
   const deviceIdRef = useRef("");
@@ -157,6 +154,8 @@ export function SpotifyPlayer({
   const modeRef = useRef(mode);
   const generationRef = useRef(0);
   const commandsRef = useRef(Promise.resolve());
+  const desktopLeaseRef = useRef<PlaybackCommandLease | null>(null);
+  const ownedDesktopUriRef = useRef("");
   const wakePendingRef = useRef(false);
   const manualSyncRequestedRef = useRef(false);
   const recoverWebPlayerRef = useRef<() => void>(() => undefined);
@@ -183,9 +182,10 @@ export function SpotifyPlayer({
     const currentPlayback = playbackRef.current;
     const currentMapping = mappingRef.current;
     const signature = spotifyPlaybackSignature(currentPlayback, currentMapping, currentDeviceId);
-    const current = () => generationRef.current === generation && currentDeviceId === deviceIdRef.current &&
+    const desktopLease = modeRef.current === "desktop" ? desktopLeaseRef.current : null;
+    const current = () => (!desktopLease || desktopLease.current()) && generationRef.current === generation && currentDeviceId === deviceIdRef.current &&
       signature === spotifyPlaybackSignature(playbackRef.current, mappingRef.current, deviceIdRef.current);
-    const task = commandsRef.current.then(async () => {
+    const reconcile = async () => {
       if (!current() || !currentDeviceId) return;
       if (!force && suppressedReconnectRef.current === signature) return;
       if (!force && !wake && commandRef.current === signature) return;
@@ -209,6 +209,11 @@ export function SpotifyPlayer({
       const actions = spotifySyncActions(currentPlayback, uri, observation, force, Date.now(), checkpointChanged ? 0 : undefined);
       for (const action of actions) {
         if (!current()) return;
+        if (desktopLease && uri && (action.action === "play" || action.action === "resume")) {
+          // Record ownership before the network request: cleanup may start while
+          // Spotify is still applying an uninterruptible play command.
+          ownedDesktopUriRef.current = uri;
+        }
         const positionMs = action.action === "seek" || action.action === "play" ? spotifyTargetPositionMs(currentPlayback) : undefined;
         if (player && action.action !== "play") {
           if (action.action === "seek") await player.seek(positionMs!);
@@ -232,9 +237,11 @@ export function SpotifyPlayer({
       }
       if (current()) {
         commandRef.current = signature;
+        if (desktopLease && uri && currentPlayback.playing) ownedDesktopUriRef.current = uri;
         setError("");
       }
-    }).catch((cause) => {
+    };
+    const task = commandsRef.current.then(() => desktopLease ? desktopLease.enqueue(reconcile) : reconcile()).catch((cause) => {
       if (!current()) return;
       commandRef.current = "";
       const message = cause instanceof Error ? cause.message : "Could not sync Spotify playback.";
@@ -249,7 +256,7 @@ export function SpotifyPlayer({
   reconcilePlaybackRef.current = reconcilePlayback;
 
   useEffect(() => {
-    if (error) onError?.(error);
+    onError?.(error);
   }, [error, onError]);
 
   useEffect(() => {
@@ -309,6 +316,10 @@ export function SpotifyPlayer({
     setError("");
     commandRef.current = "";
     if (mode === "desktop") {
+      let selectedDevice = "";
+      let lifecycle: PlaybackCommandLifecycle | undefined;
+      let lease: PlaybackCommandLease | undefined;
+      ownedDesktopUriRef.current = "";
       void api<{ devices?: Array<{ id: string | null; name: string; type: string; is_active: boolean; is_restricted: boolean }> }>(
         "/api/spotify/devices",
         accessTokenRef.current
@@ -322,6 +333,11 @@ export function SpotifyPlayer({
           available.find((device) => device.type === "Computer") ||
           available[0];
         if (!selected?.id) throw new Error("Open Spotify on your computer or another device, then try again.");
+        selectedDevice = selected.id;
+        lifecycle = spotifyDesktopLifecycles.get(selected.id) || new PlaybackCommandLifecycle();
+        spotifyDesktopLifecycles.set(selected.id, lifecycle);
+        lease = lifecycle.claim();
+        desktopLeaseRef.current = lease;
         storeValue("soundspin-spotify-device-id", selected.id);
         deviceIdRef.current = selected.id;
         setDeviceId(selected.id);
@@ -332,9 +348,31 @@ export function SpotifyPlayer({
         onConnectionLostRef.current(message);
       });
       return () => {
+        const ownedUri = ownedDesktopUriRef.current;
+        const sessionToken = accessTokenRef.current;
         alive = false;
         generationRef.current += 1;
         deviceIdRef.current = "";
+        desktopLeaseRef.current = null;
+        if (!lease || !lifecycle) return;
+        const releasedLifecycle = lifecycle;
+        void lease.release(async () => {
+          if (!ownedUri) return;
+          // Pause only the recording/device this adapter controlled, after all
+          // in-flight commands; leave playback moved elsewhere by the user alone.
+          const { state } = await api<{ state?: { device?: { id?: string }; item?: { uri?: string } } | null }>(
+            "/api/spotify/playback", sessionToken);
+          if (releasedLifecycle.owned || state?.device?.id !== selectedDevice || state.item?.uri !== ownedUri) return;
+          await api("/api/spotify/playback", sessionToken, {
+            method: "POST", body: JSON.stringify({ action: "pause", deviceId: selectedDevice })
+          });
+        }).catch(() => {
+          // Provider cleanup is best effort if the session/device went offline.
+        }).finally(() => {
+          if (!releasedLifecycle.owned && spotifyDesktopLifecycles.get(selectedDevice) === releasedLifecycle) {
+            spotifyDesktopLifecycles.delete(selectedDevice);
+          }
+        });
       };
     }
 
@@ -535,9 +573,13 @@ export function SpotifyPlayer({
         if (isDeviceUnavailable(cause)) recoverWebPlayerRef.current();
       });
     } else if (deviceId) {
-      void api("/api/spotify/playback", accessTokenRef.current, {
-        method: "POST",
-        body: JSON.stringify({ action: "volume", deviceId, volumePercent: volume })
+      const lease = desktopLeaseRef.current;
+      const sessionToken = accessTokenRef.current;
+      void lease?.enqueue(async () => {
+        await api("/api/spotify/playback", sessionToken, {
+          method: "POST",
+          body: JSON.stringify({ action: "volume", deviceId, volumePercent: volume })
+        });
       }).catch((cause) => {
         setError(cause instanceof Error ? cause.message : "Could not set Spotify volume.");
       });

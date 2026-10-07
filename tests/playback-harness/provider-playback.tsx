@@ -11,15 +11,24 @@ const calls: { method: string; value?: unknown }[] = [];
 const statusCallbacks: number[] = [];
 const statusSamples: (PlayerStatus & { version: number })[] = [];
 const endCallbacks: number[] = [];
+const errors: string[] = [];
 const positionCallbacks: ((position: number) => void)[] = [];
 const pausedCallbacks: { callback: (paused: boolean) => void; paused: boolean }[] = [];
 const listeners = new Map<string, (event?: unknown) => void>();
+const readyCallbacks: ((event?: unknown) => void)[] = [];
+const loadCallbacks: (() => void)[] = [];
+let deferWidgetReady = new URLSearchParams(location.search).has("defer-ready");
+let deferWidgetLoad = false;
+let widgetCreations = 0;
 let widgetPaused = true;
 let deferPaused = false;
 let now = 100_000;
 Date.now = () => now;
 let callbackVersion = 0;
 let accessToken = "initial-token";
+let syncRevision = 0;
+let configurations = 0;
+let failNextPlay = false;
 let playback: Playback = {
   track: {
     id: "room-track",
@@ -37,29 +46,44 @@ let playback: Playback = {
 };
 
 const playbackStates = { playing: 2, paused: 3, stopped: 4, ended: 5, completed: 10 };
-const music = {
+function createMusic() { return {
   isAuthorized: true,
   currentPlaybackTime: 10,
   currentPlaybackDuration: 180,
   playbackState: playbackStates.playing as number | string,
-  authorize: async () => "music-user-token",
+  volume: 1,
+  authorize: async () => { calls.push({ method: "authorize" }); return "music-user-token"; },
   setQueue: async (value: unknown) => { calls.push({ method: "setQueue", value }); },
-  seekToTime: async (value: number) => { calls.push({ method: "seek", value }); },
-  play: async () => { calls.push({ method: "play" }); },
+  async seekToTime(value: number) { calls.push({ method: "seek", value }); this.currentPlaybackTime = value; },
+  play: async () => {
+    calls.push({ method: "play" });
+    if (failNextPlay) { failNextPlay = false; throw new Error("Temporary Apple playback interruption"); }
+  },
   pause: async () => { calls.push({ method: "pause" }); }
-};
+}; }
+let music = createMusic();
 window.MusicKit = {
   PlaybackStates: playbackStates,
-  configure: () => { calls.push({ method: "configure" }); },
+  configure: () => {
+    calls.push({ method: "configure" });
+    if (configurations++ > 0) music = createMusic();
+  },
   getInstance: () => music
 };
 
 const widget = {
   bind(event: string, listener: (event?: unknown) => void) {
     listeners.set(event, listener);
-    if (event === "ready") queueMicrotask(() => listener());
+    if (event === "ready") {
+      readyCallbacks.push(listener);
+      if (!deferWidgetReady) queueMicrotask(() => listener());
+    }
   },
-  load(_url: string, options: { callback?: () => void }) { queueMicrotask(() => options.callback?.()); },
+  load(url: string, options: { callback?: () => void }) {
+    calls.push({ method: "load", value: url });
+    if (deferWidgetLoad && options.callback) loadCallbacks.push(options.callback);
+    else queueMicrotask(() => options.callback?.());
+  },
   play() { calls.push({ method: "play" }); },
   pause() { calls.push({ method: "pause" }); },
   seekTo(value: number) {
@@ -74,7 +98,7 @@ const widget = {
     else callback(widgetPaused);
   }
 };
-window.SC = { Widget: Object.assign(() => widget, {
+window.SC = { Widget: Object.assign(() => { widgetCreations++; return widget; }, {
   Events: { READY: "ready", LOAD_PROGRESS: "load", PLAY_PROGRESS: "progress", SEEK: "seek", FINISH: "finish", ERROR: "error" }
 }) };
 
@@ -82,10 +106,11 @@ function render() {
   const version = callbackVersion;
   const common = {
     playback,
-    syncRevision: 0,
+    syncRevision,
     isDj: true,
     volume: 50,
     onEnded: () => endCallbacks.push(version),
+    onError: (message: string) => errors.push(message),
     onStatus: (status: PlayerStatus) => {
       statusCallbacks.push(version);
       statusSamples.push({ ...status, version });
@@ -102,6 +127,14 @@ Object.assign(window, {
     statusCallbacks,
     statusSamples,
     endCallbacks,
+    errors,
+    inspectMusic: () => ({ volume: music.volume, authorized: music.isAuthorized }),
+    failNextMusicPlay: () => { failNextPlay = true; },
+    get widgetCreations() { return widgetCreations; },
+    get pendingLoads() { return loadCallbacks.length; },
+    resolveReady(index: number) { readyCallbacks[index]?.(); },
+    deferWidgetLoads(value: boolean) { deferWidgetLoad = value; },
+    resolveLoad() { loadCallbacks.shift()?.(); },
     get pendingPositions() { return positionCallbacks.length; },
     get pendingPaused() { return pausedCallbacks.length; },
     setNow(value: number) { now = value; },
@@ -117,10 +150,12 @@ Object.assign(window, {
       music.currentPlaybackTime = progress;
       music.playbackState = playbackStates[state as keyof typeof playbackStates] ?? state;
     },
-    render(options: { accessToken?: string; callbackVersion?: number; position?: number }) {
+    render(options: { accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string }) {
       accessToken = options.accessToken ?? accessToken;
       callbackVersion = options.callbackVersion ?? callbackVersion;
-      if (options.position !== undefined) playback = { ...playback, position: options.position, updatedAt: now };
+      syncRevision = options.syncRevision ?? syncRevision;
+      if (options.position !== undefined || options.playing !== undefined) playback = { ...playback, position: options.position ?? playback.position, playing: options.playing ?? playback.playing, updatedAt: now };
+      if (options.trackId && playback.track) playback = { ...playback, track: { ...playback.track, id: options.trackId, permalinkUrl: `https://soundcloud.com/test/${options.trackId}` }, updatedAt: now };
       render();
     },
     unmount() { root.unmount(); }

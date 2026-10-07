@@ -201,8 +201,8 @@ export class QueueUndoRegistry {
     return transaction.receipt;
   }
 
-  beginRemove(room: Room, userId: string, trackId: string, now = Date.now()) {
-    const queue = privateQueue(room, userId);
+  beginRemove(room: Room, userId: string, trackId: string, now = Date.now(), draft = room) {
+    const queue = privateQueue(draft, userId);
     const index = queue.findIndex((track) => track.id === trackId);
     if (index < 0) throw new Error("That waiting track is no longer in your queue.");
     for (const [token, entry] of this.entries) if (entry.expiresAt <= now || (entry.room === room && entry.userId === userId)) this.entries.delete(token);
@@ -223,11 +223,11 @@ export class QueueUndoRegistry {
       rollback: (): QueueRollbackResult => {
         if (settled) return settled;
         if (this.entries.get(token) === entry) this.entries.delete(token);
-        const current = privateQueue(room, userId);
+        const current = privateQueue(draft, userId);
         const same = (item: Track) => item.id === track.id || sameRecording(item, track);
         // A save can yield while another tab re-adds, reorders, or advances.
         // Restore only this removal; never overwrite its current queue/turn.
-        if ((room.playback.track && same(room.playback.track)) || room.history.some((item) => item.id === track.id) || current.some(same)) {
+        if ((draft.playback.track && same(draft.playback.track)) || draft.history.some((item) => item.id === track.id) || current.some(same)) {
           return settled = { status: "superseded", changed: false, undoAvailable: false };
         }
         insertAtSurvivingAnchor(current, track, entry);
@@ -242,7 +242,7 @@ export class QueueUndoRegistry {
     return transaction.result;
   }
 
-  beginRestore(room: Room, userId: string, token: string, now = Date.now()) {
+  beginRestore(room: Room, userId: string, token: string, now = Date.now(), draft = room) {
     const entry = this.entries.get(token);
     if (!entry || entry.expiresAt <= now) {
       if (entry?.expiresAt && entry.expiresAt <= now) this.entries.delete(token);
@@ -250,11 +250,11 @@ export class QueueUndoRegistry {
     }
     if (entry.room !== room || entry.userId !== userId) throw new Error("This Undo belongs to a different room or account.");
     if (entry.phase !== "removed") throw new Error("This queue change is still being saved. Wait before trying Undo again.");
-    if (!canJoinDjQueue(room, userId) || !room.djQueueUserIds.includes(userId)) throw new Error("Join the DJ lineup with permission before restoring this track.");
-    const queue = privateQueue(room, userId);
+    if (!canJoinDjQueue(draft, userId) || !draft.djQueueUserIds.includes(userId)) throw new Error("Join the DJ lineup with permission before restoring this track.");
+    const queue = privateQueue(draft, userId);
     const same = (track: Track) => track.id === entry.track.id || sameRecording(track, entry.track);
-    if ((room.playback.track && same(room.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
-    if (room.history.some((track) => track.id === entry.track.id)) throw new Error("That queue item has already played and cannot be restored.");
+    if ((draft.playback.track && same(draft.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
+    if (draft.history.some((track) => track.id === entry.track.id)) throw new Error("That queue item has already played and cannot be restored.");
     // Stable surviving neighbors preserve current edits; no old numeric index.
     entry.phase = "restoring";
     const position = insertAtSurvivingAnchor(queue, entry.track, entry);
@@ -269,9 +269,9 @@ export class QueueUndoRegistry {
       },
       rollback: (rollbackNow = Date.now()): QueueRollbackResult => {
         if (settled) return settled;
-        const current = privateQueue(room, userId);
+        const current = privateQueue(draft, userId);
         const index = current.indexOf(entry.track);
-        if (index < 0 || room.playback.track?.id === entry.track.id || room.history.some((track) => track.id === entry.track.id)) {
+        if (index < 0 || draft.playback.track?.id === entry.track.id || draft.history.some((track) => track.id === entry.track.id)) {
           if (this.entries.get(token) === entry) this.entries.delete(token);
           return settled = { status: "superseded", changed: false, undoAvailable: false };
         }
@@ -286,10 +286,19 @@ export class QueueUndoRegistry {
   }
 
   revoke(token: string) { this.entries.delete(token); }
+  releaseRoom(roomId: string) { for (const [token, entry] of this.entries) if (entry.room.id === roomId) this.entries.delete(token); }
 }
 
 export function sameRecording(first: Pick<Track, "provider" | "providerId" | "canonicalId">, second: Pick<Track, "provider" | "providerId" | "canonicalId">) {
   return (first.provider === second.provider && first.providerId === second.providerId) || Boolean(first.canonicalId && first.canonicalId === second.canonicalId);
+}
+
+/** Role/settings changes update lineup and playback in the same durable command. */
+export function pruneUnauthorizedDjs(room: Room) {
+  if (room.settings.djAccess !== "roles") return;
+  const previousDj = room.djUserId;
+  room.djQueueUserIds = room.djQueueUserIds.filter(id => canJoinDjQueue(room, id));
+  if (previousDj && !room.djQueueUserIds.includes(previousDj)) advanceRadio(room);
 }
 
 /** Append a pre-resolved set in order and report every skipped item. */

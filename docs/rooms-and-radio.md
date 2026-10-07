@@ -39,8 +39,9 @@ flowchart LR
 
 The Node server is authoritative for the radio. Browsers send commands, but
 they never directly decide the next track, role eligibility, or shared playback
-state. The server validates each command, mutates the room, persists it, and
-then broadcasts a new personalized snapshot.
+state. The server validates each command against a private draft of the last
+committed room, persists the draft, and then publishes a personalized snapshot.
+Failed persistence leaves the authoritative room and playback unchanged.
 
 This is currently a **single active Node instance** design. Presence maps,
 cached DJ identities, disconnect timers, and Socket.IO fan-out live in one
@@ -52,13 +53,24 @@ and durable grace scheduling before horizontally scaling the server.
 
 | File | Responsibility |
 | --- | --- |
-| `server/index.ts` | HTTP and Socket.IO entry point, validation, authorization, presence, grace-period lifecycle, and command handlers. |
+| `server/index.ts` | Composition root, admission, presence, timer lifecycle, room metadata/profile routes, readiness and diagnostics. |
+| `server/room-actions.ts` | Admitted DJ, queue, playback, role, note and vote commands. |
+| `server/room-command-service.ts` | Ordered durable mutation followed by personalized broadcast. |
+| `server/music-routes.ts`, `server/admin-routes.ts` | Provider/catalog and administrative HTTP boundaries. |
+| `server/spotify-oauth-routes.ts` | One-use browser-bound linking flow and validated internal return destinations. |
+| `server/socket-credentials.ts` | Verified JWT expiry checks and idle socket disconnect. |
+| `server/room-entry-limiter.ts`, `server/room-password.ts` | Account/peer admission budgets and asynchronous legacy-compatible scrypt verification. |
+| `server/idle-rooms.ts`, `server/runtime-metrics.ts` | Idle cache lifetime and bounded operation diagnostics. |
 | `server/radio.ts` | Radio state normalization, DJ eligibility, round-robin advancement, private queue access, and snapshot privacy. |
 | `server/store.ts` | Live room cache, Supabase reads/writes, room directory, roles, favorites, profiles, and ordered persistence. |
-| `server/types.ts` | Authoritative server room and snapshot shapes. |
+| `server/types.ts` | Authoritative private room extension of shared room fields. |
+| `shared/types.ts`, `shared/room-protocol.ts` | Public snapshots, acknowledgements and runtime command schemas shared by client and server. |
 | `server/radio.test.ts` | Focused tests for rotation, privacy, legacy migration, and disconnect timers. |
-| `src/types.ts` | Client mirror of the safe snapshot types. It intentionally has no `djQueues` map. |
-| `src/App.tsx` | Socket lifecycle, room screen, personalized snapshot consumption, player controls, and DJ queue UI. |
+| `src/types.ts` | Re-exports shared public types, which have no `djQueues` map. |
+| `src/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
+| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
+| `src/provider-playback.ts`, `src/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
+| `src/App.tsx` | Screen composition, room view, player controls and DJ queue UI. |
 | `src/components/RoomSettingsDialog.tsx` | Room metadata, DJ access mode, moderator, and DJ-role controls. |
 | `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
 | `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
@@ -373,9 +385,25 @@ Room data is split deliberately:
 On load, first-class columns and membership rows override duplicated fields in
 the JSON document. They are the authorization and directory source of truth.
 
-`Store.saveRoom` updates the live cache immediately and serializes persistence
-through `writeChain`. Await its returned promise before acknowledging a command;
-otherwise a slow older write could win over a newer radio transition.
+`Store.changeRoom` orders the complete validate/persist/commit sequence per room.
+An operation receives a cloned draft; snapshots keep reading the committed
+object while writes are pending. A failure discards the draft and preserves
+retry receipts. Role and settings changes use the service-only
+`soundspin_commit_room` SQL function to commit metadata/membership and radio
+state in one transaction. Ordinary radio changes update only state and its
+timestamp. Unrelated Supabase rooms progress independently. The local fallback
+retains one atomic file queue because all rooms share a file.
+
+`Store.saveRoom` is retained for bootstrap/fixture compatibility and immediately
+publishes its supplied object. Admitted handlers must use `changeRoom`, usually
+through `RoomCommandService`, which broadcasts only after persistence succeeds.
+
+JWT expiry is enforced both at command execution and by idle disconnect timers.
+Protected-room password attempts share a twenty-attempt/five-minute account/room
+budget across reconnects. General joins share account and peer budgets.
+Same-room refresh failures preserve an existing admitted session. Idle Supabase
+rooms release their process cache after ten minutes once writes and DJ grace
+are settled; JSON-mode rooms remain cached as their local source of truth.
 
 The server uses a secret Supabase client. The secret key must never be exposed
 through a `VITE_` variable, browser bundle, snapshot, or log. Browser access to

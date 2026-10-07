@@ -307,3 +307,64 @@ test("a delayed wake result cannot resync an old recording after the room change
   expect(commands[0]).toMatchObject({ source: "api", action: "play", spotifyUri: "spotify:track:track-b" });
   expect((await snapshot(page)).state?.track_window.current_track.uri).toBe("spotify:track:track-b");
 });
+
+test("desktop source fallback stops the owned recording", async ({ page }) => {
+  await openPlayer(page, "?mode=desktop");
+  await page.evaluate(() => window.playbackHarness.fallback());
+  await expect.poll(async () => (await snapshot(page)).state?.paused).toBe(true);
+  expect(await mutations(page)).toContainEqual({ source: "api", action: "pause", deviceId: "mock-desktop-device" });
+});
+
+test("desktop cleanup waits for an in-flight play before pausing the device", async ({ page }) => {
+  await openPlayer(page, "?mode=desktop");
+  await page.evaluate(() => {
+    window.playbackHarness.deferNextPlay();
+    window.playbackHarness.updatePlayback({ trackId: "track-b", position: 20 });
+  });
+  await expect.poll(async () => (await snapshot(page)).pendingPlay).toBe(true);
+  await page.evaluate(() => window.playbackHarness.fallback());
+  await settle(page);
+  expect((await mutations(page)).some((command) => command.action === "pause")).toBe(false);
+  await page.evaluate(() => window.playbackHarness.resolvePendingPlay());
+  await expect.poll(async () => (await snapshot(page)).state?.paused).toBe(true);
+  const commands = await mutations(page);
+  expect(commands.map((command) => command.action)).toEqual(["play", "pause"]);
+  expect((await snapshot(page)).state?.track_window.current_track.uri).toBe("spotify:track:track-b");
+});
+
+test("desktop ownership transfer does not let delayed cleanup pause the new adapter", async ({ page }) => {
+  await openPlayer(page, "?mode=desktop");
+  await page.evaluate(() => {
+    window.playbackHarness.deferNextPlay();
+    window.playbackHarness.updatePlayback({ trackId: "track-b", position: 20 });
+  });
+  await expect.poll(async () => (await snapshot(page)).pendingPlay).toBe(true);
+  await page.evaluate(() => window.playbackHarness.fallback());
+  await settle(page);
+  await page.evaluate(() => window.playbackHarness.mount());
+  await settle(page);
+  await page.evaluate(() => window.playbackHarness.resolvePendingPlay());
+  await settle(page);
+  await expect.poll(async () => (await snapshot(page)).state?.track_window.current_track.uri).toBe("spotify:track:track-b");
+  expect((await mutations(page)).some((command) => command.action === "pause")).toBe(false);
+  expect((await snapshot(page)).state?.paused).toBe(false);
+});
+
+test("desktop departure preserves unrelated playback the user started", async ({ page }) => {
+  await openPlayer(page, "?mode=desktop");
+  await page.evaluate(() => {
+    window.playbackHarness.setSdkState({ uri: "spotify:track:personal-recording" });
+    window.playbackHarness.fallback();
+  });
+  await settle(page);
+  expect((await mutations(page)).some((command) => command.action === "pause")).toBe(false);
+  expect((await snapshot(page)).state?.paused).toBe(false);
+});
+
+test("successful Spotify recovery clears the error reported to the parent", async ({ page }) => {
+  await openPlayer(page);
+  await page.evaluate(() => window.playbackHarness.emit("playback_error", { message: "Temporary playback interruption" }));
+  await expect.poll(async () => (await snapshot(page)).errors.at(-1)).toBe("Temporary playback interruption");
+  await page.evaluate(() => window.playbackHarness.sync());
+  await expect.poll(async () => (await snapshot(page)).errors.at(-1)).toBe("");
+});

@@ -1,0 +1,566 @@
+import express from "express";
+import { z } from "zod";
+import type { SoundCloudApi, SoundCloudSearchResult } from "./soundcloud.js";
+import type { SpotifyApi } from "./spotify.js";
+import type { SpotifyAccounts } from "./spotify-accounts.js";
+import type { AppleMusicApi } from "./apple-music.js";
+import type { GiphyApi } from "./giphy.js";
+import { BoundedCache } from "./bounded-cache.js";
+import { runtimeMetrics } from "./runtime-metrics.js";
+
+export interface MusicRouteOptions {
+  authEnabled: boolean;
+  getUserId: (request: express.Request) => Promise<string | null>;
+  youtubeApiKey?: string;
+  soundCloudApi: Pick<SoundCloudApi, "configured" | "searchTracks" | "resolveTrack">;
+  spotifyApi: Pick<SpotifyApi, "configured" | "searchTracks" | "getTrack" | "request">;
+  spotifyAccounts: Pick<SpotifyAccounts, "configured" | "connected" | "disconnect" | "getAccessToken" | "invalidate">;
+  appleMusicApi: Pick<AppleMusicApi, "configured" | "storefront" | "searchTracks" | "getTrack" | "getDeveloperToken">;
+  giphyApi: Pick<GiphyApi, "configured" | "gifs">;
+  fetchImpl?: typeof fetch;
+}
+interface YouTubeSearchResult { id: string; title: string; channel: string; thumbnail: string; duration?: string; durationMs?: number }
+const youtubeSearchSchema = z.object({
+  q: z.string().trim().min(2).max(100)
+});
+
+const soundCloudSearchSchema = youtubeSearchSchema;
+const spotifySearchSchema = youtubeSearchSchema;
+const appleMusicSearchSchema = youtubeSearchSchema.extend({
+  storefront: z.string().regex(/^[a-z]{2}$/i).optional()
+});
+const giphySearchSchema = z.object({
+  q: z.string().trim().max(100).optional().default("")
+});
+
+const spotifyResolveSchema = z.object({
+  url: z.string().trim().max(2048)
+});
+
+const appleMusicResolveSchema = z.object({
+  url: z.string().trim().url().max(2048),
+  storefront: z.string().regex(/^[a-z]{2}$/i).optional()
+});
+
+const spotifyPlaybackSchema = z.object({
+  action: z.enum(["transfer", "play", "pause", "resume", "seek", "volume"]),
+  deviceId: z.string().min(1).max(200).optional(),
+  spotifyUri: z.string().regex(/^spotify:track:[A-Za-z0-9]{22}$/).optional(),
+  positionMs: z.number().int().min(0).max(24 * 60 * 60 * 1000).optional(),
+  volumePercent: z.number().int().min(0).max(100).optional()
+}).superRefine((value, context) => {
+  if (value.action === "play" && !value.spotifyUri) {
+    context.addIssue({ code: "custom", path: ["spotifyUri"], message: "A Spotify track is required." });
+  }
+  if (value.action === "transfer" && !value.deviceId) {
+    context.addIssue({ code: "custom", path: ["deviceId"], message: "A Spotify device is required." });
+  }
+  if (value.action === "volume" && value.volumePercent === undefined) {
+    context.addIssue({ code: "custom", path: ["volumePercent"], message: "A volume level is required." });
+  }
+});
+
+const soundCloudResolveSchema = z.object({
+  url: z.string().trim().url().max(2048)
+}).superRefine((value, context) => {
+  const hostname = new URL(value.url).hostname.toLowerCase();
+  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
+    context.addIssue({ code: "custom", path: ["url"], message: "Enter a valid SoundCloud track URL." });
+  }
+});
+
+function decodeYouTubeText(value: string) {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function formatYouTubeDuration(value?: string) {
+  if (!value) return undefined;
+  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return undefined;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3] || 0);
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function youtubeDurationMs(value?: string) {
+  if (!value) return undefined;
+  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return undefined;
+  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+}
+
+function spotifyTrackId(value: string) {
+  if (/^[A-Za-z0-9]{22}$/.test(value)) return value;
+  const uri = value.match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
+  if (uri) return uri;
+  try {
+    const url = new URL(value);
+    if (url.hostname === "open.spotify.com" || url.hostname.endsWith(".spotify.com")) {
+      return url.pathname.match(/^\/(?:intl-[a-z]{2}\/)?track\/([A-Za-z0-9]{22})/i)?.[1] || null;
+    }
+  } catch {
+    // Not a Spotify URL.
+  }
+  return null;
+}
+
+function appleMusicTrack(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "music.apple.com" && !url.hostname.endsWith(".music.apple.com")) return null;
+    const storefront = url.pathname.split("/").filter(Boolean)[0]?.toLowerCase();
+    const id = url.searchParams.get("i") || url.pathname.match(/\/(?:song|album)\/[^/]+\/(\d+)$/)?.[1];
+    return id && /^\d+$/.test(id) ? { id, storefront } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function mountMusicRoutes(app: express.Express, options: MusicRouteOptions) {
+  const { authEnabled, youtubeApiKey, soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi } = options;
+  const getApiUserId = options.getUserId;
+  const fetchImpl = options.fetchImpl || fetch;
+  const youtubeSearchCache = new BoundedCache<{ expiresAt: number; results: YouTubeSearchResult[] }>(500);
+  const soundCloudSearchCache = new BoundedCache<{ expiresAt: number; results: SoundCloudSearchResult[] }>(500);
+  const spotifySearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<SpotifyApi["searchTracks"]>> }>(500);
+  const appleMusicSearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<AppleMusicApi["searchTracks"]>> }>(500);
+  const youtubeSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
+  const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
+  const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
+  app.use(["/api/youtube", "/api/soundcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], (_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
+  const trackedProvider = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const started = Date.now();
+    try { const result = await operation(); runtimeMetrics.observe("provider_request", Date.now() - started, result instanceof Response && !result.ok); return result; }
+    catch (error) { runtimeMetrics.observe("provider_request", Date.now() - started, true); throw error; }
+  };
+function consumeProviderSearchLimit(request: express.Request) {
+  const now = Date.now();
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const current = providerSearchLimits.get(rateKey);
+  const limit = !current || current.resetAt <= now
+    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+    : current;
+  if (limit.count >= 40) return false;
+  limit.count += 1;
+  providerSearchLimits.set(rateKey, limit);
+  return true;
+}
+
+async function spotifyForUser<T>(userId: string, operation: (accessToken: string) => Promise<T>) {
+  try {
+    return await trackedProvider(async () => operation(await spotifyAccounts.getAccessToken(userId)));
+  } catch (error) {
+    if ((error as Error & { status?: number }).status !== 401) throw error;
+    spotifyAccounts.invalidate(userId);
+    return trackedProvider(async () => operation(await spotifyAccounts.getAccessToken(userId)));
+  }
+}
+
+app.get("/api/youtube/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!youtubeApiKey) {
+    return response.status(503).json({ error: "YouTube search is not configured yet." });
+  }
+
+  const parsed = youtubeSearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  }
+
+  const now = Date.now();
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const currentLimit = youtubeSearchLimits.get(rateKey);
+  const limit = !currentLimit || currentLimit.resetAt <= now
+    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+    : currentLimit;
+  if (limit.count >= 30) {
+    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
+  }
+  limit.count += 1;
+  youtubeSearchLimits.set(rateKey, limit);
+
+  const cacheKey = parsed.data.q.toLocaleLowerCase();
+  const cached = youtubeSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return response.json({ results: cached.results });
+  }
+
+  try {
+    const searchParams = new URLSearchParams({
+      key: youtubeApiKey,
+      part: "snippet",
+      type: "video",
+      videoEmbeddable: "true",
+      safeSearch: "moderate",
+      maxResults: "12",
+      q: parsed.data.q
+    });
+    const searchResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/search?${searchParams}`, { signal: AbortSignal.timeout(10_000) }));
+    const searchPayload = await searchResponse.json() as {
+      error?: { message?: string };
+      items?: Array<{
+        id: { videoId?: string };
+        snippet: {
+          title: string;
+          channelTitle: string;
+          thumbnails: {
+            medium?: { url: string };
+            default?: { url: string };
+          };
+        };
+      }>;
+    };
+    if (!searchResponse.ok) {
+      throw new Error(searchPayload.error?.message || "YouTube search failed.");
+    }
+
+    const items = (searchPayload.items || []).filter((item) => item.id.videoId);
+    const ids = items.map((item) => item.id.videoId!).join(",");
+    const durations = new Map<string, { label: string; milliseconds?: number }>();
+    if (ids) {
+      const videoParams = new URLSearchParams({
+        key: youtubeApiKey,
+        part: "contentDetails",
+        id: ids
+      });
+      const videoResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`, { signal: AbortSignal.timeout(10_000) }));
+      if (videoResponse.ok) {
+        const videoPayload = await videoResponse.json() as {
+          items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
+        };
+        for (const video of videoPayload.items || []) {
+          const duration = formatYouTubeDuration(video.contentDetails?.duration);
+          if (duration) durations.set(video.id, { label: duration, milliseconds: youtubeDurationMs(video.contentDetails?.duration) });
+        }
+      }
+    }
+
+    const results: YouTubeSearchResult[] = items.map((item) => ({
+      id: item.id.videoId!,
+      title: decodeYouTubeText(item.snippet.title),
+      channel: decodeYouTubeText(item.snippet.channelTitle),
+      thumbnail:
+        item.snippet.thumbnails.medium?.url ||
+        item.snippet.thumbnails.default?.url ||
+        `https://i.ytimg.com/vi/${item.id.videoId}/mqdefault.jpg`,
+      duration: durations.get(item.id.videoId!)?.label,
+      durationMs: durations.get(item.id.videoId!)?.milliseconds
+    }));
+    youtubeSearchCache.set(cacheKey, {
+      expiresAt: now + 5 * 60 * 1000,
+      results
+    });
+    response.json({ results });
+  } catch (error) {
+    console.error("YouTube search failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "YouTube search failed."
+    });
+  }
+});
+
+app.get("/api/soundcloud/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!soundCloudApi.configured) {
+    return response.status(503).json({ error: "SoundCloud search is not configured yet." });
+  }
+
+  const parsed = soundCloudSearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  }
+
+  const now = Date.now();
+  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const currentLimit = soundCloudSearchLimits.get(rateKey);
+  const limit = !currentLimit || currentLimit.resetAt <= now
+    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+    : currentLimit;
+  if (limit.count >= 30) {
+    return response.status(429).json({ error: "Too many searches. Please try again in a few minutes." });
+  }
+  limit.count += 1;
+  soundCloudSearchLimits.set(rateKey, limit);
+
+  const cacheKey = parsed.data.q.toLocaleLowerCase();
+  const cached = soundCloudSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return response.json({ results: cached.results });
+  }
+
+  try {
+    const results = await trackedProvider(() => soundCloudApi.searchTracks(parsed.data.q));
+    soundCloudSearchCache.set(cacheKey, {
+      expiresAt: now + 5 * 60 * 1000,
+      results
+    });
+    response.json({ results });
+  } catch (error) {
+    console.error("SoundCloud search failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "SoundCloud search failed."
+    });
+  }
+});
+
+app.get("/api/soundcloud/resolve", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!soundCloudApi.configured) {
+    return response.status(503).json({ error: "SoundCloud is not configured yet." });
+  }
+
+  const parsed = soundCloudResolveSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter a valid SoundCloud track URL." });
+  }
+
+  try {
+    response.json({ result: await trackedProvider(() => soundCloudApi.resolveTrack(parsed.data.url)) });
+  } catch (error) {
+    console.error("SoundCloud URL resolution failed", error);
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Could not resolve that SoundCloud URL."
+    });
+  }
+});
+
+app.get("/api/spotify/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!spotifyApi.configured) return response.status(503).json({ error: "Spotify is not configured yet." });
+  const parsed = spotifySearchSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many searches. Please try again shortly." });
+  const key = parsed.data.q.toLocaleLowerCase();
+  const cached = spotifySearchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
+  try {
+    const results = await trackedProvider(() => spotifyApi.searchTracks(parsed.data.q));
+    spotifySearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
+    response.json({ results });
+  } catch (error) {
+    console.error("Spotify search failed", error);
+    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify search failed." });
+  }
+});
+
+app.get("/api/spotify/resolve", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!spotifyApi.configured) return response.status(503).json({ error: "Spotify is not configured yet." });
+  const parsed = spotifyResolveSchema.safeParse(request.query);
+  const id = parsed.success ? spotifyTrackId(parsed.data.url) : null;
+  if (!id) return response.status(400).json({ error: "Enter a valid Spotify track URL or URI." });
+  try {
+    response.json({ result: await trackedProvider(() => spotifyApi.getTrack(id)) });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Spotify URL." });
+  }
+});
+
+app.get("/api/apple/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
+  const parsed = appleMusicSearchSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many searches. Please try again shortly." });
+  const storefront = parsed.data.storefront?.toLowerCase() || appleMusicApi.storefront;
+  const key = `${storefront}:${parsed.data.q.toLocaleLowerCase()}`;
+  const cached = appleMusicSearchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
+  try {
+    const results = await trackedProvider(() => appleMusicApi.searchTracks(parsed.data.q, 12, storefront));
+    appleMusicSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
+    response.json({ results });
+  } catch (error) {
+    console.error("Apple Music search failed", error);
+    response.status(502).json({ error: error instanceof Error ? error.message : "Apple Music search failed." });
+  }
+});
+
+app.get("/api/apple/resolve", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
+  const parsed = appleMusicResolveSchema.safeParse(request.query);
+  const resolved = parsed.success ? appleMusicTrack(parsed.data.url) : null;
+  if (!resolved) return response.status(400).json({ error: "Enter a valid Apple Music song URL." });
+  try {
+    response.json({
+      result: await trackedProvider(() => appleMusicApi.getTrack(
+        resolved.id,
+        parsed.success ? parsed.data.storefront?.toLowerCase() || resolved.storefront || appleMusicApi.storefront : appleMusicApi.storefront
+      ))
+    });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Apple Music URL." });
+  }
+});
+
+app.get("/api/giphy", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!giphyApi.configured) {
+    return response.status(503).json({ error: "GIPHY is not configured yet." });
+  }
+  const parsed = giphySearchSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "GIF searches must be 100 characters or fewer." });
+  }
+  if (!consumeProviderSearchLimit(request)) {
+    return response.status(429).json({ error: "Too many searches. Please try again shortly." });
+  }
+
+  try {
+    response.json({ results: await trackedProvider(() => giphyApi.gifs(parsed.data.q)) });
+  } catch (error) {
+    console.error("GIPHY request failed", error);
+    response.status(502).json({
+      error: error instanceof Error ? error.message : "Could not load GIFs."
+    });
+  }
+});
+
+app.get("/api/music/connections", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    const spotifyConnected = spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false;
+    let spotifyProfile: { displayName: string; product?: string } | null = null;
+    if (spotifyConnected) {
+      try {
+        const profile = await spotifyForUser(userId, (token) => spotifyApi.request<{
+          display_name?: string;
+          product?: string;
+        }>(token, "/me"));
+        spotifyProfile = { displayName: profile.display_name || "Spotify account", product: profile.product };
+      } catch {
+        // The saved connection remains useful even when profile metadata is temporarily unavailable.
+      }
+    }
+    response.json({
+      spotify: {
+        configured: spotifyAccounts.configured,
+        connected: spotifyConnected,
+        profile: spotifyProfile
+      },
+      apple: { configured: appleMusicApi.configured }
+    });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load music connections." });
+  }
+});
+
+app.delete("/api/spotify/connection", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    await spotifyAccounts.disconnect(userId);
+    response.status(204).end();
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not disconnect Spotify." });
+  }
+});
+
+app.get("/api/spotify/token", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    response.json({ accessToken: await spotifyAccounts.getAccessToken(userId) });
+  } catch (error) {
+    response.status(401).json({ error: error instanceof Error ? error.message : "Connect Spotify first." });
+  }
+});
+
+app.get("/api/spotify/devices", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    response.json(await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player/devices")));
+  } catch (error) {
+    response.status(502).json({ error: error instanceof Error ? error.message : "Could not load Spotify devices." });
+  }
+});
+
+app.get("/api/spotify/playback", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  try {
+    const state = await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player"));
+    response.json({ state });
+  } catch (error) {
+    response.status(502).json({ error: error instanceof Error ? error.message : "Could not read Spotify playback." });
+  }
+});
+
+app.post("/api/spotify/playback", express.json(), async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: "Authentication required." });
+  const parsed = spotifyPlaybackSchema.safeParse(request.body);
+  if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid playback command." });
+  const { action, deviceId, spotifyUri, positionMs, volumePercent } = parsed.data;
+  const device = deviceId ? `?${new URLSearchParams({ device_id: deviceId })}` : "";
+  try {
+    await spotifyForUser(userId, async (token) => {
+      if (action === "transfer") {
+        return spotifyApi.request(token, "/me/player", {
+          method: "PUT",
+          body: JSON.stringify({ device_ids: [deviceId], play: false })
+        });
+      }
+      if (action === "play") {
+        return spotifyApi.request(token, `/me/player/play${device}`, {
+          method: "PUT",
+          body: JSON.stringify({ uris: [spotifyUri], position_ms: positionMs || 0 })
+        });
+      }
+      if (action === "pause") return spotifyApi.request(token, `/me/player/pause${device}`, { method: "PUT" });
+      if (action === "resume") return spotifyApi.request(token, `/me/player/play${device}`, { method: "PUT" });
+      if (action === "volume") {
+        const params = new URLSearchParams({ volume_percent: String(volumePercent) });
+        if (deviceId) params.set("device_id", deviceId);
+        return spotifyApi.request(token, `/me/player/volume?${params}`, { method: "PUT" });
+      }
+      const params = new URLSearchParams({ position_ms: String(positionMs || 0) });
+      if (deviceId) params.set("device_id", deviceId);
+      return spotifyApi.request(token, `/me/player/seek?${params}`, { method: "PUT" });
+    });
+    response.status(204).end();
+  } catch (error) {
+    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify playback failed." });
+  }
+});
+
+app.get("/api/apple/token", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!appleMusicApi.configured) return response.status(503).json({ error: "Apple Music is not configured yet." });
+  try {
+    response.json({ developerToken: appleMusicApi.getDeveloperToken(), storefront: appleMusicApi.storefront });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : "Could not create an Apple Music token." });
+  }
+});
+
+}

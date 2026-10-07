@@ -28,6 +28,7 @@ import { readStoredValue, storeValue } from "../lib/browser-storage";
 import { TrackArtwork } from "./TrackArtwork";
 import { readRecentRoomVisits } from "../lib/room-visits";
 import "../styles/layout-completion.css";
+import { requestJson } from "../lib/authenticated-http";
 
 const directoryCache = new Map<string, RoomDirectoryEntry[]>();
 function readDirectoryPreferences(userId: string) {
@@ -49,17 +50,7 @@ interface RoomLobbyProps {
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers
-    }
-  });
-  const payload = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "Something went wrong.");
-  return payload;
+  return requestJson<T>(path, { ...init, accessToken });
 }
 
 export function RoomLobby({
@@ -103,12 +94,13 @@ export function RoomLobby({
   const [creating, setCreating] = useState(false);
   const [protectedRoom, setProtectedRoom] = useState<RoomDirectoryEntry | null>(null);
 
-  const loadRooms = useCallback(async () => {
+  const loadRooms = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++requestRef.current;
     setRefreshing(true);
     setError("");
     try {
-      const payload = await api<{ rooms: RoomDirectoryEntry[] }>("/api/rooms", accessToken);
+      const payload = await requestJson<{ rooms: RoomDirectoryEntry[] }>("/api/rooms", { accessToken, signal,
+        validate: (value): value is { rooms: RoomDirectoryEntry[] } => Boolean(value && typeof value === "object" && "rooms" in value && Array.isArray(value.rooms)) });
       if (requestId === requestRef.current) { setRooms(payload.rooms); directoryCache.set(currentUser.id, payload.rooms); setDirectoryLoaded(true); setNow(Date.now()); }
     } catch (loadError) {
       if (requestId === requestRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load rooms.");
@@ -130,8 +122,9 @@ export function RoomLobby({
     setFavoritePending(new Set());
     setLoading(!directoryCache.has(currentUser.id));
     setDirectoryLoaded(directoryCache.has(currentUser.id));
-    void loadRooms();
-    return () => { requestRef.current += 1; accountRef.current += 1; };
+    const controller = new AbortController();
+    void loadRooms(controller.signal);
+    return () => { requestRef.current += 1; accountRef.current += 1; controller.abort(); };
   }, [loadRooms]);
 
   const visibleRooms = useMemo(() => rooms.filter((room) =>

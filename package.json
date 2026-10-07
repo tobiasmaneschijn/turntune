@@ -8,8 +8,10 @@
     "dev:server": "tsx watch --env-file-if-exists=.env server/index.ts",
     "dev:web": "vite",
     "build": "npm run typecheck && tsc -p tsconfig.server.json && vite build",
-    "start": "node dist-server/index.js",
+    "start": "node dist-server/server/index.js",
     "test": "tsx --test tests/*.test.ts server/*.test.ts",
+    "test:sql": "node --test tests/*-rls.test.mjs tests/sql/check-chat-rls.mjs",
+    "test:production": "node --test tests/production-entrypoint-smoke.mjs",
     "test:signup": "tsx --test server/invite-signup.test.ts",
     "test:chat": "tsx --test tests/chat-*.test.ts",
     "test:feedback": "tsx --test tests/feedback-diagnostics.test.ts tests/feedback-agent-prompt.test.ts",
@@ -56,6 +58,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@playwright/test": "^1.62.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.13",

@@ -1,90 +1,117 @@
-# SoundSpin stability review — 6 October 2026
+# Architecture review and implementation — 7 October 2026
 
-This review covered the local codebase, automated tests, and an isolated browser
-preview. It improves the existing app without changing the deployed database,
-provider accounts, or music catalog configuration.
+The approved review has been implemented locally. Verification uses isolated
+storage, disposable PostgreSQL databases, fake provider SDKs and browser fixtures.
+No production migration, account change or deployment was performed.
 
-## Corrected defects
+## What is right
 
-| Area | Failure | Result |
-| --- | --- | --- |
-| Persistence | One rejected write blocked all following writes; saves captured mutable state too late | Saves preserve their requested state and order, and recover after errors |
-| Local storage | Room and provider credential writes raced one temporary file | Both use the same atomic write queue |
-| Rooms | Concurrent reads or first guest joins created separate live room objects | Loads share an object and guest creation reserves it synchronously |
-| Settings and profiles | Queued radio saves reverted settings; joining overwrote saved display names | Radio saves only radio state; saved identity and authoritative metadata survive |
-| Socket actions | Rejected async handlers were unhandled; pending controls lacked timeouts | Handlers catch failures and return a reply; client requests reject offline actions and expire |
-| Room lifecycle | A disconnected socket could reappear after loading; joins could complete out of order | Joins are serialized per connection and recheck presence around awaited work |
-| Authentication | Invite password was embedded in code; partial configuration enabled local mode | Signup uses the server environment; production and partial configuration fail closed |
-| Authentication UI | Failed bootstrap remained cached; recovery events were missed or reopened later | Configuration can retry, initialization retains recovery events, and completion survives refresh |
-| Playback | SDK failures poisoned initialization; old progress ended new songs; provider changes left audio running | SDKs retry, completion follows the current recording, and provider cleanup stops audio |
-| Provider accounts | Simultaneous refreshes raced token rotation; delayed refresh undid disconnect | Token refreshes share work and account changes serialize |
-| Catalogs | Normalization discarded non-Latin titles; Apple fallback selected other mixes | International titles are retained and counterpart matching requires the same recording |
-| Chat | Malformed events crashed rendering; callbacks crossed room lifetimes | Protocol validation and room-scoped transport isolate event handling |
-| Chat composer | Unconfirmed sends cleared drafts, duplicate submits and stale GIF responses were accepted | Delivery acknowledgements gate success, drafts survive errors, and searches cancel |
-| Chat history | Optional profile failures hid messages; older reply previews disappeared | Core history survives enrichment failures and missing replies load in a bounded query |
-| User recovery | Failed history had no retry; local-mode chat crashed the room | History retries/reloads after subscription, and local mode shows an unavailable-chat state |
-| HTTP API | Unknown endpoints and invalid JSON returned HTML or raw errors | API failures return consistent JSON without exposing internal errors |
+- The modular monolith suits this product. One Node process owns room decisions;
+  React renders personalized state; Supabase owns durable data and account identity.
+- `radio.ts` keeps rotation, private queues and normalization as testable domain
+  rules. `roomForListener` protects private picks at the snapshot boundary.
+- Provider-neutral recordings and per-listener playback let accounts use their
+  own entitlements without putting provider credentials into room state.
+- Live chat acknowledgement and durable history are distinct outcomes, with
+  immutable message UUIDs and explicit recovery for each failure.
+- Existing configuration fails closed in production; encrypted refresh tokens,
+  private media capabilities and account-owned library data have clear boundaries.
+- Deterministic provider/browser fixtures and a real Socket.IO integration test
+  exercise user behavior without relying on production services.
 
-## Code map
+## Implemented improvements
 
-- `src/hooks/use-app-auth.ts`: account bootstrap, subscriptions and retry.
-- `src/hooks/use-room-connection.ts`: room joins, credential handshakes and cleanup.
-- `src/socket-request.ts`: offline checks and bounded acknowledgements.
-- `src/chat/protocol.ts`: validation of untrusted live events and media links.
-- `src/chat/realtime.ts`: one room's live transport lifetime.
-- `src/chat/persistence.ts`: durable messages, reply previews and reactions.
-- `src/player-api-loader.ts`: shared, recoverable provider SDK loading.
-- `src/playback-progress.ts`: recording-specific completion detection.
-- `server/config.ts`: startup configuration requirements.
-- `server/socket-handler.ts`: async failure handling and join sequencing.
-- `server/store.ts`: persistence, cached rooms and authoritative metadata.
-- `server/radio.ts`: room normalization, private queues and DJ rotation.
+| Area | Result |
+| --- | --- |
+| Room writes | Commands validate private drafts in per-room order, persist and then publish. Failed saves leave playback, queues and authoritative cache unchanged. Unrelated Supabase rooms write independently. |
+| Room settings and roles | A service-only SQL function commits metadata or membership together with radio state. Permission changes prune the lineup in the same transaction. |
+| Lifecycle | Same-room refresh failure preserves admission; DJ joins committed during disconnect reconcile fresh account presence. Offline eviction retries failed saves. Idle durable-backed rooms release cache and associated timers/receipts. |
+| OAuth | Spotify linking binds one-use state to an HttpOnly browser nonce and checks same-origin internal return paths, including slash/backslash and control-character cases. |
+| Authentication | Verified JWT expiry gates commands and disconnects idle sockets. Room-entry budgets survive reconnects; asynchronous scrypt keeps legacy password hashes compatible. |
+| Chat writes | Live and durable paths share rate and fresh-timestamp policy. Original stored retries remain valid; shared operation UUIDs prevent duplicate charging. |
+| Feedback and admin data | Browser feedback submissions cannot forge administrative fields. SQL aggregates all activity rows into UTC days without API page truncation. |
+| Playback | Shared status/command contracts, explicit seek policy and owned-device cleanup. Apple developer credentials renew with room checkpoint restoration. Healthy measured playback clears provider attention errors while preserving command failures. |
+| Frontend coordination | Room session, profile restoration and immutable chat delivery/outbox lifetimes have separate controllers. Token rotation preserves dirty profile fields; successful retry clears only an unchanged original draft. Role controls reject offline/unadmitted actions and bound pending time. |
+| Protocol and HTTP | Shared public types and runtime command schemas reduce client/server drift. Common authenticated HTTP handling provides deadlines, aborts, JSON errors and response guards. |
+| Capacity and diagnostics | Bounded catalog/rate caches, 1,000-track waiting queues and 1,000-row chat windows. Admin-only operation timings, error counts and pending-command counts accompany liveness/readiness routes. |
+| Delivery verification | CI runs unit/integration, isolated SQL, production build and compiled-server smoke checks, plus five deterministic browser suites. |
+| Deployment hardening | Engine.IO is locked to 6.6.11, covering the transport-upgrade denial-of-service fix identified by its maintainer. Docker build context excludes local environment/credential files. |
 
-The main screen and server entry point still contain substantial composition
-and route logic. Further extraction should follow feature boundaries, preserve
-authorization checks, and come with integration coverage rather than moving
-code without changing its behavior.
+## Module boundaries
 
-## Validation
+`server/index.ts` is the composition root and live presence/admission lifecycle.
+`room-actions.ts` handles admitted commands; `room-command-service.ts` joins
+durable commit and personalized broadcast; `store.ts` owns persistence and stable
+committed room objects. `music-routes.ts`, `admin-routes.ts` and
+`spotify-oauth-routes.ts` isolate HTTP feature boundaries. `radio.ts` remains
+independent of HTTP and Socket.IO.
 
-`npm test` includes regression tests for failure recovery, concurrent saves and
-joins, stale playback events, token rotation, malformed chat payloads, history
-enrichment failures, SDK timeouts, and invalid preferences. The server integration
-test uses two real local Socket.IO clients to verify private queues, ownership,
-rotation, stale skips/seeks, API error responses, and reconnect grace.
+`shared/types.ts` defines safe snapshots and acknowledgements.
+`shared/room-protocol.ts` supplies command schemas for both sides. The server's
+private `Room` extends shared fields with `djQueues`; that map is never part of
+the public snapshot type.
 
-`npm run build` includes frontend and server type checking. GitHub Actions runs
-tests and the build on pushes and pull requests.
+On the frontend, `use-room-session.ts` owns route and connection/admission state,
+`use-app-profile.ts` owns account profile restoration, and `use-chat-delivery.ts`
+owns immutable sends, retries and completion. Provider components implement the
+shared playback lifecycle; `apple-music-session.ts` owns credential renewal.
 
-The browser preview verified local room entry, DJ joining, manual queue entry,
-skipping, and returning to a room with browser navigation. The preview uses
-temporary data and no account or provider credentials.
+## Verification
 
-## Remaining work and limits
+Run the complete checks from the repository root:
 
-1. **Private-room chat authorization is a security gap.** The existing
-   `soundspin_messages` and reaction read policies allow all authenticated users,
-   and live chat uses public Broadcast channels. Knowing a room slug bypasses the
-   room password for chat access. Input validation does not provide authorization.
-   Address database policies, authorized private Realtime channels, and the room
-   membership lifecycle together, then verify with at least two distinct accounts.
-   Public uploaded chat media also needs a deliberate privacy policy. No migration
-   was applied as part of this review, and password-protected chat must not be
-   treated as confidential until that work is completed.
-2. **Live provider and account verification remains necessary.** SDK and adapter
-   regressions are deterministic; Spotify/Apple entitlements, OAuth redirects,
-   browser autoplay and deployed Supabase policies require actual account testing.
-3. **Room coordination remains process-local.** Deploy one application instance.
-   Multiple replicas need shared presence/coordination and distributed ordering.
-4. **The frontend bundle remains large.** Feature-level lazy loading can reduce
-   initial downloads; the build currently reports a chunk-size warning.
+```bash
+npm test
+npm run test:sql
+npm run build
+npm run test:production
+npm run test:ui
+npm run test:ui:fixtures
+npm run test:ui:playback
+npm run test:ui:music-qol
+npm run test:ui:player-qol
+```
 
-## Deployment notes
+The SQL suites execute actual migrations and verify denied access, permitted
+service operations and transaction rollback. The compiled production smoke
+starts plain Node from an unrelated working directory, serves deep SPA links
+and entry assets, checks readiness and prevents external network calls. Browser
+checks cover desktop and mobile, including profile refresh, retry draft cleanup,
+room navigation, transcript rollover and provider lifecycle recovery.
 
-- Configure `SIGNUP_INVITE_PASSWORD` in the deployment environment; Compose now
-  forwards it. With no value, account creation is disabled.
-- Supply all four server Supabase values. Partial configuration is an error, and
-  production requires account services.
-- Restart frontend and server together: playback updates now carry the current
-  track ID so delayed controls cannot affect the next song.
-- Changes are local and have not been deployed.
+Final verification passed 270 unit/integration tests, all five SQL suites, the
+production build and compiled-server smoke. Browser suites passed 343 cases:
+24 general UI, 192 fixtures, 43 playback, 44 music and 40 player checks. The
+fixture suite also has 38 intentional skips for cases belonging to its other
+viewport project. The real authentication integration signs ephemeral JWTs and
+exercises the SDK verifier, expiry disconnect and refreshed reconnect.
+
+## Deployment and remaining limits
+
+1. Deploy one active Node instance. Presence, ordering, OAuth nonces, rate budgets
+   and grace timers remain process-local. Multiple replicas need shared room
+   ownership/ordering and timers in addition to a Socket.IO adapter.
+2. Apply all pending migrations before deploying server and client together,
+   including the new feedback-column, atomic-room-command and daily-activity
+   migrations. This implementation has not changed a live database.
+3. Run configured-account acceptance checks for Spotify OAuth/entitlements,
+   Apple authorization, browser autoplay and production proxy behavior. Fixtures
+   verify application logic; they do not prove external account availability.
+4. Apple MusicKit's public token renewal path replaces its singleton, so renewal
+   can briefly restart playback before restoring the current checkpoint.
+5. Metrics describe this process and reset on restart. They provide bounded
+   timings and failure counts, not distributed tracing or a durable audit log.
+6. Room state remains a JSON document. This is appropriate for the current
+   single-process workload; larger room payloads or higher write frequency should
+   be measured before choosing normalized tables or a separate coordination tier.
+7. Peer/IP admission budgets see the directly connected address. Behind a shared
+   reverse proxy they can become collective budgets; any forwarded-address
+   strategy must explicitly trust the deployment's proxy boundary.
+8. Existing dependency audit alerts remain in CLI/build dependencies and
+   conditionally used library paths. They need separate targeted maintenance;
+   this work does not claim an audit-clean dependency tree. The reachable
+   Engine.IO upgrade issue was patched following the
+   [maintainer advisory](https://github.com/socketio/socket.io/security/advisories/GHSA-2gc4-cqfq-p2gv).
+
+See [Rooms and radio](rooms-and-radio.md) and [Chat](chat.md) for invariants,
+data flows and extension guidance.

@@ -18,4 +18,42 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run test:sql
       - run: npm run build
+      - run: npm run test:production
+
+  browser-checks:
+    # Existing visual baselines are recorded on Windows. Behavior suites use
+    # the same environment and isolated fixtures, without live credentials.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: ui
+            command: npm run test:ui
+          - suite: fixtures
+            command: npm run test:ui:fixtures
+          - suite: playback
+            command: npm run test:ui:playback
+          - suite: music
+            command: npm run test:ui:music-qol
+          - suite: player
+            command: npm run test:ui:player-qol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-${{ matrix.suite }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore

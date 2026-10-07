@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Playback, ProviderTrackMapping } from "../types";
-import type { PlayerStatus } from "./YouTubePlayer";
+import type { ProviderTrackMapping } from "../types";
+import { PlaybackCommandLifecycle, playbackTargetPosition, type CheckpointProviderPlaybackProps, type PlaybackCommandLease } from "../provider-playback";
+import { createAppleMusicSession } from "../apple-music-session";
 import { createPlayerApiLoader } from "../player-api-loader";
 import { PlaybackEndTracker } from "../playback-progress";
 import { storeValue } from "../lib/browser-storage";
+import { requestJson } from "../lib/authenticated-http";
 
 interface MusicKitInstance {
   isAuthorized?: boolean;
@@ -29,9 +31,7 @@ declare global {
   interface Window { MusicKit?: MusicKitGlobal }
 }
 
-let configuredMusicKit: Promise<MusicKitInstance> | null = null;
-let musicKitOwner: object | null = null;
-let musicKitCommands: Promise<void> = Promise.resolve();
+const musicKitLifecycle = new PlaybackCommandLifecycle();
 
 const loadMusicKitScript = createPlayerApiLoader({
   src: "https://js-cdn.music.apple.com/musickit/v3/musickit.js",
@@ -40,15 +40,15 @@ const loadMusicKitScript = createPlayerApiLoader({
   readyEvent: "musickitloaded"
 });
 
-async function getMusicKit(accessToken: string) {
-  if (configuredMusicKit) return configuredMusicKit;
-  configuredMusicKit = (async () => {
-    const response = await fetch("/api/apple/token", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(15_000)
+const musicKitSession = createAppleMusicSession<MusicKitInstance>({
+  requestToken: async (accessToken) => {
+    const payload = await requestJson<{ developerToken?: string; storefront?: string }>("/api/apple/token", {
+      accessToken, errorMessage: "Apple Music is not configured."
     });
-    const payload = await response.json() as { developerToken?: string; storefront?: string; error?: string };
-    if (!response.ok || !payload.developerToken) throw new Error(payload.error || "Apple Music is not configured.");
+    if (!payload.developerToken) throw new Error("Apple Music is not configured.");
+    return { developerToken: payload.developerToken, storefront: payload.storefront };
+  },
+  configure: async (payload) => {
     const sdk = await loadMusicKitScript();
     await sdk.configure({
       developerToken: payload.developerToken,
@@ -56,16 +56,8 @@ async function getMusicKit(accessToken: string) {
       app: { name: "Lydman", build: "1.0.0" }
     });
     return sdk.getInstance();
-  })().catch((cause) => {
-    configuredMusicKit = null;
-    throw cause;
-  });
-  return configuredMusicKit;
-}
-
-function targetPosition(playback: Playback) {
-  return Math.max(0, playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0));
-}
+  }
+});
 
 function reportAppleAuthorization(authorized: boolean) {
   storeValue("soundspin-apple-authorized", String(authorized));
@@ -82,52 +74,51 @@ export function AppleMusicPlayer({
   onEnded,
   onStatus,
   onError
-}: {
-  playback: Playback;
-  syncRevision: number;
+}: CheckpointProviderPlaybackProps & {
   mapping: ProviderTrackMapping;
-  isDj: boolean;
-  volume: number;
   accessToken: string;
-  onEnded: () => void;
-  onStatus: (status: PlayerStatus) => void;
-  onError?: (message: string) => void;
 }) {
   const musicRef = useRef<MusicKitInstance | null>(null);
+  const leaseRef = useRef<PlaybackCommandLease | null>(null);
   const commandRef = useRef("");
   const loadedTrackRef = useRef("");
   const endTrackerRef = useRef(new PlaybackEndTracker());
   const accessTokenRef = useRef(accessToken);
+  const volumeRef = useRef(volume);
   const onEndedRef = useRef(onEnded);
   const onStatusRef = useRef(onStatus);
   const onErrorRef = useRef(onError);
   const [authorized, setAuthorized] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
+  const [sessionRevision, setSessionRevision] = useState(0);
   const track = playback.track;
 
   accessTokenRef.current = accessToken;
+  volumeRef.current = volume;
   onEndedRef.current = onEnded;
   onStatusRef.current = onStatus;
   onErrorRef.current = onError;
 
   useEffect(() => {
-    if (error) onErrorRef.current?.(error);
+    onErrorRef.current?.(error);
   }, [error]);
 
   // The app's auth token can refresh while audio is playing. MusicKit owns
   // its own authorization, so refreshing that token must not reset its queue.
   useEffect(() => {
     let alive = true;
-    const owner = {};
-    musicKitOwner = owner;
+    const lease = musicKitLifecycle.claim();
+    leaseRef.current = lease;
     commandRef.current = "";
     loadedTrackRef.current = "";
     setReady(false);
     setError("");
-    void getMusicKit(accessTokenRef.current).then((music) => {
-      if (!alive) return;
+    void lease.enqueue(async () => {
+      const music = await musicKitSession.get(accessTokenRef.current);
+      if (!alive || !lease.current()) return;
       musicRef.current = music;
+      music.volume = volumeRef.current / 100;
       const isAuthorized = Boolean(music.isAuthorized);
       setAuthorized(isAuthorized);
       reportAppleAuthorization(isAuthorized);
@@ -137,16 +128,57 @@ export function AppleMusicPlayer({
     });
     return () => {
       alive = false;
-      const music = musicRef.current;
       musicRef.current = null;
-      if (musicKitOwner !== owner) return;
-      musicKitOwner = null;
-      // A provider switch must stop audio after any in-flight queue operation.
-      musicKitCommands = musicKitCommands.then(async () => {
-        if (!musicKitOwner) await music?.pause();
-      }).catch(() => undefined);
+      leaseRef.current = null;
+      // Configuration can also finish after unmount; stop its final singleton
+      // after the shared queue, unless another adapter has taken ownership.
+      void lease.release(async () => { await musicKitSession.current()?.pause(); }).catch(() => undefined);
     };
   }, []);
+
+  useEffect(() => {
+    const lease = leaseRef.current;
+    if (!lease || (!ready && syncRevision === 0)) return;
+    let alive = true;
+    let refreshing = false;
+    const renew = () => {
+      if (!alive || !lease.current() || refreshing || !musicKitSession.refreshDue()) return;
+      refreshing = true;
+      void lease.enqueue(async () => {
+        const music = await musicKitSession.get(accessTokenRef.current);
+        if (!alive || !lease.current()) return;
+        if (music !== musicRef.current) {
+          musicRef.current = music;
+          music.volume = volumeRef.current / 100;
+          loadedTrackRef.current = "";
+          commandRef.current = "";
+          // configure() replaces the v3 singleton. Replay the latest room
+          // checkpoint on the new instance after renewal completes.
+          setSessionRevision((revision) => revision + 1);
+        }
+        const isAuthorized = Boolean(music.isAuthorized);
+        setAuthorized(isAuthorized);
+        reportAppleAuthorization(isAuthorized);
+        setReady(true);
+        setError("");
+      }).catch((cause) => {
+        if (alive) setError(cause instanceof Error ? cause.message : "Could not renew Apple Music playback.");
+      }).finally(() => { refreshing = false; });
+    };
+    const wake = () => { if (document.visibilityState !== "hidden") renew(); };
+    renew();
+    const timer = window.setInterval(renew, 30_000);
+    window.addEventListener("focus", wake);
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", wake);
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [ready, syncRevision]);
 
   const authorize = useCallback(() => {
     const music = musicRef.current;
@@ -167,18 +199,30 @@ export function AppleMusicPlayer({
   }, [volume, ready]);
 
   useEffect(() => {
-    const music = musicRef.current;
-    if (!music || !authorized || !ready) return;
+    const lease = leaseRef.current;
+    if (!musicRef.current || !lease || !authorized || !ready) return;
     const trackKey = track ? `${track.id}:${mapping.providerId}` : "";
-    const signature = `${trackKey}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}`;
+    const signature = `${trackKey}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}:${sessionRevision}`;
     if (commandRef.current === signature) return;
     commandRef.current = signature;
     let alive = true;
     // MusicKit queue writes are asynchronous and cannot be cancelled. Serialize
     // them so a slower old track cannot replace the latest room track.
-    musicKitCommands = musicKitCommands.then(async () => {
+    void lease.enqueue(async () => {
       if (!alive) return;
       try {
+        const music = await musicKitSession.get(accessTokenRef.current);
+        if (!alive || !lease.current()) return;
+        if (music !== musicRef.current) {
+          musicRef.current = music;
+          music.volume = volumeRef.current / 100;
+          loadedTrackRef.current = "";
+        }
+        if (!music.isAuthorized) {
+          setAuthorized(false);
+          reportAppleAuthorization(false);
+          return;
+        }
         if (!track) {
           await music.pause();
           loadedTrackRef.current = "";
@@ -189,7 +233,7 @@ export function AppleMusicPlayer({
           if (!alive) return;
           loadedTrackRef.current = trackKey;
         }
-        await music.seekToTime?.(targetPosition(playback));
+        await music.seekToTime?.(playbackTargetPosition(playback));
         if (!alive) return;
         if (playback.playing) await music.play();
         else await music.pause();
@@ -197,9 +241,11 @@ export function AppleMusicPlayer({
       } catch (cause) {
         if (alive) setError(cause instanceof Error ? cause.message : "Apple Music playback failed.");
       }
+    }).catch((cause) => {
+      if (alive) setError(cause instanceof Error ? cause.message : "Apple Music playback failed.");
     });
     return () => { alive = false; };
-  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, ready, syncRevision]);
+  }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, ready, syncRevision, sessionRevision]);
 
   useEffect(() => {
     if (!track || !authorized) return;

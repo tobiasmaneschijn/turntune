@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Crown, Globe2, LockKeyhole, Shield, UserPlus, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Badge } from "./ui/badge";
@@ -9,18 +9,24 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { socket } from "../socket";
+import { requestSocketAction } from "../socket-request";
+import { requestJson } from "../lib/authenticated-http";
 import type { RoomSnapshot } from "../types";
 
 export function RoomSettingsDialog({
   snapshot,
   currentUserId,
   accessToken,
+  connected = false,
+  transport = socket,
   onClose,
   onNotice
 }: {
   snapshot: RoomSnapshot;
   currentUserId: string;
   accessToken: string;
+  connected?: boolean;
+  transport?: Parameters<typeof requestSocketAction>[0];
   onClose: () => void;
   onNotice: (notice: string) => void;
 }) {
@@ -33,42 +39,50 @@ export function RoomSettingsDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const isOwner = snapshot.room.ownerUserId === currentUserId;
+  const [pendingRoles, setPendingRoles] = useState<Set<string>>(new Set());
+  const pendingRolesRef = useRef(new Set<string>());
+  const activeRef = useRef(true);
+  const saveControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; saveControllerRef.current?.abort(); }; }, []);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    if (saveControllerRef.current) return;
+    const controller = new AbortController();
+    saveControllerRef.current = controller;
     setSaving(true);
     setError("");
     const body: { name: string; description: string; isPublic: boolean; djAccess: "everyone" | "roles"; password?: string | null } = { name, description: description.trim(), isPublic, djAccess };
     if (passwordMode === "replace") body.password = password;
     if (passwordMode === "remove") body.password = null;
     try {
-      const response = await fetch(`/api/rooms/${snapshot.room.id}`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+      await requestJson(`/api/rooms/${snapshot.room.id}`, {
+        method: "PATCH", accessToken, signal: controller.signal,
+        body: JSON.stringify(body), errorMessage: "Could not save room settings."
       });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Could not save room settings.");
+      if (!activeRef.current) return;
       onNotice("Room settings saved");
       onClose();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Could not save room settings.");
+      if (activeRef.current) setError(saveError instanceof Error ? saveError.message : "Could not save room settings.");
     } finally {
-      setSaving(false);
+      saveControllerRef.current = null;
+      if (activeRef.current) setSaving(false);
     }
   };
 
-  const setModerator = (userId: string, moderator: boolean) => {
-    socket.emit("room:moderator:set", { userId, moderator }, (result: { ok: boolean; error?: string }) => {
-      if (!result.ok) setError(result.error || "Could not update moderator.");
-      else onNotice(moderator ? "Moderator added" : "Moderator removed");
-    });
-  };
-
-  const setDjRole = (userId: string, dj: boolean) => {
-    socket.emit("room:dj-role:set", { userId, dj }, (result: { ok: boolean; error?: string }) => {
-      if (!result.ok) setError(result.error || "Could not update DJ role.");
-      else onNotice(dj ? "DJ role added" : "DJ role removed");
+  const changeRole = (userId: string, role: "moderator" | "dj-role", enabled: boolean) => {
+    if (!connected || !transport.connected) { setError("Reconnect before changing room roles."); return; }
+    if (pendingRolesRef.current.has(userId)) return;
+    pendingRolesRef.current.add(userId);
+    setPendingRoles(new Set(pendingRolesRef.current));
+    setError("");
+    requestSocketAction(transport, `room:${role}:set`, { roomId: snapshot.room.id, userId, [role === "moderator" ? "moderator" : "dj"]: enabled }, (result) => {
+      pendingRolesRef.current.delete(userId);
+      if (!activeRef.current) return;
+      setPendingRoles(new Set(pendingRolesRef.current));
+      if (!result.ok) setError(result.error || "Could not update room role.");
+      else onNotice(`${role === "moderator" ? "Moderator" : "DJ role"} ${enabled ? "added" : "removed"}`);
     });
   };
 
@@ -135,11 +149,11 @@ export function RoomSettingsDialog({
                         <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small></span>
                         {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
                           <span className="room-role-actions">
-                            <Button type="button" variant="ghost" size="sm" onClick={() => setModerator(user.id, !moderator)}>
+                            <Button type="button" variant="ghost" size="sm" disabled={!connected || pendingRoles.has(user.id)} onClick={() => changeRole(user.id, "moderator", !moderator)}>
                               {moderator ? <X /> : <UserPlus />}{moderator ? "Remove mod" : "Moderator"}
                             </Button>
                             {!moderator && (
-                              <Button type="button" variant="ghost" size="sm" onClick={() => setDjRole(user.id, !dj)}>
+                              <Button type="button" variant="ghost" size="sm" disabled={!connected || pendingRoles.has(user.id)} onClick={() => changeRole(user.id, "dj-role", !dj)}>
                                 {dj ? <X /> : <UserPlus />}{dj ? "Remove DJ" : "DJ role"}
                               </Button>
                             )}
@@ -153,6 +167,7 @@ export function RoomSettingsDialog({
             )}
           </div>
 
+          {!connected && <p role="status">Reconnect to update room roles.</p>}
           {error && <div className="dialog-error" role="alert">{error}</div>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

@@ -105,3 +105,20 @@ test("reactions never buffer offline and show failure without claiming an accept
   await expect(love).toBeEnabled();
   expect(await page.evaluate(() => (window as any).playerQolTest.calls)).toEqual(["vibe:vote"]);
 });
+
+test("provider recovery removes stale playback attention without a manual retry", async ({ page }) => {
+  await page.evaluate(() => (window as any).playerQolTest.error("Temporary provider interruption"));
+  await expect(page.getByRole("alert")).toContainText("Temporary provider interruption");
+  await expect(page.getByText("Playback needs attention", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as any).playerQolTest.error(""));
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText("Playback needs attention", { exact: true })).toHaveCount(0);
+});
+
+test("healthy provider reports preserve a rejected room-command error", async ({ page }) => {
+  await page.getByRole("button", { name: "Pause room", exact: true }).click();
+  await page.evaluate(() => (window as any).playerQolTest.pending({ ok: false, error: "DJ permission changed" }));
+  await expect(page.getByRole("alert")).toContainText("DJ permission changed");
+  await page.evaluate(() => (window as any).playerQolTest.error(""));
+  await expect(page.getByRole("alert")).toContainText("DJ permission changed");
+});

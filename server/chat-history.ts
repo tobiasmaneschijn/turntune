@@ -1,5 +1,6 @@
 import express, { type Express, type Request, type Response } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ChatRateLimit, ChatWriteConflict, createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
 import { canonicalMessage, chatMessageSchema, chatReactionSchema, immutableMessageKey, type ChatMessageInput, type ChatReply, type RelayMessage } from './chat-validation.js'
 import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
@@ -17,6 +18,7 @@ export interface ChatHistoryRouteOptions {
   canReadRoom: (userId: string, roomSlug: string) => Promise<boolean>
   canWriteRoom?: (userId: string, roomSlug: string) => Promise<boolean>
   getUser?: (userId: string, roomSlug: string) => Promise<User | null>
+  writePolicy?: ChatWritePolicy
 }
 const SELECT = 'id, content, message_type, media_url, storage_path, mentions, user_id, user_name, avatar_seed, created_at, reply_to_id, soundspin_message_reactions(emoji, user_id)'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -91,6 +93,7 @@ async function enrich(client: SupabaseClient, roomSlug: string, rows: HistoryRow
 
 /** Every endpoint authorizes BEFORE privileged reads, including target/reply/context queries. */
 export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOptions) {
+  const writePolicy = options.writePolicy || createChatWritePolicy()
   const replyWithReadCheck = async (userId: string, room: string, response: Response, payload: unknown) => {
     if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
     response.json(payload)
@@ -108,7 +111,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
       if (!allowed) { response.status(403).json({ error: write ? 'Join this room before saving chat messages or reactions.' : 'Join this room before reading its chat history.' }); return }
       await run(options.client, roomSlug, request, response, userId)
     } catch (error) {
-      response.status(error instanceof Conflict ? 409 : error instanceof BadRequest ? 400 : 503).json({ error: error instanceof BadRequest || error instanceof Conflict ? error.message : write ? 'Chat could not be saved. Try again.' : 'Chat history could not be loaded. Try again.' })
+      response.status(error instanceof ChatRateLimit ? 429 : error instanceof Conflict || error instanceof ChatWriteConflict ? 409 : error instanceof BadRequest ? 400 : 503).json({ error: error instanceof BadRequest || error instanceof Conflict || error instanceof ChatRateLimit || error instanceof ChatWriteConflict ? error.message : write ? 'Chat could not be saved. Try again.' : 'Chat history could not be loaded. Try again.' })
     }
   }
   app.get('/api/rooms/:roomSlug/chat/history', authorized(async (client, room, request, response, userId) => {
@@ -146,6 +149,17 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
   app.post('/api/rooms/:roomSlug/chat/messages', express.json({ limit: '16kb' }), authorized(async (client, room, request, response, userId) => {
     const parsed = chatMessageSchema.safeParse(request.body)
     if (!parsed.success) throw new BadRequest('Invalid room chat message.')
+    const stored = await loadStoredChatMessage(client, parsed.data.id)
+    if (stored) {
+      if (stored.roomId !== room || stored.userId !== userId || immutableMessageKey(stored.message) !== immutableMessageKey(parsed.data)) throw new Conflict('This message ID already belongs to different content, account, or room.')
+      writePolicy.message(room, userId, parsed.data, true)
+      if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+      response.json({ ok: true }); return
+    }
+    try { writePolicy.message(room, userId, parsed.data) } catch (error) {
+      if (error instanceof ChatRateLimit || error instanceof ChatWriteConflict) throw error
+      throw new BadRequest(error instanceof Error ? error.message : 'Invalid message time.')
+    }
     const user = await options.getUser?.(userId, room) || { id: userId, name: 'Listener', avatarSeed: userId }
     if (user.id !== userId) throw new BadRequest('Invalid chat account.')
     const reply = parsed.data.replyTo ? await loadChatReply(client, room, parsed.data.replyTo.id) : undefined
@@ -175,6 +189,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
   app.post('/api/rooms/:roomSlug/chat/reactions', express.json({ limit: '16kb' }), authorized(async (client, room, request, response, userId) => {
     const parsed = chatReactionSchema.safeParse(request.body)
     if (!parsed.success) throw new BadRequest('Invalid room chat reaction.')
+    writePolicy.reaction(room, userId, parsed.data)
     if (!await loadChatReply(client, room, parsed.data.messageId)) throw new BadRequest('This room message is unavailable.')
     const values = { message_id: parsed.data.messageId, user_id: userId, emoji: parsed.data.emoji }
     if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }

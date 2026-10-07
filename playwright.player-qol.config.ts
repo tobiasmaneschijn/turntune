@@ -6,5 +6,5 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "mobile", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } }
   ],
-  webServer: { command: "npm run dev:web -- --mode test --port 4179 --strictPort", url: "http://127.0.0.1:4179/tests/player-qol-harness/index.html", reuseExistingServer: true, timeout: 120000 }
+  webServer: { command: "npm run dev:web -- --mode test --port 4179 --strictPort", url: "http://127.0.0.1:4179/tests/player-qol-harness/index.html", reuseExistingServer: !process.env.CI, timeout: 120000 }
 });

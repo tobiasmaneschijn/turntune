@@ -42,11 +42,18 @@ export class AnnouncementExpiryRegistry {
       this.entries.delete(room.id);
       if (room.announcement?.id !== note.id || room.announcement.expiresAt === null) return;
       if (room.announcement.expiresAt > Date.now()) { this.watch(room); return; }
-      room.announcement = null;
-      void this.expire(room).catch(console.error);
+      // The callback stages and persists expiry before publishing it.
+      void this.expire(room).catch(error => {
+        console.error(error);
+        if (room.announcement?.id !== note.id || this.entries.has(room.id)) return;
+        const retry = setTimeout(() => { this.entries.delete(room.id); this.watch(room); }, 5_000);
+        retry.unref();
+        this.entries.set(room.id, { id: note.id, timer: retry });
+      });
     }, Math.min(2_147_483_647, Math.max(0, note.expiresAt - Date.now())));
     timer.unref();
     this.entries.set(room.id, { id: note.id, timer });
   }
+  cancel(roomId: string) { const entry = this.entries.get(roomId); if (entry) clearTimeout(entry.timer); this.entries.delete(roomId); }
   clear() { for (const entry of this.entries.values()) clearTimeout(entry.timer); this.entries.clear(); }
 }

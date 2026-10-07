@@ -9,5 +9,5 @@ export default defineConfig({
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "mobile", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } }
   ],
-  webServer: { command: "npm run dev:web -- --mode test --port 4175 --strictPort", url: "http://127.0.0.1:4175/tests/ui-harness/index.html", reuseExistingServer: true, timeout: 120_000 }
+  webServer: { command: "npm run dev:web -- --mode test --port 4175 --strictPort", url: "http://127.0.0.1:4175/tests/ui-harness/index.html", reuseExistingServer: !process.env.CI, timeout: 120_000 }
 });

@@ -82,14 +82,18 @@ and describe changes users can see.
 
 ```bash
 npm test
+npm run test:sql
 npm run build
+node --test tests/production-entrypoint-smoke.mjs
 ```
 
-The test command discovers every test in `tests/` and `server/`, including an
+The test command discovers TypeScript tests in `tests/` and `server/`, including an
 isolated two-listener server test. It uses temporary storage and removes provider
 and Supabase credentials from the child process. The build checks both frontend
-and server types before producing assets. GitHub Actions runs both checks on
-pushes and pull requests.
+and server types before producing assets. SQL checks run the actual migrations
+against disposable PGlite databases. The production smoke launches the compiled
+server with fake configuration and blocks external requests. GitHub Actions runs
+these checks plus five deterministic browser suites on pushes and pull requests.
 
 For focused checks use `test:radio`, `test:chat`, `test:playback`, or
 `test:integration`. Integration tests never load `.env` or contact the configured
@@ -161,10 +165,11 @@ configured production branch applies it automatically. Keep all future schema
 changes as new files in `supabase/migrations`; do not edit an already-deployed
 migration.
 
-Chat is delivered through Supabase Realtime Broadcast. Message history is
-stored in `soundspin_messages` and created by the
-`20260716214500_realtime_chat.sql` migration. Socket.IO remains responsible for
-synchronized playback and listener presence. Replies and reactions are added by
+Chat is delivered through authenticated, room-admitted Socket.IO. Message history is
+stored in `soundspin_messages` and was created by the
+`20260716214500_realtime_chat.sql` migration. Authorized server routes govern
+history and durable writes; browser table mutation grants are revoked by later
+chat authorization migrations. Replies and reactions are added by
 `20260719130616_chat_replies_and_reactions.sql`. See
 [`docs/chat.md`](docs/chat.md) for the data flow, code map, schema notes, and
 troubleshooting guide.
@@ -190,12 +195,13 @@ where user_id = 'USER_UUID';
 ```
 
 Marked profiles show a `[DEV]` flair beside their display name. The marker is
-not editable through the profile API and currently identifies the account; it
-does not grant room moderation or database permissions.
+not editable through the profile API. It grants access to the application's
+administrative dashboard and feedback tools; room roles remain separate.
 
 Emoji support works without additional configuration. Uploaded chat images are
-stored in the public `chat-media` Supabase Storage bucket created by
-`20260716220000_chat_media.sql` and are limited to 6 MB. GIF search requires a
+stored in the private `chat-media` Supabase Storage bucket and are limited to
+6 MB. Later authorization migrations make the originally public bucket private;
+the server signs five-minute image URLs after checking room access. GIF search requires a
 GIPHY developer key in the server-side `GIPHY_API_KEY`; without it, the GIF
 button remains disabled. Lydman proxies GIF searches so the key is never
 returned to the browser and browser CORS policy does not apply to GIPHY's API
@@ -223,6 +229,28 @@ npm start
 The production server listens on port `3000` by default. Set `PORT` and
 `DATA_DIR` to override the defaults.
 
+Deploy **one active Node instance**. Presence, command ordering, reconnect grace,
+chat rate limits and OAuth state are process-local. A Socket.IO adapter alone
+does not make multiple replicas safe; distributed room ownership, ordering and
+timers are required first. `/api/health` reports liveness; `/api/ready` returns
+503 while shutting down or when the room database cannot be reached. Docker
+uses readiness for its health check. App admins can inspect bounded, account-free
+operation timings and failure counts at `/api/admin/runtime`.
+
+Commands clone the last committed room, validate within its command queue,
+persist, and then publish. Unrelated Supabase rooms write independently; the
+local JSON fallback shares one atomic file writer. Idle Supabase room cache
+entries are released after ten minutes, waiting for commands and DJ grace.
+Each waiting queue is capped at 1,000 tracks; chat retains a 1,000-row active
+window and a scrolled reader snapshot. Catalog caches are bounded.
+
+Apply all pending migrations before deploying this server, including
+`20261007063943_restrict_feedback_submission_columns.sql`,
+`20261007064407_atomic_room_commands.sql`, and
+`20261007064601_admin_daily_activity.sql`. They respectively protect feedback
+administrative fields, atomically commit room settings/roles with radio state,
+and aggregate complete UTC activity totals for the dashboard.
+
 ## Dokploy deployment
 
 1. Push this repository to a Git provider supported by Dokploy.
@@ -247,6 +275,14 @@ Spotify and choose either the Lydman Web Playback device or their Spotify
 Desktop/Connect device. Apple Music listeners authorize MusicKit in the player.
 Lydman tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
+
+The adapters share measured playback status and lifecycle contracts. Explicit
+seeks override background drift tolerance. Leaving Spotify Desktop pauses only
+the recording/device owned by the departing adapter after pending commands
+settle. Apple Music developer tokens renew before expiry through public MusicKit
+configuration and restore the current room checkpoint; renewal can briefly
+restart playback. Browser fixtures verify these paths; real provider entitlement,
+autoplay and OAuth checks still require configured accounts.
 
 Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
 configured. Spotify does not accept `localhost`: use the explicit loopback
