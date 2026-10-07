@@ -1,6 +1,6 @@
 /* Profile surface styles. */
 .header-profile-button { padding: 0; border: 0; background: transparent; cursor: pointer; transition: transform .15s ease; }
-.profile-page { min-height: 100vh; position: relative; overflow: hidden; color: #f5f5f4; }
+.profile-page { min-height: 100vh; position: relative; overflow: hidden; color: var(--foreground); }
 .profile-page-header { position: relative; z-index: 2; grid-template-columns: 1fr auto 1fr; align-items: center; border-bottom: 1px solid var(--line); }
 .profile-back { justify-self: start; border: 0; background: transparent; color: #9a9ca5; display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
 .profile-back:hover { color: white; }
@@ -21,7 +21,7 @@
 .profile-edit { display: grid; }
 .profile-edit label { gap: 6px; font-weight: 600; }
 .profile-edit input,
-.profile-edit textarea { width: 100%; resize: vertical; border: 1px solid #30313a; outline: 0; color: #f4f4f2; font: 12px "Geist Variable", sans-serif; }
+.profile-edit textarea { width: 100%; resize: vertical; border: 1px solid #30313a; outline: 0; color: var(--foreground); font: 12px "Geist Variable", sans-serif; }
 .profile-edit input:focus,
 .profile-edit textarea:focus { border-color: #5a5d46; }
 .profile-edit > small { margin-top: -8px; color: #5f616a; text-align: right; font-size: 9px; }
@@ -30,7 +30,7 @@
 .profile-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 5; padding: 10px 15px; border: 1px solid rgba(248,113,113,.2); color: #fecaca; font-size: 11px; }
 .profile-loading,
 .profile-error-card { width: min(430px, calc(100% - 32px)); margin: 25vh auto 0; padding: 30px; border: 1px solid var(--line); text-align: center; }
-.profile-error-card strong { color: white; }
+.profile-error-card strong { color: var(--foreground); }
 .profile-error-card p { margin-bottom: 0; }
 @media (max-width: 900px) {
   .profile-hero { grid-template-columns: auto 1fr; }
@@ -139,6 +139,27 @@
   --card: oklch(.145 .025 145);
   --secondary: oklch(.2 .04 145);
 }
+.light .profile-theme-afterglow {
+  --primary: oklch(.68 .16 48);
+  --primary-foreground: oklch(.17 .035 35);
+  --ring: oklch(.58 .16 48);
+  --card: oklch(.99 .008 48);
+  --secondary: oklch(.94 .02 48);
+}
+.light .profile-theme-deep-space {
+  --primary: oklch(.53 .2 285);
+  --primary-foreground: oklch(.98 .005 285);
+  --ring: oklch(.53 .2 285);
+  --card: oklch(.985 .008 285);
+  --secondary: oklch(.94 .02 285);
+}
+.light .profile-theme-laser-lime {
+  --primary: oklch(.7 .16 130);
+  --primary-foreground: oklch(.14 .04 135);
+  --ring: oklch(.55 .15 130);
+  --card: oklch(.99 .008 130);
+  --secondary: oklch(.94 .025 130);
+}
 .profile-theme-afterglow .profile-hero { background: linear-gradient(135deg, color-mix(in oklch, var(--card), var(--primary) 8%), var(--card)); }
 .profile-theme-deep-space .profile-hero { background: radial-gradient(circle at 12% 0%, color-mix(in oklch, var(--primary), transparent 86%), transparent 35%), var(--card); }
 .profile-theme-laser-lime .profile-hero { background: linear-gradient(115deg, color-mix(in oklch, var(--primary), transparent 94%), var(--card) 55%); }
@@ -189,4 +210,56 @@
 .light .profile-card {
   background: color-mix(in oklch, var(--card), var(--background) 12%);
   box-shadow: 0 12px 34px oklch(0.25 0.02 285 / 7%);
+}
+
+.profile-identity :is(h1, h2) { margin: 0; font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.profile-handle { display: block; margin-top: 4px; color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
+.profile-identity > .profile-status { margin-top: 12px; color: var(--foreground); font-size: 13px; overflow-wrap: anywhere; }
+.profile-identity > .profile-bio { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-identity > .profile-member-since { margin-top: 14px; margin-bottom: 0; font-size: 11px; }
+.profile-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.profile-friend-state { display: inline-flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: 12px; }
+.profile-friend-state > svg { width: 15px; height: 15px; }
+.profile-favorites-card { margin-top: 16px; }
+.profile-song-list { display: grid; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.profile-song { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-width: 0; padding: 8px 0; }
+.profile-song > .track-artwork { width: 44px; height: 44px; border-radius: var(--radius-lg); }
+.profile-song-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.profile-song-copy > :is(strong, a) { font-size: 13px; font-weight: 600; color: var(--foreground); overflow-wrap: anywhere; line-height: 1.4; }
+.profile-song-copy > a:hover { text-decoration: underline; }
+.profile-song-copy > small { color: var(--muted-foreground); font-size: 11px; overflow-wrap: anywhere; line-height: 1.4; }
+.profile-song-actions { display: flex; align-items: center; }
+.profile-music-editor { display: grid; gap: 12px; min-width: 0; }
+.profile-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.profile-section-heading > h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.profile-section-heading > small { color: var(--muted-foreground); font-size: 11px; }
+.profile-visibility-note { margin: -8px 0 0; color: var(--muted-foreground); font-size: 11px; }
+.profile-pick-list { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 4px 10px; }
+.profile-pick-list > .profile-song + .profile-song { border-top: 1px solid var(--border); }
+.profile-pick-list > p, .profile-music-editor > p[role="status"] { color: var(--muted-foreground); font-size: 12px; }
+.profile-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.avatar-upload:has(input:focus-visible) > label { outline: 2px solid var(--ring); outline-offset: 2px; }
+.profile-edit .grid > small { color: var(--muted-foreground); font-size: 11px; }
+.profile-inline-error { margin: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--destructive); font-size: 12px; overflow-wrap: anywhere; }
+.profile-inline-error > p { margin: 0; }
+.profile-save-status { margin: 12px 0; color: var(--muted-foreground); font-size: 12px; }
+.profile-privacy-setting { margin-top: 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.profile-privacy-setting > div { display: grid; gap: 4px; }
+.profile-privacy-setting small { color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+.profile-embedded { min-height: 0; width: 100%; overflow: visible; background: transparent; }
+.profile-embedded .profile-shell { width: 100%; padding: 0; }
+.profile-embedded .profile-hero { padding: 18px; gap: 14px; grid-template-columns: auto minmax(0, 1fr); text-align: left; }
+.profile-embedded .profile-avatar-wrap { justify-self: start; }
+.profile-embedded .profile-identity :is(h1, h2) { font-size: 24px; }
+.profile-embedded .profile-settings-grid { grid-template-columns: minmax(0, 1fr); }
+.profile-embedded .profile-loading, .profile-embedded .profile-error-card { width: 100%; margin: 0; padding: 24px; }
+.profile-embedded .profile-identity > p { margin-inline: 0; }
+
+@media (max-width: 640px) {
+  .profile-actions { justify-content: center; }
+  .profile-embedded .profile-actions { justify-content: flex-start; }
+  .profile-music-editor .profile-song { grid-template-columns: 40px minmax(0, 1fr); }
+  .profile-music-editor .profile-song > .track-artwork { width: 40px; height: 40px; }
+  .profile-music-editor .profile-song-actions { grid-column: 2; justify-self: end; }
+  .profile-pick-list .profile-song { grid-template-columns: 40px minmax(0, 1fr) auto; }
 }

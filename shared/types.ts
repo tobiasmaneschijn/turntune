@@ -20,6 +20,20 @@ export interface SoundSpinProfile {
   theme_key: string;
   created_at: string;
   updated_at: string;
+  handle?: string | null;
+  status_text?: string;
+  favorite_tracks?: ProfileTrack[];
+}
+
+/** Explicitly featured songs; never contains private queue or account data. */
+export interface ProfileTrack {
+  provider: Provider;
+  providerId: string;
+  title: string;
+  artist?: string;
+  artworkUrl?: string;
+  permalinkUrl?: string;
+  durationMs?: number;
 }
 
 export interface SoundSpinProfileOption {
@@ -80,6 +94,7 @@ export interface RoomAnnouncement {
 export interface RoomSettings {
   djAccess?: DjAccess;
   description?: string;
+  themePrompt?: string;
   [key: string]: unknown;
 }
 
@@ -151,4 +166,3 @@ export interface SocketReply {
   added?: number;
   skipped?: Array<{ title: string; reason: string }>;
 }
-

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 
 export const inviteSignupSchema = z.object({
+  displayName: z.string().trim().min(1).max(32).optional(),
   email: z.string().trim().email().max(320),
   password: z.string().min(6).max(128),
   invitePassword: z.string().min(1).max(256)

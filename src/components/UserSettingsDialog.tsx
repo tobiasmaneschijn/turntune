@@ -33,13 +33,12 @@ export interface MusicConnections {
 const playbackOptions: Array<{
   value: PlaybackPreference;
   title: string;
-  description: string;
   icon: typeof Radio;
 }> = [
-  { value: "source", title: "Room source", description: "Use each track's original provider.", icon: Radio },
-  { value: "spotify-web", title: "Spotify in Lydman", description: "Play in this browser.", icon: Music2 },
-  { value: "spotify-desktop", title: "Spotify Desktop", description: "Play on a Spotify Connect device.", icon: MonitorSpeaker },
-  { value: "apple", title: "Apple Music", description: "Play matching tracks in this browser.", icon: Music2 }
+  { value: "source", title: "Original provider", icon: Radio },
+  { value: "spotify-web", title: "Spotify in browser", icon: Music2 },
+  { value: "spotify-desktop", title: "Spotify Connect", icon: MonitorSpeaker },
+  { value: "apple", title: "Apple Music", icon: Music2 }
 ];
 
 export function UserSettingsDialog({
@@ -169,7 +168,7 @@ export function UserSettingsDialog({
             <TabsContent value="playback">
               <div className="settings-panel-stack">
                 <section>
-                  <div className="settings-section-heading"><strong>Default playback device</strong><small>Requires a matching track on your provider.</small></div>
+                  <div className="settings-section-heading"><strong>Default playback</strong></div>
                   <ToggleGroup className="playback-option-list" aria-label="Default playback device">
                     {playbackOptions.map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
@@ -178,12 +177,13 @@ export function UserSettingsDialog({
                       return (
                         <ToggleGroupItem key={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable} pressed={selected} onPressedChange={() => updatePlayback({ preference: option.value })}>
                           <span className="playback-option-icon"><Icon /></span>
-                          <span><strong>{option.title}</strong><small>{unavailable ? "Not configured by the host" : option.description}</small></span>
+                          <span><strong>{option.title}</strong>{unavailable && <small>Not configured</small>}</span>
                           {selected && <CircleCheck className="playback-option-check" />}
                         </ToggleGroupItem>
                       );
                     })}
                   </ToggleGroup>
+                  {settings.playback.preference !== "source" && <small>Requires a matching track.</small>}
                   {settings.playback.preference.startsWith("spotify") && !connections.spotifyConnected && (
                     <div className="settings-inline-notice">
                       <span>Spotify connection required.</span>
@@ -236,7 +236,7 @@ export function UserSettingsDialog({
                 {connectionError && <div className="settings-inline-notice" role="alert"><span>{connectionError}</span>{onRetryConnections && <Button size="sm" variant="outline" onClick={onRetryConnections}>Retry connection check</Button>}</div>}
                 <div className="connection-row connection-row-expanded">
                   <span className="connection-logo spotify">S</span>
-                  <span><strong>{connections.spotifyProfile?.displayName || "Spotify"}</strong><small>{connections.spotifyConnected ? `${connections.spotifyProfile?.product === "premium" ? "Premium" : "Connected"} · ${selectedSpotifyDevice ? `Selected: ${selectedSpotifyDevice.name}` : `${devices.length} playback device${devices.length === 1 ? "" : "s"} found`}` : spotifyUnavailable ? "Not configured by the host" : "Connect for web and desktop playback"}</small></span>
+                  <span><strong>{connections.spotifyProfile?.displayName || "Spotify"}</strong>{(connections.spotifyConnected || spotifyUnavailable) && <small>{connections.spotifyConnected ? [connections.spotifyProfile?.product === "premium" ? "Premium" : "Connected", selectedSpotifyDevice?.name].filter(Boolean).join(" · ") : "Not configured"}</small>}</span>
                   <span className="connection-actions">
                     {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={refreshDevices}><RefreshCw /> Refresh</Button>}
                     <Button variant="outline" size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>{connections.spotifyConnected ? "Reconnect" : "Connect"}</Button>
@@ -245,7 +245,7 @@ export function UserSettingsDialog({
                 </div>
                 <div className="connection-row">
                   <span className="connection-logo apple">A</span>
-                  <span><strong>Apple Music</strong><small>{appleUnavailable ? "Not configured by the host" : appleAuthorized ? "Authorized in this browser" : "Authorization is requested when first used"}</small></span>
+                  <span><strong>Apple Music</strong></span>
                   <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
                 </div>
                 {deviceError && <div className="dialog-error">{deviceError}</div>}
@@ -259,10 +259,10 @@ export function UserSettingsDialog({
                   setRequestingPermission(true);
                   void requestNotificationPermission().then(setNotificationPermission).finally(() => setRequestingPermission(false));
                 }}>{requestingPermission ? "Requesting permission…" : "Enable notifications"}</Button>}</div>
-                <SettingSwitch title="Background notifications only" description="Send system notifications only when this tab is hidden or unfocused." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
+                <SettingSwitch title="Background notifications only" description="Only when this tab is inactive." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
                 <SettingSwitch title="DJ turn" checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
-                <SettingSwitch title="Unavailable tracks" description="No match on your preferred provider." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
-                <SettingSwitch title="Chat mentions" description="Mentions of your display name." checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
+                <SettingSwitch title="Unavailable tracks" description="No match on your provider." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
+                <SettingSwitch title="Chat mentions" checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
                 <SettingSwitch title="Playback errors" checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
               </div>
             </TabsContent>
@@ -275,9 +275,8 @@ export function UserSettingsDialog({
                     <SelectTrigger id="color-theme" className="w-full"><SelectValue>{theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}</SelectValue></SelectTrigger>
                     <SelectContent><SelectGroup><SelectItem value="dark">Dark</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="system">System</SelectItem></SelectGroup></SelectContent>
                   </Select>
-                  <small>System follows your device theme.</small>
                 </section>
-                <SettingSwitch title="Compact player by default" description="Keep the player collapsed between visits." checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
+                <SettingSwitch title="Compact player by default" checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
                 <SettingSwitch title="Reduced motion" checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
                 <section className="settings-control-group">
                   <Label htmlFor="artwork-blur">Artwork background blur <strong>{settings.appearance.artworkBlur}px</strong></Label>

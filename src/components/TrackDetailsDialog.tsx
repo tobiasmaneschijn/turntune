@@ -28,8 +28,8 @@ export function TrackDetailsDialog({ track, open, onOpenChange, durationMs, retu
   const copy = async (link: boolean) => {
     try {
       await navigator.clipboard.writeText(link ? source! : [track.title, track.artist].filter(Boolean).join(" — "));
-      setFeedback(link ? "Track link copied." : "Title and artist copied.");
-    } catch { setFeedback("Could not copy. You can select the full text or open the source link."); }
+      setFeedback("Copied.");
+    } catch { setFeedback("Couldn't copy. Select the text instead."); }
   };
   const content = <><h3>{track.title}</h3>{track.artist && <p>{track.artist}</p>}<dl><dt>Provider</dt><dd>{providerLabel(track.provider)}</dd>{track.addedBy && <><dt>Contributed by</dt><dd>{track.addedBy.name}</dd></>}{duration && <><dt>Duration</dt><dd>{duration}</dd></>}{playedAt && <><dt>Played</dt><dd><time dateTime={new Date(track.playedAt!).toISOString()}>{playedAt}</time></dd></>}</dl><div className="music-details-actions"><Button variant="outline" onClick={() => void copy(false)}>Copy title and artist</Button>{source && <><Button variant="outline" onClick={() => void copy(true)}>Copy track link</Button><a href={source} target="_blank" rel="noreferrer">Open on {providerLabel(track.provider)}</a></>}</div>{feedback && <p role="status">{feedback}</p>}</>;
   if (!narrow && returnFocusRef?.current) return <Popover.Root open={open} onOpenChange={onOpenChange}><Popover.Portal><Popover.Positioner anchor={returnFocusRef} side="right" align="start" sideOffset={8} collisionPadding={12} className="music-track-popover-positioner"><Popover.Popup className="music-track-details music-track-popover" finalFocus={returnFocusRef}><div className="music-details-header"><Popover.Title>Track details</Popover.Title><Popover.Description className="sr-only">Recording information and source.</Popover.Description></div>{content}<Popover.Close render={<Button variant="ghost" size="icon" className="music-details-close" aria-label="Close" />}><X /></Popover.Close></Popover.Popup></Popover.Positioner></Popover.Portal></Popover.Root>;

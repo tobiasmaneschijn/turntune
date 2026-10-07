@@ -26,6 +26,13 @@ test("invite signup validation rejects extra fields and short passwords", () => 
   }).success, false);
 });
 
+test("signup can seed a display name without accepting privilege metadata", () => {
+  const payload = { email: "friend@example.com", password: "long-enough", invitePassword: "invite", displayName: "  Alice  " };
+  assert.equal(inviteSignupSchema.parse(payload).displayName, "Alice");
+  assert.equal(inviteSignupSchema.safeParse({ ...payload, displayName: " " }).success, false);
+  assert.equal(inviteSignupSchema.safeParse({ ...payload, user_metadata: { is_app_admin: true } }).success, false);
+});
+
 test("invite password comparison only accepts the configured password", () => {
   assert.equal(invitePasswordMatches("open-sesame", "open-sesame"), true);
   assert.equal(invitePasswordMatches("open-sesamf", "open-sesame"), false);

@@ -240,17 +240,17 @@ test("directory previews are public, useful, stale-labelled, sortable and resili
   const publicRooms = page.locator(".room-directory-section").filter({ has: page.getByRole("heading", { name: "Public rooms", exact: true }) });
   await expect(publicRooms).toContainText("A room for evening electronic music");
   await expect(publicRooms).toContainText("Evening Signal");
-  await expect(publicRooms).toContainText("Older preview · refresh to update");
+  await expect(publicRooms).toContainText("Preview is out of date");
   await expect(page.getByText("SECRET PROTECTED TRACK")).toHaveCount(0); await expect(page.getByText("SECRET PRIVATE TRACK")).toHaveCount(0);
   await page.getByRole("combobox", { name: "Sort rooms" }).click(); await page.getByRole("option", { name: "Alphabetical", exact: true }).click();
   await expect(publicRooms.locator(".room-card").first()).toContainText("Alpha Radio");
   await page.getByRole("textbox", { name: "Find a room" }).fill("no matching room");
   await expect(publicRooms).toContainText("No matching rooms");
-  await page.getByRole("button", { name: "Reset room filters" }).click();
+  await page.getByRole("button", { name: "Reset filters" }).click();
   await expect(publicRooms.locator(".room-card").first()).toContainText("Zulu Radio");
   await page.evaluate(() => { (window as any).layoutFixture.failDirectory = true; });
   await page.getByRole("button", { name: "Refresh rooms" }).click();
-  await expect(page.getByRole("alert")).toContainText("temporarily unavailable");
+  await expect(page.locator(".lobby-error")).toContainText("temporarily unavailable");
   await expect(publicRooms.getByRole("button", { name: "Join Zulu Radio" })).toBeVisible();
   await page.evaluate(() => { (window as any).layoutFixture.failDirectory = false; (window as any).layoutFixture.delayDirectory = true; });
   await publicRooms.getByRole("button", { name: "Join Zulu Radio" }).click(); await page.getByRole("button", { name: "Return to directory" }).click();
@@ -268,11 +268,11 @@ test("empty accessible directory has one distinct onboarding state", async ({ pa
 
 test("failed initial directory request does not imply that no rooms are accessible", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=lobby-error`);
-  await expect(page.getByRole("alert")).toContainText("temporarily unavailable");
+  await expect(page.locator(".lobby-error")).toContainText("temporarily unavailable");
   await expect(page.getByText("No rooms available")).toHaveCount(0);
-  await expect(page.getByRole("status")).not.toContainText("0 rooms available");
+  await expect(page.locator(".lobby-filter-summary").getByRole("status")).not.toContainText("0 rooms");
   await page.evaluate(() => { (window as any).layoutFixture.failDirectory = false; });
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.locator(".lobby-error").getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByRole("button", { name: "Join Zulu Radio" })).toBeVisible();
 });
 
@@ -351,7 +351,7 @@ test("waiting-room and failed provider verification never claim checked readines
   await page.getByRole("button", { name: "Continue as listener" }).click();
   await page.goto(`${roomUrl}?scenario=checklist&provider=error&user=error-listener`);
   await openChecklist(page);
-  await expect(checklist).toContainText("Couldn't check provider status. Retry in Settings.");
+  await expect(checklist).toContainText("Couldn't check status. Retry in Settings.");
   await expect(page.getByRole("button", { name: "Ready to listen" })).toHaveCount(0);
 });
 

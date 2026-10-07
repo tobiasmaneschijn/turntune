@@ -120,6 +120,15 @@ test("clears stale votes and rejects the playing DJ's own persisted vote", () =>
   assert.deepEqual(Object.entries(state.vibe!.votes), []);
 });
 
+test("malformed stored themes cannot crash a room view", () => {
+  const state = room();
+  for (const invalid of [{ text: "theme" }, 42, " ", "x".repeat(161)]) {
+    state.settings.themePrompt = invalid as string;
+    normalizeRadioState(state);
+    assert.equal(state.settings.themePrompt, undefined);
+  }
+});
+
 test("private queue lookup handles guest IDs that match object properties", () => {
   const state = room();
   for (const id of ["constructor", "__proto__", "toString"]) {

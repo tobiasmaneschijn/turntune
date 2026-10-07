@@ -30,7 +30,9 @@ import type { ChatMessage } from "../../src/chat/model";
 
 const scenario = new URLSearchParams(location.search).get("scenario") || "room-active";
 const user = { id: "qa-admin", name: "QA Admin", avatarSeed: "qa-admin", avatarKey: "pulse", isAppAdmin: true };
-const profile = { user_id: user.id, display_name: user.name, is_app_admin: true, bio: "Weekend DJ, product builder, and collector of excellent transitions.", avatar_key: "pulse", avatar_url: null, avatar_path: null, theme_key: "afterglow", created_at: "2026-01-15T12:00:00Z", updated_at: "2026-07-31T12:00:00Z" };
+const profile = { user_id: user.id, display_name: user.name, is_app_admin: true, bio: "Weekend DJ.", handle: "qa_admin", status_text: "One more song.",
+  favorite_tracks: [{ provider: "youtube", providerId: "aaaaaaaaaaa", title: "Sunset Signal", artist: "Mira" }],
+  avatar_key: "pulse", avatar_url: null, avatar_path: null, theme_key: "afterglow", created_at: "2026-01-15T12:00:00Z", updated_at: "2026-07-31T12:00:00Z" };
 const messages: ChatMessage[] = [
   { id: "m1", user: { ...user, name: "Mira" }, content: "That transition was perfect.", type: "text", createdAt: "2026-07-31T18:30:00Z", reactions: [{ emoji: "Like", userId: user.id, userName: "QA Admin" }] },
   { id: "m2", user, content: "Queued one more for the sunset set.", type: "text", createdAt: "2026-07-31T18:31:00Z", reactions: [], replyTo: { id: "m1", user: { ...user, name: "Mira" }, content: "That transition was perfect.", type: "text", createdAt: "2026-07-31T18:30:00Z", reactions: [] } }
@@ -66,6 +68,8 @@ const rejectedAuthClient = { auth: { signInWithPassword: async () => ({ error: n
 let directoryRequests = 0;
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url === "/api/social") return Response.json({ people: [], invitations: [], shareActivity: false });
+  if (url === "/api/library") return Response.json({ library: { picks: [], sets: [] } });
   if (url.includes("/api/admin/dashboard")) return Response.json(scenario === "admin-feedback" ? adminFeedbackData : adminData);
   if (url.includes("/api/profiles/")) return Response.json({ profile, options: [
     { key: "pulse", kind: "avatar", name: "Pulse", metadata: {} }, { key: "orbit", kind: "avatar", name: "Orbit", metadata: {} },

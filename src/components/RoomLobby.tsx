@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import type { RoomDirectoryEntry, User } from "../types";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
 import { TrackArtwork } from "./TrackArtwork";
+import { FriendsPanel } from "./FriendsPanel";
 import { readRecentRoomVisits } from "../lib/room-visits";
 import "../styles/layout-completion.css";
 import { requestJson } from "../lib/authenticated-http";
@@ -44,6 +45,7 @@ interface RoomLobbyProps {
   currentUser: User;
   onOpenRoom: (slug: string, password?: string) => void;
   onOpenProfile: () => void;
+  onOpenPerson?: (id: string) => void;
   onSignOut: () => void;
   feedbackButton: ReactNode;
   adminButton?: ReactNode;
@@ -58,6 +60,7 @@ export function RoomLobby({
   currentUser,
   onOpenRoom,
   onOpenProfile,
+  onOpenPerson,
   onSignOut,
   feedbackButton,
   adminButton
@@ -175,7 +178,7 @@ export function RoomLobby({
           <ThemeToggle compact />
           <Button variant="ghost" className="lobby-profile h-10 px-2" data-navigation-focus="lobby-profile" onClick={onOpenProfile} aria-label="Open your profile">
             <Avatar user={currentUser} size={28} />
-            <span><strong>{currentUser.name}</strong><small>Profile</small></span>
+            <span><strong>{currentUser.name}</strong></span>
           </Button>
           <Button variant="ghost" size="sm" onClick={onSignOut} className="lobby-sign-out text-muted-foreground">
             <LogOut /> Sign out
@@ -221,7 +224,7 @@ export function RoomLobby({
           </Select>
           <Button variant="outline" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0} aria-label="Refresh rooms"><RefreshCw className={refreshing ? "spin" : undefined} /><span>{refreshing ? "Refreshing…" : "Refresh"}</span></Button>
         </div>
-        <div className="lobby-filter-summary"><p role="status">{!loading && directoryLoaded && `${visibleRooms.length} ${visibleRooms.length === 1 ? "room" : "rooms"}${filtering ? " match your filters" : " available"}${refreshing ? " · refreshing previews" : ""}`}</p>{(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setFilter("all"); setSort("active"); }}>Reset room filters</Button>}</div>
+        <div className="lobby-filter-summary"><p role="status">{!loading && directoryLoaded && `${visibleRooms.length} ${visibleRooms.length === 1 ? "room" : "rooms"}`}</p>{(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setFilter("all"); setSort("active"); }}>Reset filters</Button>}</div>
         {loading ? (
           <div className="room-card-grid" aria-label="Loading rooms">
             {[0, 1, 2].map((item) => <Skeleton key={item} className="h-36 rounded-xl" />)}
@@ -256,6 +259,7 @@ export function RoomLobby({
             />}
           </div>
         )}
+        <FriendsPanel accessToken={accessToken} currentUser={currentUser} onOpenRoom={onOpenRoom} onOpenPerson={onOpenPerson} />
       </div>
 
       {creating && (
@@ -327,7 +331,7 @@ function RoomSection({
                 {room.description && <p className="room-card-description">{room.description}</p>}
                 {room.isPublic && !room.passwordProtected && room.preview && <div className="room-preview-track">
                   <TrackArtwork track={{ provider: room.preview.provider || "youtube", providerId: "" }} src={room.preview.artworkUrl || null} compact className="room-preview-art" />
-                  <div><small>{now - room.preview.observedAt > 90_000 ? "Older preview · refresh to update" : room.preview.playing ? "Playing now" : "Room paused"}</small><strong title={room.preview.title}>{room.preview.title}</strong>{room.preview.artist && <span>{room.preview.artist}</span>}</div>
+                  <div><small>{now - room.preview.observedAt > 90_000 ? "Preview is out of date" : room.preview.playing ? "Playing" : "Paused"}</small><strong title={room.preview.title}>{room.preview.title}</strong>{room.preview.artist && <span>{room.preview.artist}</span>}</div>
                 </div>}
               </div>}
               <CardContent className="room-card-content">
@@ -349,7 +353,6 @@ function RoomSection({
           <EmptyHeader>
             <EmptyMedia variant="icon"><Radio /></EmptyMedia>
             <EmptyTitle>{filtering ? "No matching rooms" : "No rooms yet"}</EmptyTitle>
-            {filtering && <EmptyDescription>Try another name or filter.</EmptyDescription>}
           </EmptyHeader>
         </Empty>
       )}
@@ -395,7 +398,7 @@ function CreateRoomDialog({
         <form className="grid gap-5" autoComplete="off" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>Create a room</DialogTitle>
-            <DialogDescription>DJ queues are private. Each DJ plays one track per turn.</DialogDescription>
+            <DialogDescription className="sr-only">Name and access settings.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -430,7 +433,7 @@ function CreateRoomDialog({
               />
             </div>
             <div className="switch-row">
-              <span><Globe2 /><span><strong>Public room</strong><small>Show in the room directory</small></span></span>
+              <span><Globe2 /><span><strong>List in room directory</strong></span></span>
               <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
             </div>
           </div>
@@ -464,7 +467,7 @@ export function PasswordDialog({
           <DialogHeader>
             <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><LockKeyhole className="size-4" /></div>
             <DialogTitle>{roomName}</DialogTitle>
-            <DialogDescription>Enter the room password to join.</DialogDescription>
+            <DialogDescription className="sr-only">Enter the room password to join.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="join-password">Password</Label>

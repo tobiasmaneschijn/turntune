@@ -53,15 +53,21 @@ function RoomSessionHarness() {
 
 function Harness() {
   const [token, setToken] = useState('token-one')
+  const [account, setAccount] = useState(user)
   const [connected, setConnected] = useState(false)
   const [notice, setNotice] = useState('')
+  const [updatedProfile, setUpdatedProfile] = useState('')
   const roles = new URLSearchParams(location.search).get('surface') === 'roles'
+  const otherProfile = new URLSearchParams(location.search).get('profile') === 'other'
+  const embedded = new URLSearchParams(location.search).has('embedded')
   return <ThemeProvider><main>
     <button onClick={() => setToken('token-two')}>Rotate token</button>
+    <button onClick={() => { setAccount(bob); setToken('token-bob'); setUpdatedProfile('') }}>Switch account</button>
     <button onClick={() => { state.connected = !connected; setConnected(!connected) }}>Toggle connection</button>
     <p role="status">{notice}</p>
+    <output data-testid="profile-updated">{updatedProfile}</output>
     {roles ? <RoomSettingsDialog snapshot={snapshot} currentUserId={user.id} accessToken={token} connected={connected} transport={transport} onClose={() => {}} onNotice={setNotice} />
-      : <ProfilePage profileId={user.id} accessToken={token} currentUser={user} onBack={() => {}} onOwnProfileUpdated={() => {}} />}
+      : <ProfilePage profileId={otherProfile ? bob.id : account.id} accessToken={token} currentUser={account} embedded={embedded} onBack={() => {}} onOwnProfileUpdated={(profile) => setUpdatedProfile(profile.display_name)} onInvite={(id) => setNotice(`Invited ${id}`)} />}
   </main></ThemeProvider>
 }
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).get('surface') === 'session' ? <RoomSessionHarness /> : <Harness />)

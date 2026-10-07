@@ -30,7 +30,7 @@ function DialogContent({
           {children}
           {showCloseButton && (
             <DialogPrimitive.Close
-              render={<Button variant="ghost" size="icon-sm" className="absolute right-4 top-4 text-muted-foreground" />}
+              render={<Button variant="ghost" size="icon-sm" className="absolute right-4 top-4 z-10 text-muted-foreground" />}
             >
               <X />
               <span className="sr-only">Close</span>

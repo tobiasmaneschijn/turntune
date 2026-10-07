@@ -28,10 +28,10 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
   const picks = library?.picks.filter((pick) => [pick.track.title, pick.track.artist].some((value) => value?.toLocaleLowerCase().includes(needle))) || [];
   const sets = library?.sets.filter((set) => set.name.toLocaleLowerCase().includes(needle) || set.tracks.some((track) => [track.title, track.artist].some((value) => value?.toLocaleLowerCase().includes(needle)))) || [];
   return <div className="music-library-content">
-    <div className="music-library-heading"><p>Available in every room</p><Button variant="ghost" size="icon" aria-label="Refresh private picks and sets" disabled={busy || loading} onClick={refresh}><RefreshCw size={16} /></Button></div>
-    <details className="music-library-help"><summary>About picks and sets</summary><p>Sets save copies of tracks. Adding a set keeps your queue and skips tracks already playing or queued. Picks and sets remain until you delete them or your account.</p></details>
+    <div className="music-library-heading"><Button className="ml-auto" variant="ghost" size="icon" aria-label="Refresh private picks and sets" disabled={busy || loading} onClick={refresh}><RefreshCw size={16} /></Button></div>
+    <details className="music-library-help"><summary>About sets</summary><p>Sets add to your queue. Playing and queued tracks are skipped.</p></details>
     {loading && <p role="status">Loading picks and sets…</p>}
-    {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Retry library</Button></div>}
+    {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Retry</Button></div>}
     {library && <><Input aria-label="Filter private picks and sets" placeholder="Filter picks and sets" value={filter} onChange={(event) => setFilter(event.target.value)} />
       <details className="music-create-set"><summary>Save current queue as a set</summary><form className="music-save-set" onSubmit={async (event) => {
         event.preventDefault();
@@ -39,7 +39,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
         if (!queue.length || queue.length > 50) { setFormError("A set needs 1–50 waiting tracks."); return; }
         draftId.current ||= crypto.randomUUID();
         if (await mutate({ type: "save-set", id: draftId.current, name: setName.trim(), tracks: queue.map(libraryTrack) })) { setSetName(""); draftId.current = null; setFormError(""); }
-      }}><label>Set name<Input value={setName} disabled={busy} maxLength={60} onChange={(event) => { setSetName(event.target.value); draftId.current = null; }} placeholder="Friday focus" /></label><Button variant="outline" type="submit" disabled={busy || !queue.length || queue.length > 50}>Save queue as set</Button><small>{queue.length > 50 ? "50-track limit. Shorten your queue first." : "Saves queued tracks in order."}</small></form></details>
+      }}><label>Set name<Input value={setName} disabled={busy} maxLength={60} onChange={(event) => { setSetName(event.target.value); draftId.current = null; }} placeholder="Friday focus" /></label><Button variant="outline" type="submit" disabled={busy || !queue.length || queue.length > 50}>Save queue as set</Button>{queue.length > 50 && <small>50-track limit. Shorten your queue first.</small>}</form></details>
       {formError && <p role="alert">{formError}</p>}
       <h3>My picks <small>{library.picks.length}/500</small></h3>
       {picks.map((pick) => <div className="music-library-row" key={pick.id}><TrackArtwork track={pick.track} compact /><div><strong>{pick.track.title}</strong><small>{[pick.track.artist, providerLabel(pick.track.provider), formatTrackDuration(pick.track.durationMs)].filter(Boolean).join(" · ")}</small><div className="music-library-row-actions"><Button variant="ghost" size="sm" aria-label={`Add saved pick ${pick.track.title} to my queue`} disabled={busy || !canEnqueue || isQueued(pick.track)} onClick={() => enqueue(pick.track)}><Plus />{isQueued(pick.track) ? "Already in room" : "Add to queue"}</Button><Button variant="ghost" size="icon" aria-label={`Details for saved pick ${pick.track.title}`} onClick={() => details(pick.track)}><Info /></Button><Button variant="ghost" size="icon" aria-label={`Delete saved pick ${pick.track.title}`} disabled={busy} onClick={() => void mutate({ type: "delete-pick", id: pick.id })}><Trash2 /></Button></div></div></div>)}

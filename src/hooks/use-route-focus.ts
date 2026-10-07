@@ -8,11 +8,12 @@ export function rememberNavigationFocus(context: string) {
 }
 
 /** Call with the intentional route identity, never with presence/playback state. */
-export function useRouteFocus(route: string, restoreContext?: string) {
+export function useRouteFocus(route: string, restoreContext?: string, suspendDestinationFocus = false) {
   const previous = useRef(route);
   useEffect(() => {
     if (previous.current === route) return;
     previous.current = route;
+    if (suspendDestinationFocus) return;
     let frame = 0;
     const focusDestination = () => {
       const key = restoreContext ? returnTargets.get(restoreContext) : undefined;
@@ -32,5 +33,5 @@ export function useRouteFocus(route: string, restoreContext?: string) {
     const observer = new MutationObserver(() => { if (focusDestination()) observer.disconnect(); });
     observer.observe(document.body, { childList: true, subtree: true });
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [route, restoreContext]);
+  }, [route, restoreContext, suspendDestinationFocus]);
 }

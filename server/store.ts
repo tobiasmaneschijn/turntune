@@ -2,6 +2,7 @@ import { RoomCommandError } from "./socket-handler.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
+import { profileUpdateSchema, type ProfileUpdate } from "./profile-fields.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
 import { runtimeMetrics } from "./runtime-metrics.js";
@@ -16,7 +17,7 @@ import type {
   SoundSpinProfileOption
 } from "./types.js";
 
-const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, avatar_url, avatar_path, theme_key, created_at, updated_at";
+const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, avatar_url, avatar_path, theme_key, created_at, updated_at, handle, status_text, favorite_tracks";
 
 interface Database {
   rooms: Record<string, Room>;
@@ -548,9 +549,10 @@ export class Store {
   async updateRoomSettings(
     roomSlug: string,
     userId: string,
-    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string }
+    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string; themePrompt?: string | null }
   ) {
     if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError("Room descriptions can contain at most 240 characters.");
+    if (update.themePrompt !== undefined && update.themePrompt !== null && (typeof update.themePrompt !== "string" || update.themePrompt.trim().length > 160)) throw new RoomCommandError("Themes can contain at most 160 characters.");
     const room = await this.loadRoom(roomSlug);
     if (!room) throw new RoomCommandError("This room no longer exists.");
     await this.changeRoom(room, async draft => {
@@ -562,7 +564,11 @@ export class Store {
       if (update.passwordHash !== undefined) { draft.passwordProtected = Boolean(update.passwordHash); metadata.password_hash = update.passwordHash; }
       if (update.djAccess !== undefined) draft.settings.djAccess = update.djAccess;
       if (update.description !== undefined) draft.settings.description = update.description.trim();
-      if (update.djAccess !== undefined || update.description !== undefined) metadata.settings = draft.settings;
+      if (update.themePrompt !== undefined) {
+        if (update.themePrompt?.trim()) draft.settings.themePrompt = update.themePrompt.trim();
+        else delete draft.settings.themePrompt;
+      }
+      if (update.djAccess !== undefined || update.description !== undefined || update.themePrompt !== undefined) metadata.settings = draft.settings;
       pruneUnauthorizedDjs(draft);
       return { result: undefined, metadata };
     });
@@ -659,15 +665,10 @@ export class Store {
 
   async updateProfile(
     userId: string,
-    update: {
-      displayName?: string;
-      bio?: string;
-      avatarKey?: string;
-      customAvatarPath?: string;
-      themeKey?: string;
-    }
+    input: ProfileUpdate
   ) {
     if (!this.supabase) return null;
+    const update = profileUpdateSchema.parse(input);
     const supabase = this.supabase;
     const current = await this.getProfile(userId);
     if (!current) throw new Error("Profile not found.");
@@ -709,6 +710,9 @@ export class Store {
     const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (update.displayName !== undefined) values.display_name = update.displayName;
     if (update.bio !== undefined) values.bio = update.bio;
+    if (update.handle !== undefined) values.handle = update.handle;
+    if (update.statusText !== undefined) values.status_text = update.statusText;
+    if (update.favoriteTracks !== undefined) values.favorite_tracks = update.favoriteTracks;
     if (update.avatarKey !== undefined) {
       values.avatar_key = update.avatarKey;
       values.avatar_url = null;
@@ -726,6 +730,7 @@ export class Store {
       .eq("user_id", userId)
       .select(PROFILE_COLUMNS)
       .single();
+    if (error?.code === "23505" && update.handle !== undefined) throw new Error("That handle is taken.");
     if (error) throw new Error(`Could not update profile: ${error.message}`);
     return data as SoundSpinProfile;
   }

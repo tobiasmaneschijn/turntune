@@ -18,6 +18,25 @@ function room(): Room {
   };
 }
 
+test("theme nights require room authority and survive a server restart", async t => {
+  const dataDir = await temporaryDirectory(t);
+  const store = new Store({ dataDir, supabase: null });
+  await store.init();
+  const state = store.getOrCreateLocalRoom("test-room", room);
+  state.moderatorUserIds = ["moderator"];
+  await store.saveRoom(state);
+  await assert.rejects(store.updateRoomSettings(state.id, "listener", { themePrompt: "School years" }), /Only the owner or a moderator/);
+  assert.equal(state.settings.themePrompt, undefined);
+  await store.updateRoomSettings(state.id, "moderator", { themePrompt: "  School years  " });
+  await store.flush();
+  const restored = new Store({ dataDir, supabase: null });
+  await restored.init();
+  assert.equal(restored.getRoom(state.id)?.settings.themePrompt, "School years");
+  await assert.rejects(restored.updateRoomSettings(state.id, "alice", { themePrompt: "x".repeat(161) }), /at most 160/);
+  await restored.updateRoomSettings(state.id, "alice", { themePrompt: null });
+  assert.equal(restored.getRoom(state.id)?.settings.themePrompt, undefined);
+});
+
 function client(from: (table: string) => unknown) {
   return { from } as unknown as SupabaseClient;
 }

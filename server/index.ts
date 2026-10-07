@@ -21,7 +21,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
+import { profileUpdateSchema } from "./profile-fields.js";
 import { mountPrivateLibraryRoutes } from "./library-routes.js";
+import { mountSocialRoutes } from "./social-routes.js";
+import { SocialStore } from "./social-store.js";
 import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./chat-history.js";
 import { createChatRelay } from "./chat-relay.js";
 import { resolveChatMediaUrl } from "./chat-media.js";
@@ -117,15 +120,6 @@ const idleRooms = new IdleRoomRegistry(roomId => {
   return true;
 });
 function watchIdleRoom(roomId: string) { if (store.usesSupabase && !roomUsers.get(roomId)?.size) idleRooms.schedule(roomId); }
-const profileUpdateSchema = z.object({
-  displayName: z.string().trim().min(1).max(32).optional(),
-  bio: z.string().trim().max(160).optional(),
-  avatarKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional(),
-  customAvatarPath: z.string().regex(/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp|gif)$/).optional(),
-  themeKey: z.string().regex(/^[a-z0-9-]{2,40}$/).optional()
-}).refine((value) => Object.keys(value).length > 0, "No profile changes supplied.")
-  .refine((value) => !(value.avatarKey && value.customAvatarPath), "Choose an unlocked avatar or a custom upload, not both.");
-
 const roomCreateSchema = z.object({
   name: z.string().trim().min(1).max(48),
   isPublic: z.boolean().default(true),
@@ -137,7 +131,8 @@ const roomSettingsSchema = z.object({
   description: z.string().trim().max(240).optional(),
   isPublic: z.boolean().optional(),
   password: z.union([z.string().max(128), z.null()]).optional(),
-  djAccess: z.enum(["everyone", "roles"]).optional()
+  djAccess: z.enum(["everyone", "roles"]).optional(),
+  themePrompt: z.string().trim().max(160).nullable().optional()
 }).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
@@ -194,6 +189,22 @@ async function getApiAdminUserId(request: express.Request): Promise<
 }
 
 mountPrivateLibraryRoutes(app, store, getApiUserId);
+const socialStore = new SocialStore({
+  supabase: supabaseAdmin,
+  getRoomAccess: async (slug, userId) => {
+    const access = await store.getRoomAccess(slug, userId);
+    return { ...access, passwordProtected: Boolean(access.passwordHash) };
+  },
+  getProfile: userId => store.getProfile(userId),
+  getRoom: async slug => { const room = await store.loadRoom(slug); return room ? { name: room.name } : null; },
+  getActivity: userId => {
+    for (const [roomSlug, users] of roomUsers) {
+      if ([...users.values()].some(user => user.id === userId)) return { roomSlug };
+    }
+    return null;
+  }
+});
+mountSocialRoutes(app, socialStore, getApiUserId);
 async function canWriteRoomChat(userId: string, roomSlug: string) {
   const access = await store.getRoomAccess(roomSlug, userId);
   return access.exists && (access.isPublic || Boolean(access.role)) &&
@@ -263,6 +274,7 @@ app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response
     const { error } = await signupAdmin.auth.admin.createUser({
       email: parsed.data.email,
       password: parsed.data.password,
+      ...(parsed.data.displayName ? { user_metadata: { display_name: parsed.data.displayName } } : {}),
       email_confirm: true
     });
     if (error) {
@@ -688,7 +700,8 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
       isPublic: parsed.data.isPublic,
       passwordHash: parsed.data.password === undefined ? undefined : await hashRoomPassword(parsed.data.password),
       djAccess: parsed.data.djAccess,
-      description: parsed.data.description
+      description: parsed.data.description,
+      themePrompt: parsed.data.themePrompt
     });
     if (room) {
       for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {

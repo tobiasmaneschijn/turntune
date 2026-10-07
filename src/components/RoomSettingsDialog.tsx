@@ -3,7 +3,7 @@ import { Crown, Globe2, LockKeyhole, Shield, UserPlus, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -104,10 +104,10 @@ export function RoomSettingsDialog({
               <div className="grid gap-2">
                 <Label htmlFor="settings-description">Description <span className="font-normal text-muted-foreground">Optional</span></Label>
                 <Input id="settings-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" />
-                <p id="settings-description-help" className="room-description-help">Shown in the directory. Plain text, up to 240 characters.</p>
+                <p id="settings-description-help" className="room-description-help">In the directory · 240 characters max.</p>
               </div>
               <div className="switch-row">
-                <span><Globe2 /><span><strong>Public room</strong><small>List this room in the directory</small></span></span>
+                <span><Globe2 /><span><strong>List in room directory</strong></span></span>
                 <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
               </div>
               <Card size="sm">
@@ -136,7 +136,7 @@ export function RoomSettingsDialog({
 
             {isOwner && (
               <Card size="sm" className="moderator-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle><CardDescription>Moderators manage the room. DJs can join restricted DJ queues.</CardDescription></CardHeader>
+                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle></CardHeader>
                 <CardContent className="moderator-list">
                   {snapshot.users.map((user) => {
                     const owner = user.id === snapshot.room.ownerUserId;
@@ -145,7 +145,7 @@ export function RoomSettingsDialog({
                     return (
                       <div key={user.id}>
                         <Avatar user={user} size={28} />
-                        <span><strong>{user.name}</strong><small>{owner ? "Owner" : moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small></span>
+                        <span><strong>{user.name}</strong>{!owner && <small>{moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small>}</span>
                         {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
                           <span className="room-role-actions">
                             <Button type="button" variant="ghost" size="sm" disabled={!connected || pendingRoles.has(user.id)} onClick={() => changeRole(user.id, "moderator", !moderator)}>

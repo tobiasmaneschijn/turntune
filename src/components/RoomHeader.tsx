@@ -21,7 +21,7 @@ const FeedbackButton = lazy(() => import("./FeedbackDialog").then((module) => ({
 
 export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, diagnosticContext,
   onHome, onSettings, onRoomSettings, onAdmin, onProfile, onSignOut, onResetLayout, onNotice, connected = true, onReconnect,
-  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange }: {
+  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange }: {
   roomName: string;
   roomSlug: string;
   listenerCount: number;
@@ -42,6 +42,8 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   moderatorUserIds?: string[];
   djUserId?: string | null;
   onOpenProfile?: (userId: string) => void;
+  onFriends?: () => void;
+  onThemeNight?: () => void;
   onFocusSearch?: () => void;
   onOpenQueue?: () => void;
   onOpenPlayer?: () => void;
@@ -66,7 +68,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   useEffect(() => () => { if (copiedTimer.current !== null) clearTimeout(copiedTimer.current); }, []);
   const copyInvite = async () => {
     try {
-      await navigator.clipboard.writeText(location.href);
+      await navigator.clipboard.writeText(new URL(`/room/${roomSlug}`, location.origin).href);
       setCopied(true);
       onNotice("Invite link copied");
       if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
@@ -85,6 +87,8 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     { id: "invite", label: "Copy room invite", key: "I", run: () => void copyInvite() },
     { id: "rooms", label: "Open room directory", run: onHome },
     { id: "profile", label: "Open my profile", run: onProfile },
+    ...(onFriends ? [{ id: "friends", label: "Friends", run: onFriends }] : []),
+    ...(onThemeNight ? [{ id: "theme", label: "Theme night", run: onThemeNight }] : []),
   ];
   useKeyboardShortcuts([
     ...commands.filter(command => command.key).map(command => ({ id: `room-${command.id}`, label: command.label, key: command.key!, enabled: singleKeys, run: command.run })),
@@ -112,6 +116,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
           {onRoomSettings && <Button variant="ghost" size="icon" onClick={onRoomSettings} title="Room settings" aria-label="Room settings"><Shield /></Button>}
         </div>
         <ThemeToggle compact />
+        {onFriends && <Button variant="ghost" size="sm" className="header-friends-button" onClick={onFriends}><Users /><span>Friends</span></Button>}
         <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Invite link copied" : "Copy room invite link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Invite"}</span></Button>
         <Button variant="ghost" size="icon" className="header-profile-button" data-navigation-focus="room-profile" onClick={onProfile} title="Open your profile" aria-label="Open your profile"><Avatar user={currentUser} size={30} /></Button>
         {onSignOut && <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut /></Button>}
@@ -123,6 +128,8 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
             {onRoomSettings && <DropdownMenuItem onClick={onRoomSettings}><Shield /> Room settings</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => setFeedbackOpen(true)}><Lightbulb /> Send feedback</DropdownMenuItem>
             <DropdownMenuItem onClick={onProfile} data-navigation-focus="room-actions"><UserRound /> Your profile</DropdownMenuItem>
+            {onFriends && <DropdownMenuItem onClick={onFriends}><Users /> Friends</DropdownMenuItem>}
+            {onThemeNight && <DropdownMenuItem onClick={onThemeNight}>Theme night</DropdownMenuItem>}
             {onAdmin && <DropdownMenuItem onClick={onAdmin}><LayoutDashboard /> Admin dashboard</DropdownMenuItem>}
             {participants && onOpenProfile && <DropdownMenuItem onClick={() => { peopleReturnRef.current = moreRef.current; setPeopleOpen(true); }}><Users /> Room listeners</DropdownMenuItem>}
             <DropdownMenuSeparator />

@@ -8,12 +8,15 @@ const profile = { user_id: '00000000-0000-4000-8000-000000000001', display_name:
 test('credential rotation preserves edited profile fields and the next save uses the fresh token', async ({ page }) => {
   let loads = 0, saveToken = ''
   await page.route('**/api/profiles/*', (route) => { loads++; return route.fulfill({ json: { profile, options: [] } }) })
+  await page.route('**/api/social', (route) => route.fulfill({ json: { people: [], shareActivity: false } }))
+  await page.route('**/api/library', (route) => route.fulfill({ json: { library: { picks: [], sets: [] } } }))
   await page.route('**/api/profile', (route) => {
     saveToken = route.request().headers().authorization
     const body = route.request().postDataJSON() as { displayName: string; bio: string }
     return route.fulfill({ json: { profile: { ...profile, display_name: body.displayName, bio: body.bio } } })
   })
   await page.goto('/tests/frontend-session-harness/index.html')
+  await page.getByRole('button', { name: 'Edit profile', exact: true }).click()
   await page.getByLabel('Display name', { exact: true }).fill('Unsaved name')
   await page.getByLabel('Bio', { exact: true }).fill('Unsaved bio')
   await page.getByRole('button', { name: 'Rotate token' }).click()

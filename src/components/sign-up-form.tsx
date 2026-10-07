@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { requestJson } from '@/lib/authenticated-http'
 
 import { cn } from '@/lib/utils'
@@ -13,12 +14,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function SignUpForm({
+  client,
   onNavigate,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
+  client?: SupabaseClient
   onNavigate: (path: string) => void
 }) {
+  const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
@@ -31,6 +35,10 @@ export function SignUpForm({
     e.preventDefault()
     setError(null)
 
+    if (!displayName.trim()) {
+      setError('Enter a display name.')
+      return
+    }
     if (password !== repeatPassword) {
       setError('Passwords do not match')
       return
@@ -40,10 +48,18 @@ export function SignUpForm({
     try {
       await requestJson('/api/signup', {
         method: 'POST',
-        body: JSON.stringify({ email, password, invitePassword }),
+        body: JSON.stringify({ email, password, invitePassword, displayName: displayName.trim() }),
         errorMessage: 'Could not create account. Try again.',
       })
       setSuccess(true)
+      if (client) {
+        try {
+          const { error: signInError } = await client.auth.signInWithPassword({ email, password })
+          if (signInError) throw signInError
+        } catch (signInError: unknown) {
+          setError(signInError instanceof Error ? signInError.message : 'Could not sign in. Try signing in below.')
+        }
+      }
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'Could not create account. Try again.')
     } finally {
@@ -59,7 +75,8 @@ export function SignUpForm({
             <CardTitle className="text-xl">Account created</CardTitle>
           </CardHeader>
           <CardContent>
-            <Button type="button" className="w-full" onClick={() => onNavigate('/login')}>
+            {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
+            <Button type="button" className="w-full" disabled={isLoading} onClick={() => onNavigate('/login')}>
               Sign in
             </Button>
           </CardContent>
@@ -67,11 +84,15 @@ export function SignUpForm({
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Create an account</CardTitle>
+            <CardTitle className="text-xl">Create account</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignUp}>
               <div className="flex flex-col gap-6">
+                <div className="grid gap-2">
+                  <Label htmlFor="display-name">Display name</Label>
+                  <Input id="display-name" autoComplete="nickname" required maxLength={32} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+                </div>
                 <div className="grid gap-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
@@ -123,10 +144,10 @@ export function SignUpForm({
                     onChange={(e) => setInvitePassword(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Ask the person who invited you for this password.
+                    Get this from whoever invited you.
                   </p>
                 </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
+                {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? 'Creating account…' : 'Create account'}
                 </Button>

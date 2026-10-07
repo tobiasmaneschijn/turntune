@@ -50,6 +50,9 @@ export function normalizeRadioState(room: Room) {
   const tracks = (value: unknown): Track[] => Array.isArray(value) ? value.filter(isUsableTrack) : [];
   if (!object(room.settings)) room.settings = {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
+  if (typeof room.settings.themePrompt === "string" && room.settings.themePrompt.trim().length <= 160 && room.settings.themePrompt.trim()) {
+    room.settings.themePrompt = room.settings.themePrompt.trim();
+  } else delete room.settings.themePrompt;
   room.moderatorUserIds = ids(room.moderatorUserIds);
   room.djRoleUserIds = ids(room.djRoleUserIds);
   room.djQueueUserIds = ids(room.djQueueUserIds);

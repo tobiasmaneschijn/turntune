@@ -8,8 +8,6 @@ import {
   Music2,
   Radio,
   Share2,
-  Sparkles,
-  Users,
   Waves
 } from "lucide-react";
 
@@ -42,18 +40,15 @@ const SAMPLE_USERS: User[] = [
 const BENEFITS = [
   {
     icon: Waves,
-    title: "Synchronized playback",
-    description: "Everyone in the room hears the same song at the same time."
+    title: "Synchronized playback"
   },
   {
     icon: ListMusic,
-    title: "DJ turns",
-    description: "Play one song per turn from your private queue."
+    title: "DJ turns"
   },
   {
     icon: MessageCircle,
-    title: "Room chat",
-    description: "Send messages, replies, and reactions while listening."
+    title: "Room chat"
   }
 ];
 
@@ -232,12 +227,11 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
           <h2 id="landing-features-title">Features</h2>
         </div>
         <div className="landing-feature-grid">
-          {BENEFITS.map(({ icon: Icon, title, description }) => (
+          {BENEFITS.map(({ icon: Icon, title }) => (
             <Card className="landing-feature-card" key={title}>
               <CardHeader>
                 <span className="landing-feature-icon"><Icon aria-hidden="true" /></span>
                 <CardTitle>{title}</CardTitle>
-                <CardDescription>{description}</CardDescription>
               </CardHeader>
             </Card>
           ))}
@@ -257,28 +251,6 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             </li>
           ))}
         </ol>
-      </section>
-
-      <section className="landing-cta" aria-labelledby="landing-cta-title">
-        <div className="landing-cta-decoration" aria-hidden="true"><Users /><Music2 /><Sparkles /></div>
-        <h2 id="landing-cta-title">Create a listening room</h2>
-        <div className="landing-cta-actions">
-          <a
-            href="/sign-up"
-            className={buttonVariants({ size: "lg" })}
-            onClick={(event) => navigateInsideApp(event, "/sign-up", onNavigate)}
-          >
-            Sign up <ArrowRight data-icon="inline-end" />
-          </a>
-          <a
-            href="/login"
-            className={buttonVariants({ variant: "outline", size: "lg" })}
-            onClick={(event) => navigateInsideApp(event, "/login", onNavigate)}
-          >
-            Sign in
-          </a>
-        </div>
-        <p className="landing-invite-note"><Link2 aria-hidden="true" /> Invite required to create an account.</p>
       </section>
 
       <footer className="landing-footer">

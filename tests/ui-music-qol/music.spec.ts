@@ -369,7 +369,7 @@ test("private library errors keep set drafts and offer a retry without false sav
   await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toHaveValue("Keep this draft");
   await expect(page.locator(".music-action-status")).not.toContainText("Saved set");
   fails = false;
-  await page.getByRole("button", { name: "Retry library", exact: true }).click();
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.locator(".music-library-content").getByRole("alert")).toHaveCount(0);
 });
 
@@ -382,7 +382,7 @@ test("queue and history details show complete metadata, safe links and clipboard
   await expect(dialog).toContainText("Fixture Artist");
   await expect(dialog.getByRole("link", { name: "Open on YouTube", exact: true })).toHaveAttribute("href", "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   await dialog.getByRole("button", { name: "Copy title and artist", exact: true }).click();
-  await expect(dialog.getByRole("status")).toContainText("Could not copy");
+  await expect(dialog.getByRole("status")).toContainText("Couldn't copy");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("button", { name: "Actions for Alpha", exact: true })).toBeFocused();
   await page.getByRole("tab", { name: "History", exact: true }).click();
@@ -430,6 +430,6 @@ test("full Unicode track details and successful copying fit 320px without losing
   expect(box!.width).toBeLessThanOrEqual(320);
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await dialog.getByRole("button", { name: "Copy title and artist", exact: true }).click();
-  await expect(dialog.getByRole("status")).toHaveText("Title and artist copied.");
+  await expect(dialog.getByRole("status")).toHaveText("Copied.");
   expect(await page.evaluate(() => (window as any).copiedMusicText)).toBe(`${title} — Alexandria & 朋友`);
 });

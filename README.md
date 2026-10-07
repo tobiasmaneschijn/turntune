@@ -30,6 +30,9 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - A compact current-track strip, named layouts, room commands, and listening guidance
 - Room descriptions, safe public previews, account-scoped recent rooms, and host notes
 - Older chat pages, room message search, and attention-aware notification controls
+- Profiles with handles, status, and up to three favorite songs
+- Mutual friends, room invitations, and optional activity sharing with friends
+- Profile drawers that keep the room player running, and host-controlled theme nights
 
 ## Local development
 
@@ -48,6 +51,12 @@ the app. The browser requires Supabase authentication; configuration failures sh
 a retry screen. The server retains a credential-free JSON store for isolated
 development and integration tests. Production startup rejects absent or partial
 Supabase configuration.
+
+Apply all Supabase migrations before starting the updated server. The profile and
+friends features require `20261007081213_friends_and_profile_showcase.sql`.
+Friends can see room activity only when sharing is enabled and they have room
+access. Invitations to private rooms grant membership only with current owner or
+moderator authority; password-protected rooms still require their password.
 
 ## Architecture documentation
 

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export function LoginForm({
   client,
@@ -85,7 +85,7 @@ export function LoginForm({
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              {error && <Alert variant="destructive"><AlertTitle>Could not sign in</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Signing in…' : 'Sign in'}
               </Button>

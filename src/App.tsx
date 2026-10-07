@@ -18,6 +18,12 @@ import { ListeningChecklist } from "./components/ListeningChecklist";
 import { RoomAnnouncementBanner } from "./components/RoomAnnouncementBanner";
 import { RoomPeopleDialog } from "./components/RoomPeopleDialog";
 import { DeferredDialog } from "./components/DeferredDialog";
+import { RoomProfileDialog } from "./components/RoomProfileDialog";
+import { FriendsPanel } from "./components/FriendsPanel";
+import { ThemeNightDialog } from "./components/ThemeNightDialog";
+import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog";
+import { requestJson } from "./lib/authenticated-http";
+import { rememberAuthDestination, takeAuthDestination } from "./lib/auth-destination";
 import { MessageIcon, UsersIcon } from "./components/Icons";
 import { ForgotPasswordForm } from "./components/forgot-password-form";
 import { LoginForm } from "./components/login-form";
@@ -75,6 +81,8 @@ export function App() {
   const isTabletDualRoomLayout = useMediaQuery("(min-width: 900px) and (max-width: 1024px) and (min-height: 560px)");
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [themeNightOpen, setThemeNightOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const previousDjUserIdRef = useRef<string | null>(null);
   const djBaselineRef = useRef("");
@@ -85,8 +93,16 @@ export function App() {
     goHome: leaveRoom, backFromProfile } = useRoomSession({ auth, profile, profileReady, onNotice: setNotice });
   const draftOwnerRef = useRef(auth.session?.user.id);
   const [roomNotificationsMuted] = useRoomNotificationMuted(profile.id, roomId || "");
-  useRouteFocus(navigationContext, navigationContext);
+  useRouteFocus(navigationContext, navigationContext, Boolean(roomId && profilePageId));
   const recordedVisitRef = useRef<string | null>(null);
+  const invitationRequests = useRef(new Map<string, AbortController>());
+  useEffect(() => () => {
+    invitationRequests.current.forEach(controller => controller.abort());
+    invitationRequests.current.clear();
+  }, [auth.session?.user.id, roomId]);
+  useEffect(() => {
+    setFriendsOpen(false); setThemeNightOpen(false); setRoomSettingsOpen(false); setUserSettingsOpen(false);
+  }, [auth.session?.user.id, roomId]);
   useEffect(() => {
     if (!roomId) { recordedVisitRef.current = null; return; }
     const userId = auth.session?.user.id;
@@ -173,7 +189,26 @@ export function App() {
   const goHome = () => {
     setRoomSettingsOpen(false);
     setUserSettingsOpen(false);
+    setFriendsOpen(false);
+    setThemeNightOpen(false);
     leaveRoom();
+  };
+
+  const updateOwnProfile = (updated: SoundSpinProfile) => {
+    const nextProfile = { id: updated.user_id, name: updated.display_name, avatarSeed: updated.user_id,
+      avatarKey: updated.avatar_key, avatarUrl: updated.avatar_url || undefined, isAppAdmin: updated.is_app_admin };
+    storeValue("soundspin-profile", JSON.stringify(nextProfile));
+    setProfile(nextProfile);
+  };
+  const inviteFriend = async (userId: string) => {
+    if (!auth.session || !roomId || invitationRequests.current.has(userId)) return;
+    const controller = new AbortController();
+    invitationRequests.current.set(userId, controller);
+    try {
+      await requestJson("/api/room-invitations", { accessToken: auth.session.access_token, method: "POST", signal: controller.signal, body: JSON.stringify({ userId, roomSlug: roomId }) });
+      if (!controller.signal.aborted) setNotice("Invitation sent");
+    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Could not invite. Try again."); }
+    finally { if (invitationRequests.current.get(userId) === controller) invitationRequests.current.delete(userId); }
   };
 
   if (auth.error) {
@@ -201,7 +236,7 @@ export function App() {
       <PasswordRecoveryScreen
         client={auth.client!}
         onComplete={() => {
-          history.replaceState({}, "", "/");
+          history.replaceState({}, "", takeAuthDestination());
           setAuth((current) => ({ ...current, recovery: false }));
         }}
       />
@@ -235,7 +270,7 @@ export function App() {
     );
   }
 
-  if (profilePageId && auth.session) {
+  if (profilePageId && auth.session && !roomId) {
     return (
       <Suspense fallback={<LoadingScreen label="Loading profile…" />}>
         <ProfilePage
@@ -244,18 +279,7 @@ export function App() {
           accessToken={auth.session.access_token}
           currentUser={profile}
           onBack={backFromProfile}
-          onOwnProfileUpdated={(updated) => {
-            const nextProfile = {
-              id: updated.user_id,
-              name: updated.display_name,
-              avatarSeed: updated.user_id,
-              avatarKey: updated.avatar_key,
-              avatarUrl: updated.avatar_url || undefined,
-              isAppAdmin: updated.is_app_admin
-            };
-            storeValue("soundspin-profile", JSON.stringify(nextProfile));
-            setProfile(nextProfile);
-          }}
+          onOwnProfileUpdated={updateOwnProfile}
           onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
         />
       </Suspense>
@@ -269,6 +293,7 @@ export function App() {
         currentUser={profile}
         onOpenRoom={openRoom}
         onOpenProfile={() => openProfile(profile.id)}
+        onOpenPerson={openProfile}
         onSignOut={() => void auth.client?.auth.signOut()}
         feedbackButton={<Suspense fallback={null}><FeedbackButton userId={profile.id} diagnosticContext={{ surface: "room-directory" }} /></Suspense>}
         adminButton={profile.isAppAdmin ? <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button> : null}
@@ -329,6 +354,8 @@ export function App() {
         currentUser={profile} onHome={goHome} onSettings={() => setUserSettingsOpen(true)}
         onRoomSettings={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id) ? () => setRoomSettingsOpen(true) : undefined}
         onAdmin={profile.isAppAdmin ? openAdmin : undefined} onProfile={() => openProfile(profile.id)}
+        onFriends={() => setFriendsOpen(true)}
+        onThemeNight={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id) ? () => setThemeNightOpen(true) : undefined}
         onSignOut={auth.enabled ? () => { void auth.client?.auth.signOut(); } : undefined}
         onResetLayout={resetRoomLayout} onNotice={setNotice}
         layoutPreset={roomLayouts.layoutPreset} onLayoutPresetChange={roomLayouts.onLayoutPresetChange}
@@ -359,7 +386,8 @@ export function App() {
           onLayoutChanged={roomLayouts.onLayoutChanged}
           miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={userSettings.playback.defaultVolume === 0} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
-          roomNotice={<RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} />}
+          roomNotice={<>{snapshot.room.settings.themePrompt && <div className="room-theme-banner" aria-label="Room theme"><span>Theme</span><strong>{snapshot.room.settings.themePrompt}</strong></div>}
+            <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} /></>}
           radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
@@ -409,6 +437,18 @@ export function App() {
       {roomSettingsOpen && auth.session && (
         <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
+      {auth.session && <RoomProfileDialog profileId={profilePageId} accessToken={auth.session.access_token}
+        currentUser={profile} onClose={backFromProfile} onUpdate={updateOwnProfile} onInvite={userId => { void inviteFriend(userId); }} />}
+      {friendsOpen && auth.session && <Dialog open onOpenChange={setFriendsOpen}>
+        <DialogContent className="room-friends-dialog"><DialogTitle className="sr-only">Friends</DialogTitle>
+          <FriendsPanel accessToken={auth.session.access_token} currentUser={profile}
+            currentRoomSlug={roomId} onOpenPerson={id => { setFriendsOpen(false); openProfile(id); }}
+            onOpenRoom={id => { setFriendsOpen(false); openRoom(id); }} />
+        </DialogContent>
+      </Dialog>}
+      {themeNightOpen && auth.session && <ThemeNightDialog key={`${snapshot.room.id}:${profile.id}`} roomSlug={snapshot.room.id}
+        prompt={snapshot.room.settings.themePrompt} accessToken={auth.session.access_token} connected={connected}
+        onClose={() => setThemeNightOpen(false)} onNotice={setNotice} />}
     </main>
   );
 }
@@ -426,6 +466,8 @@ function LoadingScreen({ label }: { label: string }) {
 function PublicEntry({ client }: { client: SupabaseClient }) {
   const [path, setPath] = useState(location.pathname);
 
+  useEffect(() => { rememberAuthDestination(path); }, [path]);
+
   useEffect(() => {
     const onPopState = () => setPath(location.pathname);
     addEventListener("popstate", onPopState);
@@ -433,6 +475,8 @@ function PublicEntry({ client }: { client: SupabaseClient }) {
   }, []);
 
   const navigate = (nextPath: string) => {
+    rememberAuthDestination(path);
+    if (nextPath === "/") takeAuthDestination();
     history.pushState({}, "", nextPath);
     setPath(nextPath);
   };
@@ -453,7 +497,7 @@ function AuthScreen({
 }) {
 
   const form = path === "/sign-up"
-    ? <SignUpForm onNavigate={onNavigate} className="w-full" />
+    ? <SignUpForm client={client} onNavigate={onNavigate} className="w-full" />
     : path === "/forgot-password"
       ? <ForgotPasswordForm client={client} onNavigate={onNavigate} className="w-full" />
       : <LoginForm client={client} onNavigate={onNavigate} className="w-full" />;

@@ -3,6 +3,7 @@ import type { AppAuth } from "./use-app-auth";
 import { useRoomConnection } from "./use-room-connection";
 import { rememberNavigationFocus } from "./use-route-focus";
 import { socket } from "../socket";
+import { takeAuthDestination } from "../lib/auth-destination";
 import type { RoomSnapshot, User } from "../types";
 
 export type AppRoute = { kind: "lobby" } | { kind: "room"; roomId: string } |
@@ -14,13 +15,19 @@ export function parseAppRoute(path: string): AppRoute {
   if (profile) return { kind: "profile", profileId: profile[1] };
   return path === "/admin" ? { kind: "admin" } : { kind: "lobby" };
 }
+export function parseNavigationRoute(path: string, state: unknown): AppRoute {
+  const route = parseAppRoute(path);
+  const backgroundRoomId = state && typeof state === "object" && "backgroundRoomId" in state ? state.backgroundRoomId : null;
+  return route.kind === "profile" && typeof backgroundRoomId === "string" && /^[a-z0-9-]{3,48}$/.test(backgroundRoomId)
+    ? { ...route, backgroundRoomId } : route;
+}
 export const routeRoomId = (route: AppRoute) => route.kind === "room" ? route.roomId : route.kind === "profile" ? route.backgroundRoomId || null : null;
 export const appRouteContext = (route: AppRoute) => route.kind === "room" ? `room:${route.roomId}` : route.kind === "profile" ? `profile:${route.profileId}` : route.kind;
 
 /** Coordinates URL navigation, room admission and transient room state in one lifetime. */
 export function useRoomSession({ auth, profile, profileReady, onNotice, transport = socket }: { auth: AppAuth; profile: User; profileReady: boolean; onNotice: (message: string) => void;
   transport?: NonNullable<Parameters<typeof useRoomConnection>[0]['transport']> }) {
-  const [route, setRoute] = useState(() => parseAppRoute(location.pathname));
+  const [route, setRoute] = useState(() => parseNavigationRoute(location.pathname, history.state));
   const routeRef = useRef(route); routeRef.current = route;
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
   const [connected, setConnected] = useState(false);
@@ -37,7 +44,7 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     routeRef.current = next; setRoute(next);
   }, []);
   useEffect(() => {
-    const pop = () => adoptRoute(parseAppRoute(location.pathname));
+    const pop = () => adoptRoute(parseNavigationRoute(location.pathname, history.state));
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, [adoptRoute]);
@@ -46,8 +53,11 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
   }, [auth.enabled, auth.session?.user.id, transport]);
   useEffect(() => {
     if (!auth.enabled || !auth.session) return;
-    if (!auth.recovery && ["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) history.replaceState({}, "", "/");
-    const parsed = parseAppRoute(location.pathname);
+    if (!auth.recovery) {
+      const destination = takeAuthDestination();
+      if (["/login", "/sign-up", "/forgot-password"].includes(location.pathname)) history.replaceState({}, "", destination);
+    }
+    const parsed = parseNavigationRoute(location.pathname, history.state);
     // An in-app profile keeps the underlying room connection while its page is visible.
     if (parsed.kind === "profile" && routeRef.current.kind === "profile" && parsed.profileId === routeRef.current.profileId) parsed.backgroundRoomId = routeRef.current.backgroundRoomId;
     adoptRoute(parsed);
@@ -65,7 +75,7 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     setSnapshot(null); setRoomPassword(password || ""); setRoomPasswordRequired(false); setRoomJoinError("");
   };
   const goHome = () => { transport.disconnect(); navigate({ kind: "lobby" }, "/"); };
-  const openProfile = (profileId: string) => navigate({ kind: "profile", profileId, backgroundRoomId: roomId || undefined }, `/profile/${profileId}`, { from: location.pathname });
+  const openProfile = (profileId: string) => navigate({ kind: "profile", profileId, backgroundRoomId: roomId || undefined }, `/profile/${profileId}`, { from: location.pathname, backgroundRoomId: roomId || undefined });
   const openAdmin = () => { transport.disconnect(); navigate({ kind: "admin" }, "/admin", { from: location.pathname }); };
   const backFromProfile = () => { if (history.state?.from) history.back(); else goHome(); };
   return { route, roomId, profilePageId: route.kind === "profile" ? route.profileId : null, adminPage: route.kind === "admin", navigationContext,

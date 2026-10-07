@@ -1,0 +1,22 @@
+.friends-panel { display: grid; gap: 12px; min-width: 0; padding: 20px 0; border-top: 1px solid var(--border); }
+.friends-panel h2 { margin: 0; font-size: 18px; font-weight: 500; }
+.friends-panel h3 { margin: 0 0 8px; font-size: 14px; font-weight: 500; }
+.friends-person { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-width: 0; padding: 8px 0; }
+.friends-person-profile { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+button.friends-person-profile { cursor: pointer; }
+.friends-person-profile strong { overflow-wrap: anywhere; font-weight: 500; }
+.friends-person-profile .avatar { flex-shrink: 0; }
+.friends-person-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; }
+.friends-room-name { overflow-wrap: anywhere; color: var(--muted-foreground); font-size: 12px; }
+.friends-group { padding-top: 12px; border-top: 1px solid var(--border); }
+.friends-state, .friends-feedback { margin: 0; color: var(--muted-foreground); font-size: 13px; }
+.friends-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--destructive); font-size: 13px; }
+.friends-invitation { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.friends-invitation strong { font-weight: 500; }
+.friends-invitation > span { color: var(--muted-foreground); font-size: 12px; }
+.friends-discovery { min-width: 0; }
+.friends-discovery summary { width: fit-content; cursor: pointer; font-size: 13px; }
+.friends-search { display: flex; gap: 8px; margin: 12px 0; }
+.friends-search input { min-width: 0; }
+@media (max-width: 480px) { .friends-person-actions { justify-content: flex-start; } .friends-person { align-items: flex-start; } .friends-search { flex-wrap: wrap; } .friends-search input { flex: 1 1 160px; } }
+@media (pointer: coarse) { .friends-person-profile { min-height: 44px; } .friends-discovery summary { min-height: 44px; padding: 12px 0; } }
