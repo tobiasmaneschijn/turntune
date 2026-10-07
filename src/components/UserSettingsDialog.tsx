@@ -36,10 +36,10 @@ const playbackOptions: Array<{
   description: string;
   icon: typeof Radio;
 }> = [
-  { value: "source", title: "Room source", description: "Use the provider attached to each queued track.", icon: Radio },
-  { value: "spotify-web", title: "Spotify in Lydman", description: "Play through the Spotify device in this browser.", icon: Music2 },
-  { value: "spotify-desktop", title: "Spotify Desktop", description: "Send playback to a selected Spotify Connect device.", icon: MonitorSpeaker },
-  { value: "apple", title: "Apple Music", description: "Play matching tracks through MusicKit in Lydman.", icon: Music2 }
+  { value: "source", title: "Room source", description: "Use each track's original provider.", icon: Radio },
+  { value: "spotify-web", title: "Spotify in Lydman", description: "Play in this browser.", icon: Music2 },
+  { value: "spotify-desktop", title: "Spotify Desktop", description: "Play on a Spotify Connect device.", icon: MonitorSpeaker },
+  { value: "apple", title: "Apple Music", description: "Play matching tracks in this browser.", icon: Music2 }
 ];
 
 export function UserSettingsDialog({
@@ -154,7 +154,7 @@ export function UserSettingsDialog({
       }}>
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Customize playback, connected services, notifications, and appearance.</DialogDescription>
+          <DialogDescription className="sr-only">Playback, connections, notifications, and appearance.</DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation={isMobile ? "horizontal" : "vertical"} className="user-settings-layout">
@@ -169,7 +169,7 @@ export function UserSettingsDialog({
             <TabsContent value="playback">
               <div className="settings-panel-stack">
                 <section>
-                  <div className="settings-section-heading"><strong>Default playback device</strong><small>Used whenever a matching version of the room track is available.</small></div>
+                  <div className="settings-section-heading"><strong>Default playback device</strong><small>Requires a matching track on your provider.</small></div>
                   <ToggleGroup className="playback-option-list" aria-label="Default playback device">
                     {playbackOptions.map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
@@ -186,7 +186,7 @@ export function UserSettingsDialog({
                   </ToggleGroup>
                   {settings.playback.preference.startsWith("spotify") && !connections.spotifyConnected && (
                     <div className="settings-inline-notice">
-                      <span>Connect Spotify before using this playback device.</span>
+                      <span>Spotify connection required.</span>
                       <Button size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>Connect Spotify</Button>
                     </div>
                   )}
@@ -211,7 +211,7 @@ export function UserSettingsDialog({
                       <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices" aria-label="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
                     </div>
                     {deviceError && <small className="settings-field-error">{deviceError}</small>}
-                    {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No available Spotify devices yet. Open Spotify on a device, then Refresh devices.</p>}
+                    {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
                   </section>
                 )}
 
@@ -227,7 +227,7 @@ export function UserSettingsDialog({
                   </Select>
                 </section>
 
-                <SettingSwitch title="Resume after reconnecting" description="Catch up to the room automatically when the playback device reconnects." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />
+                <SettingSwitch title="Resume after reconnecting" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />
               </div>
             </TabsContent>
 
@@ -249,7 +249,7 @@ export function UserSettingsDialog({
                   <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
                 </div>
                 {deviceError && <div className="dialog-error">{deviceError}</div>}
-                {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No available Spotify devices yet. Open Spotify on a device, then Refresh devices.</p>}
+                {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
               </div>
             </TabsContent>
 
@@ -259,11 +259,11 @@ export function UserSettingsDialog({
                   setRequestingPermission(true);
                   void requestNotificationPermission().then(setNotificationPermission).finally(() => setRequestingPermission(false));
                 }}>{requestingPermission ? "Requesting permission…" : "Enable notifications"}</Button>}</div>
-                <SettingSwitch title="Notify when Lydman is in the background" description="Use system notifications when this tab is hidden or unfocused. In-app feedback remains available while you are here." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
-                <SettingSwitch title="DJ turn" description="Notify me when my on-air turn begins." checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
-                <SettingSwitch title="Unavailable tracks" description="Notify me when my preferred provider has no matching recording." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
-                <SettingSwitch title="Chat mentions" description="Notify me when another listener mentions my display name." checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
-                <SettingSwitch title="Playback errors" description="Notify me when the selected playback device fails." checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
+                <SettingSwitch title="Background notifications only" description="Send system notifications only when this tab is hidden or unfocused." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
+                <SettingSwitch title="DJ turn" checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
+                <SettingSwitch title="Unavailable tracks" description="No match on your preferred provider." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
+                <SettingSwitch title="Chat mentions" description="Mentions of your display name." checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
+                <SettingSwitch title="Playback errors" checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
               </div>
             </TabsContent>
 
@@ -275,10 +275,10 @@ export function UserSettingsDialog({
                     <SelectTrigger id="color-theme" className="w-full"><SelectValue>{theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}</SelectValue></SelectTrigger>
                     <SelectContent><SelectGroup><SelectItem value="dark">Dark</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="system">System</SelectItem></SelectGroup></SelectContent>
                   </Select>
-                  <small>Dark stays the default. System follows your device preference.</small>
+                  <small>System follows your device theme.</small>
                 </section>
-                <SettingSwitch title="Compact player by default" description="Keep the center player collapsed between visits." checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
-                <SettingSwitch title="Reduced motion" description="Disable decorative transitions and movement." checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
+                <SettingSwitch title="Compact player by default" description="Keep the player collapsed between visits." checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
+                <SettingSwitch title="Reduced motion" checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
                 <section className="settings-control-group">
                   <Label htmlFor="artwork-blur">Artwork background blur <strong>{settings.appearance.artworkBlur}px</strong></Label>
                   <Slider id="artwork-blur" min={0} max={60} value={[settings.appearance.artworkBlur]} onValueChange={(value) => updateAppearance({ artworkBlur: typeof value === "number" ? value : value[0] })} aria-label="Artwork background blur" />
@@ -292,10 +292,10 @@ export function UserSettingsDialog({
   );
 }
 
-function SettingSwitch({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+function SettingSwitch({ title, description, checked, onChange }: { title: string; description?: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <div className="settings-switch-row">
-      <span><strong>{title}</strong><small>{description}</small></span>
+      <span><strong>{title}</strong>{description && <small>{description}</small>}</span>
       <Switch checked={checked} onCheckedChange={onChange} aria-label={title} />
     </div>
   );

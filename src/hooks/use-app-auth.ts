@@ -58,7 +58,7 @@ export function useAppAuth() {
       unsubscribe?.();
       setAuth((current) => ({
         ...current, loading: false,
-        error: error instanceof Error ? error.message : "Could not restore your session."
+        error: error instanceof Error ? error.message : "Could not restore your session. Try again."
       }));
     });
 

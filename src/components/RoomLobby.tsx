@@ -193,9 +193,7 @@ export function RoomLobby({
       <div className="lobby-shell">
         <section className="lobby-hero">
           <div>
-            <p className="section-kicker">ROOMS</p>
-            <h1 tabIndex={-1}>Listen together.</h1>
-            <p>Rejoin a favorite room or see what is playing now.</p>
+            <h1 tabIndex={-1}>Rooms</h1>
           </div>
           <Button size="lg" onClick={() => setCreating(true)}>
             <Plus /> New room
@@ -205,7 +203,7 @@ export function RoomLobby({
         {error && (
           <Alert variant="destructive" className="lobby-error">
             <AlertCircle />
-            <AlertTitle>Rooms could not be updated</AlertTitle>
+            <AlertTitle>Couldn't update rooms</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
             <AlertAction><Button variant="ghost" size="sm" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0}>Retry</Button><Button variant="ghost" size="icon-xs" onClick={() => setError("")} aria-label="Dismiss error"><X /></Button></AlertAction>
           </Alert>
@@ -230,15 +228,13 @@ export function RoomLobby({
           </div>
         ) : (
           <div className="lobby-sections">
-            {!rooms.length && directoryLoaded && <Empty><EmptyHeader><EmptyMedia variant="icon"><Radio /></EmptyMedia><EmptyTitle>No accessible rooms yet</EmptyTitle><EmptyDescription>Create a room or open a room invite to start listening.</EmptyDescription></EmptyHeader><Button variant="outline" onClick={() => setCreating(true)}>Create your first room</Button></Empty>}
+            {!rooms.length && directoryLoaded && <Empty><EmptyHeader><EmptyMedia variant="icon"><Radio /></EmptyMedia><EmptyTitle>No rooms available</EmptyTitle><EmptyDescription>Open an invite to join a private room.</EmptyDescription></EmptyHeader><Button variant="outline" onClick={() => setCreating(true)}>Create room</Button></Empty>}
             {lastRoom && <section className="lobby-return-room" aria-label="Return to last room"><div><h2>Return to last room</h2><p>{lastRoom.name}</p></div><Button variant="outline" aria-label={`Return to ${lastRoom.name}`} data-navigation-focus={`room:${lastRoom.slug}`} onClick={() => enter(lastRoom)}>Return <ArrowRight /></Button></section>}
-            {accessibleRecentRooms.length > 0 && <RoomSection title="Recently visited" subtitle="Your recent listening rooms on this device" rooms={recentRooms} empty="No recently visited rooms match your filters." onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now} />}
+            {accessibleRecentRooms.length > 0 && <RoomSection title="Recently visited" rooms={recentRooms} onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now} />}
             {favorites.length > 0 && (
               <RoomSection
                 title="Favorites"
-                subtitle="Your saved rooms"
                 rooms={favorites}
-                empty=""
                 onEnter={enter}
                 onFavorite={toggleFavorite}
                 favoritePending={favoritePending}
@@ -246,15 +242,12 @@ export function RoomLobby({
               />
             )}
             {rooms.some((room) => room.role !== null) && <RoomSection
-              title="Your rooms" subtitle="Rooms you belong to" rooms={memberRooms}
-              empty={filtering ? "No member rooms match your filters." : "Rooms you belong to appear here."}
+              title="Your rooms" rooms={memberRooms}
               onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now}
             />}
             {rooms.length > 0 && <RoomSection
               title="Public rooms"
-              subtitle={`${publicRooms.length} available`}
               rooms={publicRooms}
-              empty={filtering ? "Try another name or filter." : "No public rooms yet. Create one to get started."}
               onEnter={enter}
               onFavorite={toggleFavorite}
               favoritePending={favoritePending}
@@ -285,9 +278,7 @@ export function RoomLobby({
 
 function RoomSection({
   title,
-  subtitle,
   rooms,
-  empty,
   onEnter,
   onFavorite,
   favoritePending,
@@ -295,9 +286,7 @@ function RoomSection({
   now
 }: {
   title: string;
-  subtitle: string;
   rooms: RoomDirectoryEntry[];
-  empty: string;
   onEnter: (room: RoomDirectoryEntry) => void;
   onFavorite: (room: RoomDirectoryEntry) => void;
   favoritePending: Set<string>;
@@ -307,7 +296,7 @@ function RoomSection({
   return (
     <section className="room-directory-section">
       <div className="directory-heading">
-        <div><h2>{title}</h2><p>{subtitle}</p></div>
+        <div><h2>{title}</h2></div>
       </div>
       {rooms.length ? (
         <div className="room-card-grid">
@@ -338,7 +327,7 @@ function RoomSection({
                 {room.description && <p className="room-card-description">{room.description}</p>}
                 {room.isPublic && !room.passwordProtected && room.preview && <div className="room-preview-track">
                   <TrackArtwork track={{ provider: room.preview.provider || "youtube", providerId: "" }} src={room.preview.artworkUrl || null} compact className="room-preview-art" />
-                  <div><small>{now - room.preview.observedAt > 90_000 ? "Preview from earlier · refresh for latest" : room.preview.playing ? "Playing now" : "Room paused"}</small><strong title={room.preview.title}>{room.preview.title}</strong>{room.preview.artist && <span>{room.preview.artist}</span>}</div>
+                  <div><small>{now - room.preview.observedAt > 90_000 ? "Older preview · refresh to update" : room.preview.playing ? "Playing now" : "Room paused"}</small><strong title={room.preview.title}>{room.preview.title}</strong>{room.preview.artist && <span>{room.preview.artist}</span>}</div>
                 </div>}
               </div>}
               <CardContent className="room-card-content">
@@ -359,8 +348,8 @@ function RoomSection({
         <Empty className="empty-room-section">
           <EmptyHeader>
             <EmptyMedia variant="icon"><Radio /></EmptyMedia>
-            <EmptyTitle>{filtering ? "No matching rooms" : "No rooms here yet"}</EmptyTitle>
-            <EmptyDescription>{empty}</EmptyDescription>
+            <EmptyTitle>{filtering ? "No matching rooms" : "No rooms yet"}</EmptyTitle>
+            {filtering && <EmptyDescription>Try another name or filter.</EmptyDescription>}
           </EmptyHeader>
         </Empty>
       )}
@@ -406,7 +395,7 @@ function CreateRoomDialog({
         <form className="grid gap-5" autoComplete="off" onSubmit={submit}>
           <DialogHeader>
             <DialogTitle>Create a room</DialogTitle>
-            <DialogDescription>Listen together with private DJ queues and one song per turn. You can change access and moderators later.</DialogDescription>
+            <DialogDescription>DJ queues are private. Each DJ plays one track per turn.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -475,7 +464,7 @@ export function PasswordDialog({
           <DialogHeader>
             <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><LockKeyhole className="size-4" /></div>
             <DialogTitle>{roomName}</DialogTitle>
-            <DialogDescription>This room is protected. Enter its password to join.</DialogDescription>
+            <DialogDescription>Enter the room password to join.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="join-password">Password</Label>

@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -42,11 +41,11 @@ export function SignUpForm({
       await requestJson('/api/signup', {
         method: 'POST',
         body: JSON.stringify({ email, password, invitePassword }),
-        errorMessage: 'Could not create the account',
+        errorMessage: 'Could not create account. Try again.',
       })
       setSuccess(true)
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      setError(error instanceof Error ? error.message : 'Could not create account. Try again.')
     } finally {
       setIsLoading(false)
     }
@@ -58,13 +57,9 @@ export function SignUpForm({
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Account created</CardTitle>
-            <CardDescription>Your Lydman account is ready.</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Sign in with the email and password you just chose.
-            </p>
-            <Button type="button" className="mt-4 w-full" onClick={() => onNavigate('/login')}>
+            <Button type="button" className="w-full" onClick={() => onNavigate('/login')}>
               Sign in
             </Button>
           </CardContent>
@@ -73,7 +68,6 @@ export function SignUpForm({
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Create an account</CardTitle>
-            <CardDescription>Save your rooms, profile, and listening progress.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignUp}>
@@ -129,7 +123,7 @@ export function SignUpForm({
                     onChange={(e) => setInvitePassword(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Ask the person who invited you for the shared password.
+                    Ask the person who invited you for this password.
                   </p>
                 </div>
                 {error && <p className="text-sm text-red-500">{error}</p>}
@@ -138,7 +132,6 @@ export function SignUpForm({
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">
-                Already have an account?{' '}
                 <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>Sign in</Button>
               </div>
             </form>

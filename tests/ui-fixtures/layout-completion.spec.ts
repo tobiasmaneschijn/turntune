@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const roomUrl = "/tests/layout-completion-harness/index.html";
 const more = (page: import("@playwright/test").Page) => page.getByRole("button", { name: "More room actions" });
 async function openChecklist(page: import("@playwright/test").Page) {
-  const dialog = page.getByRole("dialog", { name: "Get ready to listen", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Listening setup", exact: true });
   const setup = page.getByRole("button", { name: "Open listening checklist" });
   await expect(page.locator(".room-listening-checklist")).toBeVisible();
   if (await setup.count()) {
@@ -93,7 +93,7 @@ test("single-character shortcuts can be disabled per listener while commands rem
   await more(page).click();
   await page.getByRole("menuitem", { name: "Room commands" }).click();
   await expect(page.getByRole("textbox", { name: "Find a room command" })).toBeFocused();
-  await page.getByRole("menuitem", { name: "Open Settings" }).click();
+  await page.getByRole("menuitem", { name: "Open settings" }).click();
   await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toBeVisible();
 });
 
@@ -214,10 +214,10 @@ test("intentional profile navigation focuses its heading and restores the room c
 
 test("first listening checklist reflects capabilities, activation and per-user completion", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=checklist&provider=unconfigured&audio=activation`);
-  await expect(page.getByRole("heading", { name: "Get ready to listen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Listening setup" })).toBeVisible();
   const checklist = await openChecklist(page);
   await expect(page.getByRole("button", { name: "Ready to listen" })).toHaveCount(0);
-  await expect(checklist).toContainText("unavailable here");
+  await expect(checklist).toContainText("Unavailable. Choose another provider.");
   await page.getByRole("button", { name: "Choose provider" }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await expect(settings).toBeVisible();
@@ -226,13 +226,13 @@ test("first listening checklist reflects capabilities, activation and per-user c
   await openChecklist(page);
   await page.getByRole("button", { name: "Enable my audio" }).click();
   await openChecklist(page);
-  await expect(checklist).toContainText("Audio is playing on your device");
-  await expect(checklist).toContainText("Your queue is private; one song plays per turn");
+  await expect(checklist).toContainText("Playing.");
+  await expect(checklist).toContainText("One song per turn. Your queue is private.");
   await page.getByRole("button", { name: "Ready to listen" }).click(); await page.reload();
-  await expect(page.getByRole("heading", { name: "Get ready to listen" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Listening setup" })).toHaveCount(0);
   await page.goto(`${roomUrl}?scenario=checklist&user=another-listener`);
-  await expect(page.getByRole("heading", { name: "Get ready to listen" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Explore music and DJ turns" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Listening setup" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose music" })).toHaveCount(0);
 });
 
 test("directory previews are public, useful, stale-labelled, sortable and resilient on return", async ({ page }) => {
@@ -240,7 +240,7 @@ test("directory previews are public, useful, stale-labelled, sortable and resili
   const publicRooms = page.locator(".room-directory-section").filter({ has: page.getByRole("heading", { name: "Public rooms", exact: true }) });
   await expect(publicRooms).toContainText("A room for evening electronic music");
   await expect(publicRooms).toContainText("Evening Signal");
-  await expect(publicRooms).toContainText("Preview from earlier · refresh for latest");
+  await expect(publicRooms).toContainText("Older preview · refresh to update");
   await expect(page.getByText("SECRET PROTECTED TRACK")).toHaveCount(0); await expect(page.getByText("SECRET PRIVATE TRACK")).toHaveCount(0);
   await page.getByRole("combobox", { name: "Sort rooms" }).click(); await page.getByRole("option", { name: "Alphabetical", exact: true }).click();
   await expect(publicRooms.locator(".room-card").first()).toContainText("Alpha Radio");
@@ -262,14 +262,14 @@ test("directory previews are public, useful, stale-labelled, sortable and resili
 
 test("empty accessible directory has one distinct onboarding state", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=empty-lobby`);
-  await expect(page.getByText("No accessible rooms yet")).toBeVisible();
+  await expect(page.getByText("No rooms available")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Public rooms", exact: true })).toHaveCount(0);
 });
 
 test("failed initial directory request does not imply that no rooms are accessible", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=lobby-error`);
   await expect(page.getByRole("alert")).toContainText("temporarily unavailable");
-  await expect(page.getByText("No accessible rooms yet")).toHaveCount(0);
+  await expect(page.getByText("No rooms available")).toHaveCount(0);
   await expect(page.getByRole("status")).not.toContainText("0 rooms available");
   await page.evaluate(() => { (window as any).layoutFixture.failDirectory = false; });
   await page.getByRole("button", { name: "Retry", exact: true }).click();
@@ -346,12 +346,12 @@ test("confirmed visit records are bounded and protected return uses the password
 test("waiting-room and failed provider verification never claim checked readiness", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=checklist&provider=idle`);
   const checklist = await openChecklist(page);
-  await expect(checklist).toContainText("Playback will be checked when the room starts a track");
+  await expect(checklist).toContainText("Waiting for a track.");
   await expect(page.getByRole("button", { name: "Ready to listen" })).toHaveCount(0);
   await page.getByRole("button", { name: "Continue as listener" }).click();
   await page.goto(`${roomUrl}?scenario=checklist&provider=error&user=error-listener`);
   await openChecklist(page);
-  await expect(checklist).toContainText("Provider status could not be checked");
+  await expect(checklist).toContainText("Couldn't check provider status. Retry in Settings.");
   await expect(page.getByRole("button", { name: "Ready to listen" })).toHaveCount(0);
 });
 
@@ -369,7 +369,7 @@ test("small-screen coach is complete, expands its steps and gets out of the keyb
     const box = await control.boundingBox(); expect(box!.height).toBeGreaterThanOrEqual(44);
     expect(box!.y).toBeGreaterThanOrEqual(context!.y); expect(box!.y + box!.height).toBeLessThanOrEqual(context!.y + context!.height);
   }
-  const body = await openChecklist(page); await expect(body).toContainText("Your queue is private; one song plays per turn");
+  const body = await openChecklist(page); await expect(body).toContainText("One song per turn. Your queue is private.");
   const enable = page.getByRole("button", { name: "Enable my audio" }); await enable.scrollIntoViewIfNeeded(); await expect(enable).toBeInViewport({ ratio: 1 });
   await page.keyboard.press("Escape"); await expect(setup).toBeFocused();
   await page.getByRole("tab", { name: "Chat", exact: true }).click();

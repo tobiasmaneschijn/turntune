@@ -40,7 +40,7 @@ export function ForgotPasswordForm({
       if (error) throw error
       setSuccess(true)
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      setError(error instanceof Error ? error.message : 'Could not send reset link. Try again.')
     } finally {
       setIsLoading(false)
     }
@@ -52,20 +52,13 @@ export function ForgotPasswordForm({
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Check your email</CardTitle>
-            <CardDescription>Password reset instructions are on the way.</CardDescription>
+            <CardDescription>If this email has an account, it will receive a reset link.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              If you registered using your email and password, you will receive a password reset
-              email.
-            </p>
-          </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Reset your password</CardTitle>
-            <CardDescription>We’ll send a reset link to your email address.</CardDescription>
+            <CardTitle className="text-xl">Reset password</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleForgotPassword}>
@@ -87,7 +80,6 @@ export function ForgotPasswordForm({
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">
-                Already have an account?{' '}
                 <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>Sign in</Button>
               </div>
             </form>

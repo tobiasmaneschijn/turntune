@@ -18,7 +18,7 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, fetchI
       if (!response.ok) throw new Error("This YouTube recording is unavailable or could not be verified.");
       const source = await response.json() as { title?: unknown; author_name?: unknown } | null;
       const safe = libraryTrackSchema.safeParse({ ...verified, title: source?.title, artist: source?.author_name === undefined ? track.artist : source.author_name, permalinkUrl: url });
-      if (!safe.success) throw new Error("This YouTube recording returned invalid or oversized metadata and was skipped.");
+      if (!safe.success) throw new Error("This YouTube recording returned invalid or oversized metadata.");
       verified = safe.data;
     } else if (track.provider === "spotify") {
       if (!spotify.configured) throw new Error("Spotify catalog verification is unavailable. Try this recording later.");
@@ -38,11 +38,11 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, fetchI
     }
     signal.throwIfAborted();
     const safeSource = libraryTrackSchema.safeParse(verified);
-    if (!safeSource.success) throw new Error("This recording returned invalid or oversized source metadata and was skipped.");
+    if (!safeSource.success) throw new Error("This recording returned invalid or oversized source metadata.");
     const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic);
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
-    if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata and was skipped.");
+    if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata.");
     return { ...mappings, ...safeMapped.data };
   };
 }

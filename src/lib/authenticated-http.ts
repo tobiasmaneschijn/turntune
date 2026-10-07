@@ -9,7 +9,7 @@ interface JsonRequestOptions<T> extends RequestInit {
 
 /** One bounded request policy for browser API adapters; callers own their response schema. */
 export async function requestJson<T>(path: string, options: JsonRequestOptions<T> = {}, fetchImpl: typeof fetch = fetch): Promise<T> {
-  const { accessToken, errorMessage = "The request could not be completed. Please try again.", timeoutMs = HTTP_REQUEST_TIMEOUT_MS, validate, signal, ...init } = options;
+  const { accessToken, errorMessage = "The request could not be completed. Try again.", timeoutMs = HTTP_REQUEST_TIMEOUT_MS, validate, signal, ...init } = options;
   const controller = new AbortController();
   const cancel = () => controller.abort(signal?.reason);
   if (signal?.aborted) cancel();
@@ -27,16 +27,16 @@ export async function requestJson<T>(path: string, options: JsonRequestOptions<T
     try { payload = await response.json(); }
     catch {
       if (controller.signal.aborted) throw controller.signal.reason;
-      throw new Error(response.ok ? "The server returned an invalid response. Please try again." : errorMessage);
+      throw new Error(response.ok ? "The server returned an invalid response. Try again." : errorMessage);
     }
     if (!response.ok) {
       const error = payload && typeof payload === "object" && "error" in payload ? payload.error : undefined;
       throw new Error(typeof error === "string" && error.length <= 1000 ? error : errorMessage);
     }
-    if (validate ? !validate(payload) : payload === null || typeof payload !== "object") throw new Error("The server returned an invalid response. Please try again.");
+    if (validate ? !validate(payload) : payload === null || typeof payload !== "object") throw new Error("The server returned an invalid response. Try again.");
     return payload as T;
   } catch (error) {
-    if (controller.signal.aborted && controller.signal.reason?.name === "TimeoutError") throw new Error("The request timed out. Please try again.");
+    if (controller.signal.aborted && controller.signal.reason?.name === "TimeoutError") throw new Error("The request timed out. Try again.");
     throw error;
   } finally {
     deadline.removeEventListener("abort", expire);

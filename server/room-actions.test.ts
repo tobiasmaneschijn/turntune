@@ -202,5 +202,5 @@ test("real queue handlers preserve deliberate receipt errors and reject set impo
   assert.match((await run("queue:remove", { trackId: target }))?.error || "", /no longer in your queue/);
   assert.match((await run("queue:set-add", { setId: target, requestId: target }))?.error || "", /Join the DJ lineup/);
   storageFails = true;
-  assert.equal((await run("dj:join", undefined))?.error, "Could not save this change. Please reconnect to check the room and try again.");
+  assert.equal((await run("dj:join", undefined))?.error, "Could not save this change. Reconnect and check the room before trying again.");
 });

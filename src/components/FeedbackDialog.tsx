@@ -5,7 +5,7 @@ import { buildFeedbackDiagnostics, type FeedbackDiagnosticContext } from "../fee
 import { getSupabaseClient } from "../supabase";
 import { feedbackStageLabel, submitFeedbackRecord, type FeedbackSubmissionStage } from "../feedback-submission";
 import { Button } from "./ui/button";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Alert, AlertDescription } from "./ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -107,7 +107,7 @@ export function FeedbackButton({
     setScreenshots((current) => {
       const availableSlots = MAX_SCREENSHOTS - current.length;
       if (files.length > availableSlots) {
-        setError(`You can attach up to ${MAX_SCREENSHOTS} screenshots.`);
+        setError(`Attach up to ${MAX_SCREENSHOTS} screenshots.`);
       }
       return [
         ...current,
@@ -187,7 +187,7 @@ export function FeedbackButton({
       setSent(true);
       toast.success("Feedback sent");
     } catch (submitError) {
-      if (isCurrent()) setError(submitError instanceof Error ? submitError.message : "Could not send feedback. Please try again.");
+      if (isCurrent()) setError(submitError instanceof Error ? submitError.message : "Couldn't send feedback. Try again.");
     } finally {
       submittingRef.current = false;
       if (activeRef.current) setSubmitting(false);
@@ -215,8 +215,8 @@ export function FeedbackButton({
             <div className="feedback-success">
               <span className="feedback-success-icon"><CheckCircle2 /></span>
               <DialogHeader className="pr-0 text-center">
-                <DialogTitle>Thanks for the feedback</DialogTitle>
-                <DialogDescription>Your note has been sent to the Lydman team.</DialogDescription>
+                <DialogTitle>Feedback sent</DialogTitle>
+                <DialogDescription className="sr-only">Sent to the Lydman team.</DialogDescription>
               </DialogHeader>
               <Button onClick={() => setOpen(false)}>Done</Button>
             </div>
@@ -224,7 +224,7 @@ export function FeedbackButton({
             <form onSubmit={submitFeedback} className="feedback-form" aria-busy={submitting}>
               <DialogHeader>
                 <DialogTitle className="feedback-title"><Lightbulb /> Send feedback</DialogTitle>
-                <DialogDescription>Tell us what happened and attach anything that helps show it.</DialogDescription>
+                <DialogDescription className="sr-only">Report a problem or suggest a change.</DialogDescription>
               </DialogHeader>
 
               <div className="feedback-classification">
@@ -248,7 +248,7 @@ export function FeedbackButton({
                     <SelectTrigger id="feedback-impact" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="minor">Minor</SelectItem>
-                      <SelectItem value="blocking">Blocking something</SelectItem>
+                      <SelectItem value="blocking">Blocking</SelectItem>
                       <SelectItem value="unusable">App unusable</SelectItem>
                     </SelectGroup></SelectContent>
                   </Select>
@@ -256,13 +256,12 @@ export function FeedbackButton({
               </div>
 
               <div className="feedback-field">
-                <Label htmlFor="feedback-message">What would you like us to know?</Label>
+                <Label htmlFor="feedback-message">Description</Label>
                 <Textarea
                   id="feedback-message"
                   disabled={submitting}
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
-                  placeholder="Share an idea, report a problem, or tell us what could be better…"
                   rows={5}
                   maxLength={4000}
                   autoFocus
@@ -307,7 +306,7 @@ export function FeedbackButton({
                     }}
                   >
                     <span className="feedback-dropzone-icon"><ImagePlus /></span>
-                    <span><strong>Paste a screenshot</strong><small>Press Ctrl+V anywhere in this window</small></span>
+                    <span><strong>Paste with Ctrl+V</strong></span>
                     <span className="feedback-divider">or</span>
                     <span className="feedback-browse"><Paperclip /> Choose files</span>
                     <input
@@ -341,7 +340,7 @@ export function FeedbackButton({
                 )}
               </div>
 
-              {error && <Alert variant="destructive"><AlertTitle>Could not send feedback</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
               {submitting && <p className="feedback-submission-stage" role="status">{feedbackStageLabel(submissionStage)}…</p>}
 
               <DialogFooter>

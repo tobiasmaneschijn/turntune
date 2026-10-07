@@ -27,11 +27,11 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 export const notificationPermissionDescription = (permission: NotificationPermissionState) => permission === 'unsupported'
-  ? 'This browser does not support system notifications. In-app feedback and recovery remain available.'
+  ? 'This browser does not support system notifications. In-app notifications are still available.'
   : permission === 'denied'
-    ? 'System notifications are blocked. Allow notifications in your browser’s site settings to enable them. In-app feedback remains available.'
+    ? 'System notifications are blocked. Allow them in your browser’s site settings.'
     : permission === 'granted' ? 'System notifications are allowed for this browser.'
-      : 'System notifications need browser permission. Enable them when you are ready; preferences still apply to in-app feedback.'
+      : 'Enable notifications to allow them in this browser.'
 
 export function isAppInBackground() {
   return typeof document === 'undefined' || document.visibilityState !== 'visible' || !document.hasFocus()

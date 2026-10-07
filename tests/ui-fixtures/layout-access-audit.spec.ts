@@ -24,7 +24,7 @@ test("320px feedback primary targets, heading and submission remain reachable", 
   await target(page.getByRole("option", { name: "Idea", exact: true }));
   await page.getByRole("option", { name: "Idea", exact: true }).click();
   await target(dialog.getByRole("combobox", { name: "Impact", exact: true }));
-  await target(dialog.getByRole("textbox", { name: "What would you like us to know?" }));
+  await target(dialog.getByRole("textbox", { name: "Description", exact: true }));
   await target(dialog.locator("label.feedback-dropzone"));
   await target(dialog.getByRole("switch", { name: "Include technical diagnostics" }));
   await target(dialog.getByRole("button", { name: "Send feedback", exact: true }));
@@ -94,8 +94,8 @@ test("320px private library actions, disclosure and form targets retain geometry
 test("successful empty Spotify device discovery offers an actionable recovery", async ({ page }) => {
   await page.goto("/tests/ui-harness/index.html?scenario=settings"); await productionCss(page);
   await page.getByRole("tab", { name: "Connections", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText("No available Spotify devices yet. Open Spotify on a device, then Refresh devices.");
+  await expect(page.getByRole("status")).toHaveText("No Spotify devices available. Open Spotify on a device, then refresh.");
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText("No available Spotify devices yet. Open Spotify on a device, then Refresh devices.");
+  await expect(page.getByRole("status")).toHaveText("No Spotify devices available. Open Spotify on a device, then refresh.");
 });

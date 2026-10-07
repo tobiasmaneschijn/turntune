@@ -74,7 +74,7 @@ export function useChatDelivery(options: Options) {
       if (delivered) finish(message.id, lifetime)
       return Boolean(delivered)
     } catch (error) {
-      if (lifetime.active) current.onError(error instanceof Error ? error.message : 'Could not send this message. Please try again.')
+      if (lifetime.active) current.onError(error instanceof Error ? error.message : 'Could not send this message. Try again.')
       return false
     } finally { if (lifetime.active) { sendingRef.current = false; setSending(false) } }
   }, [finish])

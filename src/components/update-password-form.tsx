@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -36,7 +35,7 @@ export function UpdatePasswordForm({
       if (error) throw error
       onComplete()
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      setError(error instanceof Error ? error.message : 'Could not save password. Try again.')
     } finally {
       setIsLoading(false)
     }
@@ -47,7 +46,6 @@ export function UpdatePasswordForm({
       <Card>
         <CardHeader>
           <CardTitle className="text-xl">Set a new password</CardTitle>
-          <CardDescription>Choose a password you don’t use elsewhere.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleForgotPassword}>
@@ -57,7 +55,6 @@ export function UpdatePasswordForm({
                 <Input
                   id="password"
                   type="password"
-                  placeholder="New password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

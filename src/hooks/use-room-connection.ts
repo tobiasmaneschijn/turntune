@@ -61,7 +61,7 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
     const onConnectError = (error: Error) => {
       onConnected(false);
       onNotice(error.message);
-      if (!transport.active) onJoinError(error.message || "Could not connect. Please try again.");
+      if (!transport.active) onJoinError(error.message || "Could not connect. Try again.");
     };
     const receiveSnapshot = (next: RoomSnapshot) => {
       if (active && next.room.id === roomId) {

@@ -117,7 +117,7 @@ test("keyboard help lists current controls and returns focus to the menu", async
   const more = page.getByRole("button", { name: "More room actions" });
   await more.click();
   await page.getByRole("menuitem", { name: "Keyboard help" }).click();
-  await expect(page.getByRole("dialog", { name: "Keyboard help" })).toContainText("Open Chat and focus the message field");
+  await expect(page.getByRole("dialog", { name: "Keyboard help" })).toContainText("Open chat and focus the message field");
   await page.keyboard.press("Escape");
   await expect(more).toBeFocused();
 });

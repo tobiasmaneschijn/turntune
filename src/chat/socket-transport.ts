@@ -43,7 +43,7 @@ export function createSocketChatSessionFactory(socket: SocketChatTransport, room
     listeners.forEach(([event, handler]) => socket.on(event, handler))
     queueMicrotask(() => { if (active && !reportedInitial) { reportedInitial = true; callbacks.onConnection(ready) } })
     const send = (kind: 'message' | 'reaction' | 'typing', payload: unknown) => new Promise<void>((resolve, reject) => {
-      if (!active || !ready) { reject(new Error('Chat is reconnecting. Please try again.')); return }
+      if (!active || !ready) { reject(new Error('Chat is reconnecting. Try again.')); return }
       requestSocketAction(socket, `chat:${kind}`, { roomId, [kind]: payload }, (result) => result.ok ? resolve() : reject(new Error(result.error || 'Could not confirm this chat event.')))
     })
     return {

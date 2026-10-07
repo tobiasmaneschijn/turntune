@@ -44,24 +44,24 @@ test("expiry removes a dismissed or visible note without requiring a new snapsho
 
 test("feedback uses real upload/send stages, blocks edits and waits for durable success", async ({ page }) => {
   await page.goto(url); await page.getByRole("button", { name: "Feedback", exact: true }).click();
-  await page.getByLabel("What would you like us to know?").fill("Testing screenshot stages");
+  await page.getByLabel("Description", { exact: true }).fill("Testing screenshot stages");
   await page.locator("#feedback-screenshots").setInputFiles([1, 2].map(id => ({ name: `${id}.png`, mimeType: "image/png", buffer: Buffer.from("image") })));
   await page.getByRole("button", { name: "Send feedback", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Uploading screenshot 1 of 2");
-  await expect(page.getByLabel("What would you like us to know?")).toBeDisabled();
+  await expect(page.getByLabel("Description", { exact: true })).toBeDisabled();
   await page.evaluate(() => window.qolExtras.finishUpload?.());
   await expect(page.getByRole("status")).toContainText("Uploading screenshot 2 of 2");
   await page.evaluate(() => window.qolExtras.finishUpload?.());
   await expect(page.getByRole("status")).toContainText("Sending feedback");
-  await expect(page.getByText("Thanks for the feedback")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Feedback sent", exact: true })).toHaveCount(0);
   await page.evaluate(() => window.qolExtras.finishInsert?.());
-  await expect(page.getByText("Thanks for the feedback")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Feedback sent", exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.qolExtras.insertCount)).toBe(1);
 });
 
 test("failed feedback upload keeps description and cleans only successful attachments", async ({ page }) => {
   await page.goto(url); await page.getByRole("button", { name: "Feedback", exact: true }).click();
-  await page.getByLabel("What would you like us to know?").fill("Keep this report");
+  await page.getByLabel("Description", { exact: true }).fill("Keep this report");
   await page.locator("#feedback-screenshots").setInputFiles([1, 2].map(id => ({ name: `${id}.png`, mimeType: "image/png", buffer: Buffer.from("image") })));
   await page.getByRole("button", { name: "Send feedback", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Uploading screenshot 1 of 2");
@@ -69,7 +69,7 @@ test("failed feedback upload keeps description and cleans only successful attach
   await expect(page.getByRole("status")).toContainText("Uploading screenshot 2 of 2");
   await page.evaluate(() => window.qolExtras.failUpload?.());
   await expect(page.getByRole("alert")).toContainText("Screenshot upload failed");
-  await expect(page.getByLabel("What would you like us to know?")).toHaveValue("Keep this report");
+  await expect(page.getByLabel("Description", { exact: true })).toHaveValue("Keep this report");
   expect(await page.evaluate(() => window.qolExtras.insertCount)).toBe(0);
   expect(await page.evaluate(() => window.qolExtras.removed.length)).toBe(1);
 });

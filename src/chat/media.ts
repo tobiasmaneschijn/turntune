@@ -19,7 +19,7 @@ export type PastedChatMedia =
 
 export function validateChatImage(file: File): string | null {
   if (!CHAT_IMAGE_EXTENSIONS[file.type]) return 'Choose a JPEG, PNG, WebP, or GIF image.'
-  if (file.size === 0) return 'This image file is empty. Please choose another one.'
+  if (file.size === 0) return 'Image is empty. Choose another file.'
   if (file.size > CHAT_IMAGE_MAX_BYTES) return 'Images must be 6 MB or smaller.'
   return null
 }

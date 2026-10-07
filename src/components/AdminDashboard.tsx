@@ -76,14 +76,6 @@ const statusLabels: Record<FeedbackStatus, string> = {
 
 const feedbackStatuses: FeedbackStatus[] = ["new", "reviewing", "planned", "resolved", "closed"];
 
-const statusDescriptions: Record<FeedbackStatus, string> = {
-  new: "Needs triage",
-  reviewing: "Under investigation",
-  planned: "Accepted for delivery",
-  resolved: "Completed or fixed",
-  closed: "No further action"
-};
-
 const statusIcons = {
   new: Sparkles,
   reviewing: Eye,
@@ -108,7 +100,7 @@ const impactLabels: Record<AdminFeedback["impact"], string> = {
 };
 
 async function adminApi<T>(path: string, accessToken: string, init?: RequestInit) {
-  return requestJson<T>(path, { ...init, accessToken, errorMessage: "The admin request failed." });
+  return requestJson<T>(path, { ...init, accessToken, errorMessage: "Admin request failed. Try again." });
 }
 
 function formatDate(value: string, includeTime = true) {
@@ -278,10 +270,6 @@ export function AdminDashboard({
           <>
             <section className="admin-feedback-workspace" aria-label="Feedback workflow board">
               <div className="admin-feedback-tools">
-                <div className="admin-feedback-tools-copy">
-                  <strong>Workflow board</strong>
-                  <span>Select a card to review details or move it to another lane.</span>
-                </div>
                 <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback…" aria-label="Search feedback" /></div>
                 <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as FeedbackStatus | "all")}>
                   <SelectTrigger aria-label="Filter feedback lanes"><SelectValue>{statusFilter === "all" ? "All lanes" : statusLabels[statusFilter]}</SelectValue></SelectTrigger>
@@ -307,7 +295,6 @@ export function AdminDashboard({
                               <span className="admin-feedback-column-icon"><StatusIcon /></span>
                               <span>
                                 <strong id={`feedback-column-${status}`}>{statusLabels[status]}</strong>
-                                <small>{statusDescriptions[status]}</small>
                               </span>
                               <Badge variant="outline">{items.length}</Badge>
                             </header>
@@ -342,8 +329,7 @@ export function AdminDashboard({
                                 <Empty className="admin-feedback-column-empty">
                                   <EmptyHeader>
                                     <EmptyMedia variant="icon"><StatusIcon /></EmptyMedia>
-                                    <EmptyTitle>Nothing here</EmptyTitle>
-                                    <EmptyDescription>No feedback is currently {statusLabels[status].toLowerCase()}.</EmptyDescription>
+                                    <EmptyTitle>No feedback</EmptyTitle>
                                   </EmptyHeader>
                                 </Empty>
                               )}
@@ -409,7 +395,7 @@ export function AdminDashboard({
                           <pre>{JSON.stringify(selectedFeedback.diagnostics, null, 2)}</pre>
                         </details>
                       ) : (
-                        <div className="admin-diagnostics-empty">Technical diagnostics were not included by the user.</div>
+                        <div className="admin-diagnostics-empty">No diagnostics included.</div>
                       )}
                       <FieldGroup className="admin-feedback-workflow">
                         <Field>
@@ -423,7 +409,7 @@ export function AdminDashboard({
                         </Field>
                         <Field>
                           <FieldLabel htmlFor="admin-feedback-note">Private admin note</FieldLabel>
-                          <Textarea id="admin-feedback-note" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} placeholder="Add context, a decision, or follow-up notes…" />
+                          <Textarea id="admin-feedback-note" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} />
                         </Field>
                       </FieldGroup>
                     </div>
@@ -471,7 +457,7 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
 
       <div className="admin-overview-grid">
         <Card className="admin-activity-card">
-          <CardHeader><div><CardTitle>Activity</CardTitle><CardDescription>Last 14 days across the community</CardDescription></div><BarChart3 /></CardHeader>
+          <CardHeader><div><CardTitle>Activity</CardTitle><CardDescription>Last 14 days</CardDescription></div><BarChart3 /></CardHeader>
           <CardContent>
             <div className="admin-chart-legend"><span className="users">New users</span><span className="messages">Messages</span><span className="feedback">Feedback</span></div>
             <div className="admin-activity-chart">
@@ -499,13 +485,13 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
                 <ChevronRight />
               </button>
             ))}
-            {!data.feedback.length && <div className="admin-empty compact"><CheckCircle2 /><strong>Inbox clear</strong><span>No feedback has been submitted yet.</span></div>}
+            {!data.feedback.length && <div className="admin-empty compact"><CheckCircle2 /><strong>No feedback yet</strong></div>}
           </CardContent>
         </Card>
       </div>
 
       <Card className="admin-live-rooms">
-        <CardHeader><div><CardTitle>Room pulse</CardTitle><CardDescription>Recently active rooms and current listener presence</CardDescription></div><Radio /></CardHeader>
+        <CardHeader><CardTitle>Recently active rooms</CardTitle><Radio /></CardHeader>
         <CardContent>
           {data.rooms.slice(0, 6).map((room) => (
             <div key={room.slug}><span className={room.listenerCount > 0 ? "room-pulse live" : "room-pulse"} /><span><strong>{room.name}</strong><small>{room.slug}</small></span><Badge variant="outline">{room.listenerCount} listening</Badge><time>{formatDate(room.updatedAt, false)}</time></div>
@@ -519,7 +505,7 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
 function RoomsPanel({ data, onOpenRoom }: { data: AdminDashboardData; onOpenRoom: (slug: string) => void }) {
   return (
     <Card className="admin-rooms-table">
-      <CardHeader><div><CardTitle>All rooms</CardTitle><CardDescription>{data.rooms.length} most recently active rooms</CardDescription></div><Radio /></CardHeader>
+      <CardHeader><div><CardTitle>All rooms</CardTitle><CardDescription>{data.rooms.length} rooms · Sorted by recent activity</CardDescription></div><Radio /></CardHeader>
       <CardContent>
         <div className="admin-table-header"><span>Room</span><span>Visibility</span><span>Listeners</span><span>Updated</span><span /></div>
         {data.rooms.map((room) => (
@@ -531,7 +517,7 @@ function RoomsPanel({ data, onOpenRoom }: { data: AdminDashboardData; onOpenRoom
             <Button variant="ghost" size="sm" onClick={() => onOpenRoom(room.slug)}>Open <ExternalLink /></Button>
           </div>
         ))}
-        {!data.rooms.length && <div className="admin-empty"><Radio /><strong>No rooms yet</strong><span>Created rooms will appear here.</span></div>}
+        {!data.rooms.length && <div className="admin-empty"><Radio /><strong>No rooms yet</strong></div>}
       </CardContent>
     </Card>
   );

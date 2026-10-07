@@ -66,13 +66,13 @@ export type MusicLink = { provider: Provider; url: string; providerId?: string }
 
 export function parseMusicLink(value: string, selectedProvider: Provider): MusicLink | { error: string } {
   const input = value.trim();
-  if (!input) return { error: "Paste a track link to find its details." };
+  if (!input) return { error: "Paste a track link." };
   if (input.length > 2048) return { error: "That link is too long. Paste a track link under 2,048 characters." };
   if (/^spotify:track:[A-Za-z0-9]{22}$/.test(input)) return { provider: "spotify", url: input };
   if (/^[A-Za-z0-9_-]{11}$/.test(input)) {
     return selectedProvider === "youtube"
       ? { provider: "youtube", providerId: input, url: `https://www.youtube.com/watch?v=${input}` }
-      : { error: "For a bare YouTube video ID, choose YouTube first, or paste the full track link." };
+      : { error: "Choose YouTube for a video ID, or paste the full link." };
   }
   if (/^[A-Za-z0-9]{22}$/.test(input) && selectedProvider === "spotify") return { provider: "spotify", url: input };
   const provider = detectMusicProvider(input);

@@ -19,12 +19,12 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
   {
     version: "0.1.0",
     date: "2026-10-06",
-    title: "Shared listening, kept simple.",
+    title: "Shared listening",
     sections: [
       {
         title: "Added",
         items: [
-          "A visible app version and an in-app changelog to keep up with releases.",
+          "App version and changelog.",
           "Shared radio rooms with synchronized playback, DJ turns, and private music queues.",
           "Room chat with replies, reactions, images, and GIF search when configured.",
           "Music search and playback options for YouTube, SoundCloud, Spotify, and Apple Music.",
@@ -33,15 +33,15 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
       {
         title: "Improved",
         items: [
-          "Responsive room panels and simpler profiles with display names, bios, avatars, and themes.",
+          "Responsive room panels and profiles with display names, bios, avatars, and themes.",
           "In-app feedback and an admin workflow for reviewing reports.",
           "Search stays open while adding songs, with queue actions for touch and keyboard.",
-          "Reachable room settings on phones, a searchable listener list, and layout reset.",
+          "Room settings on phones, listener search, and layout reset.",
           "Clearer local playback status, recovery actions, track details, and mute.",
           "Multiline chat, room-specific drafts, and retry for failed history saves.",
-          "Smoother artwork changes and consistent reduced-motion behavior.",
-          "Waiting-track Undo, private picks and saved sets, and richer playback history.",
-          "A compact track strip, named layouts, room commands, and first-session listening guidance.",
+          "Artwork transitions and reduced-motion support.",
+          "Undo for queued tracks, private picks and saved sets, and playback history with timestamps.",
+          "Compact track strip, saved layouts, room commands, and listening setup.",
           "Room previews, recent rooms, host notes, and staged feedback uploads.",
           "Older chat pages, message search, and room notification controls.",
         ],

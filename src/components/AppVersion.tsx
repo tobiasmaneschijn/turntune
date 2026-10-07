@@ -35,7 +35,7 @@ export function AppVersion() {
       <DialogContent className="changelog-dialog">
         <DialogHeader>
           <DialogTitle>Changelog</DialogTitle>
-          <DialogDescription>What&apos;s new in Lydman. Current version: {APP_VERSION}.</DialogDescription>
+          <DialogDescription className="sr-only">Current version: {APP_VERSION}.</DialogDescription>
         </DialogHeader>
         <div className="changelog-releases" tabIndex={0} role="region" aria-label="Release notes">
           {CHANGELOG.map((release) => (

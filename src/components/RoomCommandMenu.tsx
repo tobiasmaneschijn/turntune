@@ -14,7 +14,7 @@ export function RoomCommandMenu({ open, onOpenChange, commands, finalFocus }: {
   const choose = (command: RoomCommand) => { setQuery(""); setActive(0); onOpenChange(false); requestAnimationFrame(command.run); };
   return <Dialog open={open} onOpenChange={(next) => { if (!next) { setQuery(""); setActive(0); } onOpenChange(next); }}>
     <DialogContent className="room-command-dialog" finalFocus={finalFocus}>
-      <DialogHeader><DialogTitle>Room commands</DialogTitle><DialogDescription>Find an action. Arrow keys choose a result; Enter runs it.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Room commands</DialogTitle><DialogDescription>Use arrow keys to select an action and Enter to run it.</DialogDescription></DialogHeader>
       <Input aria-label="Find a room command" placeholder="Search actions…" value={query} onChange={(event) => { setQuery(event.target.value); setActive(0); }} onKeyDown={(event) => {
         if (event.nativeEvent.isComposing) return;
         if (event.key === "ArrowDown" && visible.length) { event.preventDefault(); listRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }
@@ -28,7 +28,7 @@ export function RoomCommandMenu({ open, onOpenChange, commands, finalFocus }: {
       }}>
         {visible.map((command, index) => <Button key={command.id} role="menuitem" variant="ghost" tabIndex={index === active ? 0 : -1} onFocus={() => setActive(index)} onClick={() => choose(command)}><span>{command.label}</span>{command.key && <kbd>{command.key}</kbd>}</Button>)}
       </div>
-      {!visible.length && <p role="status">No actions match. Try another word.</p>}
+      {!visible.length && <p role="status">No matching actions.</p>}
     </DialogContent>
   </Dialog>;
 }

@@ -24,7 +24,6 @@ import { LoginForm } from "./components/login-form";
 import { SignUpForm } from "./components/sign-up-form";
 import { UpdatePasswordForm } from "./components/update-password-form";
 import { RealtimeChat, type RealtimeChatHandle } from "./components/realtime-chat";
-import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
@@ -145,7 +144,7 @@ export function App() {
       previousDjUserIdRef.current !== profile.id &&
       userSettings.notifications.djTurn
     ) {
-      notifyWithAttention({ key: `${context}:dj-turn:${snapshot.room.playback.track?.id || snapshot.room.playback.updatedAt}`, title: "You’re on air", body: "Your Lydman DJ turn has started.", backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted, onInApp: () => setNotice("You’re on air · your DJ turn has started") });
+      notifyWithAttention({ key: `${context}:dj-turn:${snapshot.room.playback.track?.id || snapshot.room.playback.updatedAt}`, title: "You’re on air", body: "Your DJ turn has started.", backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted, onInApp: () => setNotice("You’re on air") });
     }
     previousDjUserIdRef.current = djUserId;
   }, [snapshot?.room.djUserId, profile.id, roomId, userSettings.notifications.djTurn, userSettings.notifications.backgroundOnly, roomNotificationsMuted]);
@@ -229,7 +228,6 @@ export function App() {
           <CardHeader>
             <Brand />
             <CardTitle role="heading" aria-level={1}>Admin access required</CardTitle>
-            <CardDescription>This dashboard is only available to Lydman administrators.</CardDescription>
           </CardHeader>
           <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
         </Card>
@@ -315,7 +313,7 @@ export function App() {
   }
 
   if (!snapshot) {
-    return <LoadingScreen label={notice || (connected ? "Tuning into the room…" : "Connecting…")} />;
+    return <LoadingScreen label={notice || (connected ? "Loading room…" : "Connecting…")} />;
   }
 
   // Being allowed to DJ, joining the lineup, and currently being on air are
@@ -473,13 +471,11 @@ function AuthScreen({
         >
           <Brand />
         </a>
-        <div className="welcome-nav-actions"><span>Shared listening, kept simple.</span><ThemeToggle compact /></div>
+        <div className="welcome-nav-actions"><ThemeToggle compact /></div>
       </nav>
       <section className="auth-content">
         <div className="auth-intro">
-          <Badge variant="outline">LYDMAN</Badge>
-          <h1>Listen together,<br />wherever you are.</h1>
-          <p>Shared rooms, personal queues, and a DJ lineup that keeps the music moving.</p>
+          <h1>Listen together.</h1>
         </div>
         {form}
       </section>
@@ -497,12 +493,10 @@ function PasswordRecoveryScreen({
 }) {
   return (
     <main className="welcome auth-welcome">
-      <nav><Brand /><div className="welcome-nav-actions"><span>Secure your account.</span><ThemeToggle compact /></div></nav>
+      <nav><Brand /><div className="welcome-nav-actions"><ThemeToggle compact /></div></nav>
       <section className="auth-content">
         <div className="auth-intro">
-          <Badge variant="outline">ACCOUNT RECOVERY</Badge>
-          <h1>Choose a new password.</h1>
-          <p>Your rooms and profile will be ready when you return.</p>
+          <h1>Account recovery</h1>
         </div>
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>
@@ -530,15 +524,13 @@ function Welcome({
 
   return (
     <main className="welcome">
-      <nav><Brand /><div className="welcome-nav-actions"><span>Music is better together.</span><ThemeToggle compact /></div></nav>
+      <nav><Brand /><div className="welcome-nav-actions"><ThemeToggle compact /></div></nav>
       <section className="welcome-content">
         <div className="welcome-copy">
-          <Badge variant="outline">SHARED LISTENING</Badge>
-          <h1>One room.<br />Everyone gets a turn.</h1>
-          <p>Add a track, invite your people, and stay in sync.</p>
+          <h1>Listen together.</h1>
         </div>
         <Card className="welcome-card">
-          <CardHeader><CardTitle>{joining ? "Join the room" : "Start a room"}</CardTitle><CardDescription>{joining ? "Choose the name others will see." : "Set up a place to listen together."}</CardDescription></CardHeader>
+          <CardHeader><CardTitle>{joining ? "Join room" : "Create room"}</CardTitle></CardHeader>
           <CardContent>
           <form className="grid gap-4" onSubmit={submit}>
           <div className="grid gap-2">
@@ -551,7 +543,7 @@ function Welcome({
               <Input id="welcome-room" value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="Friday focus" maxLength={48} />
             </div>
           )}
-            <Button type="submit" size="lg">{joining ? "Join room" : "Start listening"}</Button>
+            <Button type="submit" size="lg">{joining ? "Join room" : "Create room"}</Button>
           </form>
           </CardContent>
         </Card>

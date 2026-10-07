@@ -12,7 +12,7 @@ export function createChatWritePolicy(now = Date.now) {
   const consume = (key: string, maximum: number) => {
     const current = rates.get(key);
     const entry = current && current.expiresAt > now() ? current : { count: 0, expiresAt: now() + CHAT_WRITE_WINDOW_MS };
-    if (entry.count >= maximum) throw new ChatRateLimit("Please slow down and try again shortly.");
+    if (entry.count >= maximum) throw new ChatRateLimit("Too many chat requests. Try again shortly.");
     entry.count++;
     rates.set(key, entry);
     if (rates.size > 10_000) rates.delete(rates.keys().next().value!);

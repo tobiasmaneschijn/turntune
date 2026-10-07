@@ -687,7 +687,7 @@ export function SpotifyPlayer({
             <DialogHeader className="spotify-activation-copy">
               <DialogTitle>Enable Spotify playback</DialogTitle>
               <DialogDescription>
-                Spotify needs one click before Lydman can play audio in this browser. You only need to do this when the browser blocks autoplay.
+                Your browser blocked autoplay. Enable playback to start audio.
               </DialogDescription>
             </DialogHeader>
             {error && <div className="dialog-error" role="alert">{error}</div>}

@@ -78,10 +78,7 @@
 .admin-page:has(.admin-feedback-workspace) { height: 100dvh; min-height: 620px; overflow: hidden; }
 .admin-main:has(.admin-feedback-workspace) { height: 100dvh; min-height: 0; padding-bottom: 20px; display: flex; flex-direction: column; }
 .admin-feedback-workspace { width: 100%; min-width: 0; min-height: 0; margin-top: 20px; display: grid; flex: 1; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-xl); background: color-mix(in oklch, var(--muted), transparent 58%); }
-.admin-feedback-tools { min-height: 70px; padding: 12px 14px; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(220px, 320px) 130px auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: var(--card); }
-.admin-feedback-tools-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.admin-feedback-tools-copy strong { font-size: 13px; font-weight: 600; }
-.admin-feedback-tools-copy span { overflow: hidden; color: var(--muted-foreground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-feedback-tools { min-height: 70px; padding: 12px 14px; display: grid; grid-template-columns: minmax(220px, 1fr) 130px auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: var(--card); }
 .admin-feedback-tools > [data-slot="badge"] { justify-self: end; }
 .admin-search { position: relative; }
 .admin-search > svg { width: 14px; position: absolute; z-index: 1; top: 9px; left: 9px; color: var(--muted-foreground); }
@@ -166,8 +163,7 @@
 @media (max-width: 1080px) {
   .admin-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-overview-grid { grid-template-columns: 1fr; }
-  .admin-feedback-tools { grid-template-columns: minmax(220px, 1fr) minmax(200px, 280px) 120px auto; }
-  .admin-feedback-tools-copy span { display: none; }
+  .admin-feedback-tools { grid-template-columns: minmax(200px, 1fr) 120px auto; }
   .admin-table-header,
 .admin-room-row { grid-template-columns: minmax(160px, 1.4fr) 90px 72px 110px 62px; }
 }
@@ -188,7 +184,6 @@
   .admin-topbar { min-height: 78px; }
   .admin-feedback-workspace { margin-top: 14px; }
   .admin-feedback-tools { grid-template-columns: minmax(0, 1fr) 124px auto; }
-  .admin-feedback-tools-copy { display: none; }
   .admin-feedback-board { grid-template-columns: repeat(5, minmax(260px, 78vw)); }
   .admin-table-header { display: none; }
   .admin-room-row { padding: 12px 0; grid-template-columns: minmax(150px, 1fr) auto auto; gap: 8px; }

@@ -144,7 +144,7 @@ test("pasted Spotify link gets a preview without changing search provider or aut
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await page.getByRole("button", { name: /Add by link/ }).click();
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx");
-  await expect(page.getByText("Detected Spotify · search preference stays YouTube", { exact: true })).toBeVisible();
+  await expect(page.getByText("Spotify · single tracks only", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Find track", exact: true }).click();
   await expect(page.locator(".music-link-preview")).toContainText("Detected Spotify Song");
   await expect.poll(() => api(page, "return music.commands.length")).toBe(0);
@@ -178,7 +178,7 @@ test("listener joins explicitly near search and restricted listeners get useful 
   await expect.poll(() => api(page, "return music.commands[1].event")).toBe("queue:add");
   await page.goto("/tests/qol-harness/music.html?scenario=restricted");
   await page.getByRole("tab", { name: "Search", exact: true }).click();
-  await expect(page.locator('.search-pane .music-join-prompt')).toContainText("owner or a moderator can grant you a DJ role");
+  await expect(page.locator('.search-pane .music-join-prompt')).toContainText("Ask the owner or a moderator for a DJ role.");
   await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
   await expect.poll(() => api(page, "return music.commands.length")).toBe(0);
 });
@@ -284,7 +284,7 @@ test("confirmed queue removal offers bounded Undo and restores the authoritative
   await api(page, "music.resolveNext({ok:true,position:999})");
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Alpha", "Beta", "Gamma"]);
   await expect(page.getByRole("button", { name: "Undo removal", exact: true })).toHaveCount(0);
-  await expect(page.locator(".music-action-status")).toContainText("Restored Beta. Your current room state is shown.");
+  await expect(page.locator(".music-action-status")).toContainText("Restored Beta.");
   await expect(page.locator(".music-action-status")).not.toContainText("#999");
   expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
 });
@@ -352,8 +352,8 @@ test("named sets preserve saved order, explicitly append, report skipped recordi
   await page.getByRole("textbox", { name: "New name for Evening picks", exact: true }).fill("Weekend picks");
   await page.getByRole("button", { name: "Save name", exact: true }).click();
   await expect(page.locator(".music-saved-set h4")).toHaveText("Weekend picks");
-  await page.getByRole("button", { name: "Clear private library…", exact: true }).click();
-  await page.getByRole("button", { name: "Delete all private picks and sets", exact: true }).click();
+  await page.getByRole("button", { name: "Clear library…", exact: true }).click();
+  await page.getByRole("button", { name: "Delete all picks and sets", exact: true }).click();
   await expect(page.locator(".music-saved-set")).toHaveCount(0);
 });
 

@@ -92,7 +92,7 @@ export function RoomSettingsDialog({
         <form className="grid gap-5" autoComplete="off" onSubmit={save}>
           <DialogHeader>
             <DialogTitle>Room settings</DialogTitle>
-            <DialogDescription>Manage the room details, access, and moderation team.</DialogDescription>
+            <DialogDescription className="sr-only">Room details, access, and roles.</DialogDescription>
           </DialogHeader>
 
           <div className="settings-grid">
@@ -103,7 +103,7 @@ export function RoomSettingsDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="settings-description">Description <span className="font-normal text-muted-foreground">Optional</span></Label>
-                <Input id="settings-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" placeholder="What do you like listening to here?" />
+                <Input id="settings-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" />
                 <p id="settings-description-help" className="room-description-help">Shown in the directory. Plain text, up to 240 characters.</p>
               </div>
               <div className="switch-row">
@@ -112,18 +112,17 @@ export function RoomSettingsDialog({
               </div>
               <Card size="sm">
                 <CardHeader>
-                  <CardTitle>Who can join the DJ queue?</CardTitle>
-                  <CardDescription>Choose whether listeners can take turns freely or need a room role.</CardDescription>
+                  <CardTitle>DJ queue access</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="segmented-control">
                     <Button type="button" size="sm" className={djAccess === "everyone" ? "segmented-active" : ""} variant={djAccess === "everyone" ? "secondary" : "ghost"} onClick={() => setDjAccess("everyone")}>Everyone</Button>
-                    <Button type="button" size="sm" className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role + moderators</Button>
+                    <Button type="button" size="sm" className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role and moderators</Button>
                   </div>
                 </CardContent>
               </Card>
               <Card size="sm" className="password-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle><CardDescription>Control who can enter with an invite link.</CardDescription></CardHeader>
+                <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle></CardHeader>
                 <CardContent className="grid gap-3">
                   <div className="segmented-control">
                     <Button type="button" size="sm" className={passwordMode === "unchanged" ? "segmented-active" : ""} variant={passwordMode === "unchanged" ? "secondary" : "ghost"} onClick={() => setPasswordMode("unchanged")}>Keep</Button>
@@ -137,7 +136,7 @@ export function RoomSettingsDialog({
 
             {isOwner && (
               <Card size="sm" className="moderator-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle><CardDescription>Moderators manage the room. DJ-role listeners can join a restricted DJ queue.</CardDescription></CardHeader>
+                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle><CardDescription>Moderators manage the room. DJs can join restricted DJ queues.</CardDescription></CardHeader>
                 <CardContent className="moderator-list">
                   {snapshot.users.map((user) => {
                     const owner = user.id === snapshot.room.ownerUserId;

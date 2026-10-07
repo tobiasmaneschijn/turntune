@@ -31,7 +31,7 @@ export function RoomPeopleDialog({ open, onOpenChange, users, currentUserId, djU
   const Title = mobile ? DialogTitle : Popover.Title;
   const Description = mobile ? DialogDescription : Popover.Description;
   const content = <>
-      <DialogHeader><Title>Room listeners</Title><Description>{users.length} {users.length === 1 ? "listener" : "listeners"} currently in this room.</Description></DialogHeader>
+      <DialogHeader><Title>Room listeners</Title><Description>{users.length} {users.length === 1 ? "listener" : "listeners"}</Description></DialogHeader>
       {users.length > 7 && <Input aria-label="Find a listener" placeholder="Find a listener" value={query} onChange={(event) => setQuery(event.target.value)} />}
       <div className="room-people-list">
         {orderedUsers.map((user) => <Button key={user.id} variant="ghost" className="room-person" data-navigation-focus="room-listeners" aria-label={`Open ${user.name}'s profile`} onClick={() => { onOpenChange(false); onOpenProfile(user.id); }}>

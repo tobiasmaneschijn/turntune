@@ -78,7 +78,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     mentions: ChatMention[] = []
   ) => {
     const session = sessionRef.current
-    if (!session) throw new Error('Chat is reconnecting. Please try again.')
+    if (!session) throw new Error('Chat is reconnecting. Try again.')
     const message = normalizeRealtimeMessage({
       id: crypto.randomUUID(), content, type: media?.type || 'text',
       mediaUrl: media?.mediaUrl, storagePath: media?.storagePath,
@@ -97,7 +97,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const sendExistingMessage = useCallback(async (message: ChatMessage) => {
     if (message.user.id !== user.id) throw new Error('This message belongs to another account.')
     const session = sessionRef.current
-    if (!session) throw new Error('Chat is reconnecting. Please try again.')
+    if (!session) throw new Error('Chat is reconnecting. Try again.')
     await session.sendMessage(message)
     return message
   }, [user.id])

@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -39,7 +38,7 @@ export function LoginForm({
       })
       if (error) throw error
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'An error occurred')
+      setError(error instanceof Error ? error.message : 'Could not sign in. Try again.')
     } finally {
       setIsLoading(false)
     }
@@ -49,8 +48,7 @@ export function LoginForm({
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Sign in to open your rooms and profile.</CardDescription>
+          <CardTitle className="text-xl">Sign in</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin}>
@@ -76,7 +74,7 @@ export function LoginForm({
                     className="ml-auto h-auto p-0"
                     onClick={() => onNavigate('/forgot-password')}
                   >
-                    Forgot your password?
+                    Forgot password?
                   </Button>
                 </div>
                 <Input
@@ -93,8 +91,7 @@ export function LoginForm({
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
-              Don&apos;t have an account?{' '}
-              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/sign-up')}>Create one</Button>
+              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/sign-up')}>Create account</Button>
             </div>
           </form>
         </CardContent>

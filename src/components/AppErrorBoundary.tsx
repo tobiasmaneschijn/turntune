@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
 
 export class AppErrorBoundary extends Component<{ children: ReactNode; onRetry?: () => void }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -21,8 +21,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode; onRetry?:
         <Card className="app-error-card">
           <CardHeader>
             <span className="app-error-icon"><AlertTriangle /></span>
-            <CardTitle><h1>Something interrupted the session</h1></CardTitle>
-            <CardDescription>The room is still safe. Reload the interface to reconnect.</CardDescription>
+            <CardTitle><h1>Couldn't load the app</h1></CardTitle>
           </CardHeader>
           <CardContent>
             <code>{this.state.error.message}</code>
@@ -58,8 +57,7 @@ export class PanelErrorBoundary extends Component<
       <Card className="panel-error-card">
         <CardHeader>
           <span className="app-error-icon"><AlertTriangle /></span>
-          <CardTitle><h2>{this.props.panelName} needs reconnecting</h2></CardTitle>
-          <CardDescription>The rest of the room is still available.</CardDescription>
+          <CardTitle><h2>Couldn't load {this.props.panelName.toLowerCase()}</h2></CardTitle>
         </CardHeader>
         <CardContent><code>{this.state.error.message}</code></CardContent>
         <CardFooter className="gap-2">

@@ -270,7 +270,7 @@ export function AppleMusicPlayer({
 
   return (
     <div className="provider-player-shell apple-player-shell">
-      <strong>Apple Music in Lydman</strong>
+      <strong>Apple Music</strong>
       {!authorized ? (
         <button type="button" onClick={authorize} disabled={!ready}>Connect Apple Music</button>
       ) : (

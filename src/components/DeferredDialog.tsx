@@ -27,7 +27,7 @@ export function DeferredDialog<P extends { onClose: () => void }>({ title, load,
   if (Content) return <Content {...componentProps} />;
   return <Dialog open onOpenChange={(open) => { if (!open) componentProps.onClose(); }}>
     <DialogContent finalFocus={finalFocus}>
-      <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{failed ? "This panel could not be loaded. Try again or close it." : "Loading this panel…"}</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription className="sr-only">{failed ? "Couldn't load this panel." : "Loading…"}</DialogDescription></DialogHeader>
       <AsyncState state={failed ? "error" : "loading"} title={failed ? `Could not load ${title.toLowerCase()}` : `Loading ${title.toLowerCase()}`} />
       {failed && <Button onClick={() => setRevision(value => value + 1)}>Retry loading</Button>}
     </DialogContent>

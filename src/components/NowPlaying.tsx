@@ -201,7 +201,7 @@ function BangOMeter({
           <strong>{positiveVotes}</strong>
         </button>
       </div>
-      {addedByCurrentUser && <small className="bang-owner-note">You added this track. Reactions stay with your listeners.</small>}
+      {addedByCurrentUser && <small className="bang-owner-note">Only other listeners can react to your track.</small>}
       {pending && <small role="status">Saving your reaction…</small>}
       {voteError && <small role="alert">{voteError}</small>}
     </section>
@@ -565,13 +565,13 @@ export function NowPlaying({
             {fallbackNeedsApproval ? (
               <div className="provider-player-shell fallback-player-shell">
                 <strong>Use the room source?</strong>
-                <small>No {providerLabel(preferredProvider)} match was found for this track.</small>
+                <small>No {providerLabel(preferredProvider)} match.</small>
                 <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</Button>
               </div>
             ) : fallbackSuppressed ? (
               <div className="provider-player-shell fallback-player-shell">
                 <strong>Track unavailable</strong>
-                <small>No {providerLabel(preferredProvider)} match was found. Local playback is paused for this track.</small>
+                <small>No {providerLabel(preferredProvider)} match. Playback on this device is paused.</small>
                 <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Use {providerName} for this track</Button>
               </div>
             ) : effectiveProvider === "spotify" && effectiveMapping ? (
@@ -695,7 +695,7 @@ export function NowPlaying({
               />
             </div>
           </div>
-          <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to change room playback." : isDj ? "You’re on air · your controls affect the room." : canControlPlayback ? "Moderator controls affect the room." : "The current DJ controls the room. Volume and mute affect only your device."}</p>
+          <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
           {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" onClick={onOpenSettings}><SettingsIcon /> Playback source: {providerName}{playbackPreference === "spotify-desktop" ? " Desktop" : ""} · Settings</Button>}
           {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
           {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
@@ -707,8 +707,8 @@ export function NowPlaying({
       ) : (
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
-          <h2>The room is quiet</h2>
-          <p>Add a track from any configured provider to start the radio.</p>
+          <h2>No track playing</h2>
+          <p>Add a track to start playback.</p>
         </div>
       )}
       </section>

@@ -507,13 +507,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         if (original) setReplyingTo(createReplySnapshot(original))
         else {
           draftSnapshotRef.current.draft.replyToId = undefined
-          setReplyRestoreNotice('The previous reply is unavailable. Your draft text is still here.')
+          setReplyRestoreNotice('Reply unavailable. Draft text restored.')
         }
       } catch {
         if (!active || restoredReplyIdRef.current !== replyId) return
         restoredReplyIdRef.current = undefined
         draftSnapshotRef.current.draft.replyToId = undefined
-        setReplyRestoreNotice('The previous reply could not be restored. Your draft text is still here.')
+        setReplyRestoreNotice('Could not restore reply. Draft text restored.')
       }
     }
     void restore()
@@ -738,7 +738,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         action,
       })
     } catch {
-      if (lifetime.active) setComposerError('Could not confirm that reaction update. Please try again.')
+      if (lifetime.active) setComposerError('Could not confirm reaction. Try again.')
     } finally {
       pendingReactionsRef.current.delete(key)
     }
@@ -778,7 +778,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       if (!lifetime.active) return
       await sendMediaMessage('image', mediaUrl, file.name, storagePath)
     } catch (error) {
-      if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not upload this image. Please try again.')
+      if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not upload this image. Try again.')
     } finally {
       if (lifetime.active) { uploadingRef.current = false; setUploading(false) }
     }
@@ -896,7 +896,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         <div className="chat-history-results">{[...history.searchResults].reverse().map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={`View message from ${message.user.name}: ${getMessagePreview(message)}`}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString()}</time><span>{getMessagePreview(message)}</span></button>)}</div>
         {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>More search results</Button>}
       </section>}
-      {history.context && <div className="chat-context-banner"><span>Message context · earlier conversation</span><Button variant="ghost" size="sm" onClick={returnToLive}>Back to live messages</Button></div>}
+      {history.context && <div className="chat-context-banner"><span>Earlier messages</span><Button variant="ghost" size="sm" onClick={returnToLive}>Back to live messages</Button></div>}
       {/* Messages */}
       <div ref={containerRef} className="chat-message-scroll flex-1 overflow-y-auto p-4 space-y-4">
         {(history.context ? history.context.hasOlder : history.hasOlder) && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.loadingOlder || history.contextLoading || historyLoading} onClick={() => {
@@ -1122,7 +1122,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         )}
         {mentionQuery && mentionCandidates.length > 0 && (
           <div className="chat-mention-picker" id="chat-mention-list" role="listbox" aria-label="Tag a listener">
-            <div className="chat-mention-picker-heading"><strong>Tag someone</strong><span>In this room</span></div>
+            <div className="chat-mention-picker-heading"><strong>Tag a listener</strong></div>
             {mentionCandidates.map((option, index) => (
               <button
                 id={`chat-mention-option-${index}`}

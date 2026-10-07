@@ -14,7 +14,7 @@ export function RoomMiniPlayer({ track, statusText, statusTone = "quiet", muted,
 }) {
   return <section className="room-mini-player" aria-label="Current track" data-status={statusTone}>
     {track && <TrackArtwork track={track} compact className="room-mini-art" />}
-    <div className="room-mini-copy"><strong title={track?.title}>{track?.title || "The room is quiet"}</strong><span title={statusText}>{statusText}</span></div>
+    <div className="room-mini-copy"><strong title={track?.title}>{track?.title || "No track playing"}</strong><span title={statusText}>{statusText}</span></div>
     <Button variant="ghost" size="icon" onClick={onToggleMute} aria-label={muted ? "Unmute my audio" : "Mute my audio"} aria-pressed={muted}>{muted ? <VolumeX /> : <Volume2 />}</Button>
     <Button variant="outline" size="sm" onClick={onOpenPlayer}>Open player</Button>
   </section>;

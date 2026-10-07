@@ -173,7 +173,7 @@ test.describe("authenticated UI acceptance", () => {
       await expect(page.getByRole("slider", { name: "Volume" })).toBeVisible();
     } else {
       const emptyPlayerTitle = page.locator(".empty-player h2");
-      await expect(emptyPlayerTitle).toHaveText("The room is quiet");
+      await expect(emptyPlayerTitle).toHaveText("No track playing");
       expect(await contrastRatio(emptyPlayerTitle)).toBeGreaterThanOrEqual(4.5);
     }
 

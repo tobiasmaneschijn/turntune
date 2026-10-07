@@ -42,39 +42,33 @@ const SAMPLE_USERS: User[] = [
 const BENEFITS = [
   {
     icon: Waves,
-    title: "Stay on the same beat",
-    description: "Playback stays aligned across the room, so the drop lands for everyone at once.",
-    note: "Synchronized playback"
+    title: "Synchronized playback",
+    description: "Everyone in the room hears the same song at the same time."
   },
   {
     icon: ListMusic,
-    title: "Pass the aux, fairly",
-    description: "Round-robin DJ turns give everyone a moment while private queues keep picks a surprise.",
-    note: "One song per turn"
+    title: "DJ turns",
+    description: "Play one song per turn from your private queue."
   },
   {
     icon: MessageCircle,
-    title: "React in real time",
-    description: "Chat, reply, and react without leaving the room or missing what is playing next.",
-    note: "Conversation included"
+    title: "Room chat",
+    description: "Send messages, replies, and reactions while listening."
   }
 ];
 
 const STEPS = [
   {
     icon: Headphones,
-    title: "Create your room",
-    description: "Give your listening spot a name and set the vibe."
+    title: "Create a room"
   },
   {
     icon: Share2,
-    title: "Drop the link",
-    description: "Invite the friends who always know the next song."
+    title: "Share the room link"
   },
   {
     icon: Radio,
-    title: "Take turns",
-    description: "Build private queues, rotate DJs, and listen in sync."
+    title: "Add songs and take turns"
   }
 ];
 
@@ -139,13 +133,9 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <section className="landing-hero" aria-labelledby="landing-title">
         <div className="landing-hero-copy">
-          <Badge variant="outline" className="landing-kicker">
-            <Sparkles data-icon="inline-start" /> Your room. Your rotation.
-          </Badge>
-          <h1 id="landing-title">One room.<br /><em>Everyone&apos;s turn.</em></h1>
+          <h1 id="landing-title">Listen together.</h1>
           <p>
-            Bring your people, bring the music service you already use, and keep every play,
-            queue, and reaction in sync.
+            Share a room, queue songs, and take turns as DJ.
           </p>
           <div className="landing-hero-actions">
             <a
@@ -153,7 +143,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               className={buttonVariants({ size: "lg" })}
               onClick={(event) => navigateInsideApp(event, "/sign-up", onNavigate)}
             >
-              Create your room <ArrowRight data-icon="inline-end" />
+              Create a room <ArrowRight data-icon="inline-end" />
             </a>
             <a
               href="/login"
@@ -216,7 +206,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
                     <MessageCircle aria-hidden="true" />
                   </div>
                   <div className="landing-chat-preview">
-                    <div><Avatar user={SAMPLE_USERS[2]} size={24} /><p><strong>Liv</strong><span>This intro is everything ✨</span></p></div>
+                    <div><Avatar user={SAMPLE_USERS[2]} size={24} /><p><strong>Liv</strong><span>Love this intro</span></p></div>
                     <div><Avatar user={SAMPLE_USERS[3]} size={24} /><p><strong>Leo</strong><span>Wait for the drop</span></p></div>
                   </div>
                 </section>
@@ -228,8 +218,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <section className="landing-providers" aria-labelledby="landing-providers-title">
         <div>
-          <span className="landing-section-kicker">PLAY IT YOUR WAY</span>
-          <h2 id="landing-providers-title">Your music, your service.</h2>
+          <h2 id="landing-providers-title">Music services</h2>
         </div>
         <div className="landing-provider-list" aria-label="Supported music services">
           {["YouTube", "SoundCloud", "Spotify", "Apple Music"].map((provider) => (
@@ -240,18 +229,16 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <section className="landing-section landing-features" id="features" aria-labelledby="landing-features-title">
         <div className="landing-section-heading">
-          <span className="landing-section-kicker">BUILT FOR THE GROUP CHAT</span>
-          <h2 id="landing-features-title">Less fighting over the aux.<br />More finding the next favorite.</h2>
+          <h2 id="landing-features-title">Features</h2>
         </div>
         <div className="landing-feature-grid">
-          {BENEFITS.map(({ icon: Icon, title, description, note }) => (
+          {BENEFITS.map(({ icon: Icon, title, description }) => (
             <Card className="landing-feature-card" key={title}>
               <CardHeader>
                 <span className="landing-feature-icon"><Icon aria-hidden="true" /></span>
                 <CardTitle>{title}</CardTitle>
                 <CardDescription>{description}</CardDescription>
               </CardHeader>
-              <CardContent><Badge variant="secondary">{note}</Badge></CardContent>
             </Card>
           ))}
         </div>
@@ -259,15 +246,14 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <section className="landing-section landing-how" id="how-it-works" aria-labelledby="landing-how-title">
         <div className="landing-section-heading">
-          <span className="landing-section-kicker">THREE STEPS. ZERO AUX DRAMA.</span>
-          <h2 id="landing-how-title">From link to listening in minutes.</h2>
+          <h2 id="landing-how-title">How it works</h2>
         </div>
         <ol className="landing-step-grid">
-          {STEPS.map(({ icon: Icon, title, description }, index) => (
+          {STEPS.map(({ icon: Icon, title }, index) => (
             <li key={title}>
               <span className="landing-step-number">0{index + 1}</span>
               <span className="landing-step-icon"><Icon aria-hidden="true" /></span>
-              <div><h3>{title}</h3><p>{description}</p></div>
+              <div><h3>{title}</h3></div>
             </li>
           ))}
         </ol>
@@ -275,9 +261,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <section className="landing-cta" aria-labelledby="landing-cta-title">
         <div className="landing-cta-decoration" aria-hidden="true"><Users /><Music2 /><Sparkles /></div>
-        <span className="landing-section-kicker">THE ROOM IS WAITING</span>
-        <h2 id="landing-cta-title">Ready for your next listening night?</h2>
-        <p>Bring the people. We&apos;ll keep the music together.</p>
+        <h2 id="landing-cta-title">Create a listening room</h2>
         <div className="landing-cta-actions">
           <a
             href="/sign-up"
@@ -299,7 +283,6 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
       <footer className="landing-footer">
         <Brand />
-        <p>Shared listening, kept simple.</p>
         <div className="landing-footer-meta">
           <AppVersion />
           <small>© {new Date().getFullYear()} Lydman</small>

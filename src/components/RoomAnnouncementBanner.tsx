@@ -78,12 +78,12 @@ export function RoomAnnouncementBanner({ roomId, userId, announcement, serverTim
     </div>
     <Dialog open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       <DialogContent className="room-announcement-dialog" finalFocus={canEdit ? openerRef : undefined}>
-        <DialogHeader><DialogTitle>{canEdit ? "Room note" : "Note from your host"}</DialogTitle><DialogDescription>{canEdit ? "One plain-text note for the room. Dismissal is private to each listener's browser session." : "This note is visible to the room. Dismissing it only hides it for your browser session."}</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>Room note</DialogTitle><DialogDescription>Dismissing this note hides it for your browser session.</DialogDescription></DialogHeader>
         {canEdit ? <form onSubmit={(event) => { event.preventDefault(); save(); }}>
           <Label htmlFor="room-note-text">Note</Label><Textarea id="room-note-text" value={text} onChange={event => setText(event.target.value)} maxLength={500} rows={4} disabled={pending} autoFocus />
           <small>{text.length}/500</small>
           <Label htmlFor="room-note-expiry">Remove automatically after</Label><select id="room-note-expiry" value={expiry} onChange={event => setExpiry(event.target.value)} disabled={pending}>{note?.expiresAt && <option value="keep">Keep current expiry</option>}<option value="none">Until a host removes it</option><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">1 day</option><option value="10080">7 days</option></select>
-          {note?.expiresAt && <small>Current note expires {new Date(note.expiresAt).toLocaleString()}.</small>}
+          {note?.expiresAt && <small>Expires {new Date(note.expiresAt).toLocaleString()}.</small>}
           {error && <p role="alert">{error}</p>}
           <DialogFooter>{expectedId.current && <Button type="button" variant="outline" disabled={pending || !connected} onClick={() => save(true)}>Remove note</Button>}<Button type="button" variant="ghost" disabled={pending} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={pending || !connected || !text.trim()}>{pending ? "Saving…" : "Save note"}</Button></DialogFooter>
         </form> : <><p className="room-note-full-text">{note?.text}</p>{note?.expiresAt && <small>Expires {new Date(note.expiresAt).toLocaleString()}.</small>}<Button onClick={() => setOpen(false)}>Done</Button></>}

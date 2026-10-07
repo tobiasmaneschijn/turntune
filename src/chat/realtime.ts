@@ -33,9 +33,9 @@ export function createRealtimeChatSession(
   }
 
   const send = async (event: string, payload: unknown) => {
-    if (!active || !connected) throw new Error('Chat is reconnecting. Please try again.')
+    if (!active || !connected) throw new Error('Chat is reconnecting. Try again.')
     const result = await channel.send({ type: 'broadcast', event, payload })
-    if (result !== 'ok') throw new Error('Could not confirm delivery. Please try again.')
+    if (result !== 'ok') throw new Error('Could not confirm delivery. Try again.')
   }
 
   channel

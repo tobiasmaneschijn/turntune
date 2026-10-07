@@ -28,7 +28,7 @@ export function requestSocketAction(
     if (error) {
       reply({ ok: false, error: "The request timed out. Check the room before trying again." });
     } else if (!result || typeof result.ok !== "boolean") {
-      reply({ ok: false, error: "The server returned an invalid response. Please try again." });
+      reply({ ok: false, error: "The server returned an invalid response. Try again." });
     } else {
       reply(result);
     }

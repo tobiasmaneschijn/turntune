@@ -76,14 +76,14 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     }
   };
   const commands: RoomCommand[] = [
-    ...(onFocusSearch ? [{ id: "search", label: "Focus music search", key: "S", run: onFocusSearch }] : []),
+    ...(onFocusSearch ? [{ id: "search", label: "Search music", key: "S", run: onFocusSearch }] : []),
     ...(onOpenQueue ? [{ id: "queue", label: "Open my queue", key: "Q", run: onOpenQueue }] : []),
-    ...(onOpenPlayer ? [{ id: "player", label: "Return to Player", key: "P", run: onOpenPlayer }] : []),
+    ...(onOpenPlayer ? [{ id: "player", label: "Open player", key: "P", run: onOpenPlayer }] : []),
     ...(onFocusChat ? [{ id: "chat", label: "Focus room chat", key: "/", run: onFocusChat }] : []),
     ...(onToggleMute ? [{ id: "mute", label: muted ? "Unmute my audio" : "Mute my audio", key: "M", run: onToggleMute }] : []),
-    { id: "settings", label: "Open Settings", key: "G", run: onSettings },
+    { id: "settings", label: "Open settings", key: "G", run: onSettings },
     { id: "invite", label: "Copy room invite", key: "I", run: () => void copyInvite() },
-    { id: "rooms", label: "Go to room directory", run: onHome },
+    { id: "rooms", label: "Open room directory", run: onHome },
     { id: "profile", label: "Open my profile", run: onProfile },
   ];
   useKeyboardShortcuts([
@@ -144,14 +144,14 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     {participants && onOpenProfile && <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={participants} currentUserId={currentUser.id} ownerUserId={ownerUserId} moderatorUserIds={moderatorUserIds} djUserId={djUserId} onOpenProfile={onOpenProfile} finalFocus={peopleReturnRef} anchor={listenersRef} />}
     <RoomCommandMenu open={commandsOpen} onOpenChange={setCommandsOpen} commands={commands} finalFocus={moreRef} />
     <Dialog open={helpOpen} onOpenChange={setHelpOpen}><DialogContent className="room-keyboard-help" finalFocus={moreRef}>
-      <DialogHeader><DialogTitle>Keyboard help</DialogTitle><DialogDescription>Use these controls while listening. The chat shortcut is ignored while typing in a field.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Keyboard help</DialogTitle><DialogDescription>The chat shortcut is ignored while typing in a field.</DialogDescription></DialogHeader>
       <label className="room-shortcut-preference"><span>Single-character shortcuts</span><Switch checked={singleKeys} onCheckedChange={(enabled) => { setSingleKeys(enabled); storeValue(shortcutKey, String(enabled)); }} aria-label="Single-character shortcuts" /></label>
       <dl>
         {commands.filter(command => command.key && command.id !== "chat").map(command => <div key={command.id}><dt><kbd>{command.key}</kbd></dt><dd>{command.label}{!singleKeys && " (disabled)"}</dd></div>)}
-        <div><dt><kbd>/</kbd></dt><dd>Open Chat and focus the message field{!singleKeys && " (disabled)"}</dd></div>
+        <div><dt><kbd>/</kbd></dt><dd>Open chat and focus the message field{!singleKeys && " (disabled)"}</dd></div>
         <div><dt><kbd>Ctrl / ⌘</kbd> <kbd>K</kbd></dt><dd>Open room commands</dd></div>
-        <div><dt><kbd>Enter</kbd></dt><dd>Send a message from the chat field</dd></div>
-        <div><dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>Add a new line in a message</dd></div>
+        <div><dt><kbd>Enter</kbd></dt><dd>Send a chat message</dd></div>
+        <div><dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>Add a new line</dd></div>
         <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Move between phone room tabs and horizontal settings categories</dd></div>
         <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move between desktop settings categories</dd></div>
         <div><dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>Go to the first or last room/settings tab</dd></div>

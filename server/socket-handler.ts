@@ -14,7 +14,7 @@ export function safeSocketHandler(
       await handler(payload, reply);
     } catch (error) {
       if (!(error instanceof RoomCommandError)) reportError(error);
-      reply?.({ ok: false, error: error instanceof RoomCommandError ? error.message : "Could not save this change. Please reconnect to check the room and try again." });
+      reply?.({ ok: false, error: error instanceof RoomCommandError ? error.message : "Could not save this change. Reconnect and check the room before trying again." });
     }
   };
 }

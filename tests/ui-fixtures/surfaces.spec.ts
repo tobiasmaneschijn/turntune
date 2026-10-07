@@ -148,7 +148,7 @@ test("production player sliders retain usable dimensions", async ({ page }) => {
 
 test("the application error boundary can retry a failed surface", async ({ page }) => {
   await page.goto("/tests/ui-harness/index.html?scenario=boundary");
-  await expect(page.getByRole("heading", { name: "Something interrupted the session" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Couldn't load the app" })).toBeVisible();
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Interface recovered")).toBeVisible();
 });

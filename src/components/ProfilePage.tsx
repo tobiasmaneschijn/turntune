@@ -65,7 +65,7 @@ export function ProfilePage({
       try {
         const payload = await requestJson<ProfileResponse>(`/api/profiles/${profileId}`, {
           accessToken: tokenRef.current, signal: controller.signal,
-          errorMessage: "Could not load this profile.", validate: isProfileResponse
+          errorMessage: "Could not load this profile. Try again.", validate: isProfileResponse
         });
         if (cancelled) return;
         setProfile(payload.profile);
@@ -73,7 +73,7 @@ export function ProfilePage({
         setDisplayName(payload.profile.display_name);
         setBio(payload.profile.bio);
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Could not load this profile.");
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Could not load this profile. Try again.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -102,7 +102,7 @@ export function ProfilePage({
     try {
       const payload = await requestJson<ProfileResponse>("/api/profile", {
         method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
-        body: JSON.stringify(update), errorMessage: "Could not update your profile.", validate: isProfileResponse
+        body: JSON.stringify(update), errorMessage: "Could not save your profile. Try again.", validate: isProfileResponse
       });
       if (!lifetime.active) return false;
       setProfile(payload.profile);
@@ -111,7 +111,7 @@ export function ProfilePage({
       onOwnProfileUpdated(payload.profile);
       return true;
     } catch (saveError) {
-      if (lifetime.active) setError(saveError instanceof Error ? saveError.message : "Could not update your profile.");
+      if (lifetime.active) setError(saveError instanceof Error ? saveError.message : "Could not save your profile. Try again.");
       return false;
     } finally {
       requestControllers.current.delete(controller);
@@ -141,7 +141,7 @@ export function ProfilePage({
     let newPath = "";
     try {
       const client = await getSupabaseClient();
-      if (!client) throw new Error("Avatar uploads require a signed-in Lydman account.");
+      if (!client) throw new Error("Sign in to upload an avatar.");
       newPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
       const { error: uploadError } = await client.storage.from("profile-avatars").upload(newPath, file, {
         cacheControl: "31536000",
@@ -157,7 +157,7 @@ export function ProfilePage({
       if (oldPath && oldPath !== newPath) await deleteAvatarObject(oldPath);
     } catch (uploadError) {
       if (newPath) await deleteAvatarObject(newPath);
-      if (lifetime.active) setError(uploadError instanceof Error ? uploadError.message : "Could not upload your avatar.");
+      if (lifetime.active) setError(uploadError instanceof Error ? uploadError.message : "Could not upload your avatar. Try again.");
     } finally {
       if (lifetime.active) setUploadingAvatar(false);
     }
@@ -215,19 +215,19 @@ export function ProfilePage({
         <div className="profile-hero">
           <div className="profile-avatar-wrap"><Avatar user={profileUser} size={96} /></div>
           <div className="profile-identity">
-            <span className="profile-member-since">Listener since {new Date(profile.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+            <span className="profile-member-since">Joined {new Date(profile.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
             <h1>
               {profile.display_name}
               {profile.is_app_admin && <DevFlair className="profile-dev-flair" />}
             </h1>
-            <p>{profile.bio || (isOwnProfile ? "Add a short bio to tell other listeners about yourself." : "No bio yet.")}</p>
+            {profile.bio && <p>{profile.bio}</p>}
           </div>
         </div>
 
         {isOwnProfile && (
           <div className="profile-settings-grid">
             <Card className="profile-card details-card">
-              <CardHeader><CardTitle>Profile details</CardTitle><CardDescription>What other listeners see in rooms.</CardDescription></CardHeader>
+              <CardHeader><CardTitle>Profile details</CardTitle></CardHeader>
               <CardContent>
                 <div className={`avatar-upload ${profile.avatar_url ? "has-custom-avatar" : ""}`}>
                   <Avatar user={profileUser} size={56} />
@@ -256,7 +256,7 @@ export function ProfilePage({
             </Card>
 
             <Card className="profile-card appearance-card">
-              <CardHeader><CardTitle><Palette /> Appearance</CardTitle><CardDescription>Choose how your profile shows up.</CardDescription></CardHeader>
+              <CardHeader><CardTitle><Palette /> Appearance</CardTitle></CardHeader>
               <CardContent>
                 <section className="appearance-section">
                   <h2>Avatar</h2>
@@ -280,7 +280,7 @@ export function ProfilePage({
                       const selected = profile.theme_key === option.key;
                       return (
                         <button type="button" key={option.key} className={`${selected ? "selected" : ""} theme-swatch-${option.key}`} disabled={saving} onClick={() => void updateProfile({ themeKey: option.key })}>
-                          <i /><span><strong>{option.name}</strong><small>{option.metadata.description?.replaceAll("SoundSpin", "Lydman") || (selected ? "Active theme" : "Use theme")}</small></span>{selected && <Check />}
+                          <i /><span><strong>{option.name}</strong>{selected && <small>Selected</small>}</span>{selected && <Check />}
                         </button>
                       );
                     })}
