@@ -17,6 +17,28 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.3",
+    date: "2026-10-08",
+    title: "More compact room layout",
+    sections: [
+      {
+        title: "Improved",
+        items: [
+          "Smaller player artwork and tighter spacing to reduce scrolling.",
+          "Room actions in one menu, with layout choices in a submenu.",
+          "Compact theme and announcement strip, with expandable theme details.",
+          "Tighter music lists and chat, with search and mute in the chat header.",
+        ],
+      },
+      {
+        title: "Fixed",
+        items: [
+          "Reaction emoji picker scrolling in short mobile windows.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.2",
     date: "2026-10-08",
     title: "Simpler music sidebar",
