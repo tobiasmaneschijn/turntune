@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Headphones, X } from "lucide-react";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
-import { useMediaQuery } from "../hooks/use-media-query";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 
@@ -21,7 +20,6 @@ export function ListeningChecklist({ userId, providerName, providerState, audioS
   const key = `soundspin:listening-checklist:v1:${userId}`;
   const [dismissed, setDismissed] = useState(() => readStoredValue(key) === "done");
   const [expanded, setExpanded] = useState(false);
-  const compact = useMediaQuery("(max-width: 640px), (max-height: 600px)");
   const expandRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { setDismissed(readStoredValue(key) === "done"); setExpanded(false); }, [key]);
   const close = () => {
@@ -41,11 +39,10 @@ export function ListeningChecklist({ userId, providerName, providerState, audioS
       {providerState === "idle" && <Button variant="secondary" size="sm" onClick={close}>Continue as listener</Button>}
   </>;
   return <>
-    <section className={`room-listening-checklist ${compact ? "is-compact" : ""}`} aria-labelledby="listening-checklist-title">
-      <div className="listening-checklist-heading"><Headphones /><h2 id="listening-checklist-title">Listening setup</h2>{compact && <Button ref={expandRef} variant="outline" size="sm" aria-label="Open listening checklist" onClick={() => setExpanded(true)}>Setup <ChevronRight /></Button>}<Button variant="ghost" size="icon" aria-label="Dismiss listening checklist" onClick={close}><X /></Button></div>
-      {!compact && details}
+    <section className="room-listening-checklist is-compact" aria-labelledby="listening-checklist-title">
+      <div className="listening-checklist-heading"><h2 id="listening-checklist-title" className="sr-only">Listening setup</h2><Button ref={expandRef} variant="ghost" size="sm" aria-label="Open listening checklist" onClick={() => setExpanded(true)}><Headphones />Listening setup <ChevronRight /></Button><Button variant="ghost" size="icon" aria-label="Dismiss listening checklist" onClick={close}><X /></Button></div>
     </section>
-    <Dialog open={compact && expanded} onOpenChange={setExpanded}><DialogContent className="room-listening-dialog" finalFocus={() => expandRef.current?.isConnected ? expandRef.current : document.getElementById("room-workspace") ?? false}>
+    <Dialog open={expanded} onOpenChange={setExpanded}><DialogContent className="room-listening-dialog" finalFocus={() => expandRef.current?.isConnected ? expandRef.current : document.getElementById("room-workspace") ?? false}>
       <DialogHeader><DialogTitle>Listening setup</DialogTitle><DialogDescription className="sr-only">Provider and local audio status.</DialogDescription></DialogHeader>
       {details}
     </DialogContent></Dialog>

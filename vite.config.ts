@@ -30,7 +30,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     // Generated traces/captures must not reload a different browser's room.
-    watch: { ignored: ["**/test-results/**", "**/test-results-*/**", "**/test-results-*.png", "**/playwright-report/**"] },
+    watch: { ignored: ["**/work/**", "**/test-results/**", "**/test-results-*/**", "**/test-results-*.png", "**/playwright-report/**"] },
     proxy: {
       "/socket.io": {
         target: process.env.SOUNDSPIN_API_TARGET || "http://127.0.0.1:3000",

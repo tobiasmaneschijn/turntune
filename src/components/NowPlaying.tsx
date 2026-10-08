@@ -107,7 +107,7 @@ function BangOMeter({
   const positiveVotes = votes.filter((vote) => vote === 1).length;
   const negativeVotes = votes.filter((vote) => vote === -1).length;
   const label =
-    !votes.length ? "Waiting on the room" :
+    !votes.length ? (addedByCurrentUser ? "Listeners rate your track" : "Waiting on the room") :
     votes.length === 1 ? "First reaction is in" :
     sentiment >= .6 ? "Certified banger" :
     sentiment >= .2 ? "Room is feeling it" :
@@ -201,7 +201,7 @@ function BangOMeter({
           <strong>{positiveVotes}</strong>
         </button>
       </div>
-      {addedByCurrentUser && <small className="bang-owner-note">Only other listeners can react to your track.</small>}
+      {addedByCurrentUser && <small className="bang-owner-note sr-only">Only other listeners can react to your track.</small>}
       {pending && <small role="status">Saving your reaction…</small>}
       {voteError && <small role="alert">{voteError}</small>}
     </section>
@@ -222,6 +222,7 @@ export function NowPlaying({
   onUserSettingsChange,
   roomConnected = true,
   onOpenSettings,
+  onAddTrack,
   controlsRef,
   onLocalStateChange,
   requestAction = defaultRequestAction,
@@ -240,6 +241,7 @@ export function NowPlaying({
   onUserSettingsChange: (settings: SoundSpinUserSettings) => void;
   roomConnected?: boolean;
   onOpenSettings?: () => void;
+  onAddTrack?: () => void;
   controlsRef?: Ref<NowPlayingControls>;
   onLocalStateChange?: (state: NowPlayingLocalState) => void;
   requestAction?: (event: string, payload: unknown, reply: (result: SocketReply) => void) => void;
@@ -487,6 +489,7 @@ export function NowPlaying({
     needsConnection: effectiveProvider === "spotify" && !spotifyReady
   });
   const controlsUnavailable = !canControlPlayback || !roomConnected || Boolean(pendingCommand);
+  const providerActionRequired = fallbackNeedsApproval || fallbackSuppressed || (effectiveProvider === "spotify" && !spotifyReady);
   const setVolume = (next: number) => onUserSettingsChange({
     ...userSettings, playback: { ...userSettings.playback, defaultVolume: next }
   });
@@ -557,7 +560,7 @@ export function NowPlaying({
       {track ? (
         <>
           <div className="now-playing-main">
-          <div className="track-stage">
+          <div className={`track-stage ${effectiveProvider === "spotify" && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""}`}>
             <TrackArtwork track={track} />
             {effectiveProvider === "spotify" && previewArtwork && (
               <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={`${track.title} album artwork`} />
@@ -637,19 +640,21 @@ export function NowPlaying({
                 <small>Choose another playback provider.</small>
               </div>
             )}
-            <div className="record-ring ring-one" />
-            <div className="record-ring ring-two" />
           </div>
           <div className="player-details">
           <div className="current-track">
             <div>
-              <h3>{track.title}</h3>
-              <p>
-                {track.artist ? `${track.artist} · ` : ""}Added by {track.addedBy.name} · {track.permalinkUrl ? (
+              <div className="current-track-title">
+                <h3 title={track.title}>{track.title}</h3>
+                <Button ref={detailsButtonRef} variant="ghost" size="icon" className="track-details-action" aria-label="Track details" title="Track details" onClick={() => setDetailsOpen(true)}><Info size={16} /></Button>
+              </div>
+              <p className="current-track-meta">
+                {track.artist && <span className="current-track-artist" title={track.artist}>{track.artist}</span>}
+                {track.artist && <span aria-hidden="true">·</span>}
+                {track.permalinkUrl ? (
                   <a href={track.permalinkUrl} target="_blank" rel="noreferrer">{providerLabel(track.provider)}</a>
                 ) : providerLabel(track.provider)}
               </p>
-              <Button ref={detailsButtonRef} variant="ghost" size="sm" className="track-details-action" onClick={() => setDetailsOpen(true)}><Info size={14} /> Track details</Button>
             </div>
             <div className="player-controls">
               <Button disabled={controlsUnavailable} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause room" : "Play room"} aria-describedby="playback-control-help" aria-busy={Boolean(pendingCommand)}>
@@ -695,8 +700,13 @@ export function NowPlaying({
               />
             </div>
           </div>
-          <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
-          {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" onClick={onOpenSettings}><SettingsIcon /> Playback source: {providerName}{playbackPreference === "spotify-desktop" ? " Desktop" : ""} · Settings</Button>}
+          <div className="player-secondary-actions">
+            <details className="playback-options">
+              <summary>Controls help</summary>
+              <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
+            </details>
+            {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={`Playback settings · Playback source: ${providerName}${playbackPreference === "spotify-desktop" ? " Desktop" : ""}`} onClick={onOpenSettings}><SettingsIcon size={14} /> Playback settings</Button>}
+          </div>
           {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
           {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
           {connectionError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>Retry connection check</Button></div>}
@@ -708,7 +718,7 @@ export function NowPlaying({
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
           <h2>No track playing</h2>
-          <p>Add a track to start playback.</p>
+          {onAddTrack ? <Button type="button" onClick={onAddTrack}>Add a track</Button> : <p>Add a track to start playback.</p>}
         </div>
       )}
       </section>

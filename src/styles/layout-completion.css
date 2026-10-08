@@ -2,7 +2,7 @@
 .app-shell .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 64px); display: flex !important; flex-direction: column; gap: 8px; }
 .app-shell.room-is-reconnecting .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 120px); }
 .app-shell .room-panels { flex: 1; min-height: 0; height: auto !important; }
-.room-workspace-context { flex: 0 1 auto; min-height: 0; max-height: min(220px, 35%); overflow-y: auto; }
+.room-workspace-context { flex: 0 1 auto; min-width: 0; min-height: 0; max-height: min(120px, 25%); overflow-y: auto; }
 .room-workspace-context:empty { display: none; }
 .room-mini-player { flex: 0 0 auto; min-height: 60px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
 .room-mini-player .room-mini-art { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; }
@@ -12,8 +12,26 @@
 .room-mini-copy span { font-size: 11px; color: var(--muted-foreground); }
 .room-mini-player[data-status=error] .room-mini-copy span { color: var(--destructive); }
 .room-listening-checklist { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
-.room-listening-checklist.is-compact { padding: 6px; }
-.room-workspace-context { display: grid; gap: 6px; }
+.room-listening-checklist.is-compact { flex: 0 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.room-workspace-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.room-notice-strip { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; row-gap: 4px; }
+.room-notice-strip:empty { display: none; }
+.app-shell .room-notice-strip .room-theme-banner { display: block; min-width: 0; min-height: 36px; max-width: 40%; flex: 0 1 auto; padding: 0 4px; border: 0; border-radius: 0; background: transparent; font-size: 13px; }
+.room-theme-banner summary { min-height: 36px; display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.room-theme-banner summary::-webkit-details-marker { display: none; }
+.room-theme-banner summary > span { color: var(--muted-foreground); flex: 0 0 auto; font-size: 12px; }
+.room-theme-banner summary > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.room-theme-banner summary > svg { flex: 0 0 auto; color: var(--muted-foreground); }
+.room-theme-banner summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+.room-theme-banner[open] summary > svg { transform: rotate(180deg); }
+.app-shell .room-notice-strip .room-theme-banner[open] { flex-basis: 100%; max-width: none; }
+.room-theme-banner > p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.app-shell .room-notice-strip .room-announcement-banner { flex: 1; min-width: 160px; min-height: 36px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.app-shell .room-notice-strip .room-announcement-banner [data-slot=button] { min-height: 32px; height: 32px; }
+.app-shell .room-notice-strip .room-announcement-banner [data-slot=button][aria-label="Dismiss room note"] { width: 32px; }
+.app-shell .room-notice-strip .room-announcement-text { display: block; min-width: 0; max-height: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.room-listening-checklist.is-compact .listening-checklist-heading { gap: 0; }
+.room-listening-checklist.is-compact .listening-checklist-heading h2 { flex: none; }
 .room-listening-dialog .listening-checklist-steps { grid-template-columns: 1fr; }
 .listening-checklist-heading { display: flex; gap: 8px; align-items: center; }
 .listening-checklist-heading > svg { width: 18px; height: 18px; color: var(--primary); }
@@ -55,6 +73,12 @@
 .room-preview-track strong, .room-preview-track span { overflow-wrap: anywhere; font-size: 12px; }
 .room-preview-track span { color: var(--muted-foreground); }
 @media (max-width: 640px) {
+  .room-workspace-context { gap: 4px; }
+  .room-notice-strip { flex-basis: 100%; column-gap: 8px; row-gap: 0; }
+  .room-theme-banner summary { min-height: 44px; }
+  .app-shell .room-notice-strip .room-theme-banner { max-width: 36%; }
+  .app-shell .room-notice-strip .room-announcement-banner [data-slot=button] { min-width: 44px; min-height: 44px; height: 44px; }
+  .app-shell .room-notice-strip .room-announcement-banner [data-slot=button][aria-label="Dismiss room note"] { width: 44px; }
   .listening-checklist-steps { grid-template-columns: 1fr; }
   .room-mini-player { gap: 5px; padding-inline: 6px; }
   .room-mini-player .room-mini-art { width: 28px; height: 28px; flex-basis: 28px; }
@@ -63,6 +87,9 @@
   .room-lobby .lobby-directory-tools > input, .room-lobby .lobby-directory-tools > button:last-child { grid-column: 1 / -1; }
 }
 @media (max-width: 640px), (pointer: coarse) {
+  .room-theme-banner summary { min-height: 44px; }
+  .app-shell .room-notice-strip .room-announcement-banner [data-slot=button] { min-width: 44px; min-height: 44px; height: 44px; }
+  .app-shell .room-notice-strip .room-announcement-banner [data-slot=button][aria-label="Dismiss room note"] { width: 44px; }
   :is(.app-shell, .room-lobby, [data-slot=dialog-content], .room-people-popover) button, .topbar .room-listener-count { min-width: 44px; min-height: 44px; }
   .topbar .app-brand-stack { flex-direction: row; align-items: center; gap: 4px; }
   .topbar .app-brand-stack .header-home-logo { height: 44px; min-height: 44px; }

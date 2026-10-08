@@ -1,5 +1,6 @@
 import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { createPortal } from 'react-dom'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 import {
   forwardRef,
@@ -8,6 +9,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -100,6 +102,7 @@ interface RealtimeChatProps {
   transport?: ChatSessionFactory
   onPersistReaction?: (change: { id?: string; action: 'add' | 'remove'; messageId: string; userId: string; emoji: string }) => Promise<void>
   onResolveMediaUrl?: (storagePath: string) => Promise<string>
+  headerActionsContainer?: HTMLElement | null
 }
 
 export interface RealtimeChatHandle {
@@ -226,6 +229,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   transport,
   onPersistReaction,
   onResolveMediaUrl,
+  headerActionsContainer,
   messages: initialMessages = EMPTY_MESSAGES,
 }, ref) {
   const reducedMotion = useEffectiveMotion()
@@ -308,6 +312,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [giphyConfigured, setGiphyConfigured] = useState(false)
   const [showHistorySearch, setShowHistorySearch] = useState(false)
+  const historySearchId = useId()
+  const historySearchInputRef = useRef<HTMLInputElement>(null)
+  const historySearchButtonRef = useRef<HTMLButtonElement>(null)
   const [historySearchText, setHistorySearchText] = useState('')
   const [pageAttended, setPageAttended] = useState(() => !isAppInBackground())
   const [roomMuted, setRoomMuted] = useRoomNotificationMuted(user.id, historyRoomSlug || roomName)
@@ -321,6 +328,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     onHistoricalMessages?.(messages)
   }, [attentionTracker, onHistoricalMessages])
   const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, readerWindow || liveWindow, seedHistoricalMessages, historySource)
+  useEffect(() => {
+    if (showHistorySearch) historySearchInputRef.current?.focus({ preventScroll: true })
+  }, [showHistorySearch])
   useEffect(() => {
     if (!readerWindow || !isNearBottom) return
     readerWindowRef.current = null; setReaderWindow(null)
@@ -878,17 +888,27 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setShowGiphy((current) => !current)
   }
 
+  const closeHistorySearch = () => {
+    setShowHistorySearch(false)
+    history.clearSearch()
+    historySearchButtonRef.current?.focus({ preventScroll: true })
+  }
+  const historyControls = (historyRoomSlug || notifications) ? (
+    <div className={headerActionsContainer ? 'chat-header-tools' : 'chat-history-toolbar'}>
+      {historyRoomSlug && <Button ref={historySearchButtonRef} type="button" variant="ghost" size="icon-sm" aria-label="Search room messages" title="Search room messages" aria-expanded={showHistorySearch} aria-controls={showHistorySearch ? historySearchId : undefined} onClick={() => { if (showHistorySearch) closeHistorySearch(); else setShowHistorySearch(true) }}><Search size={16} /></Button>}
+      {notifications && <Button type="button" variant="ghost" size="icon-sm" aria-label={roomMuted ? 'Room muted' : 'Mute room'} aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title={roomMuted ? 'Unmute room notifications' : 'Mute room notifications'}>{roomMuted ? <BellOff size={16} /> : <Bell size={16} />}</Button>}
+    </div>
+  ) : null
+  const composerStatus = uploading ? 'Uploading image…' : sending ? 'Sending…' : !isConnected ? 'Chat reconnecting · your draft stays here' : draftRestored ? 'Draft restored' : ''
+
   return (
     <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
-      {(historyRoomSlug || notifications) && <div className="chat-history-toolbar">
-        {historyRoomSlug && <Button variant="ghost" size="sm" aria-expanded={showHistorySearch} onClick={() => setShowHistorySearch((current) => !current)}><Search size={15} /> Search room messages</Button>}
-        {notifications && <Button variant="ghost" size="sm" aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title="Mute notifications for this room and account">{roomMuted ? <BellOff size={15} /> : <Bell size={15} />}{roomMuted ? 'Room muted' : 'Mute room'}</Button>}
-      </div>}
-      {showHistorySearch && <section className="chat-history-search" aria-label="Search room history">
+      {headerActionsContainer ? createPortal(historyControls, headerActionsContainer) : historyControls}
+      {showHistorySearch && <section id={historySearchId} className="chat-history-search" aria-label="Search room history" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeHistorySearch() } }}>
         <form onSubmit={(event) => { event.preventDefault(); void history.search(historySearchText) }}>
-          <Input aria-label="Search all saved room messages" value={historySearchText} maxLength={100} placeholder="Search message text" onChange={(event) => setHistorySearchText(event.target.value)} />
+          <Input ref={historySearchInputRef} aria-label="Search all saved room messages" value={historySearchText} maxLength={100} placeholder="Search message text" onChange={(event) => setHistorySearchText(event.target.value)} />
           <Button size="sm" type="submit" disabled={history.searchLoading || historySearchText.trim().length < 2}>Search</Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Close room message search" onClick={() => { setShowHistorySearch(false); history.clearSearch() }}><X size={15} /></Button>
+          <Button type="button" size="icon-sm" variant="ghost" aria-label="Close room message search" onClick={closeHistorySearch}><X size={15} /></Button>
         </form>
         {history.searchLoading && <p role="status">Searching saved room messages…</p>}
         {history.searchError && <p role="alert">{history.searchError}</p>}
@@ -907,7 +927,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         {history.historyError && <p role="alert" className="chat-history-error">{history.historyError}</p>}
         {visibleMessages.length === 0 && !historyLoading ? (
           <div className="text-center text-sm text-muted-foreground">
-            No messages yet. Start the conversation!
+            No messages yet.
           </div>
         ) : null}
         <ChatMessageList
@@ -1207,7 +1227,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               stopTyping()
             }}
             onPaste={(event) => void pasteMedia(event)}
-            placeholder={uploading ? 'Uploading image…' : `Message #${roomName.replace(/^soundspin:/, '')}`}
+            placeholder={uploading ? 'Uploading image…' : 'Message the room'}
             disabled={uploading}
           />
           <Button
@@ -1239,15 +1259,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             size="icon"
             disabled={!isConnected || uploading || sending || !hasDraft}
             aria-label={sending ? 'Sending message' : 'Send message'}
-            title="Send message"
+            title="Send message (Enter)"
           >
             <Send className="size-4" />
           </Button>
         </InputGroup>
-        <div id="chat-composer-hint" className="chat-composer-hint">
-          <span>{uploading ? 'Uploading image…' : sending ? 'Sending…' : !isConnected ? 'Chat reconnecting · your draft stays here' : draftRestored ? 'Draft restored' : 'Enter to send · Shift+Enter for a new line'}</span>
-          <span>{draftText.length}/500</span>
-        </div>
+        <span id="chat-composer-hint" className="sr-only">Enter to send. Shift+Enter for a new line. Maximum 500 characters.</span>
+        {(composerStatus || draftText.length >= 450) && <div className="chat-composer-hint">
+          <span role="status">{composerStatus}</span>
+          {draftText.length >= 450 && <span>{draftText.length}/500</span>}
+        </div>}
       </form>
     </div>
   )

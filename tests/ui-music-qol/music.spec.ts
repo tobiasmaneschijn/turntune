@@ -228,7 +228,7 @@ test("rejected queue movement preserves the authoritative order", async ({ page 
 test("history filters real metadata and provides safe source actions", async ({ page }) => {
   await open(page);
   await page.getByRole("tab", { name: "History", exact: true }).click();
-  await expect(page.getByText("2 recent tracks · up to 100", { exact: true })).toBeVisible();
+  await expect(page.locator(".music-history-row")).toHaveCount(2);
   await page.getByRole("textbox", { name: "Filter recently played tracks", exact: true }).fill("Past Artist");
   await expect(page.locator(".music-history-row")).toHaveCount(1);
   await expect(page.locator(".music-history-row")).toContainText("Past Artist · Spotify · 3:03");

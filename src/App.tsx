@@ -3,7 +3,6 @@ import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, use
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toast } from "sonner";
 import { LayoutDashboard } from "lucide-react";
-import { Avatar } from "./components/Avatar";
 import { MusicRail, type MusicRailControls } from "./components/MusicRail";
 import { LandingPage } from "./components/LandingPage";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -16,6 +15,7 @@ import { RoomWorkspace } from "./components/RoomWorkspace";
 import { RoomMiniPlayer } from "./components/RoomMiniPlayer";
 import { ListeningChecklist } from "./components/ListeningChecklist";
 import { RoomAnnouncementBanner } from "./components/RoomAnnouncementBanner";
+import { RoomThemeBanner } from "./components/RoomThemeBanner";
 import { RoomPeopleDialog } from "./components/RoomPeopleDialog";
 import { DeferredDialog } from "./components/DeferredDialog";
 import { RoomProfileDialog } from "./components/RoomProfileDialog";
@@ -386,7 +386,7 @@ export function App() {
           onLayoutChanged={roomLayouts.onLayoutChanged}
           miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={userSettings.playback.defaultVolume === 0} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
-          roomNotice={<>{snapshot.room.settings.themePrompt && <div className="room-theme-banner" aria-label="Room theme"><span>Theme</span><strong>{snapshot.room.settings.themePrompt}</strong></div>}
+          roomNotice={<>{snapshot.room.settings.themePrompt && <RoomThemeBanner prompt={snapshot.room.settings.themePrompt} />}
             <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} /></>}
           radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
@@ -416,6 +416,7 @@ export function App() {
                 onUserSettingsChange={changeUserSettings}
                 roomConnected={connected}
                 onOpenSettings={() => setUserSettingsOpen(true)}
+                onAddTrack={focusMusicSearch}
                 controlsRef={playerControls} onLocalStateChange={setLocalPlayback}
               /></PanelErrorBoundary>
             </div>}
@@ -637,6 +638,7 @@ function RoomChat({
   const activeRef = useRef(true);
   const chatRef = useRef<RealtimeChatHandle>(null);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const [chatHeaderActions, setChatHeaderActions] = useState<HTMLDivElement | null>(null);
   const peopleButtonRef = useRef<HTMLButtonElement>(null);
   const adminUserIds = [...new Set(
     snapshot.users
@@ -680,36 +682,17 @@ function RoomChat({
         <div>
           <MessageIcon size={20} />
           <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: 700 }}>Room chat</h2>
-          <span className="chat-shortcut-hint" title="Press / to focus chat"><kbd>/</kbd> Focus chat</span>
         </div>
         <div className="chat-presence">
-          <div className="chat-presence-avatars">
-            {snapshot.users.slice(0, 5).map((user) => (
-              <span
-                key={user.id}
-                className={user.id === snapshot.room.djUserId ? "chat-presence-dj" : undefined}
-                title={`${user.id === currentUser.id ? "You" : user.name}${user.id === snapshot.room.djUserId ? " · DJ" : ""}`}
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${user.id === currentUser.id ? "your" : user.name + "’s"} profile`}
-                data-navigation-focus={`profile:${user.id}`}
-                onClick={() => onOpenProfile(user.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenProfile(user.id); }
-                }}
-              >
-                <Avatar user={user} size={32} />
-              </span>
-            ))}
-            {snapshot.users.length > 5 && <i>+{snapshot.users.length - 5}</i>}
-          </div>
           <Button ref={peopleButtonRef} variant="ghost" size="sm" onClick={() => setPeopleOpen(true)} aria-label={`Show all ${snapshot.users.length} room listeners`}><UsersIcon size={16} /> {snapshot.users.length}</Button>
+          <div className="chat-header-actions" ref={setChatHeaderActions} />
         </div>
       </div>
       <div className="supabase-chat-body">
         {error && <div className="chat-error" role="alert">{error} <Button size="sm" variant="ghost" onClick={refreshHistory} disabled={loadingHistory}>{loadingHistory ? "Loading…" : "Retry history"}</Button></div>}
         <RealtimeChat
           ref={controlsRef || chatRef}
+          headerActionsContainer={chatHeaderActions}
           client={client}
           transport={chatTransport}
           roomName={`soundspin:${snapshot.room.id}`}
