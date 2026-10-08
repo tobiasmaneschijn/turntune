@@ -30,6 +30,8 @@ the database source of truth.
 | `src/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
 | `src/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
 | `src/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
+| `src/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
+| `src/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
 | `src/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
 | `src/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
 | `src/lib/authenticated-http.ts` | Shared HTTP deadlines, cancellation, JSON/error handling and caller-supplied response validation. |
@@ -153,6 +155,22 @@ neighbors in each direction. Message context is labeled separately from the live
 timeline, can page older/newer, and returns to the preserved live scroll position.
 Missing/revoked targets explain the failure. A valid jump focuses and outlines
 the correct message; reduced motion uses immediate scrolling.
+
+## Hidden messages
+
+The message menu contains Reply and Hide message. Hiding replaces the body with
+Hidden and removes media, reaction controls and the row's quoted reply. The menu
+then offers Unhide message. Replies to a hidden target, composer reply previews
+and history search results also display Hidden, including accessible labels.
+Reactions remain in the hover/focus toolbar; touch layouts expose a separate
+reaction button.
+
+Hidden IDs are stored in `localStorage` for the current account and room on this
+device. They survive reloads and update other open tabs. Hiding does not change
+shared messages, replies, delivery retries or server data. Hidden media does not
+refresh its signed URL, and hidden message IDs do not trigger mention alerts.
+If device storage is blocked, hiding still applies while this chat is mounted,
+with a notice that the choice cannot be saved.
 
 ## Mentions
 

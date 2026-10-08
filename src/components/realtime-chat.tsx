@@ -27,7 +27,6 @@ import {
   applyChatUserProfiles,
   applyReactionEvents,
   createReplySnapshot,
-  getMessagePreview,
   mergeChatMessages,
   CHAT_LIVE_WINDOW_LIMIT,
   recentChatMessages,
@@ -71,6 +70,8 @@ import {
   saveEmojiSkinTone,
 } from '@/components/platform-emoji-text'
 import { useChatScroll } from '@/hooks/use-chat-scroll'
+import { useChatVisibility } from '@/hooks/use-chat-visibility'
+import { getVisibleMessagePreview } from '@/chat/visibility'
 import { useChatHistory } from '@/hooks/use-chat-history'
 import { useRoomNotificationMuted } from '@/hooks/use-room-notifications'
 import { useChatPickerBounds } from '@/hooks/use-chat-picker-bounds'
@@ -125,6 +126,8 @@ const EMPTY_ADMIN_IDS: string[] = []
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
+  hiddenIds: ReadonlySet<string>
+  onHiddenChange: (messageId: string, hidden: boolean) => void
   onResolveMediaUrl?: (storagePath: string) => Promise<string>
   currentUserId: string
   liveAdminUserIds: ReadonlySet<string>
@@ -140,6 +143,8 @@ interface ChatMessageListProps {
 
 const ChatMessageList = memo(function ChatMessageList({
   messages,
+  hiddenIds,
+  onHiddenChange,
   onResolveMediaUrl,
   currentUserId,
   liveAdminUserIds,
@@ -182,6 +187,9 @@ const ChatMessageList = memo(function ChatMessageList({
             )}
             <ChatMessageItem
               message={message}
+              isHidden={hiddenIds.has(message.id)}
+              isReplyHidden={Boolean(message.replyTo && hiddenIds.has(message.replyTo.id))}
+              onHiddenChange={onHiddenChange}
               isOwnMessage={message.user.id === currentUserId}
               currentUserId={currentUserId}
               showHeader={showHeader}
@@ -244,6 +252,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const mentionListId = useId()
   const composerHintId = useId()
   const mediaPanelId = useId()
+  const { hiddenIds, setMessageHidden } = useChatVisibility(user.id, roomName)
+  const handleHiddenChange = useCallback((messageId: string, hidden: boolean) => {
+    const persisted = setMessageHidden(messageId, hidden)
+    toast.dismiss(`mention:${user.id}:${historyRoomSlug || roomName}:${messageId}`)
+    if (!persisted) toast.info(hidden ? 'Hidden until you leave this chat. Device storage is unavailable.' : 'Unhidden until you leave this chat. Device storage is unavailable.')
+    else if (hidden) toast.info('Message hidden on this device.')
+  }, [setMessageHidden, user.id, roomName, historyRoomSlug])
+  useEffect(() => {
+    for (const messageId of hiddenIds) toast.dismiss(`mention:${user.id}:${historyRoomSlug || roomName}:${messageId}`)
+  }, [hiddenIds, user.id, roomName, historyRoomSlug])
   const draftStore = useMemo(() => createChatDraftStore(user.id, roomName), [user.id, roomName])
   const initialDraft = useMemo(() => draftStore.read(), [draftStore])
   const {
@@ -485,7 +503,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   useEffect(() => {
     if (historyLoading) return
     for (const message of realtimeMessages) {
-      if (!attentionTracker.consume(message) || !notifications?.chatMentions || roomMuted || attendingLive) continue
+      if (!attentionTracker.consume(message) || hiddenIds.has(message.id) || !notifications?.chatMentions || roomMuted || attendingLive) continue
       const key = `mention:${user.id}:${historyRoomSlug || roomName}:${message.id}`
       const lifetime = lifetimeRef.current
       const activate = () => {
@@ -511,7 +529,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         onInApp: () => toast.info(`${message.user.name} mentioned you`, { id: key, description: message.content,
           action: { label: 'View', onClick: activate } }) })
     }
-  }, [attentionTracker, attendingLive, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
+  }, [attentionTracker, attendingLive, hiddenIds, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
   useEffect(() => {
     const original = document.title.replace(/^\(\d+\) /, '')
     let ownedTitle = document.title
@@ -948,7 +966,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         {history.searchLoading && <p role="status">Searching saved room messages…</p>}
         {history.searchError && <p role="alert">{history.searchError}</p>}
         {!history.searchLoading && history.searchTerm && !history.searchError && history.searchResults.length === 0 && <p>No saved messages match “{history.searchTerm}”.</p>}
-        <div className="chat-history-results">{[...history.searchResults].reverse().map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={`View message from ${message.user.name}: ${getMessagePreview(message)}`}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString()}</time><span>{getMessagePreview(message)}</span></button>)}</div>
+        <div className="chat-history-results">{[...history.searchResults].reverse().map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={`View message from ${message.user.name}: ${getVisibleMessagePreview(message, hiddenIds)}`}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString()}</time><span>{getVisibleMessagePreview(message, hiddenIds)}</span></button>)}</div>
         {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>More search results</Button>}
       </section>}
       {history.context && <div className="chat-context-banner"><span>Earlier messages</span><Button variant="ghost" size="sm" onClick={returnToLive}>Back to live messages</Button></div>}
@@ -967,6 +985,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         ) : null}
         <ChatMessageList
           messages={visibleMessages}
+          hiddenIds={hiddenIds}
+          onHiddenChange={handleHiddenChange}
           onResolveMediaUrl={onResolveMediaUrl}
           currentUserId={user.id}
           liveAdminUserIds={liveAdminUserIds}
@@ -1179,7 +1199,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                 Replying to <strong>@{replyingTo.user.name}</strong>
                 {(replyingTo.user.isAppAdmin || liveAdminUserIds.has(replyingTo.user.id)) && <DevFlair className="chat-dev-flair" />}
               </span>
-              <small><PlatformEmojiText text={getMessagePreview(replyingTo)} /></small>
+              <small><PlatformEmojiText text={getVisibleMessagePreview(replyingTo, hiddenIds)} /></small>
             </div>
             <Button
               type="button"

@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, MoreHorizontal, Reply, SmilePlus, X } from 'lucide-react'
+import { Check, Eye, EyeOff, MoreHorizontal, Reply, SmilePlus, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 import { useTheme } from 'next-themes'
 
@@ -10,6 +10,7 @@ import {
   reactionLabel,
   type ChatMessage,
 } from '@/chat/model'
+import { HIDDEN_MESSAGE_PREVIEW } from '@/chat/visibility'
 import { splitMentionText } from '@/chat/mentions'
 import { safeChatMediaUrl } from '@/chat/protocol'
 import { cn } from '@/lib/utils'
@@ -59,6 +60,9 @@ interface ChatMessageItemProps {
   showHeader: boolean
   isAuthorAppAdmin: boolean
   isReplyAuthorAppAdmin: boolean
+  isHidden: boolean
+  isReplyHidden: boolean
+  onHiddenChange: (messageId: string, hidden: boolean) => void
   onOpenProfile?: (userId: string) => void
   onReply: (message: ChatMessage) => void
   onReact: (message: ChatMessage, emoji: string) => void
@@ -80,6 +84,9 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   showHeader,
   isAuthorAppAdmin,
   isReplyAuthorAppAdmin,
+  isHidden,
+  isReplyHidden,
+  onHiddenChange,
   onOpenProfile,
   onReply,
   onReact,
@@ -98,25 +105,33 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   const showReactionPicker = reactionPickerOpen ?? localReactionPicker
   const setShowReactionPicker = (open: boolean | ((current: boolean) => boolean)) => {
     const next = typeof open === 'function' ? open(showReactionPicker) : open
-    if (!next && pickerRef.current?.contains(document.activeElement)) document.getElementById(`chat-message-${message.id}`)?.querySelector<HTMLButtonElement>('.chat-message-more')?.focus()
+    if (!next && pickerRef.current?.contains(document.activeElement)) reactionTriggerRef.current?.focus({ preventScroll: true })
     setLocalReactionPicker(next); onReactionPickerOpenChange?.(next)
   }
   const pickerRef = useRef<HTMLDivElement>(null)
+  const reactionTriggerRef = useRef<HTMLButtonElement>(null)
+  const pickerOwnsFocusRef = useRef(false)
   // Reply hands focus to the composer instead of returning to the menu trigger.
   const replyFromMenuRef = useRef(false)
   const rowRef = useRef<HTMLDivElement>(null)
-  const pickerBounds = useChatPickerBounds(showReactionPicker, rowRef, 'message')
+  const pickerBounds = useChatPickerBounds(showReactionPicker && !isHidden, rowRef, 'message')
   useEffect(() => {
-    if (!showReactionPicker) return
+    if (!isHidden || !showReactionPicker) return
+    if (pickerOwnsFocusRef.current) rowRef.current?.querySelector<HTMLButtonElement>('.chat-message-more')?.focus({ preventScroll: true })
+    pickerOwnsFocusRef.current = false
+    setShowReactionPicker(false)
+  }, [isHidden, showReactionPicker])
+  useEffect(() => {
+    if (!showReactionPicker || isHidden) return
     pickerRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
     const close = (event: PointerEvent) => { if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setShowReactionPicker(false) }
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
-  }, [showReactionPicker])
+  }, [showReactionPicker, isHidden])
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
   const reactionTooltipPrefix = useId()
   const reply = message.replyTo
-  const media = useChatMediaUrl(safeChatMediaUrl(message.mediaUrl), message.storagePath, onResolveMediaUrl, rowRef)
+  const media = useChatMediaUrl(isHidden ? undefined : safeChatMediaUrl(message.mediaUrl), isHidden ? undefined : message.storagePath, onResolveMediaUrl, rowRef)
   const mediaUrl = media.url
   const isMentioned = (message.mentions || []).some((mention) => mention.userId === currentUserId)
   const reactionGroups = useMemo(
@@ -133,10 +148,11 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         'chat-message-grouped': !showHeader,
         'chat-message-own': isOwnMessage,
         'chat-message-mentioned': isMentioned,
-        'chat-message-has-reply': Boolean(reply),
+        'chat-message-has-reply': Boolean(reply) && !isHidden,
+        'chat-message-hidden': isHidden,
       })}
     >
-      {reply && (
+      {reply && !isHidden && (
         <button
           type="button"
           className="chat-message-reply"
@@ -145,7 +161,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           <Reply size={12} />
           <strong>{reply.user.name}</strong>
           {isReplyAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
-          <PlatformEmojiText text={getMessagePreview(reply)} />
+          <PlatformEmojiText text={isReplyHidden ? HIDDEN_MESSAGE_PREVIEW : getMessagePreview(reply)} />
         </button>
       )}
       <div className="chat-message-avatar">
@@ -161,13 +177,15 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           onActionMenuOpenChange?.(open)
         }}>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="chat-message-more" aria-label={`Message actions for ${isOwnMessage ? 'your message' : message.user.name}`} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => replyFromMenuRef.current ? false : pickerRef.current?.querySelector<HTMLButtonElement>('button') ?? true}>
-            <DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> Reply</DropdownMenuItem>
-            {QUICK_REACTIONS.map((emoji) => <DropdownMenuItem key={emoji} onClick={() => onReact(message, emoji)}><PlatformEmojiText text={emoji} /> React with {emoji}</DropdownMenuItem>)}
-            <DropdownMenuItem onClick={() => setShowReactionPicker(true)}><SmilePlus /> More reactions</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => replyFromMenuRef.current ? false : true}>
+            {!isHidden && <DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> Reply</DropdownMenuItem>}
+            <DropdownMenuItem onClick={() => {
+              setShowReactionPicker(false)
+              onHiddenChange(message.id, !isHidden)
+            }}>{isHidden ? <Eye /> : <EyeOff />}{isHidden ? 'Unhide message' : 'Hide message'}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <div className="chat-message-actions" aria-label="Message actions">
+        {!isHidden && <div className="chat-message-actions" aria-label="Message actions">
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}
@@ -180,9 +198,13 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             </button>
           ))}
           <button
+            ref={reactionTriggerRef}
+            className="chat-message-react"
             type="button"
             title="More reactions"
             aria-label="More reactions"
+            aria-haspopup="dialog"
+            aria-expanded={showReactionPicker}
             onClick={() => setShowReactionPicker((current) => !current)}
           >
             <SmilePlus size={15} />
@@ -190,9 +212,12 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           <button type="button" title="Reply" aria-label="Reply" onClick={() => onReply(message)}>
             <Reply size={15} />
           </button>
-        </div>
-        {showReactionPicker && createPortal(
-          <div ref={pickerRef} className="chat-reaction-picker" role="dialog" aria-label={`React to ${message.user.name}'s message`} style={{ position: 'fixed', ...pickerBounds, right: 'auto' }} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowReactionPicker(false); document.getElementById(`chat-message-${message.id}`)?.querySelector<HTMLButtonElement>('.chat-message-more')?.focus() } }}>
+        </div>}
+        {!isHidden && showReactionPicker && createPortal(
+          <div ref={pickerRef} className="chat-reaction-picker" role="dialog" aria-label={`React to ${message.user.name}'s message`} style={{ position: 'fixed', ...pickerBounds, right: 'auto' }}
+            onFocusCapture={() => { pickerOwnsFocusRef.current = true }}
+            onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) pickerOwnsFocusRef.current = false }}
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowReactionPicker(false); reactionTriggerRef.current?.focus({ preventScroll: true }) } }}>
             <div className="chat-reaction-picker-header"><span>React to {message.user.name}'s message</span>
             <button
               type="button"
@@ -241,7 +266,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             </time>
           </div>
         )}
-        <div className="chat-message-body">
+        {isHidden ? <div className="chat-message-body chat-message-hidden-placeholder" aria-label="Message hidden on this device"><EyeOff size={14} aria-hidden="true" /><span>{HIDDEN_MESSAGE_PREVIEW}</span></div> : <div className="chat-message-body">
           {mediaUrl && (
             <a href={mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
               <img
@@ -258,13 +283,13 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
           )}
-        </div>
+        </div>}
         {saveStatus && (
           <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : undefined}>
             {saveStatus.state === 'sending' ? 'Sending…' : saveStatus.state === 'send-failed' ? <><span>Could not confirm send</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>Retry send</Button></> : saveStatus.state === 'sent-live' ? 'Sent live' : saveStatus.state === 'saved' ? <><Check size={11} /> Saved</> : saveStatus.state === 'saving' ? 'Sent live · saving history…' : <><span>Sent live · history save failed</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>Retry save</Button></>}
           </div>
         )}
-        {reactionGroups.length > 0 && (
+        {!isHidden && reactionGroups.length > 0 && (
           <div className="chat-message-reactions">
             {reactionGroups.map(([emoji, group], index) => {
               const reactors = reactionLabel(group, currentUserId)

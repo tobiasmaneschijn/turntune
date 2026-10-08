@@ -270,10 +270,8 @@ test('heavy reaction updates preserve the row and use static selection without r
   await expect(reaction.locator('strong')).toHaveText('100')
   await expect(reaction).toHaveCSS('animation-name', 'none')
   await expect(reaction.locator('[aria-live]')).toHaveCount(0)
-  await message.getByRole('button', { name: 'Message actions for Mira' }).click()
-  await page.getByRole('menuitem', { name: 'React with ❤️' }).click()
-  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
-  await expect(message.getByRole('button', { name: 'Message actions for Mira' })).toBeFocused()
+  await reaction.click()
+  await expect(reaction).toBeFocused()
   await expect(reaction).toHaveClass(/active/)
   await expect(reaction.locator('strong')).toHaveText('101')
   await expect(reaction).toHaveCSS('animation-name', 'none')
@@ -361,9 +359,9 @@ for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }
   })
 }
 
-test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', { tag: '@fixed-viewport' }, async ({ page }) => {
+test('direct reaction control escapes row clipping, fits above the keyboard composer and returns focus to its message', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
-  // Let the menu hand off focus before the lazy picker finishes loading.
+  // Keep the direct control's focus handoff stable while the lazy picker loads.
   let releasePicker!: () => void
   const pickerLoad = new Promise<void>((resolve) => { releasePicker = resolve })
   let pickerRequested = false
@@ -373,12 +371,11 @@ test('reaction dialog escapes row clipping, fits above the keyboard composer and
     await route.continue()
   })
   const message = page.locator(`#chat-message-${id(420)}`)
-  const trigger = message.getByRole('button', { name: 'Message actions for Mira' })
+  const trigger = message.getByRole('button', { name: 'More reactions', exact: true })
   const dialog = page.getByRole('dialog', { name: "React to Mira's message" })
   const close = dialog.getByRole('button', { name: 'Close reactions' })
   try {
-    await trigger.click()
-    await page.getByRole('menuitem', { name: 'More reactions' }).click()
+    await message.getByRole('button', { name: 'More reactions', exact: true }).click()
     await expect.poll(() => pickerRequested).toBe(true)
     await expect(dialog).toHaveCount(1)
     await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
@@ -399,8 +396,7 @@ test('reaction dialog escapes row clipping, fits above the keyboard composer and
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
-  await trigger.click()
-  await page.getByRole('menuitem', { name: 'More reactions' }).click()
+  await message.getByRole('button', { name: 'More reactions', exact: true }).click()
   await dialog.getByPlaceholder('Find an emoji').fill('heart')
   const emoji = dialog.locator('button.epr-emoji').first()
   await expect(emoji).toBeVisible()
