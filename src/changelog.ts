@@ -17,6 +17,21 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.2",
+    date: "2026-10-08",
+    title: "Simpler music sidebar",
+    sections: [
+      {
+        title: "Improved",
+        items: [
+          "Quieter Add music control.",
+          "Track lists directly below Queue, My picks, and History.",
+          "Compact DJ status in the footer, with an expandable lineup.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.1",
     date: "2026-10-08",
     title: "Cleaner music sidebar",

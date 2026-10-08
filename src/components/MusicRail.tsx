@@ -5,7 +5,7 @@ import { TrackArtwork } from "./TrackArtwork";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "./ui/input-group";
-import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -76,6 +76,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const [saveSetOpen, setSaveSetOpen] = useState(false);
   const narrow = useMediaQuery("(max-width: 640px)");
   const lineupId = useId();
+  const djStatusId = useId();
   const linkFormId = useId();
   const [provider, setProvider] = useState<Provider>(readSearchProvider);
   const [query, setQuery] = useState("");
@@ -117,6 +118,8 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const searchInputRef = useRef<HTMLInputElement>(null);
   const addMusicReturnFocusRef = useRef<HTMLElement | null>(null);
   const addMusicButtonRef = useRef<HTMLButtonElement>(null);
+  const lineupButtonRef = useRef<HTMLButtonElement>(null);
+  const djActionButtonRef = useRef<HTMLButtonElement>(null);
   const queueTabRef = useRef<HTMLButtonElement>(null);
   const libraryTabRef = useRef<HTMLButtonElement>(null);
   const saveSetInputRef = useRef<HTMLInputElement>(null);
@@ -170,6 +173,12 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     const timer = setTimeout(() => setUndoExpired(true), wait);
     return () => clearTimeout(timer);
   }, [undoReceipt]);
+  useEffect(() => {
+    // Keep panel feedback stable while its View queue action may hold focus.
+    if (!status || pending || libraryBusy || addMusicOpen) return;
+    const timer = setTimeout(() => setStatus(""), 5_000);
+    return () => clearTimeout(timer);
+  }, [status, pending, libraryBusy, addMusicOpen]);
 
   const refreshLibrary = async () => {
     if (!accessToken || libraryBusyRef.current) return;
@@ -272,6 +281,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const toggleDjQueue = async () => {
     const operation: PendingOperation = { kind: "dj" };
     if (!beginOperation(operation)) return;
+    const origin = document.activeElement;
     const leaving = snapshotRef.current.room.djQueueUserIds.includes(currentUserId);
     try {
       const response = await sendAction(leaving ? "dj:leave" : "dj:join");
@@ -280,6 +290,13 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       const message = leaving ? "Left the DJ lineup. Your queued tracks are still saved." : "Joined the DJ lineup. Your upcoming tracks are private.";
       setStatus(message);
       setNotice(message);
+      requestAnimationFrame(() => {
+        if (!activeRef.current || !(origin instanceof HTMLElement) || origin.dataset.djMembership !== "true") return;
+        if (document.activeElement !== origin && document.activeElement !== document.body) return;
+        const button = djActionButtonRef.current;
+        if (button?.getClientRects().length) button.focus({ preventScroll: true });
+        else lineupButtonRef.current?.focus({ preventScroll: true });
+      });
     } finally { finishOperation(operation); }
   };
 
@@ -437,7 +454,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     return ack ? ack.started ? "Now playing" : `Added${ack.position ? ` · #${ack.position}` : ""}` : "";
   };
 
-  const djAction = <Button size="sm" variant={joinedDjQueue ? "ghost" : "outline"} className="music-dj-action"
+  const djAction = <Button ref={djActionButtonRef} data-dj-membership="true" size="sm" variant={joinedDjQueue ? "ghost" : "outline"} className="music-dj-action"
     disabled={!connected || Boolean(pending) || (!joinedDjQueue && !canJoinDjQueue)} onClick={() => void toggleDjQueue()}>
     {pending?.kind === "dj" ? "Updating…" : joinedDjQueue ? "Leave lineup" : canJoinDjQueue ? "Join as DJ" : "DJ role required"}
   </Button>;
@@ -480,27 +497,9 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
 
   return <aside className="music-rail music-rail-qol music-rail-minimal panel" aria-label="Radio and your private queue">
     <div className="music-rail-heading">
-      <div><h2>Music</h2>{tab !== "history" && <span className="music-privacy"><LockKeyhole size={12} aria-hidden="true" />Private</span>}</div>
-      <div className="music-header-actions"><Button ref={addMusicButtonRef} size="sm" className="music-add-trigger" onClick={openAddMusic}><Plus size={16} />Add music</Button>{queueActions}</div>
+      <div><h2>Music</h2>{tab !== "history" && <span className="music-privacy" title="Your queue and picks are private"><LockKeyhole size={12} aria-hidden="true" /><span className="sr-only">Your queue and picks are private</span></span>}</div>
+      <div className="music-header-actions"><Button ref={addMusicButtonRef} variant="ghost" size="sm" className="music-add-trigger" aria-label="Add music" title="Add music" onClick={openAddMusic}><Plus size={16} />Add</Button>{queueActions}</div>
     </div>
-    <section className="dj-lineup" aria-label="DJ status">
-      <div className="dj-status-row">
-        <div className={`dj-lineup-current${turnAccent ? " music-turn-accent" : ""}`}>{currentDj ? <><Avatar user={currentDj} size={28} /><span><small>On air</small><strong>{currentDj.id === currentUserId ? "You" : currentDj.name}</strong></span></> : <span><small>On air</small><strong>No DJ</strong></span>}</div>
-        <Button variant="ghost" size="sm" className="dj-lineup-toggle" aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>DJ lineup<ChevronDown size={14} /></Button>
-      </div>
-      <div className="music-dj-membership">{readiness}{!addMusicOpen && djAction}</div>
-      <div id={lineupId} className="music-lineup-details" hidden={!lineupOpen}>
-        {snapshot.room.settings.djAccess === "roles" && <p>DJ role required.</p>}
-        <ol className="music-lineup-list" aria-label="DJ lineup">
-          {[...(currentDj ? [currentDj.id] : []), ...upcomingDjs].map((id) => {
-            const user = snapshot.djUsers.find((candidate) => candidate.id === id);
-            const position = upcomingDjs.indexOf(id) + 1;
-            return user ? <li key={id}><Avatar user={user} size={24} /><span><strong>{user.id === currentUserId ? "You" : user.name}</strong><small>{id === snapshot.room.djUserId ? "On air" : `Lineup position ${position}`}</small></span></li> : null;
-          })}
-        </ol>
-        {!currentDj && upcomingDjs.length === 0 && <p>No DJs in the lineup.</p>}
-      </div>
-    </section>
 
     <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} className="music-tool-tabs">
       <TabsList className="music-tabs" aria-label="Music tools">
@@ -508,7 +507,6 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
         <TabsTrigger ref={libraryTabRef} value="library">My picks</TabsTrigger>
         <TabsTrigger value="history">History</TabsTrigger>
       </TabsList>
-      {!addMusicOpen && feedback}
 
       <TabsContent value="history" keepMounted className="rail-pane music-history-pane">
         <div className="music-history-summary"><small>{snapshot.room.history.length} recent tracks · up to 100</small></div>
@@ -552,11 +550,35 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
               <DropdownMenuItem variant="destructive" disabled={Boolean(pending)} onClick={() => void queueAction("queue:remove", track)}><Trash2 />Remove from my queue</DropdownMenuItem>
             </DropdownMenuContent></DropdownMenu></span>
           </div>)}
-          {snapshot.room.queue.length === 0 && <Empty className="rail-empty rail-empty-action"><EmptyHeader><EmptyMedia variant="icon"><ListMusic size={20} /></EmptyMedia><EmptyTitle>Your queue is empty</EmptyTitle></EmptyHeader><EmptyContent><Button size="sm" onClick={openAddMusic}><Search />Find a song</Button></EmptyContent></Empty>}
+          {snapshot.room.queue.length === 0 && <Empty className="rail-empty rail-empty-action"><EmptyHeader><EmptyTitle>Queue is empty</EmptyTitle></EmptyHeader><EmptyContent><Button size="sm" variant="outline" onClick={openAddMusic}><Search />Find a song</Button></EmptyContent></Empty>}
         </div>
       </TabsContent>
       <TabsContent value="library" keepMounted className="rail-pane music-library-pane"><MusicLibraryPanel active={tab === "library"} saveSetInputRef={saveSetInputRef} saveSetOpen={saveSetOpen} onSaveSetOpenChange={setSaveSetOpen} library={privateLibrary} loading={libraryLoading} error={libraryError} busy={libraryBusy || Boolean(pending)} signedIn={Boolean(accessToken)} canEnqueue={connected} queue={snapshot.room.queue} refresh={() => void refreshLibrary()} mutate={mutateLibrary} enqueue={(track) => void enqueueTrack(track, "history")} addSet={(set) => void appendSavedSet(set)} details={openTrackDetails} isQueued={(track) => Boolean(rowStatus({ ...track, id: track.providerId, artist: track.artist || "" }))} /></TabsContent>
+      {!addMusicOpen && feedback}
     </Tabs>
+
+    <section className="dj-lineup" aria-label="DJ status">
+      <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label="DJ lineup" aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
+        <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"}</strong>{currentDj && <small>On air</small>}</span></span>
+        <span className="music-lineup-label">Lineup<ChevronDown size={14} /></span>
+      </Button>
+      {joinedDjQueue && snapshot.room.djUserId !== currentUserId && <p className="music-dj-turn">{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</p>}
+      {!joinedDjQueue && !canJoinDjQueue && <p className="music-dj-turn">DJ role required</p>}
+      <div id={lineupId} className="music-lineup-details" hidden={!lineupOpen}>
+        <ol className="music-lineup-list" aria-label="DJ lineup">
+          {[...(currentDj ? [currentDj.id] : []), ...upcomingDjs].map((id) => {
+            const user = snapshot.djUsers.find((candidate) => candidate.id === id);
+            const position = upcomingDjs.indexOf(id) + 1;
+            return user ? <li key={id}><Avatar user={user} size={24} /><span><strong>{user.id === currentUserId ? "You" : user.name}</strong><small>{id === snapshot.room.djUserId ? "On air" : `Lineup position ${position}`}</small></span></li> : null;
+          })}
+        </ol>
+        {!currentDj && upcomingDjs.length === 0 && <p>No DJs in the lineup.</p>}
+        {joinedDjQueue && snapshot.room.queue.length === 0 && <p>Add a track to your queue.</p>}
+        {!canJoinDjQueue && !joinedDjQueue && <p>Ask the owner or a moderator for a DJ role.</p>}
+        {(joinedDjQueue || !canJoinDjQueue) && !addMusicOpen && <div className="music-dj-membership">{djAction}</div>}
+      </div>
+      {!joinedDjQueue && canJoinDjQueue && !addMusicOpen && <div className="music-dj-membership">{djAction}</div>}
+    </section>
     <Sheet open={addMusicOpen} onOpenChange={setAddMusicOpen}>
       <SheetContent side={narrow ? "bottom" : "left"} className="music-add-sheet music-rail-qol" initialFocus={searchInputRef} finalFocus={() => {
         const target = addMusicReturnFocusRef.current;
