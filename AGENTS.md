@@ -1,5 +1,13 @@
 # Agent instructions
 
+## UI skills
+
+For frontend implementation or design review, read
+`.agents/skills/no-slop-ui/SKILL.md` and `.agents/skills/impeccable/SKILL.md`.
+Use Impeccable's `distill` command to simplify an existing interface.
+Preserve the project's design system, accessibility, and the copy rules below
+when applying these skills. Installation details are in `.agents/skills/README.md`.
+
 ## Keep language restrained
 
 Use plain, direct language in product copy, documentation, and replies. Tone down
