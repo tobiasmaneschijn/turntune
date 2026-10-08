@@ -17,6 +17,27 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.5",
+    date: "2026-10-08",
+    title: "Chat privacy, commands, and polls",
+    sections: [
+      {
+        title: "Added",
+        items: [
+          "Hide and unhide chat messages without changing other listeners' views.",
+          "Chat shortcuts: /queue opens your queue, /mute toggles room notifications, and /search [text] searches saved messages.",
+          "Create polls with /poll [question]: 2–4 options, live results, and one changeable vote per account.",
+        ],
+      },
+      {
+        title: "Improved",
+        items: [
+          "Removed duplicate reaction actions from message menus; reactions remain available on hover.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.4",
     date: "2026-10-08",
     title: "UI and recovery improvements",
