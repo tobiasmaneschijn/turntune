@@ -363,15 +363,32 @@ for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }
 
 test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
+  // Let the menu hand off focus before the lazy picker finishes loading.
+  let releasePicker!: () => void
+  const pickerLoad = new Promise<void>((resolve) => { releasePicker = resolve })
+  let pickerRequested = false
+  await page.route('**/node_modules/.vite/deps/emoji-picker-react.js*', async (route) => {
+    pickerRequested = true
+    await pickerLoad
+    await route.continue()
+  })
   const message = page.locator(`#chat-message-${id(420)}`)
   const trigger = message.getByRole('button', { name: 'Message actions for Mira' })
-  await trigger.click()
-  await page.getByRole('menuitem', { name: 'More reactions' }).click()
   const dialog = page.getByRole('dialog', { name: "React to Mira's message" })
-  await expect(dialog).toHaveCount(1)
-  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
-  await expect(dialog.getByRole('button', { name: 'Close reactions' })).toBeFocused()
-  await expect(dialog.getByPlaceholder('Find an emoji')).toBeVisible()
+  const close = dialog.getByRole('button', { name: 'Close reactions' })
+  try {
+    await trigger.click()
+    await page.getByRole('menuitem', { name: 'More reactions' }).click()
+    await expect.poll(() => pickerRequested).toBe(true)
+    await expect(dialog).toHaveCount(1)
+    await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+    await expect(close).toBeFocused()
+    releasePicker()
+    await expect(dialog.getByPlaceholder('Find an emoji')).toBeVisible()
+    await expect(close).toBeFocused()
+  } finally {
+    releasePicker()
+  }
   await page.setViewportSize({ width: 390, height: 380 })
   await expect.poll(async () => {
     const box = await dialog.boundingBox(), composerBox = await page.locator('.chat-composer').boundingBox()
@@ -390,6 +407,13 @@ test('reaction dialog escapes row clipping, fits above the keyboard composer and
   await emoji.click()
   await expect(dialog).toHaveCount(0)
   await expect(message.locator('.chat-message-reactions > button')).toHaveCount(1)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await message.hover()
+  await message.locator('.chat-message-actions').getByRole('button', { name: 'More reactions', exact: true }).click()
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
 })
 
 test('notification activation returns from old context to the correct live row and ignores departed-account actions', async ({ page }) => {

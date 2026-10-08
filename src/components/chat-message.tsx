@@ -106,6 +106,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   const pickerBounds = useChatPickerBounds(showReactionPicker, rowRef, 'message')
   useEffect(() => {
     if (!showReactionPicker) return
+    pickerRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
     const close = (event: PointerEvent) => { if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setShowReactionPicker(false) }
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
@@ -202,6 +203,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             <div className="chat-reaction-picker-body">
             <Suspense fallback={<div className="chat-reaction-picker-loading">Loading emoji…</div>}>
               <EmojiPicker
+                autoFocusSearch={false}
                 theme={'dark' as Theme}
                 width="100%"
                 height={Math.max(180, pickerBounds.height - 46)}
