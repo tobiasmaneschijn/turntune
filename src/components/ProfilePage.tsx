@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ImageUp, LayoutDashboard, Palette, Pencil, Plus, UserPlus } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { AppVersion } from "./AppVersion";
@@ -8,12 +8,14 @@ import { ThemeToggle } from "./ThemeToggle";
 import { ProfileMusicEditor, profileTrackKey } from "./ProfileMusicEditor";
 import { TrackArtwork } from "./TrackArtwork";
 import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
-import { getSupabaseClient } from "../supabase";
+import { getScopedSupabaseClient, getSupabaseClient } from "../supabase";
+import { boundedOperation, CLEANUP_TIMEOUT_MS, UPLOAD_TIMEOUT_MS } from "../lib/bounded-operation";
 import { requestJson } from "../lib/authenticated-http";
 import { isProfileResponse, type ProfileResponse } from "../lib/profile-response";
 import { libraryTrack, requestPrivateLibrary } from "../music-library";
@@ -33,16 +35,32 @@ function isSocialResponse(value: unknown): value is SocialResponse {
     person && typeof person === "object" && person.user && typeof person.user.id === "string" &&
     ["friends", "incoming", "outgoing"].includes(person.state));
 }
+type AvatarDraft = { kind: "image"; file: File; url: string } | { kind: "preset"; key: string };
+interface UploadedAvatar { path: string; file: File; submitted: boolean; rejected: boolean }
+interface ProfileDraft {
+  fields: { displayName: string; bio: string; handle: string; statusText: string; favoriteTracks: ProfileTrack[] };
+  avatar: { kind: "image"; file: File } | { kind: "preset"; key: string } | null;
+  uploaded: UploadedAvatar | null;
+}
+const profileDrafts = new Map<string, ProfileDraft>();
+let draftOwner: string | null = null;
+const alignDraftOwner = (owner: string | null) => {
+  if (draftOwner !== owner) { profileDrafts.clear(); draftOwner = owner; }
+};
+if (typeof window !== "undefined") window.addEventListener("soundspin:account-change", (event) => {
+  alignDraftOwner((event as CustomEvent<{ userId: string | null }>).detail?.userId || null);
+});
 interface ProfileUpdate {
   displayName?: string; bio?: string; handle?: string | null; statusText?: string; favoriteTracks?: ProfileTrack[];
   avatarKey?: string; customAvatarPath?: string; themeKey?: string;
 }
 
 export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwnProfileUpdated, onOpenAdmin,
-  embedded = false, onInvite }: {
+  embedded = false, onInvite, onEditStateChange }: {
   profileId: string; accessToken: string; currentUser: User; onBack: () => void;
   onOwnProfileUpdated: (profile: SoundSpinProfile) => void; onOpenAdmin?: () => void;
   embedded?: boolean; onInvite?: (userId: string) => void;
+  onEditStateChange?: (state: { dirty: boolean; busy: boolean; discard: () => void }) => void;
 }) {
   const formId = useId();
   const [profile, setProfile] = useState<SoundSpinProfile | null>(null);
@@ -56,6 +74,9 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarDraft, setAvatarDraft] = useState<AvatarDraft | null>(null);
+  const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [loadRevision, setLoadRevision] = useState(0);
@@ -71,6 +92,11 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const lifetimeRef = useRef({ active: true });
   const requestControllers = useRef(new Set<AbortController>());
   const draftVersionRef = useRef(0);
+  const uploadedAvatarRef = useRef<UploadedAvatar | null>(null);
+  const detailsSavingRef = useRef(false);
+  const explicitDiscardRef = useRef(false);
+  const discardDraftRef = useRef<(() => void) | null>(null);
+  const discardDraft = useCallback(() => discardDraftRef.current?.(), []);
   const fieldsRef = useRef({ displayName, bio, handle, statusText, favoriteTracks });
   fieldsRef.current = { displayName, bio, handle, statusText, favoriteTracks };
 
@@ -79,11 +105,40 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     setStatusText(loaded.status_text || ""); setFavoriteTracks(loaded.favorite_tracks || []);
   };
 
+  const dirty = Boolean(editing && profile && (displayName !== profile.display_name || bio !== profile.bio ||
+    handle !== (profile.handle || "") || statusText !== (profile.status_text || "") ||
+    JSON.stringify(favoriteTracks) !== JSON.stringify(profile.favorite_tracks || []) || avatarDraft));
+  const editBusy = saving || uploadingAvatar;
+  const draftStateRef = useRef({ dirty, fields: fieldsRef.current, avatar: avatarDraft });
+  draftStateRef.current = { dirty, fields: fieldsRef.current, avatar: avatarDraft };
+  useLayoutEffect(() => { onEditStateChange?.({ dirty, busy: editBusy, discard: discardDraft }); }, [dirty, editBusy, discardDraft, onEditStateChange]);
+  useEffect(() => {
+    if (profile && !loading && !dirty) profileDrafts.delete(`${currentUser.id}:${profileId}`);
+  }, [dirty, profile, loading, currentUser.id, profileId]);
+  useEffect(() => {
+    if (avatarDraft?.kind !== "image") return;
+    return () => URL.revokeObjectURL(avatarDraft.url);
+  }, [avatarDraft]);
+  useEffect(() => {
+    if (!dirty) return;
+    const preventUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", preventUnload);
+    return () => window.removeEventListener("beforeunload", preventUnload);
+  }, [dirty]);
+  const leaveProfile = (action: () => void) => {
+    if (editBusy) return;
+    if (dirty) setDiscardAction(() => action);
+    else action();
+  };
+
   useEffect(() => {
     const lifetime = { active: true };
     lifetimeRef.current = lifetime;
+    alignDraftOwner(currentUser.id);
+    explicitDiscardRef.current = false;
     const controller = new AbortController();
     setLoading(true); setProfile(null); setEditing(false); setSaving(false); setUploadingAvatar(false);
+    setAvatarDraft(null); setDiscardAction(null); setConfirmRemoval(false); detailsSavingRef.current = false;
     setError(""); setSaved(false); setSavingPick(""); setSavedPicks(new Set());
     draftVersionRef.current = 0;
     void requestJson<ProfileResponse>(`/api/profiles/${profileId}`, {
@@ -92,11 +147,29 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     }).then((payload) => {
       if (!lifetime.active) return;
       setProfile(payload.profile); setOptions(payload.options || []); restoreFields(payload.profile);
+      const retained = profileDrafts.get(`${currentUser.id}:${profileId}`);
+      if (retained) {
+        setDisplayName(retained.fields.displayName); setBio(retained.fields.bio); setHandle(retained.fields.handle);
+        setStatusText(retained.fields.statusText); setFavoriteTracks(retained.fields.favoriteTracks); setEditing(true);
+        const imageCommitted = retained.uploaded && retained.uploaded.path === payload.profile.avatar_path;
+        uploadedAvatarRef.current = imageCommitted ? null : retained.uploaded;
+        const avatar = imageCommitted ? null : retained.avatar;
+        setAvatarDraft(avatar?.kind === "image" ? { ...avatar, url: URL.createObjectURL(avatar.file) } : avatar);
+      }
     }).catch((cause) => {
       if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not load this profile. Try again.");
     }).finally(() => { if (lifetime.active) setLoading(false); });
     return () => {
       lifetime.active = false; controller.abort();
+      const uploaded = uploadedAvatarRef.current; uploadedAvatarRef.current = null;
+      const draft = draftStateRef.current;
+      if (draftOwner === currentUser.id && draft.dirty && !explicitDiscardRef.current) {
+        profileDrafts.set(`${currentUser.id}:${profileId}`, {
+          fields: draft.fields,
+          avatar: draft.avatar?.kind === "image" ? { kind: "image", file: draft.avatar.file } : draft.avatar,
+          uploaded
+        });
+      } else if (uploaded) void discardUploadedAvatar(uploaded);
       requestControllers.current.forEach((request) => request.abort()); requestControllers.current.clear();
     };
     // Token rotation must preserve the profile and its unsaved fields.
@@ -114,16 +187,21 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     return () => { active = false; controller.abort(); };
   }, [profileId, currentUser.id, loadRevision, socialRevision]);
 
-  const updateProfile = async (update: ProfileUpdate) => {
+  const updateProfile = async (update: ProfileUpdate, initialFields = fieldsRef.current) => {
     const lifetime = lifetimeRef.current;
     const controller = new AbortController();
     requestControllers.current.add(controller);
-    const initialFields = fieldsRef.current;
     setSaving(true); setError(""); setSaved(false);
     try {
+      const avatarUpload = update.customAvatarPath ? uploadedAvatarRef.current : null;
       const payload = await requestJson<ProfileResponse>("/api/profile", {
         method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
         body: JSON.stringify(update), errorMessage: "Could not save your profile. Try again.", validate: isProfileResponse
+      }, async (input, init) => {
+        const response = await fetch(input, init);
+        // A validation/auth rejection did not commit. A timeout or server error is uncertain.
+        if (avatarUpload && response.status >= 400 && response.status < 500 && response.status !== 408) avatarUpload.rejected = true;
+        return response;
       });
       if (!lifetime.active) return false;
       setProfile(payload.profile);
@@ -145,16 +223,60 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
 
   const saveDetails = async (event: FormEvent) => {
     event.preventDefault();
-    const draftVersion = draftVersionRef.current;
+    if (detailsSavingRef.current || saving) return;
     const normalizedHandle = handle.trim().toLowerCase();
     if (normalizedHandle && !/^[a-z0-9_]{3,24}$/.test(normalizedHandle)) {
       setError("Handle: 3–24 letters, numbers, or underscores."); return;
     }
+    const draftVersion = draftVersionRef.current;
+    const submittedFields = fieldsRef.current;
     const lifetime = lifetimeRef.current;
-    if (await updateProfile({ displayName: displayName.trim(), bio: bio.trim(), handle: normalizedHandle || null,
-      statusText: statusText.trim(), favoriteTracks })) {
-      // Fields may have changed while the request was in flight.
-      if (lifetime.active && draftVersionRef.current === draftVersion) setEditing(false);
+    const chosenAvatar = avatarDraft;
+    const oldPath = profile?.avatar_path;
+    detailsSavingRef.current = true;
+    setError(""); setSaved(false);
+    try {
+      let avatarUpdate: ProfileUpdate = chosenAvatar?.kind === "preset" ? { avatarKey: chosenAvatar.key } : {};
+      if (chosenAvatar?.kind === "image") {
+        setUploadingAvatar(true);
+        let uploaded = uploadedAvatarRef.current;
+        if (!uploaded || uploaded.file !== chosenAvatar.file) {
+          const controller = new AbortController();
+          requestControllers.current.add(controller);
+          const path = `${currentUser.id}/${crypto.randomUUID()}.${AVATAR_MIME_EXTENSIONS.get(chosenAvatar.file.type)}`;
+          try {
+            const { error: uploadError } = await boundedOperation(async (signal) => {
+              const client = await getSupabaseClient();
+              if (!client) throw new Error("Sign in to upload an avatar.");
+              const scoped = await getScopedSupabaseClient(client, currentUser.id, signal);
+              const result = await scoped.storage.from("profile-avatars").upload(path, chosenAvatar.file, {
+                cacheControl: "31536000", contentType: chosenAvatar.file.type, upsert: false
+              });
+              if (signal.aborted && !result.error) void deleteAvatarObject(path);
+              return result;
+            }, { signal: controller.signal, timeoutMs: UPLOAD_TIMEOUT_MS });
+            if (uploadError) throw new Error(uploadError.message);
+          } finally { requestControllers.current.delete(controller); }
+          uploaded = { path, file: chosenAvatar.file, submitted: false, rejected: false };
+          if (!lifetime.active) { void discardUploadedAvatar(uploaded); return; }
+          uploadedAvatarRef.current = uploaded;
+        }
+        uploaded.submitted = true; uploaded.rejected = false;
+        avatarUpdate = { customAvatarPath: uploaded.path };
+      }
+      if (!lifetime.active) return;
+      if (await updateProfile({ displayName: displayName.trim(), bio: bio.trim(), handle: normalizedHandle || null,
+        statusText: statusText.trim(), favoriteTracks, ...avatarUpdate }, submittedFields)) {
+        uploadedAvatarRef.current = null;
+        setAvatarDraft(null);
+        if (oldPath && chosenAvatar && oldPath !== avatarUpdate.customAvatarPath) void deleteAvatarObject(oldPath);
+        // Fields may have changed while the request was in flight.
+        if (draftVersionRef.current === draftVersion) { explicitDiscardRef.current = true; profileDrafts.delete(`${currentUser.id}:${profileId}`); setEditing(false); }
+      }
+    } catch (cause) {
+      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not upload your avatar. Try again.");
+    } finally {
+      if (lifetime.active) { detailsSavingRef.current = false; setUploadingAvatar(false); }
     }
   };
 
@@ -213,37 +335,42 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   };
 
   const deleteAvatarObject = async (path: string) => {
-    const client = await getSupabaseClient();
-    if (client) await client.storage.from("profile-avatars").remove([path]);
-  };
-  const uploadAvatar = async (file: File) => {
-    const extension = AVATAR_MIME_EXTENSIONS.get(file.type);
-    if (!extension) return setError("Choose a PNG, JPEG, WebP, or GIF image.");
-    if (file.size > AVATAR_MAX_BYTES) return setError("Avatar images must be 5 MB or smaller.");
-    setUploadingAvatar(true);
-    const lifetime = lifetimeRef.current;
-    setError("");
-    const oldPath = profile?.avatar_path;
-    let newPath = "";
+    // Cleanup must not hide a successful save or a useful save error.
     try {
-      const client = await getSupabaseClient();
-      if (!client) throw new Error("Sign in to upload an avatar.");
-      newPath = `${currentUser.id}/${crypto.randomUUID()}.${extension}`;
-      const { error: uploadError } = await client.storage.from("profile-avatars").upload(newPath, file, {
-        cacheControl: "31536000", contentType: file.type, upsert: false
-      });
-      if (uploadError) throw new Error(uploadError.message);
-      if (!lifetime.active) { await deleteAvatarObject(newPath); return; }
-      if (!(await updateProfile({ customAvatarPath: newPath }))) { await deleteAvatarObject(newPath); return; }
-      if (oldPath && oldPath !== newPath) await deleteAvatarObject(oldPath);
-    } catch (cause) {
-      if (newPath) await deleteAvatarObject(newPath);
-      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not upload your avatar. Try again.");
-    } finally { if (lifetime.active) setUploadingAvatar(false); }
+      await boundedOperation(async (signal) => {
+        const client = await getSupabaseClient();
+        if (!client) return;
+        const scoped = await getScopedSupabaseClient(client, currentUser.id, signal);
+        await scoped.storage.from("profile-avatars").remove([path]);
+      }, { timeoutMs: CLEANUP_TIMEOUT_MS });
+    } catch { /* Best-effort storage cleanup. */ }
   };
-  const chooseAvatar = async (avatarKey: string) => {
-    const oldPath = profile?.avatar_path;
-    if (await updateProfile({ avatarKey }) && oldPath) await deleteAvatarObject(oldPath);
+  const discardUploadedAvatar = async (uploaded: UploadedAvatar) => {
+    // An aborted or failed response can finish on the server after a later GET.
+    // Retain uncertain submitted objects rather than deleting a possibly committed avatar.
+    if (uploaded.submitted && !uploaded.rejected) return;
+    await deleteAvatarObject(uploaded.path);
+  };
+  const resetAvatarDraft = () => {
+    const uploaded = uploadedAvatarRef.current; uploadedAvatarRef.current = null;
+    if (uploaded) void discardUploadedAvatar(uploaded);
+    setAvatarDraft(null);
+  };
+  const stageAvatar = (file: File) => {
+    if (!AVATAR_MIME_EXTENSIONS.has(file.type)) return setError("Choose a PNG, JPEG, WebP, or GIF image.");
+    if (file.size > AVATAR_MAX_BYTES) return setError("Avatar images must be 5 MB or smaller.");
+    resetAvatarDraft(); draftVersionRef.current++; setSaved(false); setError("");
+    setAvatarDraft({ kind: "image", file, url: URL.createObjectURL(file) });
+  };
+  const chooseAvatar = (avatarKey: string) => {
+    resetAvatarDraft(); draftVersionRef.current++; setSaved(false); setError("");
+    if (profile?.avatar_path || profile?.avatar_key !== avatarKey) setAvatarDraft({ kind: "preset", key: avatarKey });
+  };
+
+  discardDraftRef.current = () => {
+    explicitDiscardRef.current = true; profileDrafts.delete(`${currentUser.id}:${profileId}`);
+    if (profile) restoreFields(profile);
+    resetAvatarDraft(); setEditing(false); setError(""); setSaved(false);
   };
 
   const Container = embedded ? "div" : "main";
@@ -251,7 +378,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   if (loading) return <Container className={`profile-page${embedded ? " profile-embedded" : ""}`}><div className="profile-loading" role="status">Loading profile…</div></Container>;
   if (!profile) return <Container className={`profile-page${embedded ? " profile-embedded" : ""}`}>
     <div className="profile-shell profile-state-shell">
-      {!embedded && <Button variant="ghost" onClick={onBack}><ArrowLeft /> Back</Button>}
+      {!embedded && <Button variant="ghost" onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button>}
       <Card className="profile-error-card"><CardHeader><CardTitle>Profile unavailable</CardTitle><CardDescription>{error}</CardDescription></CardHeader>
         <CardContent><Button variant="outline" onClick={() => setLoadRevision((value) => value + 1)}>Retry</Button></CardContent></Card>
     </div>
@@ -259,6 +386,8 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
 
   const profileUser: User = { id: profile.user_id, name: profile.display_name, avatarSeed: profile.user_id,
     avatarKey: profile.avatar_key, avatarUrl: profile.avatar_url || undefined, isAppAdmin: profile.is_app_admin };
+  const previewUser: User = avatarDraft?.kind === "image" ? { ...profileUser, avatarUrl: avatarDraft.url }
+    : avatarDraft?.kind === "preset" ? { ...profileUser, avatarKey: avatarDraft.key, avatarUrl: undefined } : profileUser;
   const avatarOptions = options.filter((option) => option.kind === "avatar");
   const themeOptions = options.filter((option) => option.kind === "theme");
   const relationship = social?.people.find((person) => person.user.id === profileId)?.state;
@@ -266,10 +395,10 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
 
   return <Container className={`profile-page profile-theme-${profile.theme_key}${embedded ? " profile-embedded" : ""}`}>
     {!embedded && <header className="profile-page-header"><div className="profile-header-inner">
-      <Button className="profile-header-back" variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back</Button>
+      <Button className="profile-header-back" variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button>
       <div className="app-brand-stack"><div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div><AppVersion /></div>
       <div className="profile-header-actions"><ThemeToggle compact />
-        {onOpenAdmin && <Button variant="ghost" size="icon" onClick={onOpenAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
+        {onOpenAdmin && <Button variant="ghost" size="icon" disabled={editBusy} onClick={() => leaveProfile(onOpenAdmin)} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
         <FeedbackButton userId={currentUser.id} diagnosticContext={{ surface: "profile" }} />
       </div>
     </div></header>}
@@ -285,12 +414,12 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
           <span className="profile-member-since">Joined {new Date(profile.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
         </div>
         <div className="profile-actions">
-          {isOwnProfile && !editing && <Button variant="outline" size="sm" onClick={() => { setEditing(true); setSaved(false); }}><Pencil /> Edit profile</Button>}
+          {isOwnProfile && !editing && <Button variant="outline" size="sm" onClick={() => { explicitDiscardRef.current = false; setEditing(true); setSaved(false); }}><Pencil /> Edit profile</Button>}
           {!isOwnProfile && social && <>
-            {!relationship && <Button size="sm" disabled={socialBusy} onClick={() => void changeFriend("request")}><UserPlus /> Add friend</Button>}
-            {relationship === "incoming" && <><Button size="sm" disabled={socialBusy} onClick={() => void changeFriend("accept")}>Accept</Button><Button variant="ghost" size="sm" disabled={socialBusy} onClick={() => void changeFriend("decline")}>Decline</Button></>}
-            {relationship === "outgoing" && <><span className="profile-friend-state">Requested</span><Button variant="ghost" size="sm" disabled={socialBusy} onClick={() => void changeFriend("decline")}>Cancel request</Button></>}
-            {relationship === "friends" && <><span className="profile-friend-state"><Check /> Friends</span>{onInvite && <Button size="sm" onClick={() => onInvite(profileId)}>Invite</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} onClick={() => void changeFriend("remove")}>Remove friend</Button></>}
+            {!relationship && <Button size="sm" disabled={socialBusy} aria-label={`Add friend ${profile.display_name}`} onClick={() => void changeFriend("request")}><UserPlus /> Add friend</Button>}
+            {relationship === "incoming" && <><Button size="sm" disabled={socialBusy} aria-label={`Accept ${profile.display_name}'s friend request`} onClick={() => void changeFriend("accept")}>Accept</Button><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Decline ${profile.display_name}'s friend request`} onClick={() => void changeFriend("decline")}>Decline</Button></>}
+            {relationship === "outgoing" && <><span className="profile-friend-state">Requested</span><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Cancel request to ${profile.display_name}`} onClick={() => void changeFriend("decline")}>Cancel request</Button></>}
+            {relationship === "friends" && <><span className="profile-friend-state"><Check /> Friends</span>{onInvite && <Button size="sm" aria-label={`Invite ${profile.display_name} to this room`} onClick={() => onInvite(profileId)}>Invite</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Remove friend ${profile.display_name}`} onClick={() => setConfirmRemoval(true)}>Remove friend</Button></>}
           </>}
         </div>
       </div>
@@ -307,36 +436,36 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
           return <li className="profile-song" key={key}>
             <TrackArtwork track={track} compact />
             <span className="profile-song-copy">{source ? <a href={source} target="_blank" rel="noreferrer">{track.title}</a> : <strong>{track.title}</strong>}<small>{[track.artist, providerLabel(track.provider)].filter(Boolean).join(" · ")}</small></span>
-            {!isOwnProfile && <Button variant="ghost" size="sm" disabled={Boolean(savingPick) || savedPicks.has(key)} aria-label={savedPicks.has(key) ? `${track.title} saved` : `Save ${track.title} to my picks`} onClick={() => void savePick(track)}>{savedPicks.has(key) ? <Check /> : <Plus />}{savingPick === key ? "Saving…" : savedPicks.has(key) ? "Saved" : "Save"}</Button>}
+            {!isOwnProfile && <Button variant="ghost" size="sm" disabled={Boolean(savingPick) || savedPicks.has(key)} aria-label={savingPick === key ? `Saving… ${track.title} to my picks` : savedPicks.has(key) ? `Saved ${track.title}` : `Save ${track.title} to my picks`} onClick={() => void savePick(track)}>{savedPicks.has(key) ? <Check /> : <Plus />}{savingPick === key ? "Saving…" : savedPicks.has(key) ? "Saved" : "Save"}</Button>}
           </li>;
         })}</ol></CardContent>
       </Card>}
 
       {isOwnProfile && editing && <div className="profile-settings-grid">
         <Card className="profile-card details-card"><CardHeader><CardTitle>Edit profile</CardTitle></CardHeader><CardContent>
-          <div className={`avatar-upload ${profile.avatar_url ? "has-custom-avatar" : ""}`}>
-            <Avatar user={profileUser} size={56} /><span><strong>Avatar</strong><small>PNG, JPEG, WebP, or GIF · up to 5 MB</small></span>
-            <label htmlFor={`${formId}-avatar`} aria-disabled={uploadingAvatar || saving}><ImageUp />{uploadingAvatar ? "Uploading…" : profile.avatar_url ? "Replace" : "Upload image"}</label>
+          <div className={`avatar-upload ${previewUser.avatarUrl ? "has-custom-avatar" : ""}`}>
+            <Avatar user={previewUser} size={56} /><span><strong>Avatar</strong><small>PNG, JPEG, WebP, or GIF · up to 5 MB</small></span>
+            <label htmlFor={`${formId}-avatar`} aria-disabled={uploadingAvatar || saving}><ImageUp />{uploadingAvatar ? "Uploading…" : previewUser.avatarUrl ? "Replace" : "Upload image"}</label>
             <input id={`${formId}-avatar`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingAvatar || saving} onChange={(event) => {
-              const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadAvatar(file);
+              const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) stageAvatar(file);
             }} />
           </div>
-          <form className="profile-edit" onSubmit={(event) => void saveDetails(event)}>
+          <form className="profile-edit" aria-busy={editBusy} onSubmit={(event) => void saveDetails(event)}>
             <div className="grid gap-2"><Label htmlFor={`${formId}-name`}>Display name</Label><Input id={`${formId}-name`} value={displayName} maxLength={32} onChange={(event) => { draftVersionRef.current++; setDisplayName(event.target.value); }} /></div>
             <div className="grid gap-2"><Label htmlFor={`${formId}-handle`}>Handle</Label><Input id={`${formId}-handle`} value={handle} maxLength={24} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={`${formId}-handle-help`} onChange={(event) => { draftVersionRef.current++; setHandle(event.target.value.toLowerCase()); }} /><small id={`${formId}-handle-help`}>3–24 letters, numbers, or underscores.</small></div>
             <div className="grid gap-2"><Label htmlFor={`${formId}-status`}>Status</Label><Input id={`${formId}-status`} value={statusText} maxLength={80} onChange={(event) => { draftVersionRef.current++; setStatusText(event.target.value); }} /></div>
             <div className="grid gap-2"><Label htmlFor={`${formId}-bio`}>Bio</Label><Textarea id={`${formId}-bio`} value={bio} maxLength={160} rows={3} onChange={(event) => { draftVersionRef.current++; setBio(event.target.value); }} /><small>{bio.length} / 160</small></div>
             <ProfileMusicEditor tracks={favoriteTracks} onChange={(tracks) => { draftVersionRef.current++; setFavoriteTracks(tracks); }} accessToken={accessToken} userId={currentUser.id} disabled={saving || uploadingAvatar} />
             {error && <p className="profile-inline-error" role="alert">{error}</p>}
-            <div className="profile-edit-actions"><Button type="submit" disabled={saving || uploadingAvatar || !displayName.trim()}>{saving ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={saving || uploadingAvatar} onClick={() => { restoreFields(profile); setEditing(false); setError(""); }}>Cancel</Button></div>
+            <div className="profile-edit-actions"><Button type="submit" disabled={saving || uploadingAvatar || !displayName.trim()}>{saving ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={saving || uploadingAvatar} onClick={discardDraft}>Cancel</Button></div>
           </form>
         </CardContent></Card>
 
-        <Card className="profile-card appearance-card"><CardHeader><CardTitle><Palette /> Appearance</CardTitle><CardDescription>Saves automatically.</CardDescription></CardHeader><CardContent>
+        <Card className="profile-card appearance-card"><CardHeader><CardTitle><Palette /> Appearance</CardTitle><CardDescription>Avatar changes save with your profile. Theme saves automatically.</CardDescription></CardHeader><CardContent>
           <section className="appearance-section"><h2>Avatar</h2><div className="avatar-collection">
             {avatarOptions.map((option) => {
-              const selected = !profile.avatar_url && profile.avatar_key === option.key;
-              return <button type="button" key={option.key} className={selected ? "selected" : ""} disabled={saving || uploadingAvatar} aria-pressed={selected} title={`Use ${option.name}`} onClick={() => void chooseAvatar(option.key)}>
+              const selected = !previewUser.avatarUrl && previewUser.avatarKey === option.key;
+              return <button type="button" key={option.key} className={selected ? "selected" : ""} disabled={saving || uploadingAvatar} aria-pressed={selected} title={`Use ${option.name}`} onClick={() => chooseAvatar(option.key)}>
                 <Avatar user={{ ...profileUser, avatarKey: option.key, avatarUrl: undefined }} size={48} /><strong>{option.name}</strong>{selected && <span><Check /> Selected</span>}
               </button>;
             })}
@@ -352,5 +481,21 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
 
       {isOwnProfile && social && <div className="profile-privacy-setting"><div><Label htmlFor={`${formId}-activity`}>Share activity with friends</Label><small>Friends can see rooms they can access.</small></div><Switch id={`${formId}-activity`} checked={social.shareActivity} disabled={socialBusy} onCheckedChange={(checked) => void changeShareActivity(checked)} /></div>}
     </section>
+    <Dialog open={Boolean(discardAction)} onOpenChange={(open) => { if (!open) setDiscardAction(null); }}>
+      <DialogContent showCloseButton={false}>
+        <DialogTitle>Discard changes?</DialogTitle>
+        <DialogDescription>Your profile changes have not been saved.</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setDiscardAction(null)}>Keep editing</Button>
+          <Button variant="destructive" onClick={() => { const action = discardAction; setDiscardAction(null); discardDraft(); action?.(); }}>Discard changes</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={confirmRemoval} onOpenChange={setConfirmRemoval}>
+      <DialogContent showCloseButton={false}>
+        <DialogTitle>Remove {profile.display_name} from friends?</DialogTitle>
+        <DialogDescription>Adding them again requires a new friend request.</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setConfirmRemoval(false)}>Cancel</Button>
+          <Button variant="destructive" aria-label={`Remove friend ${profile.display_name}`} onClick={() => { setConfirmRemoval(false); void changeFriend("remove"); }}>Remove friend</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </Container>;
 }

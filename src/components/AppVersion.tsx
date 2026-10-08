@@ -25,7 +25,7 @@ export function AppVersion() {
           variant="ghost"
           size="xs"
           className="changelog-trigger"
-          aria-label={`Changelog, version ${APP_VERSION}`}
+          aria-label={`v${APP_VERSION} Changelog`}
         />
       }>
         <span className="app-version-number">v{APP_VERSION}</span>

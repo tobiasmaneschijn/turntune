@@ -13,7 +13,7 @@ import type { RoomLayoutPreset } from "../hooks/use-room-layout-presets";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Switch } from "./ui/switch";
 import "../styles/layout-completion.css";
 
@@ -54,6 +54,8 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   onLayoutPresetChange?: (preset: RoomLayoutPreset) => void;
 }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackMounted, setFeedbackMounted] = useState(false);
+  useEffect(() => { setFeedbackOpen(false); setFeedbackMounted(false); }, [currentUser.id, roomSlug]);
   const [copied, setCopied] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -100,7 +102,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     <header className="topbar">
       <a className="room-skip-link" href="#room-workspace">Skip to room content</a>
       <div className="app-brand-stack">
-        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={onHome} title="Back to rooms" aria-label="Back to rooms"><Brand /></Button>
+        <Button variant="ghost" className="header-home-logo h-10 px-2" onClick={onHome} title="Back to rooms" aria-label="Lydman — Back to rooms"><Brand /></Button>
         <AppVersion />
       </div>
       <div className="room-heading"><div>
@@ -108,44 +110,59 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
         {participants && onOpenProfile ? <Button ref={listenersRef} variant="ghost" size="sm" className="room-listener-count" data-navigation-focus="room-listeners" aria-label={`Room listeners, ${listenerCount} ${listenerCount === 1 ? "listener" : "listeners"}`} onClick={() => { peopleReturnRef.current = listenersRef.current; setPeopleOpen(true); }}><span className="live-dot" aria-hidden="true" /> {listenerCount} {listenerCount === 1 ? "listener" : "listeners"}</Button> : <small><span className="live-dot" aria-hidden="true" /> {listenerCount} {listenerCount === 1 ? "listener" : "listeners"}</small>}
       </div></div>
       <div className="header-actions">
-        <Button variant="ghost" size="sm" className="header-directory-button" onClick={onHome} title="Room directory" aria-label="Room directory"><House /><span>Rooms</span></Button>
+        <Button variant="ghost" size="sm" className="header-directory-button" onClick={onHome} title="Room directory" aria-label="Rooms — Room directory"><House /><span>Rooms</span></Button>
         <ThemeToggle compact />
-        <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Invite link copied" : "Copy room invite link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Invite"}</span></Button>
+        <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Copied — invite link" : "Invite — copy room invite link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Invite"}</span></Button>
         <Button variant="ghost" size="icon" className="header-profile-button" data-navigation-focus="room-profile" onClick={onProfile} title="Open your profile" aria-label="Open your profile"><Avatar user={currentUser} size={30} /></Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button ref={moreRef} variant="ghost" size="icon" className="room-more-actions" data-navigation-focus="room-actions" aria-label="More room actions" />}><MoreHorizontal /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="room-actions-menu">
-            <DropdownMenuItem onClick={onSettings}><Settings /> Settings</DropdownMenuItem>
-            {onRoomSettings && <DropdownMenuItem onClick={onRoomSettings}><Shield /> Room settings</DropdownMenuItem>}
-            <DropdownMenuItem onClick={() => setFeedbackOpen(true)}><Lightbulb /> Send feedback</DropdownMenuItem>
-            <DropdownMenuItem onClick={onProfile} data-navigation-focus="room-actions"><UserRound /> Your profile</DropdownMenuItem>
-            {onFriends && <DropdownMenuItem onClick={onFriends}><Users /> Friends</DropdownMenuItem>}
-            {onThemeNight && <DropdownMenuItem onClick={onThemeNight}>Theme night</DropdownMenuItem>}
-            {onAdmin && <DropdownMenuItem onClick={onAdmin}><LayoutDashboard /> Admin dashboard</DropdownMenuItem>}
-            {participants && onOpenProfile && <DropdownMenuItem onClick={() => { peopleReturnRef.current = moreRef.current; setPeopleOpen(true); }}><Users /> Room listeners</DropdownMenuItem>}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Listening</DropdownMenuLabel>
+              <DropdownMenuItem onClick={onSettings}><Settings /> Settings</DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger><PanelsTopLeft /> Room layout</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="room-layout-menu">
+                  {onLayoutPresetChange && <DropdownMenuRadioGroup value={layoutPreset} onValueChange={(value) => { if (value === "balanced" || value === "player" || value === "chat") onLayoutPresetChange(value); }} aria-label="Room layout preset">
+                    <DropdownMenuRadioItem value="balanced" closeOnClick>Balanced layout</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="player" closeOnClick>Player focus layout</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="chat" closeOnClick>Chat focus layout</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>}
+                  {onLayoutPresetChange && <DropdownMenuSeparator />}
+                  <DropdownMenuItem onClick={onResetLayout}><RotateCcw /> Reset room layout</DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onClick={() => setCommandsOpen(true)}><Keyboard /> Room commands <kbd>Ctrl / ⌘ K</kbd></DropdownMenuItem>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setCommandsOpen(true)}><Keyboard /> Room commands <kbd>Ctrl / ⌘ K</kbd></DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setHelpOpen(true)}><Keyboard /> Keyboard help</DropdownMenuItem>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger><PanelsTopLeft /> Room layout</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="room-layout-menu">
-                {onLayoutPresetChange && <DropdownMenuRadioGroup value={layoutPreset} onValueChange={(value) => { if (value === "balanced" || value === "player" || value === "chat") onLayoutPresetChange(value); }} aria-label="Room layout preset">
-                  <DropdownMenuRadioItem value="balanced" closeOnClick>Balanced layout</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="player" closeOnClick>Player focus layout</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="chat" closeOnClick>Chat focus layout</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>}
-                {onLayoutPresetChange && <DropdownMenuSeparator />}
-                <DropdownMenuItem onClick={onResetLayout}><RotateCcw /> Reset room layout</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            {onSignOut && <DropdownMenuSeparator />}
-            {onSignOut && <DropdownMenuItem onClick={onSignOut}><LogOut /> Sign out</DropdownMenuItem>}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>People</DropdownMenuLabel>
+              <DropdownMenuItem onClick={onProfile} data-navigation-focus="room-actions"><UserRound /> Your profile</DropdownMenuItem>
+              {onFriends && <DropdownMenuItem onClick={onFriends}><Users /> Friends</DropdownMenuItem>}
+              {participants && onOpenProfile && <DropdownMenuItem onClick={() => { peopleReturnRef.current = moreRef.current; setPeopleOpen(true); }}><Users /> Room listeners</DropdownMenuItem>}
+            </DropdownMenuGroup>
+            {(onRoomSettings || onThemeNight || onAdmin) && <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Room management</DropdownMenuLabel>
+                {onRoomSettings && <DropdownMenuItem onClick={onRoomSettings}><Shield /> Room settings</DropdownMenuItem>}
+                {onThemeNight && <DropdownMenuItem onClick={onThemeNight}>Theme night</DropdownMenuItem>}
+                {onAdmin && <DropdownMenuItem onClick={onAdmin}><LayoutDashboard /> Admin dashboard</DropdownMenuItem>}
+              </DropdownMenuGroup>
+            </>}
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Account and help</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => setHelpOpen(true)}><Keyboard /> Keyboard help</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setFeedbackMounted(true); setFeedbackOpen(true); }}><Lightbulb /> Send feedback</DropdownMenuItem>
+              {onSignOut && <DropdownMenuItem onClick={onSignOut}><LogOut /> Sign out</DropdownMenuItem>}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </header>
     {!connected && <div className="room-connection-banner" role="status"><span>Connection lost · reconnecting…</span>{onReconnect && <Button size="sm" variant="outline" onClick={onReconnect}>Retry connection</Button>}</div>}
-    {feedbackOpen && <Suspense fallback={null}><FeedbackButton userId={currentUser.id} roomSlug={roomSlug} diagnosticContext={diagnosticContext} open={feedbackOpen} onOpenChange={setFeedbackOpen} hideTrigger finalFocus={moreRef} /></Suspense>}
+    {feedbackMounted && <Suspense fallback={null}><FeedbackButton userId={currentUser.id} roomSlug={roomSlug} diagnosticContext={diagnosticContext} open={feedbackOpen} onOpenChange={setFeedbackOpen} hideTrigger finalFocus={moreRef} /></Suspense>}
     {participants && onOpenProfile && <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={participants} currentUserId={currentUser.id} ownerUserId={ownerUserId} moderatorUserIds={moderatorUserIds} djUserId={djUserId} onOpenProfile={onOpenProfile} finalFocus={peopleReturnRef} anchor={listenersRef} />}
     <RoomCommandMenu open={commandsOpen} onOpenChange={setCommandsOpen} commands={commands} finalFocus={moreRef} />
     <Dialog open={helpOpen} onOpenChange={setHelpOpen}><DialogContent className="room-keyboard-help" finalFocus={moreRef}>

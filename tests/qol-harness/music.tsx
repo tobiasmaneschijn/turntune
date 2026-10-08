@@ -17,6 +17,7 @@ const tracks: Track[] = ["Alpha", "Beta", "Gamma"].map((title, index) => ({
 
 function initialSnapshot(roomId = "fixture-room"): RoomSnapshot {
   const scenario = new URLSearchParams(location.search).get("scenario");
+  const artworkList = (kind: string) => Array.from({ length: 100 }, (_, index): Track => ({ ...tracks[0], id: `${kind}-${index}`, title: `${kind} track ${index}`, provider: "spotify", providerId: `${kind}-${index}`, artworkUrl: `/tests/qol-harness/art/${kind}-${index}.svg` }));
   const listener = ["listener", "restricted", "listener-quiet", "library-listener"].includes(scenario || "");
   const quiet = scenario === "quiet" || scenario === "listener-quiet";
   return {
@@ -24,8 +25,8 @@ function initialSnapshot(roomId = "fixture-room"): RoomSnapshot {
       settings: { djAccess: scenario === "restricted" ? "roles" : "everyone" },
       djUserId: quiet ? null : other.id,
       djQueueUserIds: listener ? [other.id] : [self.id, other.id],
-      queue: quiet || listener ? [] : tracks.map((track) => ({ ...track })),
-      history: [{ ...tracks[1], id: "history-beta", artist: "Past Artist", provider: "spotify", providerId: "5bJ1DrEM4hNCafcDd1oxHx", addedBy: other, playedAt: Date.UTC(2026, 9, 6, 20, 45) }, { ...tracks[2], id: "history-gamma", artist: "Another Artist" }],
+      queue: scenario === "library-artwork-preload" ? artworkList("queue") : quiet || listener ? [] : tracks.map((track) => ({ ...track })),
+      history: scenario === "library-artwork-preload" ? artworkList("history") : [{ ...tracks[1], id: "history-beta", artist: "Past Artist", provider: "spotify", providerId: "5bJ1DrEM4hNCafcDd1oxHx", addedBy: other, playedAt: Date.UTC(2026, 9, 6, 20, 45) }, { ...tracks[2], id: "history-gamma", artist: "Another Artist" }],
       playback: { track: quiet ? null : { ...tracks[0], id: "currently-playing", providerId: "Zi_XLOBDo_Y", addedBy: other }, playing: !quiet, position: 30, updatedAt: Date.now() },
       vibe: null, createdAt: 1 },
     users: [self, other], djUsers: [self, other], serverTime: Date.now()
@@ -125,7 +126,7 @@ function Harness() {
     snapshot: () => latest.current
   };
 
-  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness"><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
+  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Harness /></ThemeProvider>);

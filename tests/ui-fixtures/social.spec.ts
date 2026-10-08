@@ -29,22 +29,22 @@ test("friends, requests, search, and room invites use the authenticated API", as
   expect(searches).toBe(0);
   await page.getByRole("button", { name: "Open Alex's profile" }).click();
   await expect(page.getByTestId("person-entry")).toHaveText("alex");
-  await expect(page.getByRole("button", { name: "Join", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "Join", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Join Late Night with Alex", exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "Join Late Night with Alex", exact: true }).click();
   await expect(page.getByTestId("room-entry")).toHaveText("late-night");
   await page.getByRole("button", { name: "Rotate token" }).click();
-  await page.getByRole("button", { name: "Accept", exact: true }).click();
+  await page.getByRole("button", { name: "Accept Mina's friend request", exact: true }).click();
   await expect(page.locator(".friends-panel").getByRole("status")).toHaveText("Friend added.");
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel request to Kai", exact: true }).click();
   await expect(page.locator(".friends-panel").getByRole("status")).toHaveText("Request cancelled.");
   await page.getByText("Find people", { exact: true }).click();
   await page.getByRole("textbox", { name: "Find people" }).fill("s");
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeDisabled();
   await page.getByRole("textbox", { name: "Find people" }).fill("sam");
   await page.getByRole("button", { name: "Search", exact: true }).click();
-  await page.getByRole("button", { name: "Add friend", exact: true }).click();
+  await page.getByRole("button", { name: "Add friend Sam", exact: true }).click();
   await expect(page.locator(".friends-panel").getByRole("status")).toHaveText("Request sent.");
-  await page.getByRole("button", { name: "Accept invite", exact: true }).click();
+  await page.getByRole("button", { name: "Accept invite to Locked room from Alex", exact: true }).click();
   await expect(page.getByTestId("room-entry")).toHaveText("locked");
   expect(calls.map(call => call.token)).toEqual(Array(calls.length).fill("Bearer token-two"));
   expect(calls.map(call => call.body)).toEqual([{ action: "accept" }, { action: "decline" }, { action: "request" }, null]);
@@ -63,7 +63,7 @@ test("stale searches and friend actions cannot update another account", async ({
   const searchStarted = page.waitForRequest("**/api/people?*");
   await page.getByRole("button", { name: "Search", exact: true }).click(); await searchStarted;
   const actionStarted = page.waitForRequest("**/api/friends/*");
-  await page.getByRole("button", { name: "Accept", exact: true }).click(); await actionStarted;
+  await page.getByRole("button", { name: "Accept Mina's friend request", exact: true }).click(); await actionStarted;
   await page.getByRole("button", { name: "Switch account" }).click();
   await expect(page.getByRole("textbox", { name: "Find people" })).toHaveValue("");
   releaseSearch(); releaseAction();
@@ -83,17 +83,17 @@ test("invite actions disable duplicates and a failed social load stays local", a
   await expect(page.getByText("No friends yet.", { exact: true })).toHaveCount(0);
   failing = false; await page.getByRole("button", { name: "Retry", exact: true }).click();
   const row = page.locator(".friends-person").filter({ has: page.getByRole("button", { name: "Open Alex's profile" }) });
-  await row.getByRole("button", { name: "Invite", exact: true }).click();
-  await expect(row.getByRole("button", { name: "Invite", exact: true })).toBeDisabled();
+  await row.getByRole("button", { name: "Invite Alex to this room", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Invite Alex to this room", exact: true })).toBeDisabled();
   expect(inviteCalls).toBe(1); releaseInvite();
-  await expect(row.getByRole("button", { name: "Invited", exact: true })).toBeDisabled();
+  await expect(row.getByRole("button", { name: "Invited Alex to this room", exact: true })).toBeDisabled();
 });
 
 test("friends fit narrow layouts without hiding actions", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.route("**/api/social", route => route.fulfill({ json: initial() }));
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/tests/social-harness/index.html");
-  await expect(page.getByRole("button", { name: "Accept invite", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Accept invite to Locked room from Alex", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

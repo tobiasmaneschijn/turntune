@@ -33,7 +33,8 @@ test("queue-first navigation keeps the DJ roster collapsed and one membership ac
   await expect(tabs.getByRole("tab", { name: "Queue", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Join as DJ", exact: true })).toHaveCount(1);
-  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  const lineup = page.getByRole("button", { name: / · Lineup$/ });
+  await expect(lineup).toHaveAccessibleName("Casey · Lineup");
   await expect(lineup).toHaveAttribute("aria-expanded", "false");
   const rosterId = await lineup.getAttribute("aria-controls");
   expect(rosterId).toBeTruthy();
@@ -53,7 +54,7 @@ test("queue-first navigation keeps the DJ roster collapsed and one membership ac
 
 test("queued tracks precede the DJ footer and leaving stays inside the expanded lineup", { tag: "@mobile" }, async ({ page }) => {
   await open(page);
-  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  const lineup = page.getByRole("button", { name: / · Lineup$/ });
   const footer = page.locator(".music-rail-minimal .dj-lineup");
   const queue = await page.locator(".music-queue-pane .rail-track-list").boundingBox();
   const summary = await footer.boundingBox();
@@ -75,7 +76,7 @@ test("queued tracks precede the DJ footer and leaving stays inside the expanded 
 test("footer membership changes restore focus without changing the private queue", { tag: "@mobile" }, async ({ page }) => {
   await open(page, "listener");
   const queue = await api(page, "return music.snapshot().room.queue");
-  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  const lineup = page.getByRole("button", { name: / · Lineup$/ });
   const join = page.getByRole("button", { name: "Join as DJ", exact: true });
   await expect(lineup).toHaveAttribute("aria-expanded", "false");
   await join.click();
@@ -292,7 +293,7 @@ for (const scenario of ["listener", "restricted"]) {
     if (scenario === "restricted") {
       await expect(page.locator(".music-rail-minimal .dj-lineup")).toContainText("DJ role required");
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeHidden();
-      await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+      await page.getByRole("button", { name: / · Lineup$/ }).click();
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
       await expect(page.locator('.music-rail-minimal')).toContainText("Ask the owner or a moderator for a DJ role.");
     }
@@ -337,7 +338,7 @@ test("real music rail fits a narrow screen and hides inactive panels from focus"
   await expect(page.getByRole("tabpanel", { name: /Queue/ })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).not.toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  for (const name of ["Actions for Gamma", "Add music", "DJ lineup"]) {
+  for (const name of ["Actions for Gamma", "Add music", "Casey · Lineup"]) {
     const box = await page.getByRole("button", { name, exact: true }).boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);
     expect(box!.height).toBeGreaterThanOrEqual(44);
@@ -408,9 +409,9 @@ test("a narrow desktop rail keeps search and queue controls reachable", async ({
   const add = await page.getByRole("button", { name: "Add music", exact: true }).boundingBox();
   expect(add!.x + add!.width).toBeLessThanOrEqual(rail!.x + rail!.width);
   expect(await page.locator(".music-rail-minimal").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+  await page.getByRole("button", { name: / · Lineup$/ }).click();
   expect(await page.locator(".music-rail-minimal").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+  await page.getByRole("button", { name: / · Lineup$/ }).click();
   await search(page);
   await page.getByRole("button", { name: "Add Third Song to your queue", exact: true }).click();
   await expect(page.locator(".search-result-row").filter({ hasText: "Third Song" })).toContainText("Queued · #4");
@@ -423,7 +424,7 @@ test("a short narrow rail keeps the expanded lineup below tracks and long names 
   await page.locator(".music-qol-harness").evaluate((element) => { (element as HTMLElement).style.width = "240px"; });
   const name = "Casey with an exceptionally long display name that must fit beside the lineup control";
   await api(page, `music.snapshot().djUsers.find(user => user.id === 'other').name = ${JSON.stringify(name)}; music.setDj('other')`);
-  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+  await page.getByRole("button", { name: / · Lineup$/ }).click();
   const tools = await page.locator(".music-tool-tabs").boundingBox();
   const footer = await page.locator(".music-rail-minimal .dj-lineup").boundingBox();
   expect(tools!.y + tools!.height).toBeLessThanOrEqual(footer!.y + 1);

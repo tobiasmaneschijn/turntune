@@ -1,15 +1,5 @@
 import type { MouseEvent } from "react";
-import {
-  ArrowRight,
-  Headphones,
-  Link2,
-  ListMusic,
-  MessageCircle,
-  Music2,
-  Radio,
-  Share2,
-  Waves
-} from "lucide-react";
+import { ArrowRight, MessageCircle, Music2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { User } from "@/types";
@@ -37,34 +27,10 @@ const SAMPLE_USERS: User[] = [
   { id: "leo", name: "Leo", avatarSeed: "leo", avatarKey: "voltage", isAppAdmin: false }
 ];
 
-const BENEFITS = [
-  {
-    icon: Waves,
-    title: "Synchronized playback"
-  },
-  {
-    icon: ListMusic,
-    title: "DJ turns"
-  },
-  {
-    icon: MessageCircle,
-    title: "Room chat"
-  }
-];
-
 const STEPS = [
-  {
-    icon: Headphones,
-    title: "Create a room"
-  },
-  {
-    icon: Share2,
-    title: "Share the room link"
-  },
-  {
-    icon: Radio,
-    title: "Add songs and take turns"
-  }
+  "Sign up with an invite",
+  "Create a room and share its link",
+  "Add songs and take turns as DJ"
 ];
 
 function navigateInsideApp(
@@ -88,11 +54,6 @@ function navigateInsideApp(
 export function LandingPage({ onNavigate }: LandingPageProps) {
   return (
     <main className="landing-page">
-      <div className="landing-backdrop" aria-hidden="true">
-        <span className="landing-glow landing-glow-violet" />
-        <span className="landing-glow landing-glow-cyan" />
-      </div>
-
       <header className="landing-header">
         <nav className="landing-nav" aria-label="Main navigation">
           <a
@@ -104,8 +65,8 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             <Brand />
           </a>
           <div className="landing-nav-links">
-            <a href="#features">Features</a>
             <a href="#how-it-works">How it works</a>
+            <a href="#music-services">Music services</a>
           </div>
           <div className="landing-nav-actions">
             <a
@@ -114,13 +75,6 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               onClick={(event) => navigateInsideApp(event, "/login", onNavigate)}
             >
               Sign in
-            </a>
-            <a
-              href="/sign-up"
-              className={buttonVariants({ size: "sm" })}
-              onClick={(event) => navigateInsideApp(event, "/sign-up", onNavigate)}
-            >
-              Sign up
             </a>
           </div>
         </nav>
@@ -138,27 +92,19 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               className={buttonVariants({ size: "lg" })}
               onClick={(event) => navigateInsideApp(event, "/sign-up", onNavigate)}
             >
-              Create a room <ArrowRight data-icon="inline-end" />
-            </a>
-            <a
-              href="/login"
-              className={buttonVariants({ variant: "outline", size: "lg" })}
-              onClick={(event) => navigateInsideApp(event, "/login", onNavigate)}
-            >
-              Sign in
+              Sign up with an invite <ArrowRight data-icon="inline-end" />
             </a>
           </div>
-          <p className="landing-invite-note"><Link2 aria-hidden="true" /> Invite required to create an account.</p>
+          <p className="landing-invite-note">An account is required to create or join rooms.</p>
         </div>
 
         <div className="landing-preview-stage">
-          <span className="landing-reaction landing-reaction-heart" aria-hidden="true">♥</span>
-          <span className="landing-reaction landing-reaction-fire" aria-hidden="true">🔥</span>
-          <Card className="landing-preview" aria-label="Preview of a Lydman listening room">
+          <p className="landing-preview-caption">Example listening room</p>
+          <Card className="landing-preview" aria-label="Example of a Lydman listening room">
             <CardHeader className="landing-preview-header">
               <div>
                 <CardTitle>Friday night radio</CardTitle>
-                <CardDescription><span className="landing-live-dot" /> 6 listening now</CardDescription>
+                <CardDescription>6 listeners</CardDescription>
               </div>
               <div className="landing-avatar-stack" aria-label="Maya, Noah, Liv, and Leo are listening">
                 {SAMPLE_USERS.map((user) => <Avatar key={user.id} user={user} size={30} />)}
@@ -169,7 +115,6 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               <section className="landing-now-playing" aria-label="Now playing Afterglow by Night Drive">
                 <div className="landing-album-art" aria-hidden="true">
                   <Music2 />
-                  <span className="landing-album-orbit" />
                 </div>
                 <div className="landing-track-copy">
                   <span className="landing-preview-label">Now playing</span>
@@ -178,7 +123,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
                   <div className="landing-track-progress" aria-hidden="true"><span /></div>
                   <div className="landing-track-time" aria-hidden="true"><span>1:48</span><span>3:36</span></div>
                 </div>
-                <div className="landing-equalizer" aria-label="Playing">
+                <div className="landing-equalizer" aria-hidden="true">
                   <i /><i /><i /><i />
                 </div>
               </section>
@@ -211,46 +156,21 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         </div>
       </section>
 
-      <section className="landing-providers" aria-labelledby="landing-providers-title">
-        <div>
-          <h2 id="landing-providers-title">Music services</h2>
-        </div>
-        <div className="landing-provider-list" aria-label="Supported music services">
-          {["YouTube", "SoundCloud", "Spotify", "Apple Music"].map((provider) => (
-            <Badge variant="outline" key={provider}><Music2 data-icon="inline-start" /> {provider}</Badge>
-          ))}
-        </div>
-      </section>
-
-      <section className="landing-section landing-features" id="features" aria-labelledby="landing-features-title">
-        <div className="landing-section-heading">
-          <h2 id="landing-features-title">Features</h2>
-        </div>
-        <div className="landing-feature-grid">
-          {BENEFITS.map(({ icon: Icon, title }) => (
-            <Card className="landing-feature-card" key={title}>
-              <CardHeader>
-                <span className="landing-feature-icon"><Icon aria-hidden="true" /></span>
-                <CardTitle>{title}</CardTitle>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
-      </section>
-
       <section className="landing-section landing-how" id="how-it-works" aria-labelledby="landing-how-title">
-        <div className="landing-section-heading">
-          <h2 id="landing-how-title">How it works</h2>
-        </div>
-        <ol className="landing-step-grid">
-          {STEPS.map(({ icon: Icon, title }, index) => (
-            <li key={title}>
-              <span className="landing-step-number">0{index + 1}</span>
-              <span className="landing-step-icon"><Icon aria-hidden="true" /></span>
-              <div><h3>{title}</h3></div>
-            </li>
-          ))}
+        <h2 id="landing-how-title">How it works</h2>
+        <ol className="landing-steps">
+          {STEPS.map((step) => <li key={step}>{step}</li>)}
         </ol>
+      </section>
+
+      <section className="landing-section landing-providers" id="music-services" aria-labelledby="landing-providers-title">
+        <h2 id="landing-providers-title">Music services</h2>
+        <div>
+          <ul className="landing-provider-list" aria-label="Supported music services">
+            {["YouTube", "SoundCloud", "Spotify", "Apple Music (when available)"].map((provider) => <li key={provider}>{provider}</li>)}
+          </ul>
+          <p>Spotify playback requires Premium; Apple Music requires a subscription. Connect your account in Settings.</p>
+        </div>
       </section>
 
       <footer className="landing-footer">

@@ -30,19 +30,21 @@ test('credential rotation preserves edited profile fields and the next save uses
 
 test('room roles reject offline commands, disable duplicates while pending and release after timeout', async ({ page }) => {
   await page.goto('/tests/frontend-session-harness/index.html?surface=roles')
-  const moderator = page.getByRole('button', { name: 'Moderator', exact: true })
+  const moderator = page.getByRole('button', { name: 'Moderator — Bob', exact: true })
   await expect(moderator).toBeDisabled()
   expect(await page.evaluate(() => window.frontendSessionTest.requests)).toHaveLength(0)
   // The open dialog owns focus; change the simulated connection via its backing control.
   await page.getByRole('button', { name: 'Toggle connection', includeHidden: true }).evaluate((button) => (button as HTMLButtonElement).click())
   await moderator.click()
   await expect(moderator).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
   const requests = await page.evaluate(() => window.frontendSessionTest.requests)
   expect(requests).toHaveLength(1)
   expect(requests[0]).toEqual({ event: 'room:moderator:set', payload: { roomId: 'lounge', userId: '00000000-0000-4000-8000-000000000002', moderator: true }, timeout: 15000 })
   await page.evaluate(() => window.frontendSessionTest.replies.shift()!(new Error('Timed out')))
   await expect(page.getByRole('alert')).toContainText('request timed out')
   await expect(moderator).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
 })
 
 test('room navigation preserves the underlying profile visit and reauthenticates on token rotation', async ({ page }) => {

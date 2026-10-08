@@ -32,6 +32,12 @@ import "../styles/layout-completion.css";
 import { requestJson } from "../lib/authenticated-http";
 
 const directoryCache = new Map<string, RoomDirectoryEntry[]>();
+interface FavoriteFailure {
+  slug: string;
+  name: string;
+  favorite: boolean;
+  message: string;
+}
 function readDirectoryPreferences(userId: string) {
   try {
     const value: unknown = JSON.parse(readStoredValue(`soundspin:room-directory:${userId}`) || "{}");
@@ -91,6 +97,8 @@ export function RoomLobby({
   const preferencesUserRef = useRef(currentUser.id);
   useEffect(() => { if (preferencesUserRef.current === currentUser.id) storeValue(`soundspin:room-directory:${currentUser.id}`, JSON.stringify({ query, filter, sort })); }, [currentUser.id, query, filter, sort]);
   const [favoritePending, setFavoritePending] = useState<Set<string>>(new Set());
+  const favoritePendingRef = useRef(new Set<string>());
+  const [favoriteFailures, setFavoriteFailures] = useState<Record<string, FavoriteFailure>>({});
   const requestRef = useRef(0);
   const accountRef = useRef(0);
   const [error, setError] = useState("");
@@ -120,9 +128,13 @@ export function RoomLobby({
       setFilter(preferences.filter === "active" || preferences.filter === "protected" ? preferences.filter : "all");
       setSort(preferences.sort === "favorite" || preferences.sort === "alphabetical" ? preferences.sort : "active");
       preferencesUserRef.current = currentUser.id;
+      setCreating(false);
+      setProtectedRoom(null);
     }
     setRooms(directoryCache.get(currentUser.id) || []);
+    favoritePendingRef.current.clear();
     setFavoritePending(new Set());
+    setFavoriteFailures({});
     setLoading(!directoryCache.has(currentUser.id));
     setDirectoryLoaded(directoryCache.has(currentUser.id));
     const controller = new AbortController();
@@ -134,10 +146,14 @@ export function RoomLobby({
     room.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
     (filter !== "active" || room.listenerCount > 0) && (filter !== "protected" || room.passwordProtected)
   ).sort((left, right) => (sort === "active" ? right.listenerCount - left.listenerCount : sort === "favorite" ? Number(right.isFavorite) - Number(left.isFavorite) : 0) || left.name.localeCompare(right.name)), [rooms, query, filter, sort]);
-  const favorites = visibleRooms.filter((room) => room.isFavorite);
-  const memberRooms = visibleRooms.filter((room) => room.role !== null);
-  const publicRooms = visibleRooms.filter((room) => room.isPublic);
   const accessibleRecentRooms = recentVisits.map(visit => rooms.find(room => room.slug === visit.slug)).filter((room): room is RoomDirectoryEntry => Boolean(room));
+  // A room belongs to one section. Recent access and membership take precedence
+  // so changing its favorite state does not move those familiar cards.
+  const recentSlugs = new Set(accessibleRecentRooms.map(room => room.slug));
+  const favorites = visibleRooms.filter(room => room.isFavorite && room.role === null && !recentSlugs.has(room.slug));
+  const memberRooms = visibleRooms.filter(room => room.role !== null && !recentSlugs.has(room.slug));
+  const isOtherPublicRoom = (room: RoomDirectoryEntry) => room.isPublic && room.role === null && !room.isFavorite && !recentSlugs.has(room.slug);
+  const publicRooms = visibleRooms.filter(isOtherPublicRoom);
   const recentRooms = accessibleRecentRooms.filter(room => visibleRooms.some(visible => visible.slug === room.slug));
   const lastRoom = accessibleRecentRooms[0] && visibleRooms.some(room => room.slug === accessibleRecentRooms[0].slug) ? accessibleRecentRooms[0] : null;
   const filtering = Boolean(query.trim()) || filter !== "all";
@@ -147,26 +163,35 @@ export function RoomLobby({
     else onOpenRoom(room.slug);
   };
 
-  const toggleFavorite = async (room: RoomDirectoryEntry) => {
-    if (favoritePending.has(room.slug)) return;
-    const next = !room.isFavorite;
+  const updateFavorite = async (room: Pick<RoomDirectoryEntry, "slug" | "name">, next: boolean) => {
+    if (favoritePendingRef.current.has(room.slug)) return;
+    const previous = rooms.find(item => item.slug === room.slug)?.isFavorite ?? !next;
     const accountRequest = accountRef.current;
-    setFavoritePending((current) => new Set(current).add(room.slug));
+    favoritePendingRef.current.add(room.slug);
+    setFavoritePending(new Set(favoritePendingRef.current));
     setRooms((current) => { const updated = current.map((item) => item.slug === room.slug ? { ...item, isFavorite: next } : item); directoryCache.set(currentUser.id, updated); return updated; });
     try {
       await api(`/api/rooms/${room.slug}/favorite`, accessToken, {
         method: "PUT",
         body: JSON.stringify({ favorite: next })
       });
+      if (accountRequest === accountRef.current) setFavoriteFailures(current => {
+        const updated = { ...current }; delete updated[room.slug]; return updated;
+      });
     } catch (favoriteError) {
       if (accountRequest === accountRef.current) {
-        setRooms((current) => { const updated = current.map((item) => item.slug === room.slug ? { ...item, isFavorite: !next } : item); directoryCache.set(currentUser.id, updated); return updated; });
-        setError(favoriteError instanceof Error ? favoriteError.message : "Could not update favorite.");
+        setRooms((current) => { const updated = current.map((item) => item.slug === room.slug ? { ...item, isFavorite: previous } : item); directoryCache.set(currentUser.id, updated); return updated; });
+        setFavoriteFailures(current => ({ ...current, [room.slug]: { slug: room.slug, name: room.name, favorite: next,
+          message: favoriteError instanceof Error ? favoriteError.message : "Try again." } }));
       }
     } finally {
-      if (accountRequest === accountRef.current) setFavoritePending((current) => { const pending = new Set(current); pending.delete(room.slug); return pending; });
+      if (accountRequest === accountRef.current) {
+        favoritePendingRef.current.delete(room.slug);
+        setFavoritePending(new Set(favoritePendingRef.current));
+      }
     }
   };
+  const toggleFavorite = (room: RoomDirectoryEntry) => updateFavorite(room, !room.isFavorite);
 
   return (
     <main className="room-lobby">
@@ -206,11 +231,17 @@ export function RoomLobby({
         {error && (
           <Alert variant="destructive" className="lobby-error">
             <AlertCircle />
-            <AlertTitle>Couldn't update rooms</AlertTitle>
+            <AlertTitle>Couldn't load rooms</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
             <AlertAction><Button variant="ghost" size="sm" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0}>Retry</Button><Button variant="ghost" size="icon-xs" onClick={() => setError("")} aria-label="Dismiss error"><X /></Button></AlertAction>
           </Alert>
         )}
+        {Object.values(favoriteFailures).map(failure => <Alert key={failure.slug} variant="destructive" className="lobby-error lobby-favorite-error">
+          <AlertCircle />
+          <AlertTitle>Couldn't {failure.favorite ? "add" : "remove"} {failure.name} {failure.favorite ? "to" : "from"} favorites</AlertTitle>
+          <AlertDescription>{failure.message}</AlertDescription>
+          <AlertAction><Button variant="ghost" size="sm" aria-label={`${favoritePending.has(failure.slug) ? "Retrying…" : "Retry"} favorite change for ${failure.name}`} disabled={favoritePending.has(failure.slug)} onClick={() => void updateFavorite(failure, failure.favorite)}>{favoritePending.has(failure.slug) ? "Retrying…" : "Retry"}</Button><Button variant="ghost" size="icon-xs" aria-label={`Dismiss favorite error for ${failure.name}`} onClick={() => setFavoriteFailures(current => { const updated = { ...current }; delete updated[failure.slug]; return updated; })}><X /></Button></AlertAction>
+        </Alert>)}
 
         <div className="lobby-directory-tools">
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a room" aria-label="Find a room" />
@@ -244,11 +275,11 @@ export function RoomLobby({
                 now={now}
               />
             )}
-            {rooms.some((room) => room.role !== null) && <RoomSection
+            {rooms.some((room) => room.role !== null && !recentSlugs.has(room.slug)) && <RoomSection
               title="Your rooms" rooms={memberRooms}
               onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now}
             />}
-            {rooms.length > 0 && <RoomSection
+            {rooms.some(isOtherPublicRoom) && <RoomSection
               title="Public rooms"
               rooms={publicRooms}
               onEnter={enter}
@@ -266,7 +297,7 @@ export function RoomLobby({
         <CreateRoomDialog
           accessToken={accessToken}
           onClose={() => setCreating(false)}
-          onCreated={(slug, password) => onOpenRoom(slug, password)}
+          onCreated={(slug, password) => { setCreating(false); onOpenRoom(slug, password); }}
         />
       )}
       {protectedRoom && (
@@ -337,6 +368,8 @@ function RoomSection({
               <CardContent className="room-card-content">
                 <div className="room-card-badges">
                   {room.passwordProtected && <Badge variant="outline"><LockKeyhole /> Protected</Badge>}
+                  {!room.isPublic && <Badge variant="outline">Private</Badge>}
+                  {room.role === "member" && <Badge variant="secondary">Member</Badge>}
                   {room.role === "owner" && <Badge variant="secondary">Owner</Badge>}
                   {room.role === "moderator" && <Badge variant="secondary">Moderator</Badge>}
                   {room.role === "dj" && <Badge variant="secondary">DJ role</Badge>}
@@ -374,28 +407,39 @@ function CreateRoomDialog({
   const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const activeRef = useRef(true);
+  const savingRef = useRef(false);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError("");
+    const submittedPassword = password || undefined;
     try {
-      const payload = await api<{ room: { slug: string } }>("/api/rooms", accessToken, {
+      const payload = await requestJson<{ room: { slug: string } }>("/api/rooms", {
+        accessToken,
         method: "POST",
-        body: JSON.stringify({ name, isPublic, password: password || undefined })
+        body: JSON.stringify({ name: name.trim(), isPublic, password: submittedPassword }),
+        validate: (value): value is { room: { slug: string } } => Boolean(value && typeof value === "object" && "room" in value && value.room && typeof value.room === "object" && "slug" in value.room && typeof value.room.slug === "string" && value.room.slug.length > 0)
       });
-      onCreated(payload.room.slug, password || undefined);
+      if (activeRef.current) onCreated(payload.room.slug, submittedPassword);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : "Could not create room.");
+      if (activeRef.current) setError(createError instanceof Error && !(createError instanceof TypeError)
+        && createError.message !== "The request timed out. Try again." && createError.message !== "The server returned an invalid response. Try again."
+        ? createError.message : "Creation wasn't confirmed. Refresh rooms before creating another.");
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      if (activeRef.current) setSaving(false);
     }
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent>
-        <form className="grid gap-5" autoComplete="off" onSubmit={submit}>
+    <Dialog open disablePointerDismissal={saving} onOpenChange={(open) => { if (!open && !savingRef.current) onClose(); }}>
+      <DialogContent showCloseButton={!saving}>
+        <form className="grid gap-5" autoComplete="off" onSubmit={submit} aria-busy={saving}>
           <DialogHeader>
             <DialogTitle>Create a room</DialogTitle>
             <DialogDescription className="sr-only">Name and access settings.</DialogDescription>
@@ -411,6 +455,7 @@ function CreateRoomDialog({
                 data-1p-ignore
                 data-lpignore="true"
                 required
+                disabled={saving}
                 maxLength={48}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -423,6 +468,7 @@ function CreateRoomDialog({
                 id="room-password"
                 name="soundspin-new-room-password"
                 type="password"
+                disabled={saving}
                 autoComplete="new-password"
                 data-1p-ignore
                 data-lpignore="true"
@@ -434,12 +480,13 @@ function CreateRoomDialog({
             </div>
             <div className="switch-row">
               <span><Globe2 /><span><strong>List in room directory</strong></span></span>
-              <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
+              <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="List in room directory" disabled={saving} />
             </div>
           </div>
           {error && <div className="dialog-error" role="alert">{error}</div>}
+          {saving && <p className="text-sm text-muted-foreground" role="status">Wait for room creation to finish.</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Creating…" : "Create room"}</Button>
           </DialogFooter>
         </form>

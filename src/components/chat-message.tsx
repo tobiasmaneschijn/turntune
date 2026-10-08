@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } fro
 import { createPortal } from 'react-dom'
 import { Check, MoreHorizontal, Reply, SmilePlus, X } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
+import { useTheme } from 'next-themes'
 
 import {
   getMessagePreview,
@@ -26,7 +27,7 @@ import {
   saveEmojiSkinTone,
 } from '@/components/platform-emoji-text'
 
-const EmojiPicker = lazy(() => import('emoji-picker-react'))
+const EmojiPicker = lazy(() => import('./accessible-emoji-picker'))
 const QUICK_REACTIONS = ['❤️', '😂', '😮']
 
 function MentionText({
@@ -92,6 +93,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   onReactionPickerOpenChange,
   onResolveMediaUrl,
 }: ChatMessageItemProps) {
+  const { resolvedTheme } = useTheme()
   const [localReactionPicker, setLocalReactionPicker] = useState(false)
   const showReactionPicker = reactionPickerOpen ?? localReactionPicker
   const setShowReactionPicker = (open: boolean | ((current: boolean) => boolean)) => {
@@ -204,7 +206,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             <Suspense fallback={<div className="chat-reaction-picker-loading">Loading emoji…</div>}>
               <EmojiPicker
                 autoFocusSearch={false}
-                theme={'dark' as Theme}
+                theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
                 width="100%"
                 height={Math.max(180, pickerBounds.height - 46)}
                 lazyLoadEmojis

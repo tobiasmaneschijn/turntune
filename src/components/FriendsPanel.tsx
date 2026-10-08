@@ -4,6 +4,7 @@ import type { User } from "../types";
 import { requestJson } from "../lib/authenticated-http";
 import { Avatar } from "./Avatar";
 import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import "../styles/friends.css";
 
@@ -58,7 +59,8 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
   const [people, setPeople] = useState<SocialPerson[]>([]);
   const [invitations, setInvitations] = useState<RoomInvitation[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [removeTarget, setRemoveTarget] = useState<User | null>(null);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
@@ -113,7 +115,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
 
   useEffect(() => {
     mountedRef.current = true;
-    setPeople([]); setInvitations([]); setLoaded(false); setLoadError(""); setActionError(""); setNotice("");
+    setPeople([]); setInvitations([]); setLoaded(false); setRemoveTarget(null); setLoadError(""); setActionError(""); setNotice("");
     setQuery(""); setSearchResults([]); setSearched(false); setSearching(false); setSearchError(""); setInvited(new Set());
     pendingRef.current.clear(); setPending(new Set());
     void load();
@@ -218,12 +220,12 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
     <span className="friends-person-actions">
       {relation?.state === "friends" ? <>
         {relation.room && <span className="friends-room-name">{relation.room.name}</span>}
-        {relation.room?.canJoin && relation.room.slug !== currentRoomSlug && <Button size="sm" variant="secondary" onClick={() => onOpenRoom(relation.room!.slug)}>Join</Button>}
-        {currentRoomSlug && <Button size="sm" variant="secondary" disabled={pending.has(user.id) || invited.has(user.id)} onClick={() => invite(user)}>{invited.has(user.id) ? "Invited" : "Invite"}</Button>}
-        <Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => changeFriend(user, "remove")} aria-label={`Remove ${user.name} from friends`}>Remove</Button>
-      </> : relation?.state === "incoming" ? <><Button size="sm" disabled={pending.has(user.id)} onClick={() => changeFriend(user, "accept")}>Accept</Button><Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => changeFriend(user, "decline")}>Decline</Button></>
-        : relation?.state === "outgoing" ? <><span className="friends-state">Pending</span><Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => changeFriend(user, "decline")}>Cancel</Button></>
-          : <Button size="sm" variant="secondary" disabled={pending.has(user.id)} onClick={() => changeFriend(user, "request")}><UserPlus />Add friend</Button>}
+        {relation.room?.canJoin && relation.room.slug !== currentRoomSlug && <Button size="sm" variant="secondary" aria-label={`Join ${relation.room.name} with ${user.name}`} onClick={() => onOpenRoom(relation.room!.slug)}>Join</Button>}
+        {currentRoomSlug && <Button size="sm" variant="secondary" disabled={pending.has(user.id) || invited.has(user.id)} aria-label={`${invited.has(user.id) ? "Invited" : "Invite"} ${user.name} to this room`} onClick={() => invite(user)}>{invited.has(user.id) ? "Invited" : "Invite"}</Button>}
+        <Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => setRemoveTarget(user)} aria-label={`Remove ${user.name} from friends`}>Remove</Button>
+      </> : relation?.state === "incoming" ? <><Button size="sm" disabled={pending.has(user.id)} aria-label={`Accept ${user.name}'s friend request`} onClick={() => changeFriend(user, "accept")}>Accept</Button><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={`Decline ${user.name}'s friend request`} onClick={() => changeFriend(user, "decline")}>Decline</Button></>
+        : relation?.state === "outgoing" ? <><span className="friends-state">Pending</span><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={`Cancel request to ${user.name}`} onClick={() => changeFriend(user, "decline")}>Cancel</Button></>
+          : <Button size="sm" variant="secondary" disabled={pending.has(user.id)} aria-label={`Add friend ${user.name}`} onClick={() => changeFriend(user, "request")}><UserPlus />Add friend</Button>}
     </span>
   </div>;
 
@@ -231,20 +233,32 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
   const requests = people.filter(person => person.state !== "friends");
   return <section className="friends-panel" aria-labelledby={`${panelId}-title`} ref={sectionRef}>
     <h2 id={`${panelId}-title`}>Friends</h2>
+    {!loaded && loading && <p className="friends-state" role="status">Loading friends…</p>}
     {loadError && <div className="friends-error" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>Retry</Button></div>}
     {actionError && <p className="friends-error" role="alert">{actionError}</p>}
     {notice && <p className="friends-feedback" role="status">{notice}</p>}
-    {invitations.length > 0 && <div className="friends-group"><h3>Room invites</h3>{invitations.map(invitation => <div className="friends-person" key={invitation.id}><span className="friends-invitation"><strong>{invitation.room.name}</strong><span>{invitation.from.name}</span></span><Button size="sm" disabled={pending.has(`invite:${invitation.id}`)} onClick={() => acceptInvitation(invitation)}>Accept invite</Button></div>)}</div>}
+    {invitations.length > 0 && <div className="friends-group"><h3>Room invites</h3>{invitations.map(invitation => <div className="friends-person" key={invitation.id}><span className="friends-invitation"><strong>{invitation.room.name}</strong><span>{invitation.from.name}</span></span><Button size="sm" disabled={pending.has(`invite:${invitation.id}`)} aria-label={`Accept invite to ${invitation.room.name} from ${invitation.from.name}`} onClick={() => acceptInvitation(invitation)}>Accept invite</Button></div>)}</div>}
     {friends.map(person => personRow(person.user, person))}
     {loaded && !friends.length && !requests.length && !invitations.length && <p className="friends-state">No friends yet.</p>}
     {requests.length > 0 && <div className="friends-group"><h3>Requests</h3>{requests.map(person => personRow(person.user, person))}</div>}
     <details className="friends-discovery"><summary>Find people</summary>
       <form className="friends-search" onSubmit={search}><Input aria-label="Find people" aria-describedby={`${panelId}-search-requirement`} minLength={2} maxLength={48} placeholder="Name" value={query} onChange={event => {
         setQuery(event.target.value); searchRequestRef.current += 1; searchControllerRef.current?.abort(); setSearching(false); setSearched(false); setSearchResults([]); setSearchError("");
-      }} /><span className="sr-only" id={`${panelId}-search-requirement`}>Enter at least 2 characters.</span><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? "Searching…" : "Search"}</Button></form>
+      }} /><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? "Searching…" : "Search"}</Button></form>
+      <p className="friends-search-hint" id={`${panelId}-search-requirement`}>Enter at least 2 characters.</p>
       {searchError && <p className="friends-error" role="alert">{searchError}</p>}
       {searchResults.map(user => personRow(user, people.find(person => person.user.id === user.id)))}
       {searched && !searchResults.length && <p className="friends-state" role="status">No matches.</p>}
     </details>
+    <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
+      <DialogContent showCloseButton={false}>
+        <DialogTitle>Remove {removeTarget?.name} from friends?</DialogTitle>
+        <DialogDescription>Adding them again requires a new friend request.</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setRemoveTarget(null)}>Cancel</Button>
+          <Button variant="destructive" aria-label={`Remove ${removeTarget?.name} from friends`} onClick={() => {
+            const user = removeTarget; setRemoveTarget(null); if (user) changeFriend(user, "remove");
+          }}>Remove</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>;
 }

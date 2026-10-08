@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { cn } from '@/lib/utils'
@@ -26,24 +26,53 @@ export function ForgotPasswordForm({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [resendAt, setResendAt] = useState(0)
+  const [now, setNow] = useState(Date.now)
+  const request = useRef(0)
+  const active = useRef(true)
+  const resultHeading = useRef<HTMLDivElement>(null)
+  const previousSuccess = useRef(false)
+  const remaining = Math.max(0, Math.ceil((resendAt - now) / 1000))
+  useEffect(() => { active.current = true; return () => { active.current = false; request.current += 1 } }, [])
+  useEffect(() => {
+    if (!resendAt) return
+    const timer = window.setInterval(() => setNow(Date.now()), 500)
+    return () => window.clearInterval(timer)
+  }, [resendAt])
+  useEffect(() => {
+    if (success) resultHeading.current?.focus()
+    else if (previousSuccess.current) document.getElementById('email')?.focus()
+    previousSuccess.current = success
+  }, [success])
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const sendResetLink = async () => {
+    if (isLoading || Date.now() < resendAt) return
+    const attempt = ++request.current
     setIsLoading(true)
     setError(null)
-
+    let deadline: ReturnType<typeof setTimeout> | undefined
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
-      const { error } = await client.auth.resetPasswordForEmail(email, {
-        redirectTo: `${location.origin}/update-password`,
-      })
-      if (error) throw error
+      const response = await Promise.race([
+        client.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/update-password` }),
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('Could not confirm the reset email. Check your email or try again.')), 15_000)
+        }),
+      ])
+      if (!active.current || request.current !== attempt) return
+      if (response.error) throw response.error
       setSuccess(true)
+      setResendAt(Date.now() + 60_000)
+      setNow(Date.now())
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'Could not send reset link. Try again.')
+      if (active.current && request.current === attempt) setError(error instanceof Error ? error.message : 'Could not send reset link. Try again.')
     } finally {
-      setIsLoading(false)
+      clearTimeout(deadline)
+      if (active.current && request.current === attempt) setIsLoading(false)
     }
+  }
+  const handleForgotPassword = (event: React.FormEvent) => {
+    event.preventDefault()
+    void sendResetLink()
   }
 
   return (
@@ -51,9 +80,15 @@ export function ForgotPasswordForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Check your email</CardTitle>
+            <CardTitle ref={resultHeading} role="heading" aria-level={2} tabIndex={-1} className="text-xl">Check your email</CardTitle>
             <CardDescription>If this email has an account, it will receive a reset link.</CardDescription>
           </CardHeader>
+          <CardContent className="grid gap-3">
+            {error && <p role="alert" className="dialog-error">{error}</p>}
+            <Button onClick={() => onNavigate('/login')}>Sign in</Button>
+            <Button variant="outline" disabled={isLoading} onClick={() => { setSuccess(false); setError(null); setResendAt(0) }}>Use another email</Button>
+            <Button variant="ghost" disabled={isLoading || remaining > 0} onClick={() => void sendResetLink()}>{isLoading ? 'Sending…' : remaining > 0 ? `Resend in ${remaining}s` : 'Resend reset link'}</Button>
+          </CardContent>
         </Card>
       ) : (
         <Card>
@@ -68,15 +103,17 @@ export function ForgotPasswordForm({
                   <Input
                     id="email"
                     type="email"
+                    autoComplete="email"
+                    disabled={isLoading}
                     placeholder="you@example.com"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 </div>
-                {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Sending…' : 'Send reset link'}
+                {error && <p role="alert" className="dialog-error">{error}</p>}
+                <Button type="submit" className="w-full" disabled={isLoading || remaining > 0}>
+                  {isLoading ? 'Sending…' : remaining > 0 ? `Resend in ${remaining}s` : 'Send reset link'}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/login");
-  await expect(page.getByRole("heading", { name: /listen together/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
 });
 
 test("renders the dark authentication shell", async ({ page }) => {
@@ -42,7 +42,7 @@ test("applies the stored theme before the application bundle runs", async ({ pag
 
 test("honors reduced-motion preferences", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  const animationDuration = await page.getByRole("heading", { name: /listen together/i }).evaluate((element) =>
+  const animationDuration = await page.getByRole("heading", { name: "Sign in", exact: true }).evaluate((element) =>
     getComputedStyle(element).animationDuration,
   );
   const durationInMilliseconds = animationDuration.endsWith("ms")

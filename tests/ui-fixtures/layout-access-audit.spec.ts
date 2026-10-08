@@ -35,7 +35,7 @@ test("320px feedback primary targets, heading and submission remain reachable", 
 
 test("320px settings option text fits the real target and interactive controls stay named", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/tests/ui-harness/index.html?scenario=settings"); await productionCss(page);
+  await page.goto("/tests/settings-review-harness/index.html"); await productionCss(page);
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   for (const option of await dialog.locator(".playback-option").all()) {
     await target(option);
@@ -44,6 +44,7 @@ test("320px settings option text fits the real target and interactive controls s
     expect(text!.y + text!.height).toBeLessThanOrEqual(rect!.y + rect!.height);
   }
   await target(dialog.locator('[data-slot="slider"] > div'));
+  await dialog.getByRole("button", { name: "Spotify in browser", exact: true }).click();
   await target(dialog.getByRole("combobox", { name: "When the preferred provider has no match" }));
   await dialog.getByRole("tab", { name: "Appearance", exact: true }).click();
   await target(dialog.getByRole("switch", { name: "Compact player" }));
@@ -54,7 +55,7 @@ test("320px settings option text fits the real target and interactive controls s
 test("320px room announcement read, dismiss and host tools keep independent targets", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/tests/player-qol-harness/extras.html"); await productionCss(page);
-  const read = page.getByRole("button", { name: "Read full room note" });
+  const read = page.getByRole("button", { name: /^Read full room note:/ });
   const dismiss = page.getByRole("button", { name: "Dismiss room note" });
   await target(read); await target(dismiss);
   const readBox = await read.boundingBox(); const dismissBox = await dismiss.boundingBox();

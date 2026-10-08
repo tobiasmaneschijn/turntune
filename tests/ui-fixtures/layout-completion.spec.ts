@@ -173,14 +173,14 @@ test("short windows and 320px reflow retain reachable controls without horizonta
 test("phone and coarse pointer targets have usable actual rectangles and names", { tag: "@fixed-viewport" }, async ({ page, browser }) => {
   const context = await browser.newContext({ viewport: { width: 900, height: 700 }, hasTouch: true });
   const touch = await context.newPage(); await touch.goto(roomUrl);
-  for (const target of [more(touch), touch.getByRole("button", { name: "Back to rooms" }), touch.getByRole("button", { name: "Room listeners, 10 listeners" }), touch.getByRole("switch", { name: "Compact artwork" })]) {
+  for (const target of [more(touch), touch.getByRole("button", { name: "Lydman — Back to rooms" }), touch.getByRole("button", { name: "Room listeners, 10 listeners" }), touch.getByRole("switch", { name: "Compact artwork" })]) {
     const box = await target.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
   }
   const sliderControl = touch.locator('[data-slot="slider"] > div').first();
   expect((await sliderControl.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await context.close();
   await page.setViewportSize({ width: 320, height: 568 }); await page.goto(`${roomUrl}?scenario=room-settings`);
-  for (const target of [page.getByRole("switch", { name: "Public room" }), page.getByRole("button", { name: "Everyone", exact: true }), page.getByRole("button", { name: "Close", exact: true })]) {
+  for (const target of [page.getByRole("switch", { name: "List in room directory — Public room" }), page.getByRole("button", { name: "Everyone", exact: true }), page.getByRole("button", { name: "Close", exact: true })]) {
     await target.scrollIntoViewIfNeeded(); const box = await target.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
   }
 });

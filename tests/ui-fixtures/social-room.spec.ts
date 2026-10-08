@@ -32,7 +32,7 @@ test("the app keeps its player and room admission across profile visits and brow
   }
   await page.getByRole("button", { name: "Open Bob's profile", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog").getByRole("button", { name: "Invite", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Invite Bob to this room", exact: true })).toBeVisible();
   expect(await page.evaluate(() => window.socialRoomTest)).toMatchObject({ creates: 1, destroys: 0, joins: 1, connected: true });
 });
 
@@ -42,11 +42,11 @@ test("theme nights appear in the room and can be ended", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Theme night", exact: true }).click();
   await page.getByRole("button", { name: "Guilty pleasures", exact: true }).click();
   await page.getByRole("button", { name: "Start", exact: true }).click();
-  await expect(page.getByLabel("Room theme")).toHaveText("ThemeGuilty pleasures");
+  await expect(page.getByLabel("Room theme", { exact: true }).locator("summary")).toHaveText("ThemeGuilty pleasures");
   await page.getByRole("button", { name: "More room actions", exact: true }).click();
   await page.getByRole("menuitem", { name: "Theme night", exact: true }).click();
   await page.getByRole("button", { name: "End theme", exact: true }).click();
-  await expect(page.getByLabel("Room theme")).toHaveCount(0);
+  await expect(page.getByLabel("Room theme", { exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => window.socialRoomTest.themes)).toEqual(["Guilty pleasures", null]);
 });
 
@@ -62,4 +62,5 @@ test("signup from a room link signs in and returns to that room", async ({ page 
   await expect(page).toHaveURL(/\/room\/lounge$/);
   await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates)).toBe(1);
   expect(await page.evaluate(() => window.socialRoomTest.joins)).toBe(1);
+  await expect(page.getByRole("heading", { name: "Lounge", exact: true })).toBeFocused();
 });

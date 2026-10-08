@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react'
 import '@fontsource-variable/geist'
 import '../../src/shadcn.css'
 import '../../src/styles.css'
+import { RoomProfileDialog } from '../../src/components/RoomProfileDialog'
 import { ProfilePage } from '../../src/components/ProfilePage'
 import { RoomSettingsDialog } from '../../src/components/RoomSettingsDialog'
 import { ThemeProvider } from '../../src/components/theme-provider'
@@ -57,9 +58,11 @@ function Harness() {
   const [connected, setConnected] = useState(false)
   const [notice, setNotice] = useState('')
   const [updatedProfile, setUpdatedProfile] = useState('')
+  const [dialogOpen, setDialogOpen] = useState(true)
   const roles = new URLSearchParams(location.search).get('surface') === 'roles'
   const otherProfile = new URLSearchParams(location.search).get('profile') === 'other'
   const embedded = new URLSearchParams(location.search).has('embedded')
+  const dialog = new URLSearchParams(location.search).has('dialog')
   return <ThemeProvider><main>
     <button onClick={() => setToken('token-two')}>Rotate token</button>
     <button onClick={() => { setAccount(bob); setToken('token-bob'); setUpdatedProfile('') }}>Switch account</button>
@@ -67,7 +70,9 @@ function Harness() {
     <p role="status">{notice}</p>
     <output data-testid="profile-updated">{updatedProfile}</output>
     {roles ? <RoomSettingsDialog snapshot={snapshot} currentUserId={user.id} accessToken={token} connected={connected} transport={transport} onClose={() => {}} onNotice={setNotice} />
-      : <ProfilePage profileId={otherProfile ? bob.id : account.id} accessToken={token} currentUser={account} embedded={embedded} onBack={() => {}} onOwnProfileUpdated={(profile) => setUpdatedProfile(profile.display_name)} onInvite={(id) => setNotice(`Invited ${id}`)} />}
+      : dialog ? <><button onClick={() => setDialogOpen(true)}>Open profile</button><RoomProfileDialog profileId={dialogOpen ? account.id : null} accessToken={token} currentUser={account}
+          onClose={() => setDialogOpen(false)} onUpdate={(profile) => setUpdatedProfile(profile.display_name)} /></>
+      : <ProfilePage profileId={otherProfile ? bob.id : account.id} accessToken={token} currentUser={account} embedded={embedded} onBack={() => setNotice("Profile closed")} onOwnProfileUpdated={(profile) => setUpdatedProfile(profile.display_name)} onInvite={(id) => setNotice(`Invited ${id}`)} />}
   </main></ThemeProvider>
 }
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).get('surface') === 'session' ? <RoomSessionHarness /> : <Harness />)

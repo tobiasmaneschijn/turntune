@@ -13,7 +13,8 @@ export default defineConfig({
           if (id.includes("@supabase")) return "supabase";
           if (id.includes("@base-ui")) return "base-ui";
           if (id.includes("socket.io") || id.includes("engine.io")) return "realtime";
-          if (id.includes("emoji-picker-react") || id.includes("@twemoji")) return "emoji";
+          if (id.includes("emoji-picker-react")) return "emoji-picker";
+          if (id.includes("@twemoji")) return "emoji-text";
           if (id.includes("lucide-react")) return "icons";
           if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return "react";
           if (id.includes("react-resizable-panels")) return "resizable";

@@ -2,6 +2,11 @@ import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'l
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
 import type { SkinTones, Theme } from 'emoji-picker-react'
+import { useTheme } from 'next-themes'
+import { insertComposerText } from '@/chat/composer-edit'
+import { prepareUploadedChatImage } from '@/chat/image-upload'
+import { getScopedSupabaseClient } from '@/supabase'
+import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS } from '@/lib/bounded-operation'
 import {
   forwardRef,
   lazy,
@@ -78,7 +83,7 @@ import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group'
 import { Input } from '@/components/ui/input'
 import type { User } from '@/types'
 
-const EmojiPicker = lazy(() => import('emoji-picker-react'))
+const EmojiPicker = lazy(() => import('./accessible-emoji-picker'))
 
 interface RealtimeChatProps {
   client: SupabaseClient
@@ -96,6 +101,7 @@ interface RealtimeChatProps {
   historyRoomSlug?: string
   historySource?: ChatHistorySource
   historyLoading?: boolean
+  historyUnavailable?: boolean
   onHistoricalMessages?: (messages: ChatMessage[]) => void
   notifications?: SoundSpinUserSettings['notifications']
   onNotificationActivate?: () => void
@@ -223,6 +229,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   historyRoomSlug,
   historySource,
   historyLoading = false,
+  historyUnavailable = false,
   onHistoricalMessages,
   notifications,
   onNotificationActivate,
@@ -233,6 +240,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   messages: initialMessages = EMPTY_MESSAGES,
 }, ref) {
   const reducedMotion = useEffectiveMotion()
+  const { resolvedTheme } = useTheme()
+  const mentionListId = useId()
+  const composerHintId = useId()
+  const mediaPanelId = useId()
   const draftStore = useMemo(() => createChatDraftStore(user.id, roomName), [user.id, roomName])
   const initialDraft = useMemo(() => draftStore.read(), [draftStore])
   const {
@@ -296,9 +307,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const draftMessageRef = useRef(initialDraft?.text || '')
   const composingRef = useRef(false)
+  const selectionRef = useRef({ start: initialDraft?.text.length || 0, end: initialDraft?.text.length || 0 })
   const restoredReplyIdRef = useRef(initialDraft?.replyToId)
   const draftSnapshotRef = useRef<{ store: typeof draftStore; draft: ChatDraft }>({ store: draftStore, draft: initialDraft || { text: '', mentions: [] } })
   const pendingReactionsRef = useRef(new Set<string>())
+  const uploadAbortRef = useRef<AbortController | null>(null)
+  const uploadScopeRef = useRef(`${user.id}:${roomName}`)
+  uploadScopeRef.current = `${user.id}:${roomName}`
+  const [pendingImage, setPendingImage] = useState<File | null>(null)
   const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
   const previousVisibilityRef = useRef(isVisible)
@@ -358,8 +374,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [mentionQuery, roomMentionOptions])
 
   const { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef,
-    sendText, sendMedia: sendMediaMessage, retrySend, retrySave } = useChatDelivery({
-    scope: `${user.id}:${roomName}`, isConnected, prepareMessage, deliver: sendExistingMessage, persist: onSend,
+    sendText, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
+    scope: `${user.id}:${roomName}`, isConnected, prepareMessage,
+    deliver: (message) => boundedOperation(() => sendExistingMessage(message), { timeoutMs: SUBMISSION_TIMEOUT_MS }),
+    persist: onSend ? (message) => boundedOperation(() => Promise.resolve(onSend(message)), { timeoutMs: SUBMISSION_TIMEOUT_MS }) : undefined,
     composer: () => ({ text: draftMessageRef.current, mentions: activeMentions(draftMessageRef.current.trim(), selectedMentions), replyTo: replyingTo }),
     onError: setComposerError,
     beforeTextSend: () => requestAnimationFrame(() => { if (lifetimeRef.current.active && !history.context) scrollToBottom('auto') }),
@@ -388,6 +406,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setReplyRestoreNotice('')
     restoredReplyIdRef.current = initialDraft?.replyToId
   }, [roomName, user.id, initialDraft])
+
+  useEffect(() => {
+    setPendingImage(null)
+    return () => { uploadAbortRef.current?.abort(); uploadAbortRef.current = null }
+  }, [roomName, user.id])
 
   // Debounce session storage, then flush the latest scoped draft on navigation/reload.
   useEffect(() => {
@@ -768,29 +791,41 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     if (validationError) return setComposerError(validationError)
 
     const lifetime = lifetimeRef.current
+    const controller = new AbortController()
+    const scope = `${user.id}:${roomName}`
+    const isCurrent = () => lifetime.active && uploadScopeRef.current === scope
+    uploadAbortRef.current = controller
+    setPendingImage(file)
     uploadingRef.current = true
     setUploading(true)
     const storagePath = createChatStoragePath(user.id, historyRoomSlug || roomName, file)
     try {
-      const { error } = await client.storage.from('chat-media').upload(storagePath, file, {
-        contentType: file.type,
-        cacheControl: '3600',
-        upsert: false,
-      })
-      if (error) throw error
-      if (!lifetime.active) {
-        await client.storage.from('chat-media').remove([storagePath])
-        return
-      }
-
       if (!onResolveMediaUrl) throw new Error('Private chat image delivery is unavailable.')
-      const mediaUrl = await onResolveMediaUrl(storagePath)
-      if (!lifetime.active) return
-      await sendMediaMessage('image', mediaUrl, file.name, storagePath)
+      const mediaUrl = await prepareUploadedChatImage({
+        clientFactory: (signal) => getScopedSupabaseClient(client, user.id, signal),
+        file, storagePath, resolve: onResolveMediaUrl, signal: controller.signal,
+      })
+      if (!isCurrent() || controller.signal.aborted) return
+      // Delivery owns the stable message identity after this point. Its existing
+      // retry action handles unknown acknowledgements without uploading again.
+      uploadingRef.current = false
+      setUploading(false)
+      const result = await sendMediaWithOwnership('image', mediaUrl, file.name, storagePath)
+      if (!isCurrent()) return
+      if (result.accepted) setPendingImage(null)
+      else {
+        setComposerError((current) => current || 'Image not sent. Retry the upload when chat is ready.')
+        void boundedOperation(async (signal) => {
+          const transport = await getScopedSupabaseClient(client, user.id, signal)
+          signal.throwIfAborted()
+          return transport.storage.from('chat-media').remove([storagePath])
+        }, { timeoutMs: CLEANUP_TIMEOUT_MS }).catch(() => undefined)
+      }
     } catch (error) {
-      if (lifetime.active) setComposerError(error instanceof Error ? error.message : 'Could not upload this image. Try again.')
+      if (isCurrent()) setComposerError(controller.signal.aborted ? 'Upload cancelled. Your image and draft are kept.' : error instanceof Error ? error.message : 'Could not upload this image. Try again.')
     } finally {
-      if (lifetime.active) { uploadingRef.current = false; setUploading(false) }
+      if (uploadAbortRef.current === controller) uploadAbortRef.current = null
+      if (isCurrent()) { uploadingRef.current = false; setUploading(false) }
     }
   }
 
@@ -925,7 +960,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         }}>{history.loadingOlder ? 'Loading older messages…' : 'Load older messages'}</Button></div>}
         {history.contextLoading && <p role="status">Loading message context…</p>}
         {history.historyError && <p role="alert" className="chat-history-error">{history.historyError}</p>}
-        {visibleMessages.length === 0 && !historyLoading ? (
+        {visibleMessages.length === 0 && !historyLoading && !historyUnavailable && !history.historyError ? (
           <div className="text-center text-sm text-muted-foreground">
             No messages yet.
           </div>
@@ -963,11 +998,21 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
       {(showEmoji || showGiphy) && (
         <div className="chat-picker-popover" style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
-          <div className="chat-picker-tabs" role="tablist" aria-label="Message media">
+          <div className="chat-picker-header">
+          <div className="chat-picker-tabs" role="tablist" aria-label="Message media" onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !giphyConfigured) return
+            event.preventDefault()
+            const emoji = event.key === 'End' || (event.key !== 'Home' && !showEmoji)
+            setShowEmoji(emoji); setShowGiphy(!emoji)
+            document.getElementById(`${mediaPanelId}-${emoji ? 'emoji' : 'gif'}`)?.focus()
+          }}>
             <button
               type="button"
+              id={`${mediaPanelId}-gif`}
               role="tab"
               aria-selected={showGiphy}
+              tabIndex={showGiphy ? 0 : -1}
+              aria-controls={mediaPanelId}
               className={showGiphy ? 'active' : undefined}
               disabled={!giphyConfigured}
               onClick={() => {
@@ -979,8 +1024,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             </button>
             <button
               type="button"
+              id={`${mediaPanelId}-emoji`}
               role="tab"
               aria-selected={showEmoji}
+              tabIndex={showEmoji ? 0 : -1}
+              aria-controls={mediaPanelId}
               className={showEmoji ? 'active' : undefined}
               onClick={() => {
                 setShowGiphy(false)
@@ -989,6 +1037,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             >
               Emoji
             </button>
+          </div>
             <button
               type="button"
               className="chat-picker-close"
@@ -999,10 +1048,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             </button>
           </div>
           {showEmoji ? (
-            <div className="chat-emoji-panel">
+            <div id={mediaPanelId} role="tabpanel" aria-labelledby={`${mediaPanelId}-emoji`} className="chat-emoji-panel">
               <Suspense fallback={<div className="chat-picker-loading">Loading emoji…</div>}>
                 <EmojiPicker
-                  theme={'dark' as Theme}
+                  theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
                   width="100%"
                   height={Math.max(180, mediaPickerBounds.height - 64)}
                   lazyLoadEmojis
@@ -1015,24 +1064,26 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                     saveEmojiSkinTone(selectedSkinTone)
                   }}
                   onEmojiClick={(emoji) => {
-                    const nextMessage = `${draftMessageRef.current}${emoji.emoji}`
-                    if (nextMessage.length > 500) return
-                    draftMessageRef.current = nextMessage
-                    draftSnapshotRef.current.draft.text = nextMessage
-                    setDraftText(nextMessage)
+                    const inserted = insertComposerText(draftMessageRef.current, emoji.emoji, selectionRef.current.start, selectionRef.current.end, selectedMentions)
+                    if (!inserted) return
+                    draftMessageRef.current = inserted.text
+                    draftSnapshotRef.current.draft = { ...draftSnapshotRef.current.draft, text: inserted.text, mentions: inserted.mentions }
+                    selectionRef.current = { start: inserted.caret, end: inserted.caret }
+                    setSelectedMentions(inserted.mentions)
+                    setDraftText(inserted.text)
                     setDraftRestored(false)
-                    setHasDraft(Boolean(nextMessage.trim()))
+                    setHasDraft(Boolean(inserted.text.trim()))
                     noteTyping()
                     requestAnimationFrame(() => {
                       messageInputRef.current?.focus()
-                      messageInputRef.current?.setSelectionRange(nextMessage.length, nextMessage.length)
+                      messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
                     })
                   }}
                 />
               </Suspense>
             </div>
           ) : (
-            <div className="chat-gif-panel">
+            <div id={mediaPanelId} role="tabpanel" aria-labelledby={`${mediaPanelId}-gif`} className="chat-gif-panel">
               <form
                 className="chat-gif-search"
                 onSubmit={(event) => {
@@ -1091,7 +1142,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         </div>
       )}
 
-      {composerError && <p role="alert" className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
+      {composerError && <p role="alert" className="px-4 pt-2 text-sm text-destructive">{composerError}</p>}
       {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
       <form
         ref={composerRef}
@@ -1110,6 +1161,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             event.currentTarget.value = ''
           }}
         />
+        {pendingImage && <div className="chat-pending-image">
+          <span>{pendingImage.name}</span>
+          {uploading ? <Button type="button" variant="ghost" size="sm" onClick={() => uploadAbortRef.current?.abort()}>Cancel upload</Button> : <>
+            <Button type="button" variant="ghost" size="sm" disabled={!isConnected || sending} onClick={() => void uploadImage(pendingImage)}>Retry upload</Button>
+            <Button type="button" variant="ghost" size="sm" aria-label="Remove attached image" onClick={() => setPendingImage(null)}><X size={14} /></Button>
+          </>}
+        </div>}
         <div className="chat-typing-indicator" aria-live="polite" aria-atomic="true">
           {typingLabel && <><i /><i /><i /><span>{typingLabel}</span></>}
         </div>
@@ -1135,11 +1193,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           </div>
         )}
         {mentionQuery && mentionCandidates.length > 0 && (
-          <div className="chat-mention-picker" id="chat-mention-list" role="listbox" aria-label="Tag a listener">
+          <div className="chat-mention-picker" id={mentionListId} role="listbox" aria-label="Tag a listener">
             <div className="chat-mention-picker-heading"><strong>Tag a listener</strong></div>
             {mentionCandidates.map((option, index) => (
               <button
-                id={`chat-mention-option-${index}`}
+                id={`${mentionListId}-${index}`}
                 type="button"
                 role="option"
                 aria-selected={index === activeMentionIndex}
@@ -1174,16 +1232,17 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             rows={1}
             value={draftText}
             aria-label="Message room chat"
-            aria-describedby="chat-composer-hint"
+            aria-describedby={composerHintId}
             autoComplete="off"
             autoCorrect="off"
             aria-autocomplete="list"
-            aria-controls={mentionQuery && mentionCandidates.length ? 'chat-mention-list' : undefined}
-            aria-expanded={Boolean(mentionQuery && mentionCandidates.length)}
-            aria-activedescendant={mentionQuery && mentionCandidates.length ? `chat-mention-option-${activeMentionIndex}` : undefined}
+            aria-controls={mentionQuery && mentionCandidates.length ? mentionListId : undefined}
+            aria-activedescendant={mentionQuery && mentionCandidates.length ? `${mentionListId}-${activeMentionIndex}` : undefined}
             data-form-type="other"
             maxLength={500}
+            onSelect={(event) => { selectionRef.current = { start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd } }}
             onChange={(event) => {
+              selectionRef.current = { start: event.target.selectionStart, end: event.target.selectionEnd }
               const nextMessage = event.target.value
               draftMessageRef.current = nextMessage
               draftSnapshotRef.current.draft.text = nextMessage
@@ -1227,8 +1286,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               stopTyping()
             }}
             onPaste={(event) => void pasteMedia(event)}
-            placeholder={uploading ? 'Uploading image…' : 'Message the room'}
-            disabled={uploading}
+            placeholder="Message the room"
           />
           <Button
             className="chat-composer-gif"
@@ -1249,6 +1307,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             disabled={!isConnected}
             aria-label="Add emoji"
             title="Add emoji"
+            onPointerDown={() => { if (messageInputRef.current) selectionRef.current = { start: messageInputRef.current.selectionStart, end: messageInputRef.current.selectionEnd } }}
             onClick={() => { setShowGiphy(false); setShowEmoji((current) => !current) }}
           >
             <Smile className="size-[18px]" />
@@ -1264,7 +1323,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             <Send className="size-4" />
           </Button>
         </InputGroup>
-        <span id="chat-composer-hint" className="sr-only">Enter to send. Shift+Enter for a new line. Maximum 500 characters.</span>
+        <span id={composerHintId} className="sr-only">Enter to send. Shift+Enter for a new line. Maximum 500 characters.</span>
         {(composerStatus || draftText.length >= 450) && <div className="chat-composer-hint">
           <span role="status">{composerStatus}</span>
           {draftText.length >= 450 && <span>{draftText.length}/500</span>}

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string };
 
 const versionLabel = `v${version}`;
-const triggerName = `Changelog, version ${version}`;
+const triggerName = `v${version} Changelog`;
 
 for (const surface of [
   { name: "landing page", path: "/" },

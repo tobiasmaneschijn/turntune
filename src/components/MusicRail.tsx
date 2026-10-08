@@ -515,7 +515,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
             const sourceUrl = trackSourceUrl(track);
             const existing = rowStatus({ provider: track.provider, id: track.providerId, title: track.title, artist: track.artist || "" });
             return <div className="rail-track-row music-history-row" key={`${track.id}-${index}`}>
-              <TrackArtwork track={track} compact />
+              <TrackArtwork track={track} compact active={tab === "history"} />
               <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small title={[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small>{existing && <small className="music-result-confirmation">{existing}</small>}</span>
               <DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) historyButtonRefs.current.set(track.id, button); else historyButtonRefs.current.delete(track.id); }} render={<Button variant="ghost" size="icon" aria-label={`Actions for played track ${track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
                 <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing)} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />Add to my queue</DropdownMenuItem>
@@ -537,7 +537,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
             onDragStart={(event) => { if (pendingRef.current || !connected) return event.preventDefault(); setDraggedTrackId(track.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", track.id); }} onDragEnd={() => setDraggedTrackId("")} onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => { event.preventDefault(); if (draggedTrackId && draggedTrackId !== track.id && !pendingRef.current) { const source = snapshotRef.current.room.queue.find((item) => item.id === draggedTrackId); if (source) void queueAction("queue:move", source, index); } setDraggedTrackId(""); }}>
             <span className="queue-drag-handle" title="Drag to reorder; track actions also provide movement controls" aria-hidden="true"><span className="queue-position">{index + 1}</span><GripVertical size={14} /></span>
-            <TrackArtwork track={track} compact />
+            <TrackArtwork track={track} compact active={tab === "queue"} />
             <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small><span className="sr-only">Queue position {index + 1}. </span>{track.artist || providerLabel(track.provider)}</small></span>
             <span className="queue-track-actions"><DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) queueButtonRefs.current.set(track.id, button); else queueButtonRefs.current.delete(track.id); }} data-queue-action-id={track.id} render={<Button variant="ghost" size="icon" aria-label={`Actions for ${track.title}`} disabled={!connected || Boolean(pending)} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
               <DropdownMenuItem disabled={index === 0 || Boolean(pending)} onClick={() => void queueAction("queue:play-next", track)}><ListMusic />First in my queue</DropdownMenuItem>
@@ -557,7 +557,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     </Tabs>
 
     <section className="dj-lineup" aria-label="DJ status">
-      <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label="DJ lineup" aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
+      <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label={`${currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"} · Lineup`} aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
         <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"}</strong>{joinedDjQueue && snapshot.room.djUserId !== currentUserId ? <small>{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</small> : !joinedDjQueue && !canJoinDjQueue ? <small>DJ role required</small> : currentDj && <small>On air</small>}</span></span>
         <span className="music-lineup-label">Lineup<ChevronDown size={14} /></span>
       </Button>

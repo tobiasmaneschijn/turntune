@@ -38,6 +38,9 @@ export function RoomSettingsDialog({
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const initial = useRef({ name: snapshot.room.name, description: snapshot.room.settings.description || "", isPublic: snapshot.room.isPublic, djAccess: snapshot.room.settings.djAccess || "everyone" });
+  const dirty = name !== initial.current.name || description !== initial.current.description || isPublic !== initial.current.isPublic || djAccess !== initial.current.djAccess || passwordMode !== "unchanged";
   const isOwner = snapshot.room.ownerUserId === currentUserId;
   const [pendingRoles, setPendingRoles] = useState<Set<string>>(new Set());
   const pendingRolesRef = useRef(new Set<string>());
@@ -45,9 +48,15 @@ export function RoomSettingsDialog({
   const saveControllerRef = useRef<AbortController | null>(null);
   useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; saveControllerRef.current?.abort(); }; }, []);
 
+  const requestClose = () => {
+    if (saveControllerRef.current || pendingRolesRef.current.size) return;
+    if (dirty) setDiscardOpen(true);
+    else onClose();
+  };
+
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (saveControllerRef.current) return;
+    if (saveControllerRef.current || pendingRolesRef.current.size) return;
     const controller = new AbortController();
     saveControllerRef.current = controller;
     setSaving(true);
@@ -60,7 +69,7 @@ export function RoomSettingsDialog({
         method: "PATCH", accessToken, signal: controller.signal,
         body: JSON.stringify(body), errorMessage: "Could not save room settings."
       });
-      if (!activeRef.current) return;
+      if (!activeRef.current || controller.signal.aborted) return;
       onNotice("Room settings saved");
       onClose();
     } catch (saveError) {
@@ -87,8 +96,8 @@ export function RoomSettingsDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-3xl room-settings-dialog">
+    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
+      <DialogContent className="max-w-3xl room-settings-dialog" showCloseButton={!saving}>
         <form className="grid gap-5" autoComplete="off" onSubmit={save}>
           <DialogHeader>
             <DialogTitle>Room settings</DialogTitle>
@@ -99,37 +108,37 @@ export function RoomSettingsDialog({
             <div className="settings-fields">
               <div className="grid gap-2">
                 <Label htmlFor="settings-name">Room name</Label>
-                <Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} />
+                <Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" disabled={saving} required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="settings-description">Description <span className="font-normal text-muted-foreground">Optional</span></Label>
-                <Input id="settings-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" />
+                <Input id="settings-description" disabled={saving} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" />
                 <p id="settings-description-help" className="room-description-help">In the directory · 240 characters max.</p>
               </div>
               <div className="switch-row">
                 <span><Globe2 /><span><strong>List in room directory</strong></span></span>
-                <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="Public room" />
+                <Switch checked={isPublic} disabled={saving} onCheckedChange={setIsPublic} aria-label="List in room directory — Public room" />
               </div>
               <Card size="sm">
                 <CardHeader>
                   <CardTitle>DJ queue access</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="segmented-control">
-                    <Button type="button" size="sm" className={djAccess === "everyone" ? "segmented-active" : ""} variant={djAccess === "everyone" ? "secondary" : "ghost"} onClick={() => setDjAccess("everyone")}>Everyone</Button>
-                    <Button type="button" size="sm" className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role and moderators</Button>
+                  <div className="segmented-control" role="group" aria-label="DJ queue access">
+                    <Button type="button" size="sm" disabled={saving} aria-pressed={djAccess === "everyone"} className={djAccess === "everyone" ? "segmented-active" : ""} variant={djAccess === "everyone" ? "secondary" : "ghost"} onClick={() => setDjAccess("everyone")}>Everyone</Button>
+                    <Button type="button" size="sm" disabled={saving} aria-pressed={djAccess === "roles"} className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role and moderators</Button>
                   </div>
                 </CardContent>
               </Card>
               <Card size="sm" className="password-settings">
                 <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle></CardHeader>
                 <CardContent className="grid gap-3">
-                  <div className="segmented-control">
-                    <Button type="button" size="sm" className={passwordMode === "unchanged" ? "segmented-active" : ""} variant={passwordMode === "unchanged" ? "secondary" : "ghost"} onClick={() => setPasswordMode("unchanged")}>Keep</Button>
-                    <Button type="button" size="sm" className={passwordMode === "replace" ? "segmented-active" : ""} variant={passwordMode === "replace" ? "secondary" : "ghost"} onClick={() => setPasswordMode("replace")}>{snapshot.room.passwordProtected ? "Change" : "Add"}</Button>
-                    {snapshot.room.passwordProtected && <Button type="button" size="sm" className={passwordMode === "remove" ? "segmented-active segmented-destructive" : ""} variant={passwordMode === "remove" ? "destructive" : "ghost"} onClick={() => setPasswordMode("remove")}>Remove</Button>}
+                  <div className="segmented-control" role="group" aria-label="Password action">
+                    <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "unchanged"} className={passwordMode === "unchanged" ? "segmented-active" : ""} variant={passwordMode === "unchanged" ? "secondary" : "ghost"} onClick={() => setPasswordMode("unchanged")}>Keep</Button>
+                    <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "replace"} className={passwordMode === "replace" ? "segmented-active" : ""} variant={passwordMode === "replace" ? "secondary" : "ghost"} onClick={() => setPasswordMode("replace")}>{snapshot.room.passwordProtected ? "Change" : "Add"}</Button>
+                    {snapshot.room.passwordProtected && <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "remove"} className={passwordMode === "remove" ? "segmented-active segmented-destructive" : ""} variant={passwordMode === "remove" ? "destructive" : "ghost"} onClick={() => setPasswordMode("remove")}>Remove</Button>}
                   </div>
-                  {passwordMode === "replace" && <Input name="soundspin-new-settings-password" autoComplete="new-password" data-1p-ignore data-lpignore="true" required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New room password" />}
+                  {passwordMode === "replace" && <div className="grid gap-2"><Label htmlFor="settings-password">New room password</Label><Input id="settings-password" disabled={saving} name="soundspin-new-settings-password" autoComplete="new-password" data-1p-ignore data-lpignore="true" required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New room password" /></div>}
                 </CardContent>
               </Card>
             </div>
@@ -148,11 +157,11 @@ export function RoomSettingsDialog({
                         <span><strong>{user.name}</strong>{!owner && <small>{moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small>}</span>
                         {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
                           <span className="room-role-actions">
-                            <Button type="button" variant="ghost" size="sm" disabled={!connected || pendingRoles.has(user.id)} onClick={() => changeRole(user.id, "moderator", !moderator)}>
+                            <Button type="button" variant="ghost" size="sm" disabled={!connected || saving || pendingRoles.has(user.id)} aria-label={`${moderator ? "Remove mod" : "Moderator"} — ${user.name}`} onClick={() => changeRole(user.id, "moderator", !moderator)}>
                               {moderator ? <X /> : <UserPlus />}{moderator ? "Remove mod" : "Moderator"}
                             </Button>
                             {!moderator && (
-                              <Button type="button" variant="ghost" size="sm" disabled={!connected || pendingRoles.has(user.id)} onClick={() => changeRole(user.id, "dj-role", !dj)}>
+                              <Button type="button" variant="ghost" size="sm" disabled={!connected || saving || pendingRoles.has(user.id)} aria-label={`${dj ? "Remove DJ" : "DJ role"} — ${user.name}`} onClick={() => changeRole(user.id, "dj-role", !dj)}>
                                 {dj ? <X /> : <UserPlus />}{dj ? "Remove DJ" : "DJ role"}
                               </Button>
                             )}
@@ -169,10 +178,19 @@ export function RoomSettingsDialog({
           {!connected && <p role="status">Reconnect to update room roles.</p>}
           {error && <div className="dialog-error" role="alert">{error}</div>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
+            <Button type="button" variant="outline" disabled={saving || pendingRoles.size > 0} onClick={requestClose}>Cancel</Button>
+            <Button type="submit" disabled={saving || pendingRoles.size > 0 || !name.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
           </DialogFooter>
         </form>
+        <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Discard room changes?</DialogTitle></DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDiscardOpen(false)}>Keep editing</Button>
+              <Button variant="destructive" onClick={() => { setDiscardOpen(false); onClose(); }}>Discard changes</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

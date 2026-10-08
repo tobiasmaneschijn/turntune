@@ -8,8 +8,8 @@ export function rememberNavigationFocus(context: string) {
 }
 
 /** Call with the intentional route identity, never with presence/playback state. */
-export function useRouteFocus(route: string, restoreContext?: string, suspendDestinationFocus = false) {
-  const previous = useRef(route);
+export function useRouteFocus(route: string, restoreContext?: string, suspendDestinationFocus = false, focusOnMount = false) {
+  const previous = useRef(focusOnMount ? "" : route);
   useEffect(() => {
     if (previous.current === route) return;
     previous.current = route;

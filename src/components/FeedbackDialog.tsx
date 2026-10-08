@@ -2,8 +2,10 @@ import { FormEvent, type RefObject, useCallback, useEffect, useRef, useState } f
 import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { buildFeedbackDiagnostics, type FeedbackDiagnosticContext } from "../feedback-diagnostics";
-import { getSupabaseClient } from "../supabase";
-import { feedbackStageLabel, submitFeedbackRecord, type FeedbackSubmissionStage } from "../feedback-submission";
+import { getScopedSupabaseClient, getSupabaseClient } from "../supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { boundedOperation, SUBMISSION_TIMEOUT_MS } from "../lib/bounded-operation";
+import { createFeedbackAttempt, FeedbackOutcomeUnknownError, feedbackStageLabel, submitFeedbackRecord, type FeedbackAttempt, type FeedbackSubmissionStage } from "../feedback-submission";
 import { Button } from "./ui/button";
 import { Alert, AlertDescription } from "./ui/alert";
 import {
@@ -39,7 +41,8 @@ export function FeedbackButton({
   onOpenChange,
   hideTrigger = false,
   finalFocus,
-  clientLoader = getSupabaseClient
+  clientLoader = getSupabaseClient,
+  operationClientFactory = (source, expectedUserId, signal) => getScopedSupabaseClient(source as SupabaseClient, expectedUserId, signal)
 }: {
   userId: string;
   roomSlug?: string;
@@ -49,6 +52,7 @@ export function FeedbackButton({
   hideTrigger?: boolean;
   finalFocus?: RefObject<HTMLElement | null>;
   clientLoader?: () => Promise<Parameters<typeof submitFeedbackRecord>[0]>;
+  operationClientFactory?: (source: Parameters<typeof submitFeedbackRecord>[0], expectedUserId: string, signal: AbortSignal) => Promise<Parameters<typeof submitFeedbackRecord>[0]>;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -68,11 +72,31 @@ export function FeedbackButton({
   const [sent, setSent] = useState(false);
   const attachmentsRef = useRef(screenshots);
   const submittingRef = useRef(false);
+  const submissionAbortRef = useRef<AbortController | null>(null);
+  const attemptsRef = useRef(new Map<string, FeedbackAttempt>());
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const activeRef = useRef(true);
   const identityRef = useRef(`${userId}:${roomSlug || ""}`);
+  const identityEpochRef = useRef(0);
+  if (identityRef.current !== `${userId}:${roomSlug || ""}`) identityEpochRef.current++;
   identityRef.current = `${userId}:${roomSlug || ""}`;
 
-  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; submissionAbortRef.current?.abort(); }; }, []);
+  useEffect(() => {
+    submissionAbortRef.current?.abort();
+    submissionAbortRef.current = null;
+    submittingRef.current = false;
+    setSubmitting(false);
+    attemptsRef.current.clear();
+    setOutcomeUnknown(false);
+    clearForm();
+    setSent(false);
+  }, [userId]);
+  useEffect(() => {
+    setOutcomeUnknown(Boolean(attemptsRef.current.get(identityRef.current)?.insertStarted));
+    setError(''); setSent(false);
+    return () => { submissionAbortRef.current?.abort(); };
+  }, [roomSlug]);
 
   attachmentsRef.current = screenshots;
 
@@ -166,8 +190,11 @@ export function FeedbackButton({
     setSubmitting(true);
     setSubmissionStage({ kind: "preparing" });
     setError("");
+    const controller = new AbortController();
+    submissionAbortRef.current = controller;
     const identity = identityRef.current;
-    const isCurrent = () => activeRef.current && identityRef.current === identity;
+    const identityEpoch = identityEpochRef.current;
+    const isCurrent = () => activeRef.current && identityRef.current === identity && identityEpochRef.current === identityEpoch;
     const input = {
       userId,
       screenshots: screenshots.map(({ id, file }) => ({ id, file })),
@@ -178,19 +205,37 @@ export function FeedbackButton({
       }
     };
 
+    let submittedAttempt: FeedbackAttempt | null = attemptsRef.current.get(identity) || null;
     try {
-      const client = await clientLoader();
-
-      await submitFeedbackRecord(client, input, (stage) => { if (isCurrent()) setSubmissionStage(stage); });
+      const client = await boundedOperation(() => clientLoader(), { signal: controller.signal, timeoutMs: SUBMISSION_TIMEOUT_MS });
+      if (!isCurrent()) controller.abort();
+      controller.signal.throwIfAborted();
+      const attempt = attemptsRef.current.get(identity) || createFeedbackAttempt(input);
+      submittedAttempt = attempt;
+      attemptsRef.current.set(identity, attempt);
+      await submitFeedbackRecord(client, input, (stage) => { if (isCurrent()) setSubmissionStage(stage); else controller.abort(); }, {
+        signal: controller.signal, attempt,
+        clientFactory: (signal) => operationClientFactory(client, attempt.input.userId, signal)
+      });
+      if (attemptsRef.current.get(identity) === submittedAttempt) attemptsRef.current.delete(identity);
       if (!isCurrent()) return;
+      setOutcomeUnknown(false);
       clearForm();
       setSent(true);
       toast.success("Feedback sent");
     } catch (submitError) {
-      if (isCurrent()) setError(submitError instanceof Error ? submitError.message : "Couldn't send feedback. Try again.");
+      const unknown = submitError instanceof FeedbackOutcomeUnknownError || Boolean(submittedAttempt?.outcomeUnknown);
+      if (!unknown && attemptsRef.current.get(identity) === submittedAttempt) attemptsRef.current.delete(identity);
+      if (isCurrent()) {
+        setOutcomeUnknown(unknown);
+        setError(unknown ? new FeedbackOutcomeUnknownError().message : controller.signal.aborted ? 'Cancelled. Your draft and screenshots are kept.' : submitError instanceof Error ? submitError.message : "Couldn't send feedback. Try again.");
+      }
     } finally {
-      submittingRef.current = false;
-      if (activeRef.current) setSubmitting(false);
+      if (submissionAbortRef.current === controller) {
+        submittingRef.current = false;
+        submissionAbortRef.current = null;
+        if (activeRef.current) setSubmitting(false);
+      }
     }
   };
 
@@ -210,7 +255,7 @@ export function FeedbackButton({
         <Lightbulb />
       </DialogTrigger>}
 
-        <DialogContent className="feedback-dialog max-w-xl" finalFocus={finalFocus}>
+        <DialogContent className="feedback-dialog max-w-xl" finalFocus={finalFocus} showCloseButton={!submitting}>
           {sent ? (
             <div className="feedback-success">
               <span className="feedback-success-icon"><CheckCircle2 /></span>
@@ -230,7 +275,7 @@ export function FeedbackButton({
               <div className="feedback-classification">
                 <div className="feedback-field">
                   <Label htmlFor="feedback-category">Category</Label>
-                  <Select value={category} disabled={submitting} onValueChange={(value) => setCategory(value as typeof category)}>
+                  <Select value={category} disabled={submitting || outcomeUnknown} onValueChange={(value) => setCategory(value as typeof category)}>
                     <SelectTrigger id="feedback-category" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="bug">Bug</SelectItem>
@@ -244,7 +289,7 @@ export function FeedbackButton({
                 </div>
                 <div className="feedback-field">
                   <Label htmlFor="feedback-impact">Impact</Label>
-                  <Select value={impact} disabled={submitting} onValueChange={(value) => setImpact(value as typeof impact)}>
+                  <Select value={impact} disabled={submitting || outcomeUnknown} onValueChange={(value) => setImpact(value as typeof impact)}>
                     <SelectTrigger id="feedback-impact" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
                       <SelectItem value="minor">Minor</SelectItem>
@@ -259,7 +304,7 @@ export function FeedbackButton({
                 <Label htmlFor="feedback-message">Description</Label>
                 <Textarea
                   id="feedback-message"
-                  disabled={submitting}
+                  disabled={submitting || outcomeUnknown}
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   rows={5}
@@ -286,7 +331,7 @@ export function FeedbackButton({
                           size="icon-xs"
                           onClick={() => removeScreenshot(attachment.id)}
                           aria-label={`Remove screenshot ${index + 1}`}
-                          disabled={submitting}
+                          disabled={submitting || outcomeUnknown}
                         >
                           <X />
                         </Button>
@@ -314,7 +359,7 @@ export function FeedbackButton({
                       type="file"
                       accept={SCREENSHOT_ACCEPT}
                       multiple
-                      disabled={submitting}
+                      disabled={submitting || outcomeUnknown}
                       onChange={(event) => {
                         addScreenshots(Array.from(event.target.files || []));
                         event.target.value = "";
@@ -329,7 +374,7 @@ export function FeedbackButton({
                 <div className="feedback-diagnostics-toggle">
                   <span className="feedback-diagnostics-icon"><Info /></span>
                   <span><strong>Include technical diagnostics</strong><small>Browser, device, app state, performance, and recent sanitized errors.</small></span>
-                  <Switch checked={includeDiagnostics} disabled={submitting} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
+                  <Switch checked={includeDiagnostics} disabled={submitting || outcomeUnknown} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
                 </div>
                 {includeDiagnostics && (
                   <details>
@@ -344,9 +389,12 @@ export function FeedbackButton({
               {submitting && <p className="feedback-submission-stage" role="status">{feedbackStageLabel(submissionStage)}…</p>}
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => {
+                  if (submitting) submissionAbortRef.current?.abort();
+                  else setOpen(false);
+                }}>{submitting ? 'Cancel sending' : 'Cancel'}</Button>
                 <Button type="submit" disabled={submitting || (!message.trim() && !screenshots.length)}>
-                  {submitting ? "Working…" : "Send feedback"}
+                  {submitting ? "Working…" : outcomeUnknown ? "Check submission" : "Send feedback"}
                 </Button>
               </DialogFooter>
             </form>

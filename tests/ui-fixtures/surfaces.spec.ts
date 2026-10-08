@@ -68,11 +68,22 @@ for (const scenario of mobileScenarios) {
 }
 
 test("tabs support arrow keys and retain visible focus", async ({ page }) => {
-  await page.goto("/tests/ui-harness/index.html?scenario=queue");
-  const history = page.getByRole("tab", { name: "History" });
-  await history.focus();
+  await page.goto("/tests/qol-harness/music.html");
+  const tabs = page.getByRole("tablist", { name: "Music tools", exact: true });
+  const queue = tabs.getByRole("tab", { name: /^Queue/ });
+  const picks = tabs.getByRole("tab", { name: "My picks", exact: true });
+  const history = tabs.getByRole("tab", { name: "History", exact: true });
+  await expect(tabs.getByRole("tab")).toHaveCount(3);
+  await expect(queue).toHaveAttribute("aria-selected", "true");
+  await queue.focus();
   await page.keyboard.press("ArrowRight");
-  await expect(page.getByRole("tab", { name: "Search" })).toBeFocused();
+  await expect(picks).toBeFocused();
+  await picks.press("Enter");
+  await expect(picks).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowRight");
+  await expect(history).toBeFocused();
+  await history.press("Enter");
+  await expect(history).toHaveAttribute("aria-selected", "true");
 });
 
 test("dialogs trap focus and restore it to the trigger", async ({ page }) => {

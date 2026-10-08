@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { useMediaQuery } from "../hooks/use-media-query";
 import { notificationPermissionDescription, readNotificationPermission, requestNotificationPermission } from "../notifications";
+import { readStoredValue } from "../lib/browser-storage";
 
 interface SpotifyDevice {
   id: string | null;
@@ -35,11 +36,23 @@ const playbackOptions: Array<{
   title: string;
   icon: typeof Radio;
 }> = [
-  { value: "source", title: "Original provider", icon: Radio },
+  { value: "source", title: "Room source", icon: Radio },
   { value: "spotify-web", title: "Spotify in browser", icon: Music2 },
   { value: "spotify-desktop", title: "Spotify Connect", icon: MonitorSpeaker },
   { value: "apple", title: "Apple Music", icon: Music2 }
 ];
+
+function readAppleAuthorization(): boolean | null {
+  // A configured provider is authoritative; storage is only a previous-session hint.
+  try {
+    const authorized = window.MusicKit?.getInstance().isAuthorized;
+    if (typeof authorized === "boolean") return authorized;
+  } catch {
+    // MusicKit can be present before its instance has been configured.
+  }
+  const hint = readStoredValue("soundspin-apple-authorized");
+  return hint === "true" ? true : hint === "false" ? false : null;
+}
 
 export function UserSettingsDialog({
   settings,
@@ -64,28 +77,13 @@ export function UserSettingsDialog({
 }) {
   const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance">("playback");
   const isMobile = useMediaQuery("(max-width: 600px)");
-  const categoriesRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  useEffect(() => {
-    if (!isMobile) return;
-    const frame = requestAnimationFrame(() => {
-      const list = categoriesRef.current;
-      const selected = list?.querySelector<HTMLElement>(`[data-settings-category="${tab}"]`);
-      if (!list || !selected) return;
-      const bounds = list.getBoundingClientRect();
-      const target = selected.getBoundingClientRect();
-      const inset = 8;
-      if (target.left < bounds.left + inset) list.scrollLeft += target.left - bounds.left - inset;
-      else if (target.right > bounds.right - inset) list.scrollLeft += target.right - bounds.right + inset;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [tab, isMobile]);
   const { theme = settings.appearance.theme, setTheme } = useTheme();
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [deviceError, setDeviceError] = useState("");
-  const [appleAuthorized, setAppleAuthorized] = useState(() => localStorage.getItem("soundspin-apple-authorized") === "true");
+  const [appleAuthorized, setAppleAuthorized] = useState(readAppleAuthorization);
   const [notificationPermission, setNotificationPermission] = useState(readNotificationPermission);
   const [requestingPermission, setRequestingPermission] = useState(false);
   useEffect(() => {
@@ -132,7 +130,7 @@ export function UserSettingsDialog({
   }, [tab, connections.spotifyConnected, devices.length, refreshDevices]);
 
   useEffect(() => {
-    const update = () => setAppleAuthorized(localStorage.getItem("soundspin-apple-authorized") === "true");
+    const update = () => setAppleAuthorized(readAppleAuthorization());
     window.addEventListener("soundspin:apple-authorization", update);
     return () => window.removeEventListener("soundspin:apple-authorization", update);
   }, []);
@@ -157,7 +155,7 @@ export function UserSettingsDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation={isMobile ? "horizontal" : "vertical"} className="user-settings-layout">
-          <TabsList ref={categoriesRef} className="settings-tabs" aria-label="Setting categories" activateOnFocus>
+          <TabsList className="settings-tabs" aria-label="Setting categories" activateOnFocus>
             <TabsTrigger value="playback" data-settings-category="playback"><Radio /> Playback</TabsTrigger>
             <TabsTrigger value="connections" data-settings-category="connections"><Link2 /> Connections</TabsTrigger>
             <TabsTrigger value="notifications" data-settings-category="notifications"><Bell /> Notifications</TabsTrigger>
@@ -169,13 +167,15 @@ export function UserSettingsDialog({
               <div className="settings-panel-stack">
                 <section>
                   <div className="settings-section-heading"><strong>Default playback</strong></div>
-                  <ToggleGroup className="playback-option-list" aria-label="Default playback device">
+                  <ToggleGroup className="playback-option-list" aria-label="Default playback provider" orientation="vertical" value={[settings.playback.preference]} onValueChange={(value) => {
+                    if (value[0]) updatePlayback({ preference: value[0] as PlaybackPreference });
+                  }}>
                     {playbackOptions.map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
                       const selected = settings.playback.preference === option.value;
                       const Icon = option.icon;
                       return (
-                        <ToggleGroupItem key={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable} pressed={selected} onPressedChange={() => updatePlayback({ preference: option.value })}>
+                        <ToggleGroupItem key={option.value} value={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable}>
                           <span className="playback-option-icon"><Icon /></span>
                           <span><strong>{option.title}</strong>{unavailable && <small>Not configured</small>}</span>
                           {selected && <CircleCheck className="playback-option-check" />}
@@ -202,7 +202,7 @@ export function UserSettingsDialog({
                     <Label htmlFor="spotify-device">Spotify Connect device</Label>
                     <div className="settings-select-row">
                       <Select value={settings.playback.spotifyDeviceId || "automatic"} onValueChange={(value) => updatePlayback({ spotifyDeviceId: !value || value === "automatic" ? "" : value })}>
-                        <SelectTrigger id="spotify-device" className="w-full" disabled={!devices.length}><SelectValue>{settings.playback.spotifyDeviceId ? devices.find(device => device.id === settings.playback.spotifyDeviceId)?.name || "Selected device unavailable" : "Automatic selection"}</SelectValue></SelectTrigger>
+                        <SelectTrigger id="spotify-device" className="w-full"><SelectValue>{settings.playback.spotifyDeviceId ? devices.find(device => device.id === settings.playback.spotifyDeviceId)?.name || "Selected device unavailable" : "Automatic selection"}</SelectValue></SelectTrigger>
                         <SelectContent><SelectGroup>
                           <SelectItem value="automatic">Automatic selection</SelectItem>
                           {devices.map((device) => <SelectItem key={device.id!} value={device.id!}>{device.name} · {device.type}{device.is_active ? " · Active" : ""}</SelectItem>)}
@@ -215,7 +215,7 @@ export function UserSettingsDialog({
                   </section>
                 )}
 
-                <section className="settings-control-group">
+                {settings.playback.preference !== "source" && <section className="settings-control-group">
                   <Label htmlFor="fallback-behavior">When the preferred provider has no match</Label>
                   <Select value={settings.playback.fallback} onValueChange={(value) => updatePlayback({ fallback: value as SoundSpinUserSettings["playback"]["fallback"] })}>
                     <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue>{settings.playback.fallback === "ask" ? "Ask for each unavailable track" : settings.playback.fallback === "silent" ? "Keep local playback silent" : "Use the room source automatically"}</SelectValue></SelectTrigger>
@@ -225,9 +225,9 @@ export function UserSettingsDialog({
                       <SelectItem value="silent">Keep local playback silent</SelectItem>
                     </SelectGroup></SelectContent>
                   </Select>
-                </section>
+                </section>}
 
-                <SettingSwitch title="Resume after reconnecting" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />
+                {settings.playback.preference === "spotify-web" && <SettingSwitch title="Resume when Spotify reconnects" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />}
               </div>
             </TabsContent>
 

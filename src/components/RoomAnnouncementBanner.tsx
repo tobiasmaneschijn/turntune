@@ -72,7 +72,7 @@ export function RoomAnnouncementBanner({ roomId, userId, announcement, serverTim
   return <>
     <div className={`room-announcement-banner ${hidden || !note ? "is-collapsed" : ""}`}>
       <Megaphone size={16} aria-hidden="true" />
-      {note && !hidden ? <><button className="room-announcement-text" onClick={() => { if (canEdit) edit(); else setOpen(true); }} aria-label="Read full room note">{note.text}</button><Button size="icon" variant="ghost" onClick={dismiss} aria-label="Dismiss room note"><X /></Button></> :
+      {note && !hidden ? <><button className="room-announcement-text" onClick={() => { if (canEdit) edit(); else setOpen(true); }} aria-label={`Read full room note: ${note.text}`}>{note.text}</button><Button size="icon" variant="ghost" onClick={dismiss} aria-label="Dismiss room note"><X /></Button></> :
         <span>{hidden ? <Button size="sm" variant="ghost" onClick={reopen}>Show room note</Button> : "Room note"}</span>}
       {canEdit && <Button ref={openerRef} variant="ghost" size="sm" disabled={!connected} onClick={edit}><Pencil size={14} />{note ? "Edit" : "Add note"}</Button>}
     </div>

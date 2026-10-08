@@ -122,9 +122,8 @@
   .feedback-browse { justify-content: center; }
   .feedback-previews { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .user-settings-layout { min-height: 0; height: 100%; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .settings-tabs { width: 100%; overflow-x: auto; flex-direction: row; justify-content: flex-start; overscroll-behavior-inline: contain; scrollbar-width: none; }
-  .settings-tabs::-webkit-scrollbar { display: none; }
-  .settings-tabs button { width: auto; flex: 0 0 auto; justify-content: center; }
+  .settings-tabs { width: 100%; height: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-tabs button { width: 100%; height: auto; min-width: 0; padding: 8px; gap: 5px; justify-content: flex-start; white-space: normal; }
   .settings-tab-panel { padding-right: 2px; }
 }
 
@@ -151,7 +150,6 @@
 .settings-tab-panel > [data-slot="tabs-content"] { min-width: 0; }
 .settings-tab-panel > [data-slot="tabs-content"][hidden] { display: none; }
 @media (max-width: 600px) {
-  .settings-tabs { position: relative; mask-image: linear-gradient(to right, transparent, black 7px, black calc(100% - 12px), transparent); scroll-padding-inline: 8px; }
   .settings-tabs button { min-height: 44px; }
   .user-settings-dialog { padding: 18px; }
   .user-settings-dialog [data-slot="button"], .user-settings-dialog [data-slot="select-trigger"] { min-height: 44px; }

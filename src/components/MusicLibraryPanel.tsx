@@ -91,7 +91,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
       {picks.map((pick, index) => {
         const queued = isQueued(pick.track);
         return <div className="music-library-row" key={pick.id}>
-          <TrackArtwork track={pick.track} compact />
+          <TrackArtwork track={pick.track} compact active={active} />
           <div className="music-library-pick-copy">
             <strong title={pick.track.title}>{pick.track.title}</strong><small title={pick.track.artist || providerLabel(pick.track.provider)}>{pick.track.artist || providerLabel(pick.track.provider)}</small>
           </div>

@@ -18,5 +18,6 @@ button.friends-person-profile { cursor: pointer; }
 .friends-discovery summary { width: fit-content; cursor: pointer; font-size: 13px; }
 .friends-search { display: flex; gap: 8px; margin: 12px 0; }
 .friends-search input { min-width: 0; }
+.friends-search-hint { margin: -4px 0 12px; color: var(--muted-foreground); font-size: 12px; }
 @media (max-width: 480px) { .friends-person-actions { justify-content: flex-start; } .friends-person { align-items: flex-start; } .friends-search { flex-wrap: wrap; } .friends-search input { flex: 1 1 160px; } }
 @media (pointer: coarse) { .friends-person-profile { min-height: 44px; } .friends-discovery summary { min-height: 44px; padding: 12px 0; } }

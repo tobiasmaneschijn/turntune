@@ -46,6 +46,20 @@ type FeedbackStatus = "new" | "reviewing" | "planned" | "resolved" | "closed";
 
 interface AdminFeedback extends FeedbackAgentPromptData {}
 
+interface FeedbackDraft {
+  status: FeedbackStatus;
+  note: string;
+  statusRevision: number;
+  noteRevision: number;
+  saving: boolean;
+  saved: boolean;
+  error: string;
+}
+
+function feedbackDraft(item: AdminFeedback): FeedbackDraft {
+  return { status: item.status, note: item.adminNote, statusRevision: 0, noteRevision: 0, saving: false, saved: false, error: "" };
+}
+
 interface AdminDashboardData {
   metrics: {
     users: number;
@@ -99,10 +113,6 @@ const impactLabels: Record<AdminFeedback["impact"], string> = {
   unusable: "App unusable"
 };
 
-async function adminApi<T>(path: string, accessToken: string, init?: RequestInit) {
-  return requestJson<T>(path, { ...init, accessToken, errorMessage: "Admin request failed. Try again." });
-}
-
 function formatDate(value: string, includeTime = true) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -133,15 +143,19 @@ export function AdminDashboard({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | "all">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draftStatus, setDraftStatus] = useState<FeedbackStatus>("new");
-  const [draftNote, setDraftNote] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, FeedbackDraft>>({});
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const tokenRef = useRef(accessToken); tokenRef.current = accessToken;
   const loadControllerRef = useRef<AbortController | null>(null);
+  const saveControllersRef = useRef(new Map<string, AbortController>());
+  const accountScopeRef = useRef({ userId: currentUser.id });
+  if (accountScopeRef.current.userId !== currentUser.id) accountScopeRef.current = { userId: currentUser.id };
+  const selectedIdRef = useRef(selectedId); selectedIdRef.current = selectedId;
+  const copyTimerRef = useRef<number | undefined>(undefined);
   const activeRef = useRef(true);
 
   const loadDashboard = async () => {
+    const accountScope = accountScopeRef.current;
     loadControllerRef.current?.abort();
     const controller = new AbortController(); loadControllerRef.current = controller;
     setLoading(true);
@@ -150,17 +164,32 @@ export function AdminDashboard({
       const payload = await requestJson<AdminDashboardData>("/api/admin/dashboard", { accessToken: tokenRef.current, signal: controller.signal,
         validate: (value): value is AdminDashboardData => Boolean(value && typeof value === "object" && "metrics" in value && value.metrics &&
           "feedback" in value && Array.isArray(value.feedback) && "rooms" in value && Array.isArray(value.rooms) && "activity" in value && Array.isArray(value.activity)) });
-      if (!activeRef.current || controller !== loadControllerRef.current) return;
+      if (!activeRef.current || accountScope !== accountScopeRef.current || controller !== loadControllerRef.current) return;
       setData(payload);
       setSelectedId((current) => current && payload.feedback.some((item) => item.id === current) ? current : null);
     } catch (loadError) {
-      if (activeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
+      if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
     } finally {
-      if (activeRef.current && controller === loadControllerRef.current) setLoading(false);
+      if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setLoading(false);
     }
   };
 
-  useEffect(() => { activeRef.current = true; void loadDashboard(); return () => { activeRef.current = false; loadControllerRef.current?.abort(); }; }, [currentUser.id]);
+  useEffect(() => {
+    activeRef.current = true;
+    setData(null);
+    setSelectedId(null);
+    setDrafts({});
+    setSearch("");
+    setStatusFilter("all");
+    void loadDashboard();
+    return () => {
+      activeRef.current = false;
+      loadControllerRef.current?.abort();
+      saveControllersRef.current.forEach((controller) => controller.abort());
+      saveControllersRef.current.clear();
+      window.clearTimeout(copyTimerRef.current);
+    };
+  }, [currentUser.id]);
 
   const filteredFeedback = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -173,43 +202,73 @@ export function AdminDashboard({
   }, [data?.feedback, search, statusFilter]);
 
   const selectedFeedback = data?.feedback.find((item) => item.id === selectedId) || null;
+  const draft = selectedFeedback ? drafts[selectedFeedback.id] || feedbackDraft(selectedFeedback) : null;
+  const dirty = Boolean(selectedFeedback && draft && (draft.status !== selectedFeedback.status || draft.note !== selectedFeedback.adminNote));
 
   useEffect(() => {
-    if (!selectedFeedback) return;
-    setDraftStatus(selectedFeedback.status);
-    setDraftNote(selectedFeedback.adminNote);
+    window.clearTimeout(copyTimerRef.current);
     setCopyState("idle");
-  }, [selectedFeedback?.id, selectedFeedback?.status, selectedFeedback?.adminNote]);
+  }, [selectedFeedback?.id]);
+
+  const updateDraft = (changes: { status: FeedbackStatus } | { note: string }) => {
+    if (!selectedFeedback) return;
+    const item = selectedFeedback;
+    setDrafts((current) => {
+      const previous = current[item.id] || feedbackDraft(item);
+      return { ...current, [item.id]: {
+        ...previous, ...changes, saved: false,
+        statusRevision: previous.statusRevision + ("status" in changes ? 1 : 0),
+        noteRevision: previous.noteRevision + ("note" in changes ? 1 : 0)
+      } };
+    });
+  };
 
   const copyFeedbackPrompt = async () => {
-    if (!selectedFeedback) return;
+    if (!selectedFeedback || !draft) return;
+    const accountScope = accountScopeRef.current;
+    const id = selectedFeedback.id;
     const prompt = buildFeedbackAgentPrompt({
       ...selectedFeedback,
-      status: draftStatus,
-      adminNote: draftNote
+      status: draft.status,
+      adminNote: draft.note
     });
 
     try {
       await navigator.clipboard.writeText(prompt);
+      if (!activeRef.current || accountScope !== accountScopeRef.current || selectedIdRef.current !== id) return;
       setCopyState("copied");
-      window.setTimeout(() => setCopyState("idle"), 2000);
+      copyTimerRef.current = window.setTimeout(() => setCopyState("idle"), 2000);
     } catch {
-      setCopyState("error");
+      if (activeRef.current && accountScope === accountScopeRef.current && selectedIdRef.current === id) setCopyState("error");
     }
   };
 
   const saveFeedback = async () => {
-    if (!selectedFeedback) return;
-    setSaving(true);
-    setError("");
+    if (!selectedFeedback || !draft || !dirty || saveControllersRef.current.has(selectedFeedback.id)) return;
+    const id = selectedFeedback.id;
+    const submitted = draft;
+    const accountScope = accountScopeRef.current;
+    const controller = new AbortController();
+    saveControllersRef.current.set(id, controller);
+    setDrafts((current) => ({ ...current, [id]: { ...(current[id] || submitted), saving: true, saved: false, error: "" } }));
     try {
-      const payload = await adminApi<{
+      const payload = await requestJson<{
         feedback: { id: string; status: FeedbackStatus; adminNote: string; updatedAt: string };
-      }>(`/api/admin/feedback/${selectedFeedback.id}`, tokenRef.current, {
+      }>(`/api/admin/feedback/${id}`, {
+        accessToken: tokenRef.current,
+        signal: controller.signal,
+        errorMessage: "Could not save changes. Try again.",
         method: "PATCH",
-        body: JSON.stringify({ status: draftStatus, adminNote: draftNote })
+        body: JSON.stringify({ status: submitted.status, adminNote: submitted.note }),
+        validate: (value): value is { feedback: { id: string; status: FeedbackStatus; adminNote: string; updatedAt: string } } => {
+          if (!value || typeof value !== "object" || !("feedback" in value)) return false;
+          const item = value.feedback;
+          return Boolean(item && typeof item === "object" && "id" in item && item.id === id &&
+            "status" in item && feedbackStatuses.includes(item.status as FeedbackStatus) &&
+            "adminNote" in item && typeof item.adminNote === "string" && "updatedAt" in item && typeof item.updatedAt === "string");
+        }
       });
-      if (!activeRef.current) return;
+      if (!activeRef.current || accountScope !== accountScopeRef.current || controller !== saveControllersRef.current.get(id)) return;
       setData((current) => current ? {
         ...current,
         metrics: {
@@ -217,17 +276,28 @@ export function AdminDashboard({
           openFeedback: Math.max(0, current.metrics.openFeedback + (
             (["new", "reviewing", "planned"] as FeedbackStatus[]).includes(payload.feedback.status) ? 1 : 0
           ) - (
-            (["new", "reviewing", "planned"] as FeedbackStatus[]).includes(selectedFeedback.status) ? 1 : 0
+            (["new", "reviewing", "planned"] as FeedbackStatus[]).includes(current.feedback.find((item) => item.id === id)?.status || selectedFeedback.status) ? 1 : 0
           ))
         },
         feedback: current.feedback.map((item) => item.id === payload.feedback.id
           ? { ...item, ...payload.feedback }
           : item)
       } : current);
+      setDrafts((current) => {
+        const latest = current[id] || submitted;
+        return { ...current, [id]: {
+          ...latest,
+          status: latest.statusRevision === submitted.statusRevision ? payload.feedback.status : latest.status,
+          note: latest.noteRevision === submitted.noteRevision ? payload.feedback.adminNote : latest.note,
+          saving: false, saved: true, error: ""
+        } };
+      });
     } catch (saveError) {
-      if (activeRef.current) setError(saveError instanceof Error ? saveError.message : "Could not update feedback.");
+      if (activeRef.current && accountScope === accountScopeRef.current && controller === saveControllersRef.current.get(id)) {
+        setDrafts((current) => ({ ...current, [id]: { ...(current[id] || submitted), saving: false, error: saveError instanceof Error ? saveError.message : "Could not save changes. Try again." } }));
+      }
     } finally {
-      if (activeRef.current) setSaving(false);
+      if (controller === saveControllersRef.current.get(id)) saveControllersRef.current.delete(id);
     }
   };
 
@@ -237,20 +307,19 @@ export function AdminDashboard({
         <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>Lydman</strong></div>
         <div className="admin-console-label">ADMIN CONSOLE</div>
         <nav className="admin-nav" aria-label="Admin dashboard">
-          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /> Overview</button>
-          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /> Feedback {Boolean(data?.metrics.openFeedback) && <span>{data?.metrics.openFeedback}</span>}</button>
-          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /> Rooms</button>
+          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">Overview</span></button>
+          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">Feedback</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
+          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /><span className="admin-nav-label">Rooms</span></button>
         </nav>
         <div className="admin-sidebar-footer">
           <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
-          <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft /> Back to Lydman</Button>
+          <Button variant="ghost" size="sm" onClick={onBack} aria-label="Back to Lydman room directory"><ArrowLeft /><span className="admin-back-full">Back to Lydman</span><span className="admin-back-short">Back</span></Button>
         </div>
       </aside>
 
       <section className="admin-main">
         <header className="admin-topbar">
           <div>
-            <p className="section-kicker">ADMIN</p>
             <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : "Rooms"}</h1>
           </div>
           <div className="admin-topbar-actions">
@@ -353,7 +422,7 @@ export function AdminDashboard({
 
             <Sheet open={Boolean(selectedFeedback)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
               <SheetContent className="admin-feedback-sheet">
-                {selectedFeedback && (
+                {selectedFeedback && draft && (
                   <>
                     <SheetHeader>
                       <div className="admin-feedback-detail-header">
@@ -400,8 +469,8 @@ export function AdminDashboard({
                       <FieldGroup className="admin-feedback-workflow">
                         <Field>
                           <FieldLabel htmlFor="admin-feedback-status">Status</FieldLabel>
-                          <Select value={draftStatus} onValueChange={(value) => setDraftStatus(value as FeedbackStatus)}>
-                            <SelectTrigger id="admin-feedback-status" className="w-full"><SelectValue>{statusLabels[draftStatus]}</SelectValue></SelectTrigger>
+                          <Select value={draft.status} onValueChange={(value) => updateDraft({ status: value as FeedbackStatus })}>
+                            <SelectTrigger id="admin-feedback-status" className="w-full"><SelectValue>{statusLabels[draft.status]}</SelectValue></SelectTrigger>
                             <SelectContent><SelectGroup>
                               {feedbackStatuses.map((status) => <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>)}
                             </SelectGroup></SelectContent>
@@ -409,16 +478,21 @@ export function AdminDashboard({
                         </Field>
                         <Field>
                           <FieldLabel htmlFor="admin-feedback-note">Private admin note</FieldLabel>
-                          <Textarea id="admin-feedback-note" value={draftNote} onChange={(event) => setDraftNote(event.target.value)} maxLength={2000} />
+                          <Textarea id="admin-feedback-note" value={draft.note} onChange={(event) => updateDraft({ note: event.target.value })} maxLength={2000} />
                         </Field>
                       </FieldGroup>
                     </div>
                     <SheetFooter>
-                      <Button variant="outline" onClick={() => void copyFeedbackPrompt()}>
-                        {copyState === "copied" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                        {copyState === "copied" ? "Prompt copied" : copyState === "error" ? "Copy failed — retry" : "Copy AI prompt"}
-                      </Button>
-                      <Button onClick={() => void saveFeedback()} disabled={saving || (draftStatus === selectedFeedback.status && draftNote === selectedFeedback.adminNote)}>{saving ? "Saving…" : "Save changes"}</Button>
+                      {draft.error && <div className="admin-error admin-save-error" role="alert">{draft.error}</div>}
+                      <p className="admin-save-status" role="status">{draft.saving ? "Saving…" : dirty ? "Unsaved changes" : draft.saved ? "Saved" : ""}</p>
+                      <div className="admin-feedback-actions">
+                        {dirty && <Button variant="ghost" onClick={() => setDrafts((current) => ({ ...current, [selectedFeedback.id]: feedbackDraft(selectedFeedback) }))} disabled={draft.saving}>Discard changes</Button>}
+                        <Button variant="outline" onClick={() => void copyFeedbackPrompt()}>
+                          {copyState === "copied" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                          {copyState === "copied" ? "Prompt copied" : copyState === "error" ? "Copy failed — retry" : "Copy AI prompt"}
+                        </Button>
+                        <Button onClick={() => void saveFeedback()} disabled={draft.saving || !dirty}>{draft.saving ? "Saving…" : draft.error ? "Retry save" : "Save changes"}</Button>
+                      </div>
                     </SheetFooter>
                   </>
                 )}
@@ -460,7 +534,7 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
           <CardHeader><div><CardTitle>Activity</CardTitle><CardDescription>Last 14 days</CardDescription></div><BarChart3 /></CardHeader>
           <CardContent>
             <div className="admin-chart-legend"><span className="users">New users</span><span className="messages">Messages</span><span className="feedback">Feedback</span></div>
-            <div className="admin-activity-chart">
+            <div className="admin-activity-chart" aria-hidden="true">
               {data.activity.map((item) => (
                 <div className="admin-activity-day" key={item.date} title={`${item.date}: ${item.users} users, ${item.messages} messages, ${item.feedback} feedback`}>
                   <div className="admin-activity-bars">
@@ -472,6 +546,17 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
                 </div>
               ))}
             </div>
+            <details className="admin-activity-data">
+              <summary>Daily activity data</summary>
+              <table>
+                <caption className="sr-only">Daily activity: new users, messages, and feedback</caption>
+                <thead><tr><th scope="col">Date</th><th scope="col">New users</th><th scope="col">Messages</th><th scope="col">Feedback</th></tr></thead>
+                <tbody>{data.activity.map((item) => (
+                  <tr key={item.date}><th scope="row"><time dateTime={item.date}>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${item.date}T00:00:00Z`))}</time></th><td>{item.users.toLocaleString()}</td><td>{item.messages.toLocaleString()}</td><td>{item.feedback.toLocaleString()}</td></tr>
+                ))}</tbody>
+              </table>
+              {!data.activity.length && <p>No activity data.</p>}
+            </details>
           </CardContent>
         </Card>
 
@@ -514,7 +599,7 @@ function RoomsPanel({ data, onOpenRoom }: { data: AdminDashboardData; onOpenRoom
             <span>{room.isPublic ? <><Globe2 /> Public</> : <><LockKeyhole /> Private</>}</span>
             <span><span className={room.listenerCount > 0 ? "room-pulse live" : "room-pulse"} />{room.listenerCount}</span>
             <time>{formatDate(room.updatedAt)}</time>
-            <Button variant="ghost" size="sm" onClick={() => onOpenRoom(room.slug)}>Open <ExternalLink /></Button>
+            <Button variant="ghost" size="sm" aria-label={`Open ${room.name}`} onClick={() => onOpenRoom(room.slug)}>Open <ExternalLink /></Button>
           </div>
         ))}
         {!data.rooms.length && <div className="admin-empty"><Radio /><strong>No rooms yet</strong></div>}

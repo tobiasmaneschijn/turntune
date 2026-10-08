@@ -10,16 +10,16 @@ export interface ChatHistorySource {
   loadMessage(messageId: string): Promise<ChatMessage | null>
   saveMessage(message: ChatMessage): Promise<void>
   saveReaction(change: { id?: string; action: 'add' | 'remove'; messageId: string; userId?: string; emoji: string }): Promise<void>
-  loadMediaUrl(storagePath: string): Promise<string>
+  loadMediaUrl(storagePath: string, signal?: AbortSignal): Promise<string>
 }
 interface RowsPayload { rows: ChatHistoryRow[]; replies?: ChatHistoryRow[]; profiles?: Parameters<typeof chatMessagesFromRows>[2] }
 
 /** The server checks fresh room admission before it reads privileged database history. */
 export function createChatHistorySource(accessToken: string, roomSlug: string, fetchImpl: typeof fetch = fetch): ChatHistorySource {
   const prefix = `/api/rooms/${encodeURIComponent(roomSlug)}/chat`
-  const request = async <T>(path: string, params = new URLSearchParams(), body?: unknown): Promise<T> => {
+  const request = async <T>(path: string, params = new URLSearchParams(), body?: unknown, signal?: AbortSignal): Promise<T> => {
     return requestJson<T>(`${prefix}${path}${params.size ? `?${params}` : ''}`, {
-      accessToken, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      accessToken, signal, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       errorMessage: 'Room chat could not be loaded or saved. Try again.', validate: (value): value is T => value === null || typeof value === 'object'
     }, fetchImpl)
   }
@@ -52,6 +52,6 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
     },
     async saveMessage(message) { await request('/messages', undefined, message) },
     async saveReaction(change) { await request('/reactions', undefined, { id: change.id, action: change.action, messageId: change.messageId, emoji: change.emoji }) },
-    async loadMediaUrl(storagePath) { return (await request<{ url: string }>('/media-url', undefined, { storagePath })).url },
+    async loadMediaUrl(storagePath, signal) { return (await request<{ url: string }>('/media-url', undefined, { storagePath }, signal)).url },
   }
 }

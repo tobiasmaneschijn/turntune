@@ -17,6 +17,33 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.4",
+    date: "2026-10-08",
+    title: "UI and recovery improvements",
+    sections: [
+      {
+        title: "Improved",
+        items: [
+          "Room lists without duplicates, grouped room actions, and visible Settings categories on phones.",
+          "Clearer chat text, control labels, and admin details, with a daily activity table.",
+          "Simpler landing page with invite and music-service requirements.",
+          "Faster entry pages and fewer unnecessary artwork downloads.",
+        ],
+      },
+      {
+        title: "Fixed",
+        items: [
+          "Unsaved profile and admin edits are preserved; avatar changes apply on Save.",
+          "Save and favorite errors stay with the failed action, with retry controls.",
+          "Uploads can be cancelled, and uncertain feedback retries reuse the original submission.",
+          "Emoji insertion respects the cursor and selection; navigation restores keyboard focus.",
+          "Password-reset recovery actions and Settings when browser storage is unavailable.",
+          "Friend removal confirmation and loading feedback.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.3",
     date: "2026-10-08",
     title: "More compact room layout",
