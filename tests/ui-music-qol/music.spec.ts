@@ -14,17 +14,73 @@ async function open(page: Page, scenario = "default") {
 }
 
 async function search(page: Page, query = "midnight") {
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await openAddMusic(page);
   await page.getByRole("textbox", { name: "Search music", exact: true }).fill(query);
   await page.getByRole("button", { name: "Go", exact: true }).click();
 }
+
+async function openAddMusic(page: Page) {
+  const dialog = page.getByRole("dialog", { name: "Add music", exact: true });
+  if (!await dialog.isVisible()) await page.getByRole("button", { name: "Add music", exact: true }).click();
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+test("queue-first navigation keeps the DJ roster collapsed and one membership action", { tag: "@mobile" }, async ({ page }) => {
+  await open(page, "listener");
+  const tabs = page.getByRole("tablist", { name: "Music tools", exact: true });
+  await expect(tabs.getByRole("tab")).toHaveText(["Queue", "My picks", "History"]);
+  await expect(tabs.getByRole("tab", { name: "Queue", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Join as DJ", exact: true })).toHaveCount(1);
+  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  await expect(lineup).toHaveAttribute("aria-expanded", "false");
+  const rosterId = await lineup.getAttribute("aria-controls");
+  expect(rosterId).toBeTruthy();
+  const roster = page.locator(`[id="${rosterId}"]`);
+  await expect(roster).toBeHidden();
+  await lineup.click();
+  await expect(lineup).toHaveAttribute("aria-expanded", "true");
+  await expect(roster).toBeVisible();
+  await lineup.click();
+  await expect(roster).toBeHidden();
+  const dialog = await openAddMusic(page);
+  await expect(page.getByRole("button", { name: "Join as DJ", exact: true })).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: "Join as DJ", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Join as DJ", exact: true })).toHaveCount(1);
+});
+
+test("Add music traps focus, closes with Escape and preserves search and link drafts", { tag: "@mobile" }, async ({ page }) => {
+  await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
+  await open(page, "listener");
+  const trigger = page.getByRole("button", { name: "Add music", exact: true });
+  await search(page);
+  const dialog = page.getByRole("dialog", { name: "Add music", exact: true });
+  await dialog.getByRole("button", { name: /Add by link/ }).click();
+  await dialog.getByRole("textbox", { name: "Track link", exact: true }).fill("https://youtu.be/abcdefghijk");
+  for (let index = 0; index < 12; index++) {
+    await page.keyboard.press("Tab");
+    await expect.poll(() => dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.press("Enter");
+  await expect(dialog.getByRole("textbox", { name: "Search music", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
+  await expect(dialog.getByRole("combobox", { name: "Music provider", exact: true })).toContainText("YouTube");
+  await expect(dialog.locator(".search-result-row")).toHaveCount(3);
+  await expect(dialog.getByRole("textbox", { name: "Track link", exact: true })).toHaveValue("https://youtu.be/abcdefghijk");
+  expect(await api(page, "return music.commands")).toEqual([]);
+});
 
 test("successive track adds retain search context and truthful row positions", { tag: "@mobile" }, async ({ page }) => {
   await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
   await open(page);
   await search(page);
   await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
-  await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("dialog", { name: "Add music", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
   await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Queued · #4");
   await page.getByRole("button", { name: "Add Second Song to your queue", exact: true }).click();
@@ -32,8 +88,10 @@ test("successive track adds retain search context and truthful row positions", {
   await expect.poll(() => api(page, "return music.commands.filter(x => x.event === 'queue:add').length")).toBe(3);
   await expect(page.locator(".search-result-row").filter({ hasText: "Third Song" })).toContainText("Queued · #6");
   await page.getByRole("button", { name: "View queue", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Add music", exact: true })).toBeHidden();
+  await expect(page.getByRole("tab", { name: /Queue/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".music-queue-pane .queue-track")).toHaveCount(6);
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await openAddMusic(page);
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
   await expect(page.locator(".search-result-row")).toHaveCount(3);
 });
@@ -61,7 +119,7 @@ test("quiet-room add says now playing instead of implying a queue position", asy
   await search(page);
   await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
   await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Now playing");
-  await expect(page.locator(".music-own-readiness")).toContainText("You’re on air");
+  await expect(page.getByRole("dialog", { name: "Add music", exact: true }).locator(".music-own-readiness")).toContainText("You’re on air");
   await expect.poll(() => api(page, "return music.snapshot().room.queue.length")).toBe(0);
 });
 
@@ -93,6 +151,7 @@ test("search distinguishes empty, refresh, error and newer requests", async ({ p
 
 test("queue actions reorder with keyboard or touch without changing shared playback", { tag: "@mobile" }, async ({ page }, testInfo) => {
   await open(page);
+  await expect(page.locator(".music-queue-pane .queue-track").first().locator(".rail-track-copy small")).toContainText("Queue position 1");
   const actions = page.getByRole("button", { name: "Actions for Gamma", exact: true });
   if (testInfo.project.name === "desktop") { await actions.focus(); await page.keyboard.press("Enter"); }
   else await actions.tap();
@@ -127,7 +186,8 @@ test("history filters real metadata and provides safe source actions", async ({ 
   await page.getByRole("textbox", { name: "Filter recently played tracks", exact: true }).fill("Past Artist");
   await expect(page.locator(".music-history-row")).toHaveCount(1);
   await expect(page.locator(".music-history-row")).toContainText("Past Artist · Spotify · 3:03");
-  await expect(page.locator(".music-history-row")).toContainText("Played by Casey");
+  await expect(page.locator(".music-history-row")).not.toContainText("Played by Casey");
+  await expect(page.locator(".music-history-row time")).toHaveCount(0);
   await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
   await expect(page.getByRole("menuitem", { name: "Open on Spotify", exact: true })).toHaveAttribute("href", "https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx");
   await page.keyboard.press("Escape");
@@ -141,7 +201,7 @@ test("pasted Spotify link gets a preview without changing search provider or aut
   await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "youtube"));
   await page.route("**/api/spotify/resolve?**", (route) => route.fulfill({ json: { result: { id: "5bJ1DrEM4hNCafcDd1oxHx", title: "Detected Spotify Song", artist: "Resolved Artist", durationMs: 240000 } } }));
   await open(page, "listener");
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await openAddMusic(page);
   await page.getByRole("button", { name: /Add by link/ }).click();
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx");
   await expect(page.getByText("Spotify · single tracks only", { exact: true })).toBeVisible();
@@ -152,12 +212,12 @@ test("pasted Spotify link gets a preview without changing search provider or aut
   await expect.poll(() => api(page, "return music.commands[0].payload.provider")).toBe("spotify");
   expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("soundspin-search-provider"))).toBe("youtube");
-  await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("dialog", { name: "Add music", exact: true })).toBeVisible();
 });
 
 test("unsupported link explains the problem and preserves editable input", async ({ page }) => {
   await open(page);
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
+  await openAddMusic(page);
   await page.getByRole("button", { name: /Add by link/ }).click();
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://open.spotify.com/playlist/5bJ1DrEM4hNCafcDd1oxHx");
   await page.getByRole("button", { name: "Find track", exact: true }).click();
@@ -175,6 +235,7 @@ for (const scenario of ["listener", "restricted"]) {
     await search(page);
     await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
     await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Queued · #1");
+    await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "History", exact: true }).click();
     await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
     await page.getByRole("menuitem", { name: "Add to my queue", exact: true }).click();
@@ -184,7 +245,7 @@ for (const scenario of ["listener", "restricted"]) {
     expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
     if (scenario === "restricted") {
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
-      await expect(page.locator('.music-history-pane .music-join-prompt')).toContainText("A DJ role is required to play your queued tracks.");
+      await expect(page.locator('.music-rail-minimal')).toContainText("Ask the owner or a moderator for a DJ role.");
     }
   });
 }
@@ -198,7 +259,7 @@ test("quiet-room listener queues a track and starts it only after joining as DJ"
   await expect(page.locator(".music-action-status")).toContainText("Added First Song to your private queue · #1");
   expect(await api(page, "return music.snapshot().room.playback.track")).toBeNull();
   expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
-  await page.locator('.search-pane .music-join-prompt').getByRole("button", { name: "Join as DJ", exact: true }).click();
+  await page.getByRole("dialog", { name: "Add music", exact: true }).getByRole("button", { name: "Join as DJ", exact: true }).click();
   await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Now playing");
   expect(await api(page, "return music.commands.map(x => x.event)")).toEqual(["queue:add", "dj:join"]);
 });
@@ -230,9 +291,15 @@ test("real music rail fits a narrow screen and hides inactive panels from focus"
   const box = await page.getByRole("button", { name: "Actions for Gamma", exact: true }).boundingBox();
   expect(box!.width).toBeGreaterThanOrEqual(44);
   expect(box!.height).toBeGreaterThanOrEqual(44);
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
-  await expect(page.getByRole("tabpanel", { name: "Search", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "My picks", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "My picks", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).not.toBeVisible();
+  const dialog = await openAddMusic(page);
+  await expect(dialog.getByRole("textbox", { name: "Search music", exact: true })).toBeFocused();
+  expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tab", { name: "My picks", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
 test("active music panes fill the rail with empty or visible feedback", { tag: "@mobile" }, async ({ page }) => {
@@ -243,7 +310,7 @@ test("active music panes fill the rail with empty or visible feedback", { tag: "
     const pane = page.getByRole("tabpanel", { name, exact: true });
     await expect(pane).toBeVisible();
     await expect(page.locator('.music-tool-tabs > [data-slot="tabs-content"]:visible')).toHaveCount(1);
-    await expect(page.locator('.music-tool-tabs > [data-slot="tabs-content"][hidden]')).toHaveCount(3);
+    await expect(page.locator('.music-tool-tabs > [data-slot="tabs-content"][hidden]')).toHaveCount(2);
     await expect.poll(async () => {
       const tools = await page.locator(".music-tool-tabs").boundingBox();
       const active = await pane.boundingBox();
@@ -268,12 +335,12 @@ test("active music panes fill the rail with empty or visible feedback", { tag: "
   await page.getByRole("tab", { name: "History", exact: true }).click();
   await expectFilledPane("History", true);
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).toBeHidden();
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
-  await expectFilledPane("Search");
+  await page.getByRole("tab", { name: "My picks", exact: true }).click();
+  await expectFilledPane("My picks");
   await expect(page.getByRole("textbox", { name: "Filter recently played tracks", exact: true })).toBeHidden();
   await api(page, "music.setConnected(false)");
   await expect(page.locator(".music-feedback")).toBeVisible();
-  await expectFilledPane("Search");
+  await expectFilledPane("My picks");
   await page.getByRole("tab", { name: /Queue/ }).click();
   await expectFilledPane("Queue 3", true);
 });
@@ -338,7 +405,105 @@ async function mockLibrary(page: Page) {
   });
 }
 
-test("private picks save from history, persist across room views, requeue and delete", async ({ page }) => {
+async function startSaveQueue(page: Page) {
+  await page.getByRole("tab", { name: /Queue/ }).click();
+  await page.getByRole("button", { name: "Queue actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Save queue as set", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "My picks", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeFocused();
+}
+
+test("repeated Queue actions preserves an open set draft and focuses it again", async ({ page }) => {
+  await mockLibrary(page);
+  await open(page, "library");
+  await startSaveQueue(page);
+  await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Keep this set draft");
+  await page.getByRole("tab", { name: /Queue/ }).click();
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeHidden();
+  await startSaveQueue(page);
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toHaveValue("Keep this set draft");
+});
+
+test("arrow-key tab navigation retains focus while an open set draft is preserved", { tag: "@mobile" }, async ({ page }) => {
+  await mockLibrary(page);
+  await open(page, "library");
+  await startSaveQueue(page);
+  await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Keep this draft while browsing");
+  const queue = page.getByRole("tab", { name: /Queue/ });
+  const picks = page.getByRole("tab", { name: "My picks", exact: true });
+  const history = page.getByRole("tab", { name: "History", exact: true });
+  await queue.click();
+  await queue.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(picks).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(picks).toBeFocused();
+  await expect(picks).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowRight");
+  await expect(history).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(history).toBeFocused();
+  await expect(history).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(picks).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(picks).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toHaveValue("Keep this draft while browsing");
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeVisible();
+  await expect(picks).toBeFocused();
+});
+
+for (const mutation of ["save-set", "delete-pick"] as const) {
+  for (const destination of ["library", "history"] as const) {
+    test(`${mutation} success preserves focus after moving to the ${destination} filter`, async ({ page }) => {
+      const library: any = {
+        picks: [
+          { id: "11111111-1111-4111-8111-111111111111", savedAt: 100, track: { provider: "youtube", providerId: "abcdefghijk", title: "Saved Signal" } },
+          { id: "22222222-2222-4222-8222-222222222222", savedAt: 100, track: { provider: "youtube", providerId: "lmnopqrstuv", title: "Second Signal" } }
+        ],
+        sets: []
+      };
+      let pending = false;
+      let release!: () => void;
+      const responseGate = new Promise<void>((resolve) => { release = resolve; });
+      await page.route("**/api/library", async (route) => {
+        const action = route.request().postDataJSON();
+        if (action?.type === mutation) {
+          pending = true;
+          await responseGate;
+          if (mutation === "save-set") library.sets.push({ id: action.id, name: action.name, tracks: action.tracks, savedAt: 100 });
+          else library.picks = library.picks.filter((pick: any) => pick.id !== action.id);
+        }
+        await route.fulfill({ json: { library } });
+      });
+      await open(page, "library");
+      if (mutation === "save-set") {
+        await startSaveQueue(page);
+        await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Pending set");
+        await page.getByRole("button", { name: "Save set", exact: true }).click();
+      } else {
+        await page.getByRole("tab", { name: "My picks", exact: true }).click();
+        await page.getByRole("button", { name: "Actions for saved pick Saved Signal", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Delete saved pick Saved Signal", exact: true }).click();
+        await expect(page.getByRole("menu")).toBeHidden();
+      }
+      await expect.poll(() => pending).toBe(true);
+      if (destination === "history") await page.getByRole("tab", { name: "History", exact: true }).click();
+      const filter = page.getByRole("textbox", { name: destination === "history" ? "Filter recently played tracks" : "Filter private picks and sets", exact: true });
+      const filterText = destination === "history" ? "Past Artist" : mutation === "save-set" ? "Pending" : "Signal";
+      await filter.fill(filterText);
+      await expect(filter).toBeFocused();
+      release();
+      if (mutation === "save-set") await expect(page.locator(".music-saved-set")).toContainText("Pending set");
+      else await expect(page.locator(".music-library-row")).toHaveCount(1);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expect(filter).toBeFocused();
+      await expect(filter).toHaveValue(filterText);
+    });
+  }
+}
+
+test("private picks save from history, persist across room views, expose details, requeue and delete", { tag: "@mobile" }, async ({ page }) => {
   await mockLibrary(page);
   await open(page, "library-listener");
   await page.getByRole("tab", { name: "History", exact: true }).click();
@@ -348,31 +513,45 @@ test("private picks save from history, persist across room views, requeue and de
   await api(page, "music.setRoom('second-room')");
   await page.getByRole("tab", { name: "My picks", exact: true }).click();
   await expect(page.locator(".music-library-row")).toContainText("Beta");
+  const actions = page.getByRole("button", { name: "Actions for saved pick Beta", exact: true });
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Track details", exact: true }).click();
+  const details = page.getByRole("dialog", { name: "Track details", exact: true });
+  await expect(details).toContainText("Past Artist");
+  await expect(details.getByRole("link", { name: "Open on Spotify", exact: true })).toBeVisible();
+  await details.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(actions).toBeFocused();
   await page.getByRole("button", { name: "Add saved pick Beta to my queue", exact: true }).click();
   await expect.poll(() => api(page, "return music.commands.at(-1).event")).toBe("queue:add");
   expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
-  await page.getByRole("button", { name: "Delete saved pick Beta", exact: true }).click();
+  await page.getByRole("button", { name: "Actions for saved pick Beta", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete saved pick Beta", exact: true }).click();
   await expect(page.locator(".music-library-row")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Filter private picks and sets", exact: true })).toBeFocused();
 });
 
-test("named sets preserve saved order, explicitly append, report skipped recordings, rename and clear", async ({ page }) => {
+test("Queue actions opens a focused set draft and saved sets preserve order, append, rename and clear", async ({ page }) => {
   await mockLibrary(page);
   await open(page, "library");
-  await page.getByRole("tab", { name: "My picks", exact: true }).click();
-  await page.getByText("Save current queue as a set", { exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeHidden();
+  await startSaveQueue(page);
   await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Evening picks");
-  await page.getByRole("button", { name: "Save queue as set", exact: true }).click();
+  await page.getByRole("button", { name: "Save set", exact: true }).click();
   await expect(page.locator(".music-saved-set")).toContainText("Evening picks");
-  await page.getByText("3 tracks · review saved order", { exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeHidden();
+  await page.locator(".music-saved-set .music-set-tracks > summary").click();
   await expect(page.locator(".music-saved-set ol li")).toHaveText(["Alpha — Fixture Artist · YouTube", "Beta — Fixture Artist · YouTube", "Gamma — Fixture Artist · YouTube"]);
   await page.getByRole("button", { name: "Append set to my queue", exact: true }).click();
   await expect(page.locator(".music-action-status")).toContainText("Appended 1 tracks from Evening picks · 1 skipped");
   await page.getByText("1 skipped tracks · review reasons", { exact: true }).click();
   await expect(page.locator(".music-import-summary")).toContainText("Unavailable recording — This recording is unavailable");
-  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await page.getByRole("button", { name: "Actions for saved set Evening picks", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Rename set", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "New name for Evening picks", exact: true })).toBeFocused();
   await page.getByRole("textbox", { name: "New name for Evening picks", exact: true }).fill("Weekend picks");
   await page.getByRole("button", { name: "Save name", exact: true }).click();
-  await expect(page.locator(".music-saved-set h4")).toHaveText("Weekend picks");
+  await expect(page.locator(".music-saved-set h4")).toContainText("Weekend picks");
+  await expect(page.getByRole("button", { name: "Actions for saved set Weekend picks", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Clear library…", exact: true }).click();
   await page.getByRole("button", { name: "Delete all picks and sets", exact: true }).click();
   await expect(page.locator(".music-saved-set")).toHaveCount(0);
@@ -397,10 +576,9 @@ test("private library errors keep set drafts and offer a retry without false sav
   let fails = true;
   await page.route("**/api/library", (route) => route.fulfill(fails && route.request().method() === "POST" ? { status: 503, json: { error: "Library storage is unavailable. Try again." } } : { json: { library: { picks: [], sets: [] } } }));
   await open(page, "library");
-  await page.getByRole("tab", { name: "My picks", exact: true }).click();
-  await page.getByText("Save current queue as a set", { exact: true }).click();
+  await startSaveQueue(page);
   await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Keep this draft");
-  await page.getByRole("button", { name: "Save queue as set", exact: true }).click();
+  await page.getByRole("button", { name: "Save set", exact: true }).click();
   await expect(page.locator(".music-library-content").getByRole("alert")).toContainText("Library storage is unavailable");
   await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toHaveValue("Keep this draft");
   await expect(page.locator(".music-action-status")).not.toContainText("Saved set");
@@ -422,11 +600,14 @@ test("queue and history details show complete metadata, safe links and clipboard
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("button", { name: "Actions for Alpha", exact: true })).toBeFocused();
   await page.getByRole("tab", { name: "History", exact: true }).click();
-  await expect(page.locator(".music-history-row").last()).toContainText("Play time unavailable");
-  await expect(page.locator(".music-history-row time")).toHaveAttribute("dateTime", "2026-10-06T20:45:00.000Z");
+  await expect(page.locator(".music-history-row").filter({ hasText: "Play time unavailable" })).toHaveCount(0);
+  await expect(page.locator(".music-history-row time")).toHaveCount(0);
   await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
   await page.getByRole("menuitem", { name: "Track details", exact: true }).click();
   await expect(dialog.getByRole("link", { name: "Open on Spotify", exact: true })).toBeVisible();
+  await expect(dialog).toContainText("Contributed by");
+  await expect(dialog).toContainText("Casey");
+  await expect(dialog.locator("time")).toHaveAttribute("dateTime", "2026-10-06T20:45:00.000Z");
 });
 
 test("on-air accent follows only changed authoritative DJ identity after baseline and respects reduced motion", async ({ page }) => {
