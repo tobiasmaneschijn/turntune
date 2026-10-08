@@ -47,8 +47,8 @@ test("one pending add blocks all duplicate intents and failures restore controls
   await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Adding…");
   await expect(page.getByRole("button", { name: "Add Second Song to your queue", exact: true })).toBeDisabled();
   await expect.poll(() => api(page, "return music.commands.length")).toBe(1);
-  await api(page, "music.resolveNext({ ok: false, error: 'DJ permission changed. Join again before adding.' })");
-  await expect(page.getByRole("alert")).toContainText("DJ permission changed");
+  await api(page, "music.resolveNext({ ok: false, error: 'Your room session changed. Join the room again.' })");
+  await expect(page.getByRole("alert")).toContainText("room session changed");
   await expect(page.getByRole("button", { name: "Add Second Song to your queue", exact: true })).toBeEnabled();
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
   await page.getByRole("button", { name: "Add Second Song to your queue", exact: true }).click();
@@ -140,7 +140,7 @@ test("history filters real metadata and provides safe source actions", async ({ 
 test("pasted Spotify link gets a preview without changing search provider or auto-enqueueing", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "youtube"));
   await page.route("**/api/spotify/resolve?**", (route) => route.fulfill({ json: { result: { id: "5bJ1DrEM4hNCafcDd1oxHx", title: "Detected Spotify Song", artist: "Resolved Artist", durationMs: 240000 } } }));
-  await open(page);
+  await open(page, "listener");
   await page.getByRole("tab", { name: "Search", exact: true }).click();
   await page.getByRole("button", { name: /Add by link/ }).click();
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx");
@@ -150,6 +150,7 @@ test("pasted Spotify link gets a preview without changing search provider or aut
   await expect.poll(() => api(page, "return music.commands.length")).toBe(0);
   await page.getByRole("button", { name: "Add to my queue", exact: true }).click();
   await expect.poll(() => api(page, "return music.commands[0].payload.provider")).toBe("spotify");
+  expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("soundspin-search-provider"))).toBe("youtube");
   await expect(page.getByRole("tab", { name: "Search", exact: true })).toHaveAttribute("aria-selected", "true");
 });
@@ -166,21 +167,40 @@ test("unsupported link explains the problem and preserves editable input", async
   await expect.poll(() => api(page, "return music.commands.length")).toBe(0);
 });
 
-test("listener joins explicitly near search and restricted listeners get useful guidance", async ({ page }) => {
+for (const scenario of ["listener", "restricted"]) {
+  test(`${scenario} can queue search results and played tracks without joining the lineup`, async ({ page }) => {
+    await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
+    await open(page, scenario);
+    const playback = await api(page, "return music.snapshot().room.playback");
+    await search(page);
+    await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
+    await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Queued · #1");
+    await page.getByRole("tab", { name: "History", exact: true }).click();
+    await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Add to my queue", exact: true }).click();
+    await expect.poll(() => api(page, "return music.snapshot().room.queue.length")).toBe(2);
+    expect(await api(page, "return music.commands.map(x => x.event)")).toEqual(["queue:add", "queue:add"]);
+    expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
+    expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
+    if (scenario === "restricted") {
+      await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
+      await expect(page.locator('.music-history-pane .music-join-prompt')).toContainText("A DJ role is required to play your queued tracks.");
+    }
+  });
+}
+
+test("quiet-room listener queues a track and starts it only after joining as DJ", async ({ page }) => {
   await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
-  await open(page, "listener");
+  await open(page, "listener-quiet");
   await search(page);
-  await expect(page.getByRole("button", { name: "Add First Song to your queue", exact: true })).toBeDisabled();
-  await page.locator('.search-pane .music-join-prompt').getByRole("button", { name: "Join as DJ", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Add First Song to your queue", exact: true })).toBeEnabled();
-  await expect.poll(() => api(page, "return music.commands[0].event")).toBe("dj:join");
   await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
-  await expect.poll(() => api(page, "return music.commands[1].event")).toBe("queue:add");
-  await page.goto("/tests/qol-harness/music.html?scenario=restricted");
-  await page.getByRole("tab", { name: "Search", exact: true }).click();
-  await expect(page.locator('.search-pane .music-join-prompt')).toContainText("Ask the owner or a moderator for a DJ role.");
-  await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
-  await expect.poll(() => api(page, "return music.commands.length")).toBe(0);
+  await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Queued · #1");
+  await expect(page.locator(".music-action-status")).toContainText("Added First Song to your private queue · #1");
+  expect(await api(page, "return music.snapshot().room.playback.track")).toBeNull();
+  expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
+  await page.locator('.search-pane .music-join-prompt').getByRole("button", { name: "Join as DJ", exact: true }).click();
+  await expect(page.locator(".search-result-row").filter({ hasText: "First Song" })).toContainText("Now playing");
+  expect(await api(page, "return music.commands.map(x => x.event)")).toEqual(["queue:add", "dj:join"]);
 });
 
 test("offline actions and late old-room acknowledgements cannot mutate the new view", async ({ page }) => {
@@ -320,7 +340,7 @@ async function mockLibrary(page: Page) {
 
 test("private picks save from history, persist across room views, requeue and delete", async ({ page }) => {
   await mockLibrary(page);
-  await open(page, "library");
+  await open(page, "library-listener");
   await page.getByRole("tab", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
   await page.getByRole("menuitem", { name: "Save to my picks", exact: true }).click();
@@ -330,6 +350,7 @@ test("private picks save from history, persist across room views, requeue and de
   await expect(page.locator(".music-library-row")).toContainText("Beta");
   await page.getByRole("button", { name: "Add saved pick Beta to my queue", exact: true }).click();
   await expect.poll(() => api(page, "return music.commands.at(-1).event")).toBe("queue:add");
+  expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
   await page.getByRole("button", { name: "Delete saved pick Beta", exact: true }).click();
   await expect(page.locator(".music-library-row")).toHaveCount(0);
 });
@@ -355,6 +376,21 @@ test("named sets preserve saved order, explicitly append, report skipped recordi
   await page.getByRole("button", { name: "Clear library…", exact: true }).click();
   await page.getByRole("button", { name: "Delete all picks and sets", exact: true }).click();
   await expect(page.locator(".music-saved-set")).toHaveCount(0);
+});
+
+test("listeners can append saved sets without joining the DJ lineup", async ({ page }) => {
+  await page.route("**/api/library", (route) => route.fulfill({ json: { library: { picks: [], sets: [{
+    id: "11111111-1111-4111-8111-111111111111", name: "Saved picks", savedAt: 100,
+    tracks: [{ provider: "youtube", providerId: "abcdefghijk", title: "First Song" }]
+  }] } } }));
+  await open(page, "library-listener");
+  const playback = await api(page, "return music.snapshot().room.playback");
+  await page.getByRole("tab", { name: "My picks", exact: true }).click();
+  await page.getByRole("button", { name: "Append set to my queue", exact: true }).click();
+  await expect(page.locator(".music-action-status")).toContainText("Appended 1 tracks from Saved picks");
+  expect(await api(page, "return music.commands.map(x => x.event)")).toEqual(["queue:set-add"]);
+  expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
+  expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
 });
 
 test("private library errors keep set drafts and offer a retry without false saved feedback", async ({ page }) => {

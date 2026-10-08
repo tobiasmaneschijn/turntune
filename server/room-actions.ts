@@ -94,19 +94,20 @@ export function mountRoomActions(options: RoomActionOptions) {
   onAction("queue:add", async (payload, reply) => {
     const parsed = trackSchema.safeParse(payload); const member = currentMember();
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid track." });
-    if (!member.room.djQueueUserIds.includes(member.user.id)) fail("Join the DJ queue before adding tracks.");
+    assertCurrent(member);
     const resolved = await options.resolveTrack(parsed.data);
     const result = await commands.execute(member.room, draft => {
       assertCurrent(member);
-      if (!canJoinDjQueue(draft, member.user.id) || !draft.djQueueUserIds.includes(member.user.id)) fail("Your DJ membership changed. Try again from your current room.");
       const recording = { ...parsed.data, ...resolved };
       if (draft.playback.track && sameRecording(draft.playback.track, recording)) fail("That track is already playing.");
       const queue = privateQueue(draft, member.user.id);
       const duplicate = queue.findIndex(track => sameRecording(track, recording));
       if (duplicate >= 0) fail(`That track is already #${duplicate + 1} in the queue.`);
       if (queue.length >= 1000) fail("Your waiting queue is full. Remove a track before adding another.");
-      queue.push({ id: crypto.randomUUID(), ...recording, addedBy: member.user, addedAt: Date.now() });
-      const started = !draft.playback.track; if (started) advanceRadio(draft);
+      const track = { id: crypto.randomUUID(), ...recording, addedBy: member.user, addedAt: Date.now() };
+      queue.push(track);
+      if (!draft.playback.track && draft.djQueueUserIds.includes(member.user.id)) advanceRadio(draft);
+      const started = draft.playback.track?.id === track.id;
       return { result: { started, position: started ? 0 : queue.length } };
     });
     reply?.({ ok: true, ...result });
@@ -115,7 +116,6 @@ export function mountRoomActions(options: RoomActionOptions) {
     const input = roomCommandSchemas["queue:set-add"].safeParse(payload);
     const member = currentMember(); if (!input.success) return reply?.({ ok: false, error: "Invalid saved set." });
     assertCurrent(member);
-    if (!canJoinDjQueue(member.room, member.user.id) || !member.room.djQueueUserIds.includes(member.user.id)) fail("Join the DJ lineup with permission before adding a set.");
     const result = await options.setImports.run(member.room, member.user.id, input.data.requestId, input.data.setId, async markCommitted => {
       const library = await store.getPrivateLibrary(member.user.id);
       const set = library.sets.find(value => value.id === input.data.setId);
@@ -123,7 +123,6 @@ export function mountRoomActions(options: RoomActionOptions) {
       const resolved = await resolveSavedSet(set!.tracks, options.resolveSavedRecording);
       return commands.execute(member.room, draft => {
         assertCurrent(member);
-        if (!canJoinDjQueue(draft, member.user.id) || !draft.djQueueUserIds.includes(member.user.id)) fail("Join the DJ lineup with permission before adding a set.");
         if (privateQueue(draft, member.user.id).length + resolved.tracks.length > 1000) fail("Your waiting queue is full. Remove tracks before adding this set.");
         const appended = resolved.tracks.length ? appendQueueSet(draft, member.user, resolved.tracks) : { added: 0, skipped: [], started: false };
         const outcome = { ...appended, skipped: [...resolved.skipped, ...appended.skipped] };

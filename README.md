@@ -8,7 +8,7 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 
 - Shareable room links
 - Round-robin DJ lineup with one song per turn
-- Private per-DJ music queues
+- Private music queues that listeners can prepare before joining the DJ lineup
 - One-minute reconnect grace period before an offline DJ is removed and skipped
 - Room-level DJ access: open to everyone or restricted to DJ roles and moderators
 - Real-time room chat

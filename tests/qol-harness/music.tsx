@@ -17,14 +17,16 @@ const tracks: Track[] = ["Alpha", "Beta", "Gamma"].map((title, index) => ({
 
 function initialSnapshot(roomId = "fixture-room"): RoomSnapshot {
   const scenario = new URLSearchParams(location.search).get("scenario");
+  const listener = ["listener", "restricted", "listener-quiet", "library-listener"].includes(scenario || "");
+  const quiet = scenario === "quiet" || scenario === "listener-quiet";
   return {
     room: { id: roomId, name: "Music tools", ownerUserId: other.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true, passwordProtected: false,
       settings: { djAccess: scenario === "restricted" ? "roles" : "everyone" },
-      djUserId: scenario === "quiet" ? null : other.id,
-      djQueueUserIds: scenario === "listener" || scenario === "restricted" ? [other.id] : [self.id, other.id],
-      queue: scenario === "quiet" || scenario === "listener" || scenario === "restricted" ? [] : tracks.map((track) => ({ ...track })),
+      djUserId: quiet ? null : other.id,
+      djQueueUserIds: listener ? [other.id] : [self.id, other.id],
+      queue: quiet || listener ? [] : tracks.map((track) => ({ ...track })),
       history: [{ ...tracks[1], id: "history-beta", artist: "Past Artist", provider: "spotify", providerId: "5bJ1DrEM4hNCafcDd1oxHx", addedBy: other, playedAt: Date.UTC(2026, 9, 6, 20, 45) }, { ...tracks[2], id: "history-gamma", artist: "Another Artist" }],
-      playback: { track: scenario === "quiet" ? null : { ...tracks[0], id: "currently-playing", providerId: "Zi_XLOBDo_Y", addedBy: other }, playing: scenario !== "quiet", position: 30, updatedAt: Date.now() },
+      playback: { track: quiet ? null : { ...tracks[0], id: "currently-playing", providerId: "Zi_XLOBDo_Y", addedBy: other }, playing: !quiet, position: 30, updatedAt: Date.now() },
       vibe: null, createdAt: 1 },
     users: [self, other], djUsers: [self, other], serverTime: Date.now()
   };
@@ -68,12 +70,17 @@ function Harness() {
       const next: RoomSnapshot = { ...latest.current, room: { ...latest.current.room, queue: [...latest.current.room.queue], djQueueUserIds: [...latest.current.room.djQueueUserIds] } };
       let result: SocketReply = { ok: true };
       const data = payload as any;
-      if (event === "dj:join") next.room.djQueueUserIds.unshift(self.id);
+      if (event === "dj:join") {
+        next.room.djQueueUserIds.unshift(self.id);
+        if (!next.room.playback.track && next.room.queue.length) {
+          next.room.playback = { track: next.room.queue.shift()!, playing: true, position: 0, updatedAt: Date.now() };
+          next.room.djUserId = self.id;
+        }
+      }
       if (event === "dj:leave") next.room.djQueueUserIds = next.room.djQueueUserIds.filter((id) => id !== self.id);
       if (event === "queue:add") {
-        if (!next.room.djQueueUserIds.includes(self.id)) { reply({ ok: false, error: "Join the DJ lineup first." }); return; }
         const track: Track = { ...data, id: `added-${++counter}`, addedBy: self, addedAt: Date.now() };
-        if (!next.room.playback.track) {
+        if (!next.room.playback.track && next.room.djQueueUserIds.includes(self.id)) {
           next.room.playback = { track, playing: true, position: 0, updatedAt: Date.now() };
           next.room.djUserId = self.id;
           result = { ok: true, started: true, position: 0 };
@@ -118,7 +125,7 @@ function Harness() {
     snapshot: () => latest.current
   };
 
-  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness"><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario") === "library" ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
+  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness"><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Harness /></ThemeProvider>);

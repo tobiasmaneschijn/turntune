@@ -5,7 +5,7 @@ type Database = { rows: Row[]; allowed: boolean; holdOlder: boolean; releaseOlde
 const databases = new WeakMap<Page, Database>()
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 declare global { interface Window {
-  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; reconnect(): void; rotateToken(): void }
+  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; typing(userId: string, active: boolean): void; renamePeer(userId: string, name: string): void; reconnect(): void; rotateToken(): void }
   notificationTest: { permission: string; requests: number; events: Array<{ title: string; tag: string }>; visible: boolean; focused: boolean; setAttention(visible: boolean, focused: boolean): void; activateLatest(): void }
 } }
 const incoming = (index: number, mention = true) => ({ id: id(index), content: mention ? 'Hello @Alice' : 'Another live message', type: 'text', user: { id: 'mira', name: 'Mira', avatarSeed: 'mira' },
@@ -285,6 +285,55 @@ test('heavy reaction updates preserve the row and use static selection without r
   await expect(reaction).toHaveClass(/active/)
   await expect(reaction.locator('strong')).toHaveText('101')
   await expect(reaction).toHaveCSS('animation-name', 'none')
+})
+
+test('peer typing keeps the GIF search and chat layout stable in a short laptop pane, including replies', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.locator('.supabase-chat-body').evaluate((element) => {
+    element.style.maxHeight = '380px'
+    element.style.width = '420px'
+  })
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  const picker = page.locator('.chat-picker-popover')
+  await composer.fill('Keep this draft')
+  for (const replying of [false, true]) {
+    if (replying) {
+      await page.locator('.chat-message-item').last().getByRole('button', { name: 'Message actions for Mira' }).click()
+      await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+    }
+    await page.getByRole('button', { name: 'Add GIF', exact: true }).click()
+    const search = picker.getByPlaceholder('Search GIFs')
+    await search.fill('dance')
+    await expect(picker.locator('.chat-gif-tile')).toHaveCount(8)
+    const layout = async () => Promise.all([page.locator('.chat-message-scroll').boundingBox(), page.locator('.chat-composer').boundingBox(), picker.boundingBox(), search.boundingBox()])
+    const before = await layout()
+    for (const active of [true, false, true, false]) {
+      await page.evaluate((value) => { window.chatHistoryTest.typing('mira', value); window.chatHistoryTest.typing('bob', value) }, active)
+      await expect(page.locator('.chat-typing-indicator')).toHaveText(active ? 'Bob and Mira are typing…' : '')
+      await expect.poll(layout).toEqual(before)
+      await expect(search).toBeFocused()
+      await expect(search).toHaveValue('dance')
+      const surfaceBox = (await page.locator('[data-chat-surface]').boundingBox())!
+      const pickerBox = (await picker.boundingBox())!
+      const searchBox = (await search.boundingBox())!
+      expect(pickerBox.y).toBeGreaterThanOrEqual(surfaceBox.y)
+      expect(pickerBox.y + pickerBox.height).toBeLessThanOrEqual((await page.locator('.chat-typing-indicator').boundingBox())!.y)
+      expect(searchBox.y).toBeGreaterThanOrEqual(pickerBox.y)
+      expect(searchBox.y + searchBox.height).toBeLessThanOrEqual(pickerBox.y + pickerBox.height)
+    }
+    if (replying) {
+      const longName = 'Bob with a very long name '.repeat(8).trim()
+      await page.evaluate((name) => { window.chatHistoryTest.renamePeer('bob', name); window.chatHistoryTest.typing('bob', true) }, longName)
+      await expect(page.locator('.chat-typing-indicator')).toHaveText(`${longName} is typing…`)
+      await expect.poll(layout).toEqual(before)
+      await expect(page.locator('.chat-typing-indicator span')).toHaveCSS('white-space', 'nowrap')
+      expect(await page.locator('.chat-typing-indicator span').evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+      await expect(search).toBeFocused()
+    }
+    await search.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(composer).toHaveValue('Keep this draft')
+  }
 })
 
 for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }, { width: 390, height: 380 }]) {

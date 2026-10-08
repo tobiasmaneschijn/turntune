@@ -942,10 +942,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       )}
 
       {(showEmoji || showGiphy) && (
-        <div className={cn('chat-picker-popover', {
-          'chat-picker-with-reply': Boolean(replyingTo),
-          'chat-picker-with-typing': Boolean(typingLabel),
-        })} style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
+        <div className="chat-picker-popover" style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
           <div className="chat-picker-tabs" role="tablist" aria-label="Message media">
             <button
               type="button"
@@ -1074,12 +1071,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         </div>
       )}
 
-      {typingLabel && (
-        <div className="chat-typing-indicator" aria-live="polite">
-          <i /><i /><i />
-          <span>{typingLabel}</span>
-        </div>
-      )}
       {composerError && <p role="alert" className="px-4 pt-2 text-xs text-red-400">{composerError}</p>}
       {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
       <form
@@ -1099,6 +1090,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             event.currentTarget.value = ''
           }}
         />
+        <div className="chat-typing-indicator" aria-live="polite" aria-atomic="true">
+          {typingLabel && <><i /><i /><i /><span>{typingLabel}</span></>}
+        </div>
         {replyingTo && (
           <div className="chat-reply-composer">
             <Reply className="size-3.5" />
