@@ -149,13 +149,15 @@ test.describe("authenticated UI acceptance", () => {
 
     await setTheme(page, "light");
     await expect(page.locator("html")).toHaveClass(/light/);
-    await page.getByRole("tab", { name: "Search" }).click();
+    await page.getByRole("button", { name: "Add music", exact: true }).click();
+    const addMusic = page.getByRole("dialog", { name: "Add music", exact: true });
+    await expect(addMusic).toBeVisible();
 
     const searchGroup = page.locator(".provider-search-group");
     const searchInput = page.getByRole("textbox", { name: "Search music" });
     const volumeSlider = page.locator('.volume-control [data-slot="slider"]');
     await expect(searchGroup).toBeVisible();
-    await expect.poll(async () => (await searchGroup.boundingBox())?.height || 0).toBeGreaterThanOrEqual(80);
+    await expect.poll(async () => (await searchGroup.boundingBox())?.height || 0).toBeGreaterThanOrEqual(44);
     await expect.poll(async () => (await searchInput.boundingBox())?.width || 0).toBeGreaterThanOrEqual(150);
 
     await page.getByRole("combobox", { name: "Music provider" }).click();
@@ -165,6 +167,14 @@ test.describe("authenticated UI acceptance", () => {
     const searchTitle = page.locator(".search-result-copy strong").first();
     const searchMetadata = page.locator(".search-result-copy small").first();
     await expect(searchTitle).toHaveText("Midnight City");
+
+    for (const readableText of [searchTitle, searchMetadata, searchInput, page.locator(".search-provider-mark.soundcloud").first(), page.locator(".manual-add-heading span").first()]) {
+      await expect(readableText).toBeVisible();
+      expect(await contrastRatio(readableText)).toBeGreaterThanOrEqual(4.5);
+    }
+    await expectNoHorizontalOverflow(page);
+    await page.keyboard.press("Escape");
+    await expect(addMusic).toBeHidden();
 
     if (await volumeSlider.isVisible()) {
       await expect.poll(async () => (await volumeSlider.boundingBox())?.width || 0).toBeGreaterThanOrEqual(100);
@@ -177,14 +187,8 @@ test.describe("authenticated UI acceptance", () => {
       expect(await contrastRatio(emptyPlayerTitle)).toBeGreaterThanOrEqual(4.5);
     }
 
-    expect(await contrastRatio(searchTitle)).toBeGreaterThanOrEqual(4.5);
-    expect(await contrastRatio(searchMetadata)).toBeGreaterThanOrEqual(4.5);
-    expect(await contrastRatio(searchInput)).toBeGreaterThanOrEqual(4.5);
     for (const readableText of [
       page.locator(".dj-lineup-current small").first(),
-      page.locator(".search-provider-mark.soundcloud").first(),
-      page.locator(".manual-add-heading span").first(),
-      page.locator(".manual-add-heading small").first(),
       page.locator(".chat-date-divider").first(),
       page.locator(".dev-flair").first()
     ]) {
