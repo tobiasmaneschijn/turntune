@@ -7,6 +7,9 @@ import { NowPlaying } from "../../src/components/NowPlaying";
 import { MusicRail } from "../../src/components/MusicRail";
 import { RealtimeChat } from "../../src/components/realtime-chat";
 import { RoomHeader } from "../../src/components/RoomHeader";
+import { RoomAnnouncementBanner } from "../../src/components/RoomAnnouncementBanner";
+import { RoomThemeBanner } from "../../src/components/RoomThemeBanner";
+import type { ChatHistorySource } from "../../src/chat/history-reader";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { RoomWorkspace } from "../../src/components/RoomWorkspace";
 import { DeferredDialog } from "../../src/components/DeferredDialog";
@@ -33,6 +36,15 @@ if (polished) {
 }
 const chatClient = { channel() { return { on() { return this; }, subscribe(callback: (status: string) => void) { queueMicrotask(() => callback("SUBSCRIBED")); return this; }, async send() { return "ok"; } }; }, async removeChannel() { return "ok"; } } as unknown as SupabaseClient;
 const chatMessages = [{ id: "hello-1", content: "This is the perfect soundtrack for the evening.", type: "text" as const, user: snapshot.users[1], createdAt: "2026-10-06T18:30:00Z" }, { id: "hello-2", content: "Queued a few favorites for my next turn.", type: "text" as const, user, createdAt: "2026-10-06T18:31:00Z" }];
+const chatHistorySource: ChatHistorySource = {
+  loadPage: async () => ({ messages: chatMessages, hasMore: false }),
+  search: async query => ({ messages: chatMessages.filter(message => message.content.toLowerCase().includes(query.toLowerCase())), hasMore: false }),
+  loadContext: async () => null,
+  loadMessage: async id => chatMessages.find(message => message.id === id) || null,
+  saveMessage: async () => {},
+  saveReaction: async () => {},
+  loadMediaUrl: async () => "",
+};
 type TestState = { mounts: number; calls: string[]; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void };
 const qa: TestState = { mounts: 0, calls: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {} };
 declare global { interface Window { playerQolTest: TestState } }
@@ -60,6 +72,7 @@ const loadFlaky = () => rejectOnce ? (rejectOnce = false, Promise.reject(new Err
 function Harness() {
   const [settings, setSettings] = useState(readUserSettings);
   const [pane, setPane] = useState<"radio" | "player" | "chat">("player");
+  const [chatHeaderActions, setChatHeaderActions] = useState<HTMLDivElement | null>(null);
   const [room, setRoom] = useState(snapshot);
   const [connected, setConnected] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -78,8 +91,9 @@ function Harness() {
       <Button onClick={() => setFlakyOpen(true)}>Open flaky panel</Button>
     </div>}
     <RoomWorkspace value={pane} onValueChange={setPane} defaultLayout={{ radio: 20, player: 45, chat: 35 }}
+      roomNotice={polished && <><RoomThemeBanner prompt={new URLSearchParams(location.search).get("theme") || "After hours"} /><RoomAnnouncementBanner roomId={room.room.id} userId={user.id} announcement={{ id: "fixture-note", text: "One song per turn. Pick something you love.", authorId: user.id, updatedAt: 1, expiresAt: null }} serverTime={room.serverTime} canEdit={false} connected={connected} /></>}
       radio={polished ? <MusicRail snapshot={room} currentUserId={user.id} accessToken="fixture" connected={connected} setNotice={() => {}} requestAction={requestAction} /> : <div className="panel"><input aria-label="Music search" /></div>}
-      chat={polished ? <aside className="chat panel"><div className="chat-header"><strong>Room chat</strong><small>2 listeners</small></div><div className="supabase-chat-body"><RealtimeChat client={chatClient} roomName="soundspin:player-room" user={user} roomUsers={room.users} messages={chatMessages} onSend={async () => {}} isVisible={pane === "chat"} /></div></aside> : <div className="chat panel"><textarea aria-label="Chat draft" /></div>}
+      chat={polished ? <aside className="chat panel"><div className="chat-header"><strong>Room chat</strong><div className="chat-presence"><small>2 listeners</small><div ref={setChatHeaderActions} className="chat-header-actions" /></div></div><div className="supabase-chat-body"><RealtimeChat headerActionsContainer={chatHeaderActions} historyRoomSlug={room.room.id} historySource={chatHistorySource} notifications={settings.notifications} client={chatClient} roomName="soundspin:player-room" user={user} roomUsers={room.users} messages={chatMessages} onSend={async () => {}} isVisible={pane === "chat"} /></div></aside> : <div className="chat panel"><textarea aria-label="Chat draft" /></div>}
       player={<div className="player-column" data-revision={revision}><NowPlaying snapshot={room} currentUserId={reactingListener ? "listener" : user.id} isDj canControlPlayback accessToken="fixture" compact={settings.playback.compactPlayer} onToggleCompact={() => setSettings(value => ({ ...value, playback: { ...value.playback, compactPlayer: !value.playback.compactPlayer } }))} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} userSettings={settings} onUserSettingsChange={setSettings} roomConnected={connected} onOpenSettings={() => setSettingsOpen(true)} requestAction={requestAction} providerPlayers={adapters} /></div>} />
     {delayedOpen && <DeferredDialog title="Deferred panel" load={loadDelayed} componentProps={{ onClose: () => setDelayedOpen(false) }} />}
     {flakyOpen && <DeferredDialog title="Deferred panel" load={loadFlaky} componentProps={{ onClose: () => setFlakyOpen(false) }} />}

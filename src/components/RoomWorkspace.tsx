@@ -31,13 +31,13 @@ export function RoomWorkspace({ radio, player, chat, compact = false, value, onV
     tabIndex: -1,
   });
   return <section ref={workspaceRef} id="room-workspace" tabIndex={-1} aria-label="Listening room workspace" className={`room-layout ${compact ? "compact-player-layout" : ""} ${tabletDual ? "room-tablet-dual" : ""} ${value === "radio" ? "room-radio-active" : ""}`}>
-    {(roomNotice || listeningChecklist) && <div className="room-workspace-context">{roomNotice}{listeningChecklist}</div>}
+    {(roomNotice || listeningChecklist) && <div className="room-workspace-context">{roomNotice && <div className="room-notice-strip">{roomNotice}</div>}{listeningChecklist}</div>}
     <ResizablePanelGroup className="room-panels" orientation="horizontal" {...panelProps}>
       <ResizablePanel className="room-panel room-panel-radio" id="radio" minSize="260px" maxSize="340px" {...semantics("radio")}>{radio}</ResizablePanel>
       <ResizableHandle className="room-resize-handle" withHandle />
-      <ResizablePanel className="room-panel room-panel-player" id="player" minSize="340px" {...semantics("player")}>{player}</ResizablePanel>
+      <ResizablePanel className="room-panel room-panel-player" id="player" minSize="320px" {...semantics("player")}>{player}</ResizablePanel>
       <ResizableHandle className="room-resize-handle" withHandle />
-      <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="380px" {...semantics("chat")}>{chat}</ResizablePanel>
+      <ResizablePanel className="room-panel room-panel-chat" id="chat" minSize="320px" {...semantics("chat")}>{chat}</ResizablePanel>
     </ResizablePanelGroup>
     {narrow && value !== "player" && (!tabletDual || value === "radio") && miniPlayer}
     <RoomPaneTabs value={value} mode={tabletDual ? "views" : "tabs"} onValueChange={(pane) => {

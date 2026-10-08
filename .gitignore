@@ -1,4 +1,5 @@
 node_modules/
+work/
 test-results-*.png
 dist/
 dist-server/

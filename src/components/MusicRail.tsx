@@ -509,15 +509,14 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       </TabsList>
 
       <TabsContent value="history" keepMounted className="rail-pane music-history-pane">
-        <div className="music-history-summary"><small>{snapshot.room.history.length} recent tracks · up to 100</small></div>
-        {snapshot.room.history.length > 0 && <div className="music-history-filter"><Input value={historyFilter} onChange={(event) => setHistoryFilter(event.target.value)} aria-label="Filter recently played tracks" placeholder="Filter by title or artist" />{historyFilter && <Button size="icon" variant="ghost" aria-label="Clear history filter" onClick={() => setHistoryFilter("")}><X /></Button>}</div>}
+        {snapshot.room.history.length > 0 && <div className="music-history-filter"><Input value={historyFilter} onChange={(event) => setHistoryFilter(event.target.value)} aria-label="Filter recently played tracks" placeholder="Filter history" />{historyFilter && <Button size="icon" variant="ghost" aria-label="Clear history filter" onClick={() => setHistoryFilter("")}><X /></Button>}</div>}
         <div className="rail-track-list">
           {filteredHistory.map((track, index) => {
             const sourceUrl = trackSourceUrl(track);
             const existing = rowStatus({ provider: track.provider, id: track.providerId, title: track.title, artist: track.artist || "" });
             return <div className="rail-track-row music-history-row" key={`${track.id}-${index}`}>
               <TrackArtwork track={track} compact />
-              <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small>{existing && <small className="music-result-confirmation">{existing}</small>}</span>
+              <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small title={[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small>{existing && <small className="music-result-confirmation">{existing}</small>}</span>
               <DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) historyButtonRefs.current.set(track.id, button); else historyButtonRefs.current.delete(track.id); }} render={<Button variant="ghost" size="icon" aria-label={`Actions for played track ${track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
                 <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing)} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />Add to my queue</DropdownMenuItem>
                 <DropdownMenuItem disabled={!accessToken || libraryBusy || isSaved(track)} onClick={() => savePick(track)}><Bookmark />{isSaved(track) ? "Saved to my picks" : "Save to my picks"}</DropdownMenuItem>
@@ -559,11 +558,9 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
 
     <section className="dj-lineup" aria-label="DJ status">
       <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label="DJ lineup" aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
-        <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"}</strong>{currentDj && <small>On air</small>}</span></span>
+        <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"}</strong>{joinedDjQueue && snapshot.room.djUserId !== currentUserId ? <small>{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</small> : !joinedDjQueue && !canJoinDjQueue ? <small>DJ role required</small> : currentDj && <small>On air</small>}</span></span>
         <span className="music-lineup-label">Lineup<ChevronDown size={14} /></span>
       </Button>
-      {joinedDjQueue && snapshot.room.djUserId !== currentUserId && <p className="music-dj-turn">{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</p>}
-      {!joinedDjQueue && !canJoinDjQueue && <p className="music-dj-turn">DJ role required</p>}
       <div id={lineupId} className="music-lineup-details" hidden={!lineupOpen}>
         <ol className="music-lineup-list" aria-label="DJ lineup">
           {[...(currentDj ? [currentDj.id] : []), ...upcomingDjs].map((id) => {

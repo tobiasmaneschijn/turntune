@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Copy, House, Keyboard, LayoutDashboard, Lightbulb, LogOut, MoreHorizontal, RotateCcw, Settings, Shield, UserRound, Users } from "lucide-react";
+import { Copy, House, Keyboard, LayoutDashboard, Lightbulb, LogOut, MoreHorizontal, PanelsTopLeft, RotateCcw, Settings, Shield, UserRound, Users } from "lucide-react";
 import type { User } from "../types";
 import type { FeedbackDiagnosticContext } from "../feedback-diagnostics";
 import { Avatar } from "./Avatar";
@@ -13,7 +13,7 @@ import type { RoomLayoutPreset } from "../hooks/use-room-layout-presets";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Switch } from "./ui/switch";
 import "../styles/layout-completion.css";
 
@@ -109,21 +109,12 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
       </div></div>
       <div className="header-actions">
         <Button variant="ghost" size="sm" className="header-directory-button" onClick={onHome} title="Room directory" aria-label="Room directory"><House /><span>Rooms</span></Button>
-        <div className="header-tool-group">
-          {onAdmin && <Button variant="ghost" size="icon" onClick={onAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-          <Suspense fallback={null}><FeedbackButton userId={currentUser.id} roomSlug={roomSlug} diagnosticContext={diagnosticContext} /></Suspense>
-          <Button variant="ghost" size="icon" onClick={onSettings} title="Settings" aria-label="Settings"><Settings /></Button>
-          {onRoomSettings && <Button variant="ghost" size="icon" onClick={onRoomSettings} title="Room settings" aria-label="Room settings"><Shield /></Button>}
-        </div>
         <ThemeToggle compact />
-        {onFriends && <Button variant="ghost" size="sm" className="header-friends-button" onClick={onFriends}><Users /><span>Friends</span></Button>}
         <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Invite link copied" : "Copy room invite link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Invite"}</span></Button>
         <Button variant="ghost" size="icon" className="header-profile-button" data-navigation-focus="room-profile" onClick={onProfile} title="Open your profile" aria-label="Open your profile"><Avatar user={currentUser} size={30} /></Button>
-        {onSignOut && <Button variant="ghost" size="icon" className="sign-out" aria-label="Sign out" title="Sign out" onClick={onSignOut}><LogOut /></Button>}
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button ref={moreRef} variant="ghost" size="icon" className="room-more-actions" data-navigation-focus="room-actions" aria-label="More room actions" />}><MoreHorizontal /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="room-actions-menu">
-            <div className="room-menu-name">{roomName}</div>
             <DropdownMenuItem onClick={onSettings}><Settings /> Settings</DropdownMenuItem>
             {onRoomSettings && <DropdownMenuItem onClick={onRoomSettings}><Shield /> Room settings</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => setFeedbackOpen(true)}><Lightbulb /> Send feedback</DropdownMenuItem>
@@ -135,12 +126,19 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setCommandsOpen(true)}><Keyboard /> Room commands <kbd>Ctrl / ⌘ K</kbd></DropdownMenuItem>
             <DropdownMenuItem onClick={() => setHelpOpen(true)}><Keyboard /> Keyboard help</DropdownMenuItem>
-            {onLayoutPresetChange && <DropdownMenuRadioGroup value={layoutPreset} onValueChange={(value) => { if (value === "balanced" || value === "player" || value === "chat") onLayoutPresetChange(value); }} aria-label="Room layout preset">
-              <DropdownMenuRadioItem value="balanced" closeOnClick>Balanced layout</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="player" closeOnClick>Player focus layout</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="chat" closeOnClick>Chat focus layout</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>}
-            <DropdownMenuItem onClick={onResetLayout}><RotateCcw /> Reset room layout</DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger><PanelsTopLeft /> Room layout</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="room-layout-menu">
+                {onLayoutPresetChange && <DropdownMenuRadioGroup value={layoutPreset} onValueChange={(value) => { if (value === "balanced" || value === "player" || value === "chat") onLayoutPresetChange(value); }} aria-label="Room layout preset">
+                  <DropdownMenuRadioItem value="balanced" closeOnClick>Balanced layout</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="player" closeOnClick>Player focus layout</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="chat" closeOnClick>Chat focus layout</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>}
+                {onLayoutPresetChange && <DropdownMenuSeparator />}
+                <DropdownMenuItem onClick={onResetLayout}><RotateCcw /> Reset room layout</DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            {onSignOut && <DropdownMenuSeparator />}
             {onSignOut && <DropdownMenuItem onClick={onSignOut}><LogOut /> Sign out</DropdownMenuItem>}
           </DropdownMenuContent>
         </DropdownMenu>

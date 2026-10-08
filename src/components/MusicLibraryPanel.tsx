@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { ChevronDown, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
@@ -87,6 +87,30 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
     {loading && <p role="status">Loading picks and sets…</p>}
     {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Retry</Button></div>}
     {library && <>
+      <h3>Picks {library.picks.length >= 450 && <small>{library.picks.length}/500</small>}</h3>
+      {picks.map((pick, index) => {
+        const queued = isQueued(pick.track);
+        return <div className="music-library-row" key={pick.id}>
+          <TrackArtwork track={pick.track} compact />
+          <div className="music-library-pick-copy">
+            <strong title={pick.track.title}>{pick.track.title}</strong><small title={pick.track.artist || providerLabel(pick.track.provider)}>{pick.track.artist || providerLabel(pick.track.provider)}</small>
+          </div>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label={`Add saved pick ${pick.track.title} to my queue`} title={queued ? "Already in room" : "Add to queue"} disabled={busy || !canEnqueue || queued} onClick={() => enqueue(pick.track)}>{queued ? <Check /> : <Plus />}</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger ref={(button) => { if (button) pickActionsRefs.current.set(pick.id, button); else pickActionsRefs.current.delete(pick.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved pick ${pick.track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? pickActionsRefs.current.get(pick.id) || filterRef.current || true : false}>
+              <DropdownMenuItem onClick={() => details(pick.track, pickActionsRefs.current.get(pick.id))}><Info />Track details</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" aria-label={`Delete saved pick ${pick.track.title}`} disabled={busy} onClick={async (event) => {
+                const nextId = picks[index + 1]?.id || picks[index - 1]?.id;
+                const owners = [event.currentTarget, pickActionsRefs.current.get(pick.id)];
+                if (await mutate({ type: "delete-pick", id: pick.id })) restoreActionFocus(() => (nextId ? pickActionsRefs.current.get(nextId) : undefined) || filterRef.current, owners);
+              }}><Trash2 />Delete pick</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>;
+      })}
+      {picks.length === 0 && <p className="music-library-empty">{needle ? "No matching picks." : "Save picks from a track’s menu."}</p>}
+      <h3>Sets {library.sets.length >= 25 && <small>{library.sets.length}/30</small>}</h3>
       <details className="music-create-set" open={createSetOpen} onToggle={(event) => {
         if (event.currentTarget.open !== createSetOpen) changeSaveSetOpen(event.currentTarget.open);
       }}>
@@ -110,38 +134,14 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
           {formError && <p role="alert">{formError}</p>}
         </form>
       </details>
-      <h3>Picks <small>{library.picks.length}/500</small></h3>
-      {picks.map((pick, index) => {
-        const queued = isQueued(pick.track);
-        return <div className="music-library-row" key={pick.id}>
-          <TrackArtwork track={pick.track} compact />
-          <div className="music-library-pick-copy">
-            <strong>{pick.track.title}</strong><small>{pick.track.artist || providerLabel(pick.track.provider)}</small>
-            <Button className="music-library-add" variant="ghost" size="sm" aria-label={`Add saved pick ${pick.track.title} to my queue`} disabled={busy || !canEnqueue || queued} onClick={() => enqueue(pick.track)}><Plus />{queued ? "Already in room" : "Add to queue"}</Button>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger ref={(button) => { if (button) pickActionsRefs.current.set(pick.id, button); else pickActionsRefs.current.delete(pick.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved pick ${pick.track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? pickActionsRefs.current.get(pick.id) || filterRef.current || true : false}>
-              <DropdownMenuItem onClick={() => details(pick.track, pickActionsRefs.current.get(pick.id))}><Info />Track details</DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" aria-label={`Delete saved pick ${pick.track.title}`} disabled={busy} onClick={async (event) => {
-                const nextId = picks[index + 1]?.id || picks[index - 1]?.id;
-                const owners = [event.currentTarget, pickActionsRefs.current.get(pick.id)];
-                if (await mutate({ type: "delete-pick", id: pick.id })) restoreActionFocus(() => (nextId ? pickActionsRefs.current.get(nextId) : undefined) || filterRef.current, owners);
-              }}><Trash2 />Delete pick</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>;
-      })}
-      {picks.length === 0 && <p className="music-library-empty">{needle ? "No matching picks." : "Save picks from a track’s menu."}</p>}
-      <h3>Sets <small>{library.sets.length}/30</small></h3>
       {sets.map((set, index) => <section key={set.id} className="music-saved-set">
         <details className="music-set-tracks">
-          <summary><h4>{set.name}<small>{set.tracks.length} {set.tracks.length === 1 ? "track" : "tracks"}</small></h4><ChevronDown size={15} aria-hidden="true" /></summary>
+          <summary><h4><span title={set.name}>{set.name}</span><small>{set.tracks.length} {set.tracks.length === 1 ? "track" : "tracks"}</small></h4><ChevronDown size={15} aria-hidden="true" /></summary>
           <ol>{set.tracks.map((track, trackIndex) => <li key={`${track.provider}:${track.providerId}:${trackIndex}`}>{track.title}{track.artist ? ` — ${track.artist}` : ""} · {providerLabel(track.provider)}</li>)}</ol>
           <p>Playing and queued tracks are skipped.</p>
         </details>
         <div className="music-library-row-actions">
-          <Button className="music-library-add" variant="ghost" size="sm" aria-label="Append set to my queue" disabled={busy || !canEnqueue} onClick={() => addSet(set)}><Plus />Append to queue</Button>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label="Append set to my queue" title={`Append ${set.name} to queue`} disabled={busy || !canEnqueue} onClick={() => addSet(set)}><Plus /></Button>
           <DropdownMenu>
             <DropdownMenuTrigger ref={(button) => { if (button) setActionsRefs.current.set(set.id, button); else setActionsRefs.current.delete(set.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved set ${set.name}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? (renameSetIdRef.current === set.id && renameRef.current) || setActionsRefs.current.get(set.id) || filterRef.current || true : false}>

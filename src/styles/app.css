@@ -1,6 +1,6 @@
 /* Shared application shell and foundation styles. */
 :root {
-  font-family: "Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--foreground);
   background: var(--background);
   font-synthesis: none;

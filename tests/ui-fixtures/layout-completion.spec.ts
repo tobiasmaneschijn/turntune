@@ -101,6 +101,7 @@ test("named desktop presets persist independently of compact artwork and phone r
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(roomUrl);
   await more(page).click();
+  await page.getByRole("menuitem", { name: "Room layout", exact: true }).hover();
   await page.getByRole("menuitemradio", { name: "Chat focus layout" }).click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem("soundspin-room-layout:v2:preset"))).toBe("chat");
   await page.getByRole("switch", { name: "Compact artwork" }).click();
@@ -113,6 +114,7 @@ test("named desktop presets persist independently of compact artwork and phone r
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   await more(page).click();
+  await page.getByRole("menuitem", { name: "Room layout", exact: true }).hover();
   await expect(page.getByRole("menuitemradio", { name: "Chat focus layout" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   const chat = await page.locator("#chat").boundingBox();
