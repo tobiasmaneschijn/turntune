@@ -5,7 +5,7 @@ type Database = { rows: Row[]; allowed: boolean; holdOlder: boolean; releaseOlde
 const databases = new WeakMap<Page, Database>()
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 declare global { interface Window {
-  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; reconnect(): void; rotateToken(): void }
+  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; typing(userId: string, active: boolean): void; renamePeer(userId: string, name: string): void; reconnect(): void; rotateToken(): void }
   notificationTest: { permission: string; requests: number; events: Array<{ title: string; tag: string }>; visible: boolean; focused: boolean; setAttention(visible: boolean, focused: boolean): void; activateLatest(): void }
 } }
 const incoming = (index: number, mention = true) => ({ id: id(index), content: mention ? 'Hello @Alice' : 'Another live message', type: 'text', user: { id: 'mira', name: 'Mira', avatarSeed: 'mira' },
@@ -163,7 +163,7 @@ test('successful retry clears its unchanged draft and pressing Enter cannot dupl
   expect(await page.evaluate(() => window.chatHistoryTest.saveIds)).toHaveLength(1)
 })
 
-test('a long live session keeps its reader anchored while the retained window rolls forward', async ({ page }) => {
+test('live-window rollover preserves the reader anchor and unread state, and returning live completes a pending saved search', async ({ page }) => {
   await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
   await expect(page.locator('.chat-message-item')).toHaveCount(1000)
   await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
@@ -175,19 +175,6 @@ test('a long live session keeps its reader anchored while the retained window ro
   await expect(anchor).toBeVisible()
   await expect.poll(async () => (await anchor.boundingBox())!.y).toBeCloseTo(before, 0)
   await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(200)
-  await page.getByRole('button', { name: '200 new', exact: true }).click()
-  await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
-  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
-  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
-  await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(1)
-})
-
-test('returning to a rolled live window keeps an independent saved search request responsive', async ({ page }) => {
-  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
-  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
-  await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
-  await expect(page.locator(`#chat-message-${id(221)}`)).toBeVisible()
-  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 200 }, (_, index) => incoming(1800 + index, false)))
   const database = databases.get(page)!
   database.holdSearch = true
   await page.getByRole('button', { name: 'Search room messages', exact: true }).click()
@@ -196,6 +183,9 @@ test('returning to a rolled live window keeps an independent saved search reques
   await expect.poll(() => Boolean(database.releaseSearch)).toBe(true)
   await page.getByRole('button', { name: '200 new', exact: true }).click()
   await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
+  await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(1)
   database.holdSearch = false; database.releaseSearch!()
   await expect(page.locator('.chat-history-results > button')).toHaveCount(40)
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled()
@@ -282,13 +272,64 @@ test('heavy reaction updates preserve the row and use static selection without r
   await expect(reaction.locator('[aria-live]')).toHaveCount(0)
   await message.getByRole('button', { name: 'Message actions for Mira' }).click()
   await page.getByRole('menuitem', { name: 'React with ❤️' }).click()
+  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+  await expect(message.getByRole('button', { name: 'Message actions for Mira' })).toBeFocused()
   await expect(reaction).toHaveClass(/active/)
   await expect(reaction.locator('strong')).toHaveText('101')
   await expect(reaction).toHaveCSS('animation-name', 'none')
 })
 
+test('peer typing keeps the GIF search and chat layout stable in a short laptop pane, including replies', { tag: '@fixed-viewport' }, async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.locator('.supabase-chat-body').evaluate((element) => {
+    element.style.maxHeight = '380px'
+    element.style.width = '420px'
+  })
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  const picker = page.locator('.chat-picker-popover')
+  await composer.fill('Keep this draft')
+  for (const replying of [false, true]) {
+    if (replying) {
+      await page.locator('.chat-message-item').last().getByRole('button', { name: 'Message actions for Mira' }).click()
+      await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+    }
+    await page.getByRole('button', { name: 'Add GIF', exact: true }).click()
+    const search = picker.getByPlaceholder('Search GIFs')
+    await search.fill('dance')
+    await expect(picker.locator('.chat-gif-tile')).toHaveCount(8)
+    const layout = async () => Promise.all([page.locator('.chat-message-scroll').boundingBox(), page.locator('.chat-composer').boundingBox(), picker.boundingBox(), search.boundingBox()])
+    const before = await layout()
+    for (const active of [true, false, true, false]) {
+      await page.evaluate((value) => { window.chatHistoryTest.typing('mira', value); window.chatHistoryTest.typing('bob', value) }, active)
+      await expect(page.locator('.chat-typing-indicator')).toHaveText(active ? 'Bob and Mira are typing…' : '')
+      await expect.poll(layout).toEqual(before)
+      await expect(search).toBeFocused()
+      await expect(search).toHaveValue('dance')
+      const surfaceBox = (await page.locator('[data-chat-surface]').boundingBox())!
+      const pickerBox = (await picker.boundingBox())!
+      const searchBox = (await search.boundingBox())!
+      expect(pickerBox.y).toBeGreaterThanOrEqual(surfaceBox.y)
+      expect(pickerBox.y + pickerBox.height).toBeLessThanOrEqual((await page.locator('.chat-typing-indicator').boundingBox())!.y)
+      expect(searchBox.y).toBeGreaterThanOrEqual(pickerBox.y)
+      expect(searchBox.y + searchBox.height).toBeLessThanOrEqual(pickerBox.y + pickerBox.height)
+    }
+    if (replying) {
+      const longName = 'Bob with a very long name '.repeat(8).trim()
+      await page.evaluate((name) => { window.chatHistoryTest.renamePeer('bob', name); window.chatHistoryTest.typing('bob', true) }, longName)
+      await expect(page.locator('.chat-typing-indicator')).toHaveText(`${longName} is typing…`)
+      await expect.poll(layout).toEqual(before)
+      await expect(page.locator('.chat-typing-indicator span')).toHaveCSS('white-space', 'nowrap')
+      expect(await page.locator('.chat-typing-indicator span').evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+      await expect(search).toBeFocused()
+    }
+    await search.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(composer).toHaveValue('Keep this draft')
+  }
+})
+
 for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }, { width: 390, height: 380 }]) {
-  test(`media controls fit ${viewport.width}x${viewport.height} and remain reachable after keyboard resize`, async ({ page }) => {
+  test(`media controls fit ${viewport.width}x${viewport.height} and remain reachable after keyboard resize`, { tag: '@fixed-viewport' }, async ({ page }) => {
     await page.setViewportSize(viewport)
     const composer = page.getByRole('textbox', { name: 'Message room chat' })
     await composer.fill('A draft stays here')
@@ -320,15 +361,34 @@ for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }
   })
 }
 
-test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', async ({ page }) => {
+test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
+  // Let the menu hand off focus before the lazy picker finishes loading.
+  let releasePicker!: () => void
+  const pickerLoad = new Promise<void>((resolve) => { releasePicker = resolve })
+  let pickerRequested = false
+  await page.route('**/node_modules/.vite/deps/emoji-picker-react.js*', async (route) => {
+    pickerRequested = true
+    await pickerLoad
+    await route.continue()
+  })
   const message = page.locator(`#chat-message-${id(420)}`)
   const trigger = message.getByRole('button', { name: 'Message actions for Mira' })
-  await trigger.click()
-  await page.getByRole('menuitem', { name: 'More reactions' }).click()
   const dialog = page.getByRole('dialog', { name: "React to Mira's message" })
-  await expect(dialog).toHaveCount(1)
-  await expect(dialog.getByPlaceholder('Find an emoji')).toBeVisible()
+  const close = dialog.getByRole('button', { name: 'Close reactions' })
+  try {
+    await trigger.click()
+    await page.getByRole('menuitem', { name: 'More reactions' }).click()
+    await expect.poll(() => pickerRequested).toBe(true)
+    await expect(dialog).toHaveCount(1)
+    await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+    await expect(close).toBeFocused()
+    releasePicker()
+    await expect(dialog.getByPlaceholder('Find an emoji')).toBeVisible()
+    await expect(close).toBeFocused()
+  } finally {
+    releasePicker()
+  }
   await page.setViewportSize({ width: 390, height: 380 })
   await expect.poll(async () => {
     const box = await dialog.boundingBox(), composerBox = await page.locator('.chat-composer').boundingBox()
@@ -347,6 +407,13 @@ test('reaction dialog escapes row clipping, fits above the keyboard composer and
   await emoji.click()
   await expect(dialog).toHaveCount(0)
   await expect(message.locator('.chat-message-reactions > button')).toHaveCount(1)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await message.hover()
+  await message.locator('.chat-message-actions').getByRole('button', { name: 'More reactions', exact: true }).click()
+  await expect(close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
 })
 
 test('notification activation returns from old context to the correct live row and ignores departed-account actions', async ({ page }) => {

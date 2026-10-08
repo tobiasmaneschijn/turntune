@@ -25,6 +25,8 @@
     "test:ui:player-qol": "playwright test --config=playwright.player-qol.config.ts",
     "test:integration": "tsx --test tests/server-integration.test.ts",
     "test:ui": "playwright test",
+    "test:ui:behavior": "playwright test --config=playwright.fixtures-behavior.config.ts --workers=2 && npm run test:ui:playback -- --workers=2 && npm run test:ui:music-qol -- --workers=2 && npm run test:ui:player-qol -- --workers=2",
+    "test:ui:visual": "npm run test:ui -- --workers=2 && playwright test --config=playwright.fixtures-visual.config.ts --workers=2",
     "test:ui:live": "playwright test --config=playwright.live.config.ts",
     "test:ui:fixtures": "playwright test --config=playwright.fixtures.config.ts",
     "test:ui:fixtures:update": "playwright test --config=playwright.fixtures.config.ts --update-snapshots",

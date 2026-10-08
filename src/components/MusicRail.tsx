@@ -412,7 +412,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   };
 
   const joinPrompt = !joinedDjQueue ? <div className="music-join-prompt">
-    <p>{canJoinDjQueue ? "Join as DJ to add tracks. One song plays per turn." : "Ask the owner or a moderator for a DJ role."}</p>
+    <p>{canJoinDjQueue ? "Join as DJ to play your queued tracks." : "A DJ role is required to play your queued tracks."}</p>
     {canJoinDjQueue && <Button size="sm" variant="outline" disabled={!connected || Boolean(pending)} onClick={() => void toggleDjQueue()}>Join as DJ</Button>}
   </div> : null;
 
@@ -428,7 +428,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       {resolvedTrack && <div className="music-link-preview">
         <TrackArtwork track={resolvedTrack} compact />
         <span><strong>{resolvedTrack.title}</strong><small>{[resolvedTrack.artist, providerLabel(resolvedTrack.provider), formatTrackDuration(resolvedTrack.durationMs)].filter(Boolean).join(" · ")}</small></span>
-        <Button type="button" size="sm" disabled={!connected || !joinedDjQueue || Boolean(pending)} onClick={() => void enqueueTrack(resolvedTrack, "link")}>{pending?.kind === "add" ? "Adding…" : "Add to my queue"}</Button>
+        <Button type="button" size="sm" disabled={!connected || Boolean(pending)} onClick={() => void enqueueTrack(resolvedTrack, "link")}>{pending?.kind === "add" ? "Adding…" : "Add to my queue"}</Button>
       </div>}
     </form>}
   </div>;
@@ -497,7 +497,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
               <span className={`search-provider-mark ${result.provider}`} aria-hidden="true">{result.provider === "soundcloud" ? "SC" : result.provider === "spotify" ? "S" : "▶"}</span>
               <TrackArtwork track={{ provider: result.provider, providerId: result.id, artworkUrl: result.thumbnail }} compact />
               <span className="search-result-copy"><strong>{result.title}</strong><small>{[result.artist, result.duration || formatTrackDuration(result.durationMs)].filter(Boolean).join(" · ")}</small>{(existing || adding) && <small className="music-result-confirmation">{adding ? "Adding…" : existing}</small>}</span>
-              <button type="button" className={existing ? "added" : ""} aria-label={existing ? `${result.title}: ${existing}` : `Add ${result.title} to your queue`} title={existing || (searching ? "Wait for the latest results" : !joinedDjQueue ? "Join as DJ to add music" : pending ? "Wait for the current queue action" : "Add to your private queue")} disabled={!connected || !joinedDjQueue || Boolean(existing) || Boolean(pending) || searching} onClick={() => void enqueueTrack(asTrackInput(result), "search")}>
+              <button type="button" className={existing ? "added" : ""} aria-label={existing ? `${result.title}: ${existing}` : `Add ${result.title} to your queue`} title={existing || (searching ? "Wait for the latest results" : pending ? "Wait for the current queue action" : "Add to your private queue")} disabled={!connected || Boolean(existing) || Boolean(pending) || searching} onClick={() => void enqueueTrack(asTrackInput(result), "search")}>
                 {existing ? <Check size={15} /> : adding ? <Loader2 size={15} className="music-busy-icon" /> : <Plus size={15} />}
               </button>
             </div>;
@@ -519,7 +519,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
               <TrackArtwork track={track} compact />
               <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small><small>Played by {track.addedBy.id === currentUserId ? "you" : track.addedBy.name}</small><small>{formatPlayedAt(track.playedAt) ? <time dateTime={new Date(track.playedAt!).toISOString()}>Played {formatPlayedAt(track.playedAt)}</time> : "Play time unavailable"}</small>{existing && <small className="music-result-confirmation">{existing}</small>}</span>
               <DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) historyButtonRefs.current.set(track.id, button); else historyButtonRefs.current.delete(track.id); }} render={<Button variant="ghost" size="icon" aria-label={`Actions for played track ${track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
-                <DropdownMenuItem disabled={!connected || !joinedDjQueue || Boolean(pending) || Boolean(existing)} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />Add to my queue</DropdownMenuItem>
+                <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing)} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />Add to my queue</DropdownMenuItem>
                 <DropdownMenuItem disabled={!accessToken || libraryBusy || isSaved(track)} onClick={() => savePick(track)}><Bookmark />{isSaved(track) ? "Saved to my picks" : "Save to my picks"}</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => openTrackDetails(track, historyButtonRefs.current.get(track.id) || queueButtonRefs.current.get(track.id))}><Info />Track details</DropdownMenuItem>
                 {sourceUrl && <DropdownMenuItem render={<a href={sourceUrl} target="_blank" rel="noreferrer" />}><ExternalLink />Open on {providerLabel(track.provider)}</DropdownMenuItem>}
@@ -554,7 +554,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
           {snapshot.room.queue.length === 0 && <Empty className="rail-empty rail-empty-action"><EmptyHeader><EmptyMedia variant="icon"><ListMusic size={20} /></EmptyMedia><EmptyTitle>Your queue is empty</EmptyTitle></EmptyHeader><EmptyContent><Button size="sm" onClick={() => { setTab("search"); requestAnimationFrame(() => searchInputRef.current?.focus()); }}><Search />Find a song</Button></EmptyContent></Empty>}
         </div>
       </TabsContent>
-      <TabsContent value="library" keepMounted className="rail-pane music-library-pane"><div className="rail-pane-title"><span>My picks and sets</span><small>Private</small></div>{joinPrompt}<MusicLibraryPanel library={privateLibrary} loading={libraryLoading} error={libraryError} busy={libraryBusy || Boolean(pending)} signedIn={Boolean(accessToken)} canEnqueue={connected && joinedDjQueue} queue={snapshot.room.queue} refresh={() => void refreshLibrary()} mutate={mutateLibrary} enqueue={(track) => void enqueueTrack(track, "history")} addSet={(set) => void appendSavedSet(set)} details={openTrackDetails} isQueued={(track) => Boolean(rowStatus({ ...track, id: track.providerId, artist: track.artist || "" }))} /></TabsContent>
+      <TabsContent value="library" keepMounted className="rail-pane music-library-pane"><div className="rail-pane-title"><span>My picks and sets</span><small>Private</small></div>{joinPrompt}<MusicLibraryPanel library={privateLibrary} loading={libraryLoading} error={libraryError} busy={libraryBusy || Boolean(pending)} signedIn={Boolean(accessToken)} canEnqueue={connected} queue={snapshot.room.queue} refresh={() => void refreshLibrary()} mutate={mutateLibrary} enqueue={(track) => void enqueueTrack(track, "history")} addSet={(set) => void appendSavedSet(set)} details={openTrackDetails} isQueued={(track) => Boolean(rowStatus({ ...track, id: track.providerId, artist: track.artist || "" }))} /></TabsContent>
     </Tabs>
     <TrackDetailsDialog returnFocusRef={detailsReturnFocusRef} track={detailsTrack} open={Boolean(detailsTrack)} onOpenChange={(open) => { if (!open) setDetailsTrack(null); }} />
   </aside>;

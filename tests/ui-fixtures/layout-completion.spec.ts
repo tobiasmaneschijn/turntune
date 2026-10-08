@@ -19,7 +19,7 @@ async function openChecklist(page: import("@playwright/test").Page) {
   return page.locator(".room-listening-checklist:not(.is-compact)");
 }
 
-test("mini player shares local controls and pane changes preserve provider and input lifetimes", async ({ page }) => {
+test("mini player shares local controls and pane changes preserve provider and input lifetimes", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(roomUrl);
   await page.getByRole("tab", { name: "Radio", exact: true }).click();
@@ -41,7 +41,7 @@ test("mini player shares local controls and pane changes preserve provider and i
   expect(await page.evaluate(() => (window as any).layoutFixture.unmounts)).toBe(0);
 });
 
-test("global commands reveal the destination and ignore editing, composition and modal focus", async ({ page }) => {
+test("global commands reveal the destination and ignore editing, composition and modal focus", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(roomUrl);
   await page.locator("h1").focus();
@@ -97,7 +97,7 @@ test("single-character shortcuts can be disabled per listener while commands rem
   await expect(page.getByRole("dialog", { name: "Settings", exact: true })).toBeVisible();
 });
 
-test("named desktop presets persist independently of compact artwork and phone rotation", async ({ page }) => {
+test("named desktop presets persist independently of compact artwork and phone rotation", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(roomUrl);
   await more(page).click();
@@ -120,7 +120,7 @@ test("named desktop presets persist independently of compact artwork and phone r
   expect(chat!.width).toBeGreaterThan(player!.width);
 });
 
-test("tablet exposes Player and Chat together and Radio is temporary without duplicate tab semantics", async ({ page }) => {
+test("tablet exposes Player and Chat together and Radio is temporary without duplicate tab semantics", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto(roomUrl);
   await expect(page.getByRole("region", { name: "Player", exact: true })).toBeVisible();
@@ -136,7 +136,7 @@ test("tablet exposes Player and Chat together and Radio is temporary without dup
   expect(await page.evaluate(() => (window as any).layoutFixture.mounts)).toBe(1);
 });
 
-test("visual viewport keyboard resize preserves reachable composer and bounded room context", async ({ page }) => {
+test("visual viewport keyboard resize preserves reachable composer and bounded room context", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
     const viewport = new EventTarget();
@@ -158,7 +158,7 @@ test("visual viewport keyboard resize preserves reachable composer and bounded r
   await expect(composer).toBeFocused();
 });
 
-test("short windows and 320px reflow retain reachable controls without horizontal overflow", async ({ page }) => {
+test("short windows and 320px reflow retain reachable controls without horizontal overflow", { tag: "@fixed-viewport" }, async ({ page }) => {
   for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }, { width: 1280, height: 600 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport); await page.goto(roomUrl);
     const bottom = page.getByRole("button", { name: "Bottom player control" });
@@ -168,7 +168,7 @@ test("short windows and 320px reflow retain reachable controls without horizonta
   }
 });
 
-test("phone and coarse pointer targets have usable actual rectangles and names", async ({ page, browser }) => {
+test("phone and coarse pointer targets have usable actual rectangles and names", { tag: "@fixed-viewport" }, async ({ page, browser }) => {
   const context = await browser.newContext({ viewport: { width: 900, height: 700 }, hasTouch: true });
   const touch = await context.newPage(); await touch.goto(roomUrl);
   for (const target of [more(touch), touch.getByRole("button", { name: "Back to rooms" }), touch.getByRole("button", { name: "Room listeners, 10 listeners" }), touch.getByRole("switch", { name: "Compact artwork" })]) {
@@ -183,7 +183,7 @@ test("phone and coarse pointer targets have usable actual rectangles and names",
   }
 });
 
-test("listener surface is anchored on desktop, a bottom sheet on phone and returns focus", async ({ page }) => {
+test("listener surface is anchored on desktop, a bottom sheet on phone and returns focus", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 }); await page.goto(roomUrl);
   const count = page.getByRole("button", { name: "Room listeners, 10 listeners" }); await count.click();
   const surface = page.getByRole("dialog", { name: "Room listeners" }); await expect(surface).toBeVisible();
@@ -198,7 +198,7 @@ test("listener surface is anchored on desktop, a bottom sheet on phone and retur
   expect((await page.getByRole("button", { name: "Open Listener 8's profile" }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });
 
-test("intentional profile navigation focuses its heading and restores the room control", async ({ page }) => {
+test("intentional profile navigation focuses its heading and restores the room control", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 }); await page.goto(roomUrl);
   const profile = page.getByRole("button", { name: "Open your profile" }); await profile.click();
   await expect(page.getByRole("heading", { name: "Listener profile" })).toBeFocused();
@@ -286,7 +286,7 @@ test("room description has the shared bound and is saved through the existing se
   await expect(page.getByLabel("Fixture notice")).toHaveText("Room settings saved");
 });
 
-test("200 percent layout-zoom equivalent reflows within 640 by 300 CSS pixels", async ({ browser }) => {
+test("200 percent layout-zoom equivalent reflows within 640 by 300 CSS pixels", { tag: "@fixed-viewport" }, async ({ browser }) => {
   // A 1280x600 physical viewport at 200% page zoom has a 640x300 CSS
   // viewport. DPR2 reproduces that pixel geometry; it is not pinch zoom.
   const context = await browser.newContext({ viewport: { width: 640, height: 300 }, deviceScaleFactor: 2 });
@@ -355,7 +355,7 @@ test("waiting-room and failed provider verification never claim checked readines
   await expect(page.getByRole("button", { name: "Ready to listen" })).toHaveCount(0);
 });
 
-test("small-screen coach is complete, expands its steps and gets out of the keyboard's way", async ({ page }) => {
+test("small-screen coach is complete, expands its steps and gets out of the keyboard's way", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.addInitScript(() => {
     const viewport = new EventTarget(); Object.assign(viewport, { height: 568, width: 320, scale: 1 });

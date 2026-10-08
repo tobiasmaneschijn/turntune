@@ -9,13 +9,28 @@ import { io, type Socket } from "socket.io-client";
 import type { RoomPresence, RoomSnapshot } from "../src/types.js";
 import { hashRoomPassword } from "../server/room-password.js";
 
+function waitForSnapshot(socket: Socket, matches: (snapshot: RoomSnapshot) => boolean) {
+  return new Promise<RoomSnapshot>((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); socket.off("room:snapshot", receive); };
+    const receive = (snapshot: RoomSnapshot) => {
+      if (!matches(snapshot)) return;
+      cleanup(); resolve(snapshot);
+    };
+    const timer = setTimeout(() => {
+      cleanup(); reject(new Error(`Expected room snapshot was not received on socket ${socket.id}.`));
+    }, 3_000);
+    socket.on("room:snapshot", receive);
+  });
+}
+
 test("two listeners can join, manage private queues, skip idempotently and reconnect", { timeout: 20_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-integration-"));
   const setId = "00000000-0000-4000-8000-000000000011";
   const lockedRoom = { id: "locked-room", name: "Locked fixture", ownerUserId: "password-user", moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
     passwordProtected: true, settings: {}, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
     playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
-  await writeFile(path.join(directory, "soundspin.json"), JSON.stringify({ rooms: { "locked-room": lockedRoom }, roomPasswords: { "locked-room": await hashRoomPassword("correct-secret") }, privateLibraries: { alice: { picks: [], sets: [{ id: setId, name: "Fixture set", savedAt: 1, tracks: [
+  const restrictedRoom = { ...lockedRoom, id: "restricted-room", name: "Restricted fixture", ownerUserId: "restricted-owner", passwordProtected: false, settings: { djAccess: "roles" } };
+  await writeFile(path.join(directory, "soundspin.json"), JSON.stringify({ rooms: { "locked-room": lockedRoom, "restricted-room": restrictedRoom }, roomPasswords: { "locked-room": await hashRoomPassword("correct-secret") }, privateLibraries: { alice: { picks: [], sets: [{ id: setId, name: "Fixture set", savedAt: 1, tracks: [
     { provider: "youtube", providerId: "abcdefghijk", title: "Existing" },
     { provider: "youtube", providerId: "savedTrack1", title: "First saved pick" },
     { provider: "youtube", providerId: "unavailable", title: "Unavailable pick" },
@@ -125,24 +140,77 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     const denied = await action(listener, "room:announcement", { expectedId: null, text: "Unauthorized" });
     assert.equal(denied.ok, false);
     assert.match(denied.error || "", /owners and moderators/);
-    assert.equal((await action(host, "room:announcement", { expectedId: null, text: "Take turns; add two picks.", expiresInMinutes: 60 })).ok, true);
-    const note = aliceState.room.announcement!;
+    const createdNote = (snapshot: RoomSnapshot) => snapshot.room.id === "integration-room" && snapshot.room.announcement?.text === "Take turns; add two picks.";
+    const aliceCreated = waitForSnapshot(alice, createdNote);
+    const bobCreated = waitForSnapshot(bob, createdNote);
+    const [created, aliceWithNote, bobWithNote] = await Promise.all([
+      action(host, "room:announcement", { expectedId: null, text: "Take turns; add two picks.", expiresInMinutes: 60 }),
+      aliceCreated, bobCreated
+    ]);
+    assert.equal(created.ok, true);
+    const note = aliceWithNote.room.announcement!;
     assert.equal(note.text, "Take turns; add two picks.");
     assert.ok(note.expiresAt! > Date.now());
-    // Ordering an acknowledged command on the listener settles its preceding snapshots.
-    await action(listener, "room:announcement", { expectedId: null, text: "Stale" });
-    assert.equal(bobState.room.announcement?.id, note.id);
+    assert.deepEqual(bobWithNote.room.announcement, note);
     const stale = await action(host, "room:announcement", { expectedId: null, text: "Stale" });
     assert.equal(stale.ok, false); assert.match(stale.error || "", /changed/);
-    assert.equal((await action(host, "room:announcement", { expectedId: note.id, text: "" })).ok, true);
-    assert.equal(aliceState.room.announcement, null);
+    const clearedNote = (snapshot: RoomSnapshot) => snapshot.room.id === "integration-room" && snapshot.room.announcement === null;
+    const aliceCleared = waitForSnapshot(alice, clearedNote);
+    const bobCleared = waitForSnapshot(bob, clearedNote);
+    const [cleared, aliceWithoutNote, bobWithoutNote] = await Promise.all([
+      action(host, "room:announcement", { expectedId: note.id, text: "" }), aliceCleared, bobCleared
+    ]);
+    assert.equal(cleared.ok, true);
+    assert.equal(aliceWithoutNote.room.announcement, null);
+    assert.equal(bobWithoutNote.room.announcement, null);
     assert.equal((await action(host, "room:announcement", { expectedId: null, text: "x".repeat(501) })).ok, false);
   });
-  assert.equal((await action(alice, "dj:join")).ok, true);
-  assert.equal((await action(bob, "dj:join")).ok, true);
   const track = (providerId: string) => ({ provider: "youtube", providerId, title: "Test recording" });
-  assert.equal((await action(alice, "queue:add", track("abcdefghijk"))).ok, true);
-  assert.equal((await action(alice, "queue:add", track("lmnopqrstuv"))).ok, true);
+  await t.test("a listener can add, import and manage a private queue without a DJ role or starting playback", async (t) => {
+    const listener = await connect(); t.after(() => listener.disconnect());
+    let state!: RoomSnapshot;
+    listener.on("room:snapshot", (snapshot: RoomSnapshot) => { state = snapshot; });
+    assert.equal((await action(listener, "queue:add", track("abcdefghijk"))).ok, false);
+    assert.equal((await action(listener, "room:join", { roomId: "restricted-room", user: { id: "alice", name: "Alice", avatarSeed: "alice" } })).ok, true);
+    const beforePlayback = structuredClone(state.room.playback);
+    const added = await action(listener, "queue:add", { ...track("abcdefghijk"), addedBy: { id: "bob" } }) as { ok: boolean; started: boolean; position: number };
+    assert.deepEqual(added, { ok: true, started: false, position: 1 });
+    assert.equal(state.room.queue[0].addedBy.id, "alice");
+    assert.equal((await action(listener, "queue:add", track("abcdefghijk"))).ok, false);
+    const payload = { setId, requestId: "00000000-0000-4000-8000-000000000041" };
+    const imported = await action(listener, "queue:set-add", payload) as { ok: boolean; added: number; started: boolean; skipped: unknown[] };
+    assert.equal(imported.ok, true); assert.equal(imported.added, 2); assert.equal(imported.started, false); assert.equal(imported.skipped.length, 2);
+    const waiting = structuredClone(state.room.queue);
+    assert.deepEqual(await action(listener, "queue:set-add", payload), imported);
+    assert.deepEqual(state.room.queue, waiting);
+    const last = waiting.at(-1)!;
+    assert.equal((await action(listener, "queue:play-next", { trackId: last.id })).ok, true);
+    assert.equal(state.room.queue[0].id, last.id);
+    assert.equal((await action(listener, "queue:move", { trackId: last.id, toIndex: 2 })).ok, true);
+    const removed = await action(listener, "queue:remove", { trackId: last.id }) as { ok: boolean; undo: { token: string } };
+    assert.equal(removed.ok, true);
+    assert.equal((await action(listener, "queue:undo", { token: removed.undo.token })).ok, true);
+    assert.deepEqual(state.room.queue, waiting);
+    assert.equal((await action(listener, "dj:join")).ok, false);
+    assert.deepEqual(state.room.djQueueUserIds, []);
+    assert.deepEqual(state.room.playback, beforePlayback);
+    assert.equal(state.room.djUserId, null);
+    assert.equal((await action(listener, "room:join", { roomId: "restricted-room", user: { id: "bob", name: "Bob", avatarSeed: "bob" } })).ok, true);
+    assert.deepEqual(state.room.queue, []);
+    assert.equal("djQueues" in state.room, false);
+  });
+  await t.test("prepared listener tracks wait until an explicit DJ join", async () => {
+    const before = structuredClone(aliceState.room.playback);
+    assert.deepEqual(await action(alice, "queue:add", track("abcdefghijk")), { ok: true, started: false, position: 1 });
+    assert.deepEqual(await action(alice, "queue:add", track("lmnopqrstuv")), { ok: true, started: false, position: 2 });
+    assert.deepEqual(aliceState.room.djQueueUserIds, []);
+    assert.deepEqual(aliceState.room.playback, before);
+    assert.equal(aliceState.room.queue.length, 2);
+    assert.equal((await action(alice, "dj:join")).ok, true);
+    assert.equal(aliceState.room.playback.track?.providerId, "abcdefghijk");
+    assert.equal(aliceState.room.playback.playing, true);
+  });
+  assert.equal((await action(bob, "dj:join")).ok, true);
   assert.equal(aliceState.room.queue.length, 1);
   assert.equal(bobState.room.queue.length, 0);
   await t.test("queue Undo restores only the original owner's waiting item and is single-use", async () => {
@@ -156,10 +224,12 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     assert.deepEqual(aliceState.room.playback, playback);
     assert.equal((await action(alice, "queue:undo", { token: removed.undo.token })).ok, false);
   });
-  assert.equal((await action(bob, "queue:add", track("wxyzABCDEFG"))).ok, true);
-  // The acknowledgement on Alice's socket also settles earlier snapshots from
-  // Bob's queue update, so the regression starts with both listeners current.
-  assert.equal((await action(alice, "queue:move", { trackId: "invalid", toIndex: -1 })).ok, false);
+  const aliceWithBobQueued = waitForSnapshot(alice, snapshot => snapshot.room.id === "integration-room" && snapshot.room.queue.length === 1);
+  const bobWithTrackQueued = waitForSnapshot(bob, snapshot => snapshot.room.id === "integration-room" && snapshot.room.queue.some(value => value.providerId === "wxyzABCDEFG"));
+  const [bobQueued] = await Promise.all([
+    action(bob, "queue:add", track("wxyzABCDEFG")), aliceWithBobQueued, bobWithTrackQueued
+  ]);
+  assert.equal(bobQueued.ok, true);
   await t.test("a third listener joins and leaves without replaying playback or private queues", async (t) => {
     const aliceRoomBefore = structuredClone(aliceState.room);
     const bobRoomBefore = structuredClone(bobState.room);

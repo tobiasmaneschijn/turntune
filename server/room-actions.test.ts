@@ -8,6 +8,7 @@ import { RoomCommandService } from "./room-command-service.js";
 import { reconcileDjPresence } from "./dj-presence.js";
 import { RoomCommandError } from "./socket-handler.js";
 import { QueueUndoRegistry } from "./radio.js";
+import { SetImportRegistry } from "./saved-set.js";
 import type { Room, User } from "./types.js";
 
 function rolesFixture() {
@@ -65,6 +66,39 @@ test("malformed optional room identifiers do not reach either role mutation", as
 });
 
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
+
+for (const event of ["queue:add", "queue:set-add"] as const) {
+  for (const ended of ["departed", "expired"] as const) {
+    test(`${event} rechecks the listener's ${ended} session after resolving tracks`, async () => {
+      const started = gate(); const unblock = gate(); let admitted = true; let expired = false; let writes = 0;
+      const user: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
+      const room: Room = { id: "room-one", name: "One", ownerUserId: "owner", moderatorUserIds: [], djRoleUserIds: [],
+        isPublic: true, passwordProtected: false, settings: { djAccess: "roles" }, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
+        playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
+      const recording = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Pick" };
+      const handlers = new Map<string, ReturnType<typeof safeSocketHandler>>();
+      mountRoomActions({ socket: { id: "socket", connected: true }, getMembership: () => admitted ? { room, user } : null,
+        assertAuthorized: () => { if (expired) throw new RoomCommandError("Session expired."); },
+        onAction: (name: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(name, safeSocketHandler(handler)),
+        commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown }) => {
+          const draft = structuredClone(room); const result = change(draft); Object.assign(room, draft); writes++; return result.result;
+        } },
+        store: { getPrivateLibrary: async () => ({ picks: [], sets: [{ id: target, name: "Picks", savedAt: 1, tracks: [recording] }] }) },
+        resolveTrack: async () => { started.release(); await unblock.promise; return {}; },
+        resolveSavedRecording: async () => { started.release(); await unblock.promise; return recording; },
+        setImports: new SetImportRegistry()
+      } as unknown as Parameters<typeof mountRoomActions>[0]);
+      let result: { ok: boolean; error?: string } | undefined;
+      const pending = handlers.get(event)!(event === "queue:add" ? recording : { setId: target, requestId: target }, (reply: typeof result) => { result = reply; });
+      await started.promise;
+      if (ended === "departed") admitted = false; else expired = true;
+      unblock.release(); await pending;
+      assert.equal(result?.ok, false);
+      assert.match(result?.error || "", ended === "departed" ? /room session changed/ : /Session expired/);
+      assert.equal(writes, 0); assert.deepEqual(room.djQueues, {}); assert.deepEqual(room.djQueueUserIds, []);
+    });
+  }
+}
 
 for (const secondTab of [false, true]) {
   test(`a DJ join committed after disconnect ${secondTab ? "preserves a surviving account tab" : "schedules eviction for the final account socket"}`, async () => {
@@ -182,8 +216,8 @@ test("real queue handlers preserve deliberate receipt errors and reject set impo
   const room = { id: "room-one", ownerUserId: "alice", moderatorUserIds: [], djRoleUserIds: [], djQueueUserIds: [], djQueues: {},
     settings: {}, history: [], playback: { track: null } } as unknown as Room;
   const user: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
-  const handlers = new Map<string, ReturnType<typeof safeSocketHandler>>(); let storageFails = false;
-  mountRoomActions({ socket: { id: "socket", connected: true }, getMembership: () => ({ room, user }), assertAuthorized: () => {},
+  const handlers = new Map<string, ReturnType<typeof safeSocketHandler>>(); let storageFails = false; let admitted = true;
+  mountRoomActions({ socket: { id: "socket", connected: true }, getMembership: () => admitted ? { room, user } : null, assertAuthorized: () => {},
     onAction: (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(event, safeSocketHandler(handler, () => {})),
     queueUndo: new QueueUndoRegistry(),
     commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown }) => {
@@ -200,7 +234,9 @@ test("real queue handlers preserve deliberate receipt errors and reject set impo
   };
   assert.match((await run("queue:undo", { token: target }))?.error || "", /Undo expired/);
   assert.match((await run("queue:remove", { trackId: target }))?.error || "", /no longer in your queue/);
-  assert.match((await run("queue:set-add", { setId: target, requestId: target }))?.error || "", /Join the DJ lineup/);
+  admitted = false;
+  assert.match((await run("queue:set-add", { setId: target, requestId: target }))?.error || "", /Join a room first/);
+  admitted = true;
   storageFails = true;
   assert.equal((await run("dj:join", undefined))?.error, "Could not save this change. Reconnect and check the room before trying again.");
 });

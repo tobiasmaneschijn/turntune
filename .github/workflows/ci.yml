@@ -2,7 +2,13 @@ name: App checks
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -22,24 +28,30 @@ jobs:
       - run: npm run build
       - run: npm run test:production
 
-  browser-checks:
-    # Existing visual baselines are recorded on Windows. Behavior suites use
-    # the same environment and isolated fixtures, without live credentials.
+  browser-behavior:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui:behavior
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-behavior
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+
+  browser-visual:
+    # Screenshot baselines are recorded on Windows; behavior-only suites share
+    # one Linux job and one dependency/browser installation.
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suite: ui
-            command: npm run test:ui
-          - suite: fixtures
-            command: npm run test:ui:fixtures
-          - suite: playback
-            command: npm run test:ui:playback
-          - suite: music
-            command: npm run test:ui:music-qol
-          - suite: player
-            command: npm run test:ui:player-qol
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,11 +60,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium
-      - run: ${{ matrix.command }}
+      - run: npm run test:ui:visual
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: browser-failure-${{ matrix.suite }}
+          name: browser-failure-visual
           path: |
             test-results/
             playwright-report/

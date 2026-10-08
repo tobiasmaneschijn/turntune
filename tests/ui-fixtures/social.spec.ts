@@ -89,7 +89,7 @@ test("invite actions disable duplicates and a failed social load stays local", a
   await expect(row.getByRole("button", { name: "Invited", exact: true })).toBeDisabled();
 });
 
-test("friends fit narrow layouts without hiding actions", async ({ page }) => {
+test("friends fit narrow layouts without hiding actions", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.route("**/api/social", route => route.fulfill({ json: initial() }));
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/tests/social-harness/index.html");

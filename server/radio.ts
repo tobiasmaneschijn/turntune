@@ -253,7 +253,6 @@ export class QueueUndoRegistry {
     }
     if (entry.room !== room || entry.userId !== userId) throw new Error("This Undo belongs to a different room or account.");
     if (entry.phase !== "removed") throw new Error("This queue change is still being saved. Wait before trying Undo again.");
-    if (!canJoinDjQueue(draft, userId) || !draft.djQueueUserIds.includes(userId)) throw new Error("Join the DJ lineup with permission before restoring this track.");
     const queue = privateQueue(draft, userId);
     const same = (track: Track) => track.id === entry.track.id || sameRecording(track, entry.track);
     if ((draft.playback.track && same(draft.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
@@ -306,7 +305,6 @@ export function pruneUnauthorizedDjs(room: Room) {
 
 /** Append a pre-resolved set in order and report every skipped item. */
 export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">>, now = Date.now()) {
-  if (!canJoinDjQueue(room, user.id) || !room.djQueueUserIds.includes(user.id)) throw new Error("Join the DJ lineup with permission before adding a set.");
   if (inputs.length === 0 || inputs.length > 50) throw new Error("A set must contain between 1 and 50 tracks.");
   const queue = privateQueue(room, user.id);
   const skipped: Array<{ title: string; reason: string }> = [];
@@ -319,8 +317,8 @@ export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track,
     queue.push({ ...input, id: randomUUID(), addedBy: user, addedAt: now });
     added++;
   }
-  const started = added > 0 && !room.playback.track;
-  if (started) advanceRadio(room, now);
+  const started = added > 0 && !room.playback.track && room.djQueueUserIds.includes(user.id)
+    ? Boolean(advanceRadio(room, now)) : false;
   return { added, skipped, started };
 }
 

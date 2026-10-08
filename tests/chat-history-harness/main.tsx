@@ -19,8 +19,10 @@ const handlers = new Map<string, (event: { payload: unknown }) => void>()
 let connection = (_status: string) => {}
 const harness = { sendIds: [] as string[], saveIds: [] as string[], failSend: false, failSave: false, failReaction: false, unread: 0,
   rotateToken: () => {},
+  renamePeer: (_userId: string, _name: string) => {},
   receive: (message: unknown) => handlers.get('message')?.({ payload: message }),
   react: (reaction: unknown) => handlers.get('reaction')?.({ payload: reaction }),
+  typing: (userId: string, active: boolean) => handlers.get('typing')?.({ payload: { userId, active, sentAt: Date.now() } }),
   reconnect: () => { connection('CLOSED'); connection('SUBSCRIBED') },
 }
 Object.assign(window, { chatHistoryTest: harness })
@@ -41,6 +43,7 @@ const client = {
 function Harness() {
   const [room, setRoom] = useState('lounge')
   const [user, setUser] = useState(alice)
+  const [roomUsers, setRoomUsers] = useState([alice, bob, mira])
   const [tokenRevision, setTokenRevision] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,6 +51,7 @@ function Harness() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useState(readUserSettings)
   harness.rotateToken = () => setTokenRevision((revision) => revision + 1)
+  harness.renamePeer = (userId, name) => setRoomUsers((users) => users.map((peer) => peer.id === userId ? { ...peer, name } : peer))
   const source = useMemo(() => createChatHistorySource(`${user.id}-token${tokenRevision ? `-${tokenRevision}` : ''}`, room), [room, user.id, tokenRevision])
   const refresh = useCallback(() => { setLoading(true); void source.loadPage().then((page) => setMessages(page.messages)).finally(() => setLoading(false)) }, [source])
   return <ThemeProvider><main style={{ display: 'flex', flexDirection: 'column', height: '100dvh', gap: 5, padding: 8, background: 'var(--background)', color: 'var(--foreground)' }}>
@@ -58,7 +62,7 @@ function Harness() {
       <button onClick={() => setSettingsOpen(true)}>Settings</button>
     </div>
     <p style={{ margin: 0, fontSize: 10 }}>Unread <span data-testid="unread-count">{harness.unread}</span></p>
-    <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><RealtimeChat key={`${user.id}:${room}`} client={client} roomName={`soundspin:${room}`} user={user} roomUsers={[alice, bob, mira]}
+    <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><RealtimeChat key={`${user.id}:${room}`} client={client} roomName={`soundspin:${room}`} user={user} roomUsers={roomUsers}
       messages={messages} historyRoomSlug={room} historySource={source} historyLoading={loading} notifications={settings.notifications}
       onResolveMediaUrl={source.loadMediaUrl}
       isVisible={visible} onConnected={refresh} onNotificationActivate={() => setVisible(true)} onUnreadCountChange={(count) => { harness.unread = count }}

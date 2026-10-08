@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { advanceRadio, appendQueueSet, QueueUndoRegistry, roomForListener } from "./radio.js";
+import { advanceRadio, appendQueueSet, normalizeRadioState, QueueUndoRegistry, roomForListener } from "./radio.js";
 import type { Room, Track, User } from "./types.js";
 const alice: User = { id: "alice", name: "Alice", avatarSeed: "a" };
 const bob: User = { id: "bob", name: "Bob", avatarSeed: "b" };
@@ -21,14 +21,15 @@ test("Undo preserves identity, surviving anchors, another DJ's playback and priv
   assert.equal(JSON.stringify(roomForListener(state, bob.id)).includes('"id":"b"'), false);
   assert.throws(() => undo.restore(state, alice.id, receipt.token, 201), /expired/);
 });
-test("Undo is bound to recipient and room, expires, and rechecks role/membership", () => {
+test("Undo is bound to recipient and room and expires after leaving the lineup", () => {
   const state = room(); const undo = new QueueUndoRegistry(500); const receipt = undo.remove(state, alice.id, "b", 100);
   assert.throws(() => undo.restore(state, bob.id, receipt.token, 110), /different room or account/);
   assert.throws(() => undo.restore(room(), alice.id, receipt.token, 110), /different room or account/);
   state.djQueueUserIds = [bob.id];
-  assert.throws(() => undo.restore(state, alice.id, receipt.token, 120), /Join the DJ lineup/);
-  state.djQueueUserIds.unshift(alice.id);
-  assert.throws(() => undo.restore(state, alice.id, receipt.token, 600), /expired/);
+  state.settings.djAccess = "roles"; state.ownerUserId = bob.id;
+  assert.equal(undo.restore(state, alice.id, receipt.token, 120).track.id, "b");
+  const later = undo.remove(state, alice.id, "b", 120);
+  assert.throws(() => undo.restore(state, alice.id, later.token, 620), /expired/);
 });
 test("Undo cannot duplicate a re-add, resurrect a played item, or start quiet-room audio", () => {
   const state = room(); const undo = new QueueUndoRegistry(); const receipt = undo.remove(state, alice.id, "b", 100);
@@ -57,7 +58,24 @@ test("set append preserves order and rotation and reports every duplicate includ
   assert.equal(result.added, 2); assert.equal(result.skipped.length, 3); assert.equal(result.started, false);
   assert.deepEqual(state.djQueues.alice.map((item) => item.title), ["a", "b", "c", "d", "e"]);
   assert.deepEqual(state.playback, before); assert.deepEqual(state.djQueueUserIds, lineup);
-  assert.throws(() => appendQueueSet(state, { ...alice, id: "outside" }, [input("f")]), /permission/);
+  assert.throws(() => appendQueueSet(state, alice, []), /between 1 and 50/);
+});
+
+test("listeners can prepare private sets in a quiet restricted room without entering rotation", () => {
+  const state = room(); state.ownerUserId = bob.id; state.settings.djAccess = "roles";
+  state.djQueueUserIds = [bob.id]; state.djUserId = null; state.djQueues.bob = [];
+  state.playback = { track: null, playing: false, position: 0, updatedAt: 100 };
+  const before = structuredClone(state.playback);
+  const result = appendQueueSet(state, alice, [{ provider: "youtube", providerId: "new", title: "New pick" }], 200);
+  assert.equal(result.added, 1); assert.equal(result.started, false);
+  assert.deepEqual(state.playback, before); assert.deepEqual(state.djQueueUserIds, [bob.id]);
+  const restored = JSON.parse(JSON.stringify(state)) as Room;
+  normalizeRadioState(restored);
+  assert.deepEqual(restored.djQueueUserIds, [bob.id]);
+  assert.equal(roomForListener(restored, alice.id).queue.length, 4);
+  assert.deepEqual(roomForListener(restored, bob.id).queue, []);
+  assert.equal(advanceRadio(restored, 300), null);
+  assert.equal(restored.djQueues.alice.length, 4);
 });
 
 test("a failed remove restores only its original track among concurrent queue edits and rotation", async () => {

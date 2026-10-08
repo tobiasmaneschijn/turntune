@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("phone room actions open settings from chat and restore focus", async ({ page }) => {
+test("phone room actions open settings from chat and restore focus", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/ui-harness/index.html?scenario=workspace-controls");
   await page.getByRole("tab", { name: "Chat, 3 unread" }).click();
@@ -16,7 +16,7 @@ test("phone room actions open settings from chat and restore focus", async ({ pa
   await expect(page.getByRole("status")).toHaveText("Room settings opened");
 });
 
-test("listener room menu omits privileged actions and opens feedback", async ({ page }) => {
+test("listener room menu omits privileged actions and opens feedback", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/tests/ui-harness/index.html?scenario=workspace-controls&role=listener");
   const more = page.getByRole("button", { name: "More room actions" });
@@ -29,7 +29,7 @@ test("listener room menu omits privileged actions and opens feedback", async ({ 
   await expect(more).toBeFocused();
 });
 
-test("room tabs link panels, use one tab stop, and preserve pane inputs", async ({ page }) => {
+test("room tabs link panels, use one tab stop, and preserve pane inputs", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/ui-harness/index.html?scenario=workspace-controls");
   const player = page.getByRole("tab", { name: "Player", exact: true });
@@ -48,7 +48,7 @@ test("room tabs link panels, use one tab stop, and preserve pane inputs", async 
   await expect(page.getByRole("textbox", { name: "Radio search" })).toHaveValue("Keep this search");
 });
 
-test("settings direction follows layout and each tab labels its panel", async ({ page }) => {
+test("settings direction follows layout and each tab labels its panel", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/tests/ui-harness/index.html?scenario=settings");
   await page.getByRole("tab", { name: "Playback", exact: true }).focus();
@@ -81,7 +81,7 @@ test("private membership survives unfavoriting and lobby filters survive refresh
   await expect(members.getByRole("button", { name: "Join Private Studio" })).toBeVisible();
 });
 
-test("phone profile is named and short player content has a reachable scroll fallback", async ({ page }) => {
+test("phone profile is named and short player content has a reachable scroll fallback", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 });
   await page.goto("/tests/ui-harness/index.html?scenario=lobby");
   await expect(page.getByRole("button", { name: "Open your profile" })).toBeVisible();
@@ -97,7 +97,7 @@ test("phone profile is named and short player content has a reachable scroll fal
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
-test("room listeners includes people beyond the presence strip and opens their profile", async ({ page }) => {
+test("room listeners includes people beyond the presence strip and opens their profile", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/ui-harness/index.html?scenario=workspace-controls");
   await page.getByRole("button", { name: "More room actions" }).click();
@@ -111,7 +111,7 @@ test("room listeners includes people beyond the presence strip and opens their p
   await expect(page.getByRole("status")).toHaveText("Profile opened: listener-8");
 });
 
-test("keyboard help lists current controls and returns focus to the menu", async ({ page }) => {
+test("keyboard help lists current controls and returns focus to the menu", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tests/ui-harness/index.html?scenario=workspace-controls");
   const more = page.getByRole("button", { name: "More room actions" });

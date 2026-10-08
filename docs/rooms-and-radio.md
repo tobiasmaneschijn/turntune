@@ -197,6 +197,14 @@ Example with lineup `[Alice, Bob, Casey]`:
 This produces one song per DJ per turn while allowing joined DJs to temporarily
 have an empty queue.
 
+### Preparing a private queue
+
+Every admitted listener can add tracks or saved sets, reorder waiting tracks,
+and remove or undo removal of their own queue items. Preparing a queue does not
+join the DJ lineup or require a DJ role, including in role-restricted rooms.
+Only joined DJs' queues participate in playback; adding music while outside
+the lineup leaves shared playback unchanged.
+
 ### Joining and leaving the lineup
 
 `dj:join` verifies `canJoinDjQueue`, creates the user's private queue, remembers
@@ -206,7 +214,8 @@ place.
 
 `dj:leave` is explicit intent and takes effect immediately. It cancels any grace
 timer, removes the DJ, and advances immediately if they were on air. Their
-private tracks remain in `djQueues`; rejoining restores access to that queue.
+private tracks remain in `djQueues` and can still be edited. Rejoining makes
+that queue eligible for playback again.
 
 Changing a room to role-restricted access, removing a DJ role, or removing a
 moderator also ejects users who are no longer eligible. If an ejected user is
@@ -295,7 +304,7 @@ identifies one play instance, even if the same provider track appears later.
 | Listen and vote on another user's track | Yes | Yes | Yes | Yes | Yes | Yes |
 | Join an open DJ lineup | Yes | — | — | Yes | Yes | Yes |
 | Join a role-restricted DJ lineup | No | — | — | Yes | Yes | Yes |
-| Edit own private queue | No | Yes | Yes | Only after joining | Only after joining | Only after joining |
+| Edit own private queue | Yes | Yes | Yes | Yes | Yes | Yes |
 | Pause, seek, or skip | No | No | Yes | No | Yes | Yes |
 | Change room metadata or DJ access mode | No | No | No | No | Yes | Yes |
 | Grant/revoke moderator or DJ roles | No | No | No | No | No | Yes |
