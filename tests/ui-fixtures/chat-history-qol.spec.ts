@@ -163,7 +163,7 @@ test('successful retry clears its unchanged draft and pressing Enter cannot dupl
   expect(await page.evaluate(() => window.chatHistoryTest.saveIds)).toHaveLength(1)
 })
 
-test('a long live session keeps its reader anchored while the retained window rolls forward', async ({ page }) => {
+test('live-window rollover preserves the reader anchor and unread state, and returning live completes a pending saved search', async ({ page }) => {
   await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
   await expect(page.locator('.chat-message-item')).toHaveCount(1000)
   await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
@@ -175,19 +175,6 @@ test('a long live session keeps its reader anchored while the retained window ro
   await expect(anchor).toBeVisible()
   await expect.poll(async () => (await anchor.boundingBox())!.y).toBeCloseTo(before, 0)
   await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(200)
-  await page.getByRole('button', { name: '200 new', exact: true }).click()
-  await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
-  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
-  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
-  await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(1)
-})
-
-test('returning to a rolled live window keeps an independent saved search request responsive', async ({ page }) => {
-  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 800 }, (_, index) => incoming(1000 + index, false)))
-  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
-  await page.locator('.chat-message-scroll').evaluate((element) => { element.scrollTop = 0 })
-  await expect(page.locator(`#chat-message-${id(221)}`)).toBeVisible()
-  await page.evaluate((messages) => messages.forEach((message) => window.chatHistoryTest.receive(message)), Array.from({ length: 200 }, (_, index) => incoming(1800 + index, false)))
   const database = databases.get(page)!
   database.holdSearch = true
   await page.getByRole('button', { name: 'Search room messages', exact: true }).click()
@@ -196,6 +183,9 @@ test('returning to a rolled live window keeps an independent saved search reques
   await expect.poll(() => Boolean(database.releaseSearch)).toBe(true)
   await page.getByRole('button', { name: '200 new', exact: true }).click()
   await expect(page.locator(`#chat-message-${id(1999)}`)).toBeVisible()
+  await expect(page.locator('.chat-message-item')).toHaveCount(1000)
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
+  await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(1)
   database.holdSearch = false; database.releaseSearch!()
   await expect(page.locator('.chat-history-results > button')).toHaveCount(40)
   await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeEnabled()
@@ -289,7 +279,7 @@ test('heavy reaction updates preserve the row and use static selection without r
   await expect(reaction).toHaveCSS('animation-name', 'none')
 })
 
-test('peer typing keeps the GIF search and chat layout stable in a short laptop pane, including replies', async ({ page }) => {
+test('peer typing keeps the GIF search and chat layout stable in a short laptop pane, including replies', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await page.locator('.supabase-chat-body').evaluate((element) => {
     element.style.maxHeight = '380px'
@@ -339,7 +329,7 @@ test('peer typing keeps the GIF search and chat layout stable in a short laptop 
 })
 
 for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }, { width: 390, height: 380 }]) {
-  test(`media controls fit ${viewport.width}x${viewport.height} and remain reachable after keyboard resize`, async ({ page }) => {
+  test(`media controls fit ${viewport.width}x${viewport.height} and remain reachable after keyboard resize`, { tag: '@fixed-viewport' }, async ({ page }) => {
     await page.setViewportSize(viewport)
     const composer = page.getByRole('textbox', { name: 'Message room chat' })
     await composer.fill('A draft stays here')
@@ -371,7 +361,7 @@ for (const viewport of [{ width: 390, height: 600 }, { width: 844, height: 390 }
   })
 }
 
-test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', async ({ page }) => {
+test('reaction dialog escapes row clipping, fits above the keyboard composer and returns focus to its message', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
   const message = page.locator(`#chat-message-${id(420)}`)
   const trigger = message.getByRole('button', { name: 'Message actions for Mira' })

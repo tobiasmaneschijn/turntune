@@ -101,8 +101,18 @@ isolated two-listener server test. It uses temporary storage and removes provide
 and Supabase credentials from the child process. The build checks both frontend
 and server types before producing assets. SQL checks run the actual migrations
 against disposable PGlite databases. The production smoke launches the compiled
-server with fake configuration and blocks external requests. GitHub Actions runs
-these checks plus five deterministic browser suites on pushes and pull requests.
+server with fake configuration and blocks external requests.
+
+GitHub Actions runs once per pull-request update and on pushes to `master`,
+cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
+shares one Linux installation across the fixture, playback, music and player
+checks. `npm run test:ui:visual` keeps the authentication and surface screenshot
+baselines on Windows. Both use two workers. The focused browser commands remain
+available for local debugging.
+
+Tag fixture cases that set their own viewport with `@fixed-viewport` so they run
+once. The player suite covers phone sizes within its scenarios. Tag music
+responsive and touch cases with `@mobile` to include them in the phone project.
 
 For focused checks use `test:radio`, `test:chat`, `test:playback`, or
 `test:integration`. Integration tests never load `.env` or contact the configured

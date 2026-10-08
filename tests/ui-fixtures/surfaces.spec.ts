@@ -4,8 +4,7 @@ const desktopScenarios = ["lobby", "lobby-empty", "room-active", "room-empty", "
 const mobileScenarios = ["lobby", "room-active", "queue", "chat", "settings", "profile", "admin", "admin-feedback"];
 
 for (const scenario of desktopScenarios) {
-  test(`desktop ${scenario}`, async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "desktop");
+  test(`desktop ${scenario}`, { tag: "@desktop-only" }, async ({ page }) => {
     await page.goto(`/tests/ui-harness/index.html?scenario=${scenario}`);
     if (scenario === "feedback") await page.getByRole("button", { name: "Send feedback" }).click();
     if (scenario === "admin-feedback") {
@@ -25,8 +24,7 @@ for (const scenario of desktopScenarios) {
     await expect(page.locator("body")).toHaveScreenshot(`${scenario}.png`);
   });
 
-  test(`desktop light ${scenario}`, async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "desktop");
+  test(`desktop light ${scenario}`, { tag: "@desktop-only" }, async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("soundspin-theme", "light"));
     await page.goto(`/tests/ui-harness/index.html?scenario=${scenario}`);
     if (scenario === "feedback") await page.getByRole("button", { name: "Send feedback" }).click();
@@ -49,8 +47,7 @@ for (const scenario of desktopScenarios) {
 }
 
 for (const scenario of mobileScenarios) {
-  test(`mobile ${scenario}`, async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "mobile");
+  test(`mobile ${scenario}`, { tag: "@mobile-only" }, async ({ page }) => {
     await page.goto(`/tests/ui-harness/index.html?scenario=${scenario}`);
     if (scenario === "settings") {
       const dialog = page.getByRole("dialog", { name: "Settings" });

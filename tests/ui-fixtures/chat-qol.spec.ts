@@ -103,7 +103,7 @@ test('sign out prevents the unmount flush from recreating sensitive account draf
   await expect(page.getByRole('textbox', { name: 'Message room chat' })).toHaveValue('')
 })
 
-test('composer and message actions stay usable at 320px with multiline text', async ({ page }, testInfo) => {
+test('composer and message actions stay usable at 320px with multiline text', { tag: '@fixed-viewport' }, async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 568 })
   await page.getByRole('textbox', { name: 'Message room chat' }).fill('One line\nTwo lines\nThree lines\nFour lines')
   const composer = page.getByRole('textbox', { name: 'Message room chat' })

@@ -2,16 +2,19 @@ import { expect, test } from "@playwright/test";
 const url = "/tests/player-qol-harness/index.html?listener";
 
 test("accepted reaction accent needs both server acknowledgement and matching snapshot", async ({ page }) => {
+  await page.clock.install();
   await page.goto(url);
   const love = page.getByRole("button", { name: /^Love it/ });
   await love.scrollIntoViewIfNeeded();
   await expect(page.locator(".bang-meter")).not.toHaveClass(/decorations-off/);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
   await love.click();
   await page.evaluate(() => window.playerQolTest.pending?.({ ok: true }));
   await expect(love).not.toHaveClass(/is-accepted/);
   await page.evaluate(() => window.playerQolTest.setVotes({ listener: 1 }));
   await expect(love).toHaveAttribute("aria-pressed", "true");
   await expect(love).toHaveClass(/is-accepted/);
+  await page.clock.runFor(180);
   await expect(love).not.toHaveClass(/is-accepted/);
   await expect(page.locator(".bang-meter [aria-live]")).toHaveCount(0);
 });

@@ -99,7 +99,7 @@ test('compact artwork remains sharp, bounded and decorative while hiding the lar
   expect(bounds?.height).toBe(84)
 })
 
-test('mobile pane arrival uses opacity only and honors live reduced-motion preferences', async ({ page }) => {
+test('mobile pane arrival uses opacity only and honors live reduced-motion preferences', { tag: '@fixed-viewport' }, async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/tests/ui-harness/index.html?scenario=workspace-controls')
   const chatTab = page.getByRole('tab', { name: 'Chat, 3 unread' })

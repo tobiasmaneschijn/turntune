@@ -19,7 +19,7 @@ async function search(page: Page, query = "midnight") {
   await page.getByRole("button", { name: "Go", exact: true }).click();
 }
 
-test("successive track adds retain search context and truthful row positions", async ({ page }) => {
+test("successive track adds retain search context and truthful row positions", { tag: "@mobile" }, async ({ page }) => {
   await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
   await open(page);
   await search(page);
@@ -91,7 +91,7 @@ test("search distinguishes empty, refresh, error and newer requests", async ({ p
   await expect(page.getByRole("button", { name: "Retry search", exact: true })).toBeEnabled();
 });
 
-test("queue actions reorder with keyboard or touch without changing shared playback", async ({ page }, testInfo) => {
+test("queue actions reorder with keyboard or touch without changing shared playback", { tag: "@mobile" }, async ({ page }, testInfo) => {
   await open(page);
   const actions = page.getByRole("button", { name: "Actions for Gamma", exact: true });
   if (testInfo.project.name === "desktop") { await actions.focus(); await page.keyboard.press("Enter"); }
@@ -168,7 +168,7 @@ test("unsupported link explains the problem and preserves editable input", async
 });
 
 for (const scenario of ["listener", "restricted"]) {
-  test(`${scenario} can queue search results and played tracks without joining the lineup`, async ({ page }) => {
+  test(`${scenario} can queue search results and played tracks without joining the lineup`, { tag: scenario === "restricted" ? "@mobile" : [] }, async ({ page }) => {
     await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
     await open(page, scenario);
     const playback = await api(page, "return music.snapshot().room.playback");
@@ -221,7 +221,7 @@ test("offline actions and late old-room acknowledgements cannot mutate the new v
   await expect(page.locator(".music-action-status")).toHaveText("");
 });
 
-test("real music rail fits a narrow screen and hides inactive panels from focus", async ({ page }, testInfo) => {
+test("real music rail fits a narrow screen and hides inactive panels from focus", { tag: "@mobile" }, async ({ page }, testInfo) => {
   await open(page);
   if (testInfo.project.name === "desktop") await page.setViewportSize({ width: 320, height: 600 });
   await expect(page.getByRole("tabpanel", { name: /Queue/ })).toBeVisible();
@@ -235,7 +235,7 @@ test("real music rail fits a narrow screen and hides inactive panels from focus"
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).not.toBeVisible();
 });
 
-test("active music panes fill the rail with empty or visible feedback", async ({ page }) => {
+test("active music panes fill the rail with empty or visible feedback", { tag: "@mobile" }, async ({ page }) => {
   await open(page);
   await expect(page.locator(".music-feedback")).toBeHidden();
 
@@ -452,7 +452,7 @@ test("on-air accent follows only changed authoritative DJ identity after baselin
   await expect(page.locator(".music-turn-accent")).toHaveCount(0);
 });
 
-test("full Unicode track details and successful copying fit 320px without losing the source text", async ({ page }) => {
+test("full Unicode track details and successful copying fit 320px without losing the source text", { tag: "@mobile" }, async ({ page }) => {
   await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { value: { writeText: async (value: string) => { (window as any).copiedMusicText = value; } } }));
   await page.setViewportSize({ width: 320, height: 600 });
   await open(page);

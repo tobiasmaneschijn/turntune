@@ -13,7 +13,7 @@ async function target(locator: Locator) {
   expect(box?.height).toBeGreaterThanOrEqual(44);
 }
 
-test("320px feedback primary targets, heading and submission remain reachable", async ({ page }) => {
+test("320px feedback primary targets, heading and submission remain reachable", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/tests/player-qol-harness/extras.html"); await productionCss(page);
   await page.getByRole("button", { name: "Feedback", exact: true }).click();
@@ -33,7 +33,7 @@ test("320px feedback primary targets, heading and submission remain reachable", 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });
 
-test("320px settings option text fits the real target and interactive controls stay named", async ({ page }) => {
+test("320px settings option text fits the real target and interactive controls stay named", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/tests/ui-harness/index.html?scenario=settings"); await productionCss(page);
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
@@ -51,7 +51,7 @@ test("320px settings option text fits the real target and interactive controls s
   await target(dialog.getByRole("button", { name: "Close", exact: true }));
 });
 
-test("320px room announcement read, dismiss and host tools keep independent targets", async ({ page }) => {
+test("320px room announcement read, dismiss and host tools keep independent targets", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/tests/player-qol-harness/extras.html"); await productionCss(page);
   const read = page.getByRole("button", { name: "Read full room note" });
@@ -70,7 +70,7 @@ test("320px room announcement read, dismiss and host tools keep independent targ
   await target(dialog.getByRole("button", { name: "Close", exact: true }));
 });
 
-test("320px private library actions, disclosure and form targets retain geometry", async ({ page }) => {
+test("320px private library actions, disclosure and form targets retain geometry", { tag: "@fixed-viewport" }, async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   const track = { provider: "soundcloud", providerId: "saved", title: "Saved Signal", artist: "Mira" };
   await page.route("**/api/library", route => route.fulfill({ json: { library: { picks: [{ id: "saved-pick", track, savedAt: 1 }], sets: [{ id: "saved-set", name: "Evening set", tracks: [track], savedAt: 1 }] } } }));
