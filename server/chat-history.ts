@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ChatRateLimit, ChatWriteConflict, createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
-import { canonicalMessage, chatMessageSchema, chatReactionSchema, immutableMessageKey, type ChatMessageInput, type ChatReply, type RelayMessage } from './chat-validation.js'
+import { canonicalMessage, chatMessageSchema, chatReactionSchema, chatPollVoteSchema, immutableMessageKey, type ChatMessageInput, type ChatPollVoteEvent, type ChatReply, type RelayMessage } from './chat-validation.js'
 import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
 
@@ -11,6 +11,8 @@ interface HistoryRow {
   content: string; message_type: 'text' | 'image' | 'gif'; media_url?: string | null; storage_path?: string | null
   mentions?: RelayMessage['mentions']; user_name: string; avatar_seed: string
   soundspin_message_reactions?: Array<{ emoji: string; user_id: string }>
+  poll_options?: string[] | null
+  soundspin_poll_votes?: Array<{ user_id: string; option_index: number; revision: number }>
 }
 export interface ChatHistoryRouteOptions {
   client: SupabaseClient | null
@@ -19,8 +21,9 @@ export interface ChatHistoryRouteOptions {
   canWriteRoom?: (userId: string, roomSlug: string) => Promise<boolean>
   getUser?: (userId: string, roomSlug: string) => Promise<User | null>
   writePolicy?: ChatWritePolicy
+  onPollVote?: (roomSlug: string, event: ChatPollVoteEvent, userId: string) => Promise<void>
 }
-const SELECT = 'id, content, message_type, media_url, storage_path, mentions, user_id, user_name, avatar_seed, created_at, reply_to_id, soundspin_message_reactions(emoji, user_id)'
+const SELECT = 'id, content, message_type, media_url, storage_path, mentions, user_id, user_name, avatar_seed, created_at, reply_to_id, poll_options, soundspin_message_reactions(emoji, user_id), soundspin_poll_votes(user_id, option_index, revision)'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/
 const cursorFor = (row: HistoryRow): Cursor => ({ id: row.id, createdAt: row.created_at })
@@ -37,13 +40,14 @@ export async function loadStoredChatMessage(client: SupabaseClient | null, id: s
   if (!client) throw new Error('Chat storage is unavailable. Please try again.')
   if (!UUID.test(id)) throw new BadRequest('Invalid message.')
   const { data, error } = await client.from('soundspin_messages')
-    .select('room_slug, user_id, id, content, message_type, media_url, storage_path, mentions, reply_to_id, created_at').eq('id', id).maybeSingle()
+    .select('room_slug, user_id, id, content, message_type, media_url, storage_path, mentions, reply_to_id, created_at, poll_options').eq('id', id).maybeSingle()
   if (error) throw error
   const row = data as (HistoryRow & { room_slug: string }) | null
   if (!row) return null
   return { roomId: row.room_slug, userId: row.user_id, message: chatMessageSchema.parse({ id: row.id, content: row.content,
     type: row.message_type, createdAt: row.created_at, mediaUrl: row.media_url || undefined, storagePath: row.storage_path || undefined,
-    mentions: row.mentions || [], replyTo: row.reply_to_id ? { id: row.reply_to_id } : undefined }) }
+    mentions: row.mentions || [], replyTo: row.reply_to_id ? { id: row.reply_to_id } : undefined,
+    poll: row.poll_options ? { options: row.poll_options } : undefined }) }
 }
 
 export async function loadChatReply(client: SupabaseClient | null, room: string, id: string): Promise<ChatReply | null> {
@@ -172,7 +176,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     }
     const values = { id: message.id, room_slug: room, user_id: userId, user_name: user.name, avatar_seed: user.avatarSeed,
       content: message.content, message_type: message.type, media_url: message.mediaUrl || null, storage_path: message.storagePath || null,
-      mentions: message.mentions, reply_to_id: message.replyTo?.id || null, created_at: message.createdAt }
+      mentions: message.mentions, reply_to_id: message.replyTo?.id || null, created_at: message.createdAt, poll_options: message.poll?.options || null }
     if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
     const { error } = await client.from('soundspin_messages').insert(values)
     if (error) {
@@ -182,6 +186,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
       const existing = data as HistoryRow | null
       const original = existing ? { content: existing.content, type: existing.message_type, mediaUrl: existing.media_url || undefined,
         storagePath: existing.storage_path || undefined, createdAt: existing.created_at, mentions: existing.mentions || [], replyTo: existing.reply_to_id ? { id: existing.reply_to_id } : undefined } : null
+      if (original && existing?.poll_options) Object.assign(original, { poll: { options: existing.poll_options } })
       if (!original || immutableMessageKey(original as typeof parsed.data) !== immutableMessageKey(message)) throw new Conflict('This message ID already belongs to different content, account, or room.')
     }
     response.json({ ok: true })
@@ -198,6 +203,24 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
       : await client.from('soundspin_message_reactions').delete().eq('message_id', values.message_id).eq('user_id', userId).eq('emoji', values.emoji)
     if (error) throw error
     response.json({ ok: true })
+  }, true))
+  app.post('/api/rooms/:roomSlug/chat/polls/:messageId/vote', express.json({ limit: '2kb' }), authorized(async (client, room, request, response, userId) => {
+    const parsed = chatPollVoteSchema.safeParse(request.body)
+    if (!parsed.success) throw new BadRequest('Choose a poll option.')
+    writePolicy.pollVote(room, userId)
+    const row = await target(client, room, request)
+    if (!row || row.message_type !== 'text' || !row.poll_options || parsed.data.optionIndex >= row.poll_options.length) {
+      throw new BadRequest('This poll option is unavailable.')
+    }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    const { data, error } = await client.from('soundspin_poll_votes')
+      .upsert({ message_id: row.id, room_slug: room, user_id: userId, option_index: parsed.data.optionIndex }, { onConflict: 'message_id,user_id' })
+      .select('message_id, user_id, option_index, revision').single()
+    if (error || !data) throw error || new Error('Poll vote was not saved.')
+    const event: ChatPollVoteEvent = { messageId: data.message_id, userId: data.user_id, optionIndex: data.option_index, revision: data.revision }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    await options.onPollVote?.(room, event, userId)
+    await replyWithReadCheck(userId, room, response, event)
   }, true))
   app.post('/api/rooms/:roomSlug/chat/media-url', express.json({ limit: '2kb' }), authorized(async (client, room, request, response, userId) => {
     if (typeof request.body?.storagePath !== 'string') throw new BadRequest('Invalid chat image.')

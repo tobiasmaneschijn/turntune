@@ -1,4 +1,5 @@
-import type { ChatMessage } from './model'
+import type { ChatMessage, ChatPollVoteEvent } from './model'
+import { normalizeRealtimePollVote } from './protocol'
 import { chatHistoryCursorFilter, chatMessagesFromRows, type ChatHistoryCursor, type ChatHistoryPage, type ChatHistoryRow } from './persistence'
 import { requestJson } from '../lib/authenticated-http'
 
@@ -10,6 +11,7 @@ export interface ChatHistorySource {
   loadMessage(messageId: string): Promise<ChatMessage | null>
   saveMessage(message: ChatMessage): Promise<void>
   saveReaction(change: { id?: string; action: 'add' | 'remove'; messageId: string; userId?: string; emoji: string }): Promise<void>
+  votePoll?(messageId: string, optionIndex: number): Promise<ChatPollVoteEvent>
   loadMediaUrl(storagePath: string, signal?: AbortSignal): Promise<string>
 }
 interface RowsPayload { rows: ChatHistoryRow[]; replies?: ChatHistoryRow[]; profiles?: Parameters<typeof chatMessagesFromRows>[2] }
@@ -52,6 +54,12 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
     },
     async saveMessage(message) { await request('/messages', undefined, message) },
     async saveReaction(change) { await request('/reactions', undefined, { id: change.id, action: change.action, messageId: change.messageId, emoji: change.emoji }) },
+    async votePoll(messageId, optionIndex) {
+      const payload = await request<unknown>(`/polls/${encodeURIComponent(messageId)}/vote`, undefined, { optionIndex })
+      const event = normalizeRealtimePollVote(payload)
+      if (!event || event.messageId !== messageId) throw new Error('The vote could not be confirmed. Try again.')
+      return event
+    },
     async loadMediaUrl(storagePath, signal) { return (await request<{ url: string }>('/media-url', undefined, { storagePath }, signal)).url },
   }
 }

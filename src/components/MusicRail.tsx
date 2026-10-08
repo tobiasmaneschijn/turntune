@@ -153,7 +153,10 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
 
   useEffect(() => {
     if (!controlsRef) return;
-    const controls = { focusSearch: openAddMusic, openQueue };
+    const controls = { focusSearch: openAddMusic, openQueue: () => {
+      openQueue();
+      requestAnimationFrame(() => { if (activeRef.current) queueTabRef.current?.focus({ preventScroll: true }); });
+    } };
     controlsRef.current = controls;
     return () => { if (controlsRef.current === controls) controlsRef.current = null; };
   }, [controlsRef, addMusicOpen]);

@@ -6,7 +6,7 @@ export interface ChatComposerSnapshot { text: string; mentions: ChatMention[]; r
 interface Options {
   scope: string
   isConnected: boolean
-  prepareMessage: (content: string, media?: ChatMedia, reply?: ChatReply, mentions?: ChatMention[]) => ChatMessage
+  prepareMessage: (content: string, media?: ChatMedia, reply?: ChatReply, mentions?: ChatMention[], pollOptions?: string[]) => ChatMessage
   deliver: (message: ChatMessage) => Promise<unknown>
   persist?: (message: ChatMessage) => Promise<void> | void
   composer: () => ChatComposerSnapshot
@@ -54,10 +54,10 @@ export function useChatDelivery(options: Options) {
     optionsRef.current.confirmed(completion.snapshot, completion.text)
   }, [])
 
-  const send = useCallback(async (media?: ChatMedia, caption?: string, accepted?: () => void) => {
+  const send = useCallback(async (media?: ChatMedia, caption?: string, accepted?: () => void, pollOptions?: string[]) => {
     const current = optionsRef.current
     const snapshot = current.composer()
-    const content = media ? (caption?.slice(0, 500) || 'Shared image') : snapshot.text.trim()
+    const content = pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || 'Shared image') : snapshot.text.trim()
     if (!current.isConnected || !content || sendingRef.current || (uploadingRef.current && !media?.storagePath)) return false
     if (Object.values(saveStatesRef.current).filter((entry) => entry.state === 'failed' || entry.state === 'send-failed').length >= 100) {
       current.onError('Retry pending messages before sending more.'); return false
@@ -66,11 +66,11 @@ export function useChatDelivery(options: Options) {
     const tracker = trackerRef.current
     sendingRef.current = true; setSending(true); current.onError('')
     try {
-      const message = current.prepareMessage(content, media, snapshot.replyTo || undefined, media ? [] : snapshot.mentions)
-      completionRef.current.set(message.id, { snapshot, text: !media })
+      const message = current.prepareMessage(content, media, pollOptions ? undefined : snapshot.replyTo || undefined, media || pollOptions ? [] : snapshot.mentions, pollOptions)
+      if (!pollOptions) completionRef.current.set(message.id, { snapshot, text: !media })
       setOutboxMessages((messages) => mergeChatMessages(messages, [message]))
       accepted?.()
-      if (!media) current.beforeTextSend?.()
+      if (!media && !pollOptions) current.beforeTextSend?.()
       const delivered = await tracker?.send(message, current.deliver, current.persist)
       if (delivered) finish(message.id, lifetime)
       return Boolean(delivered)
@@ -89,11 +89,16 @@ export function useChatDelivery(options: Options) {
   }, [finish])
   const retrySave = useCallback((messageId: string) => { void trackerRef.current?.retry(messageId) }, [])
   const sendText = useCallback(() => send(), [send])
+  const sendPoll = useCallback(async (question: string, pollOptions: string[]) => {
+    let accepted = false
+    await send(undefined, question, () => { accepted = true }, pollOptions)
+    return accepted
+  }, [send])
   const sendMedia = useCallback((type: 'image' | 'gif', mediaUrl: string, content: string, storagePath?: string) => send({ type, mediaUrl, storagePath }, content), [send])
   const sendMediaWithOwnership = useCallback(async (type: 'image' | 'gif', mediaUrl: string, content: string, storagePath?: string) => {
     let accepted = false
     const delivered = await send({ type, mediaUrl, storagePath }, content, () => { accepted = true })
     return { accepted, delivered }
   }, [send])
-  return { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef, sendText, sendMedia, sendMediaWithOwnership, retrySend, retrySave }
+  return { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef, sendText, sendPoll, sendMedia, sendMediaWithOwnership, retrySend, retrySave }
 }

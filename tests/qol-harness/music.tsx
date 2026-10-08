@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MusicRail, type MusicRailAction, type MusicRailActionName } from "../../src/components/MusicRail";
+import { MusicRail, type MusicRailAction, type MusicRailActionName, type MusicRailControls } from "../../src/components/MusicRail";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import type { SocketReply } from "../../src/socket-request";
 import type { RoomSnapshot, Track, User } from "../../src/types";
@@ -50,6 +50,7 @@ declare global {
       snapshot(): RoomSnapshot;
       setDj(userId: string | null): void;
       setTrackMetadata(trackId: string, title: string, artist: string): void;
+      openQueue(): void;
     };
   }
 }
@@ -58,6 +59,7 @@ function Harness() {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [connected, setConnected] = useState(true);
   const [notice, setNotice] = useState("");
+  const controlsRef = useRef<MusicRailControls>(null);
   const latest = useRef(snapshot);
   latest.current = snapshot;
   const update = (next: RoomSnapshot) => { latest.current = next; setSnapshot(next); };
@@ -123,10 +125,11 @@ function Harness() {
     setConnected,
     setDj: (userId) => update({ ...latest.current, room: { ...latest.current.room, djUserId: userId } }),
     setTrackMetadata: (trackId, title, artist) => update({ ...latest.current, room: { ...latest.current.room, queue: latest.current.room.queue.map((track) => track.id === trackId ? { ...track, title, artist } : track) } }),
-    snapshot: () => latest.current
+    snapshot: () => latest.current,
+    openQueue: () => controlsRef.current?.openQueue()
   };
 
-  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
+  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} controlsRef={controlsRef} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Harness /></ThemeProvider>);

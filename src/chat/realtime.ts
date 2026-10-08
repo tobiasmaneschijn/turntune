@@ -1,12 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { ChatMessage, ChatReactionEvent } from './model'
-import { normalizeRealtimeMessage, normalizeRealtimeReaction, normalizeTypingEvent } from './protocol'
+import type { ChatMessage, ChatPollVoteEvent, ChatReactionEvent } from './model'
+import { normalizeRealtimeMessage, normalizeRealtimePollVote, normalizeRealtimeReaction, normalizeTypingEvent } from './protocol'
 
 export const CHAT_TYPING_TTL_MS = 5_000
 
 export interface RealtimeChatCallbacks {
   onMessage: (message: ChatMessage) => void
   onReaction: (event: ChatReactionEvent) => void
+  onPollVote?: (event: ChatPollVoteEvent) => void
   onTyping: (userIds: string[]) => void
   onConnection: (connected: boolean) => void
 }
@@ -48,6 +49,11 @@ export function createRealtimeChatSession(
       if (!active) return
       const event = normalizeRealtimeReaction(payload)
       if (event) callbacks.onReaction(event)
+    })
+    .on('broadcast', { event: 'poll-vote' }, ({ payload }) => {
+      if (!active) return
+      const event = normalizeRealtimePollVote(payload)
+      if (event) callbacks.onPollVote?.(event)
     })
     .on('broadcast', { event: 'typing' }, ({ payload }) => {
       if (!active) return

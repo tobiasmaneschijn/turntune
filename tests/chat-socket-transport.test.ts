@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createSocketChatSessionFactory, type SocketChatTransport } from '../src/chat/socket-transport'
-import type { ChatMessage } from '../src/chat/model'
+import type { ChatMessage, ChatPollVoteEvent } from '../src/chat/model'
 
 const message: ChatMessage = { id: '00000000-0000-4000-8000-000000000001', content: 'Hello room', type: 'text', user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' }, createdAt: new Date().toISOString() }
 function harness() {
@@ -15,10 +15,10 @@ function harness() {
     timeout() { return { emit(event, payload, callback) { sends.push({ event, payload }); release = () => callback(null, reply) } } },
   }
   const receive = (event: string, payload?: unknown) => handlers.get(event)?.forEach((callback) => callback(payload))
-  const messages: ChatMessage[] = [], connections: boolean[] = [], typing: string[][] = []
+  const messages: ChatMessage[] = [], polls: ChatPollVoteEvent[] = [], connections: boolean[] = [], typing: string[][] = []
   const factory = createSocketChatSessionFactory(socket, 'lounge')
-  const session = factory('alice', { onMessage: (item) => messages.push(item), onReaction: () => {}, onTyping: (ids) => typing.push(ids), onConnection: (connected) => connections.push(connected) })
-  return { socket, session, factory, sends, messages, connections, typing, handlers, receive, acknowledge: () => release?.(), fail: () => { reply = { ok: false } } }
+  const session = factory('alice', { onMessage: (item) => messages.push(item), onReaction: () => {}, onPollVote: (item) => polls.push(item), onTyping: (ids) => typing.push(ids), onConnection: (connected) => connections.push(connected) })
+  return { socket, session, factory, sends, messages, polls, connections, typing, handlers, receive, acknowledge: () => release?.(), fail: () => { reply = { ok: false } } }
 }
 
 test('chat admission requires the ACK+snapshot parent signal and reconnect preserves one transport lifetime', async () => {
@@ -63,4 +63,18 @@ test('typing stop tombstones reject delayed active events and clear on disconnec
   assert.deepEqual(h.typing.at(-1), [])
   h.receive('disconnect'); assert.deepEqual(h.typing.at(-1), [])
   h.session.dispose()
+})
+
+test('accepted poll updates require active room admission and dispose with the socket transport', () => {
+  const h = harness()
+  const poll = { messageId: message.id, userId: 'alice', optionIndex: 1, revision: 2 }
+  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.equal(h.polls.length, 0)
+  h.factory.setAdmitted(true)
+  h.receive('chat:poll', { roomId: 'other', poll }); assert.equal(h.polls.length, 0)
+  h.receive('chat:poll', { roomId: 'lounge', poll: { ...poll, revision: 0 } }); assert.equal(h.polls.length, 0)
+  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.deepEqual(h.polls, [poll])
+  h.session.dispose()
+  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.equal(h.polls.length, 1)
+  assert.equal(h.handlers.get('chat:poll')?.size, 0)
+  assert.equal(h.sends.length, 0)
 })

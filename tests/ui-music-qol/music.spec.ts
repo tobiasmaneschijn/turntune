@@ -26,6 +26,17 @@ async function openAddMusic(page: Page) {
   return dialog;
 }
 
+test("external queue command opens and focuses the private queue", { tag: "@mobile" }, async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await api(page, "music.openQueue()");
+  const queue = page.getByRole("tab", { name: /Queue/ });
+  await expect(queue).toHaveAttribute("aria-selected", "true");
+  await expect(queue).toBeFocused();
+  await expect(page.getByRole("tabpanel", { name: /Queue/ })).toBeVisible();
+  expect(await api(page, "return music.commands.length")).toBe(0);
+});
+
 test("queue-first navigation keeps the DJ roster collapsed and one membership action", { tag: "@mobile" }, async ({ page }) => {
   await open(page, "listener");
   const tabs = page.getByRole("tablist", { name: "Music tools", exact: true });

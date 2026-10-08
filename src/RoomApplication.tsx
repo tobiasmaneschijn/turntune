@@ -373,6 +373,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
               isVisible={!isNarrowRoomLayout || mobileRoomPane === "chat" || (isTabletDualRoomLayout && mobileRoomPane !== "radio")}
               onActivate={() => setMobileRoomPane("chat")}
               onUnreadCountChange={setChatUnreadCount}
+              onOpenQueue={openMusicQueue}
               controlsRef={chatControls}
             /></PanelErrorBoundary>}
       />
@@ -455,6 +456,7 @@ function RoomChat({
   isVisible,
   onActivate,
   onUnreadCountChange,
+  onOpenQueue,
   controlsRef
 }: {
   snapshot: RoomSnapshot;
@@ -467,6 +469,7 @@ function RoomChat({
   isVisible: boolean;
   onActivate: () => void;
   onUnreadCountChange: (count: number) => void;
+  onOpenQueue: () => void;
   controlsRef?: RefObject<RealtimeChatHandle | null>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -550,6 +553,7 @@ function RoomChat({
           roomUsers={snapshot.users}
           isVisible={isVisible}
           onUnreadCountChange={onUnreadCountChange}
+          onOpenQueue={onOpenQueue}
           historyRoomSlug={snapshot.room.id}
           historySource={historySource}
           onPersistReaction={historySource.saveReaction}

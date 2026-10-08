@@ -43,6 +43,7 @@ export function createChatWritePolicy(now = Date.now) {
       if (input.id) once(`reaction:${input.id}`, key, () => consume(`${roomId}:${userId}:reaction`, 60));
       else consume(`${roomId}:${userId}:reaction`, 60);
     },
+    pollVote(roomId: string, userId: string) { consume(`${roomId}:${userId}:poll-vote`, 30); },
     typing(roomId: string, userId: string) { consume(`${roomId}:${userId}:typing`, 20); }
   };
 }

@@ -5,15 +5,17 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import {
   coalesceReactionEvent,
+  coalescePollVoteEvent,
   mergeChatMessages,
   recentChatMessages,
   type ChatMedia,
   type ChatMention,
   type ChatMessage,
   type ChatReactionEvent,
+  type ChatPollVoteEvent,
   type ChatReply,
 } from '@/chat/model'
-import { normalizeRealtimeMessage } from '@/chat/protocol'
+import { normalizeRealtimeMessage, normalizeRealtimePollVote } from '@/chat/protocol'
 import { createRealtimeChatSession, type ChatSessionFactory, type RealtimeChatCallbacks, type RealtimeChatSession } from '@/chat/realtime'
 import type { User } from '@/types'
 
@@ -32,6 +34,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
+  const [pollVoteEvents, setPollVoteEvents] = useState<ChatPollVoteEvent[]>([])
   const [typingUserIds, setTypingUserIds] = useState<string[]>([])
   const sessionRef = useRef<RealtimeChatSession | null>(null)
   const connectedCallbackRef = useRef(onConnected)
@@ -39,11 +42,16 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const beforeMessageRef = useRef(onBeforeMessage)
   beforeMessageRef.current = onBeforeMessage
   const messageBufferRef = useRef<ChatMessage[]>([])
+  const applyPollVote = useCallback((event: ChatPollVoteEvent) => {
+    const normalized = normalizeRealtimePollVote(event)
+    if (normalized) setPollVoteEvents((current) => coalescePollVoteEvent(current, normalized).slice(-4000))
+  }, [])
 
   useEffect(() => {
     setMessages([])
     messageBufferRef.current = []
     setReactionEvents([])
+    setPollVoteEvents([])
     setTypingUserIds([])
     setIsConnected(false)
     const callbacks: RealtimeChatCallbacks = {
@@ -54,6 +62,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
         setMessages(messageBufferRef.current)
       },
       onReaction: (event) => setReactionEvents((current) => coalesceReactionEvent(current, event).slice(-4000)),
+      onPollVote: applyPollVote,
       onTyping: setTypingUserIds,
       onConnection: (connected) => {
         if (connected) {
@@ -69,7 +78,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
       sessionRef.current = null
       session.dispose()
     }
-  }, [client, roomName, user.id, transport])
+  }, [client, roomName, user.id, transport, applyPollVote])
 
   const sendMessage = useCallback(async (
     content: string,
@@ -88,9 +97,10 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     await session.sendMessage(message)
     return message
   }, [user])
-  const prepareMessage = useCallback((content: string, media?: ChatMedia, replyTo?: ChatReply, mentions: ChatMention[] = []) => {
+  const prepareMessage = useCallback((content: string, media?: ChatMedia, replyTo?: ChatReply, mentions: ChatMention[] = [], pollOptions?: string[]) => {
     const message = normalizeRealtimeMessage({ id: crypto.randomUUID(), content, type: media?.type || 'text', mediaUrl: media?.mediaUrl,
-      storagePath: media?.storagePath, user, mentions, replyTo, createdAt: new Date().toISOString() })
+      storagePath: media?.storagePath, user, mentions, replyTo, createdAt: new Date().toISOString(),
+      poll: pollOptions ? { options: pollOptions } : undefined })
     if (!message) throw new Error('This message could not be sent. Check its text or image.')
     return message
   }, [user])
@@ -110,5 +120,5 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     await sessionRef.current?.sendTyping(active)
   }, [])
 
-  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, broadcastTyping, typingUserIds, isConnected }
+  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, pollVoteEvents, applyPollVote, broadcastTyping, typingUserIds, isConnected }
 }

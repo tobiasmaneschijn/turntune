@@ -12,6 +12,7 @@ export interface ChatMessage {
   mentions?: ChatMention[]
   replyTo?: ChatReply
   reactions?: ChatReaction[]
+  poll?: ChatPoll
   createdAt: string
 }
 
@@ -41,6 +42,21 @@ export interface ChatReactionEvent extends ChatReaction {
   id: string
   messageId: string
   action: 'add' | 'remove'
+}
+
+export interface ChatPollVote {
+  userId: string
+  optionIndex: number
+  revision: number
+}
+
+export interface ChatPoll {
+  options: string[]
+  votes: ChatPollVote[]
+}
+
+export interface ChatPollVoteEvent extends ChatPollVote {
+  messageId: string
 }
 
 export interface ChatMedia {
@@ -195,6 +211,61 @@ export function coalesceReactionEvent(
   const nextEvents = [...events]
   nextEvents[existingIndex] = nextEvent
   return nextEvents
+}
+
+/** One account's latest accepted vote wins, even when acknowledgements arrive out of order. */
+export function coalescePollVoteEvent(events: ChatPollVoteEvent[], nextEvent: ChatPollVoteEvent): ChatPollVoteEvent[] {
+  const existingIndex = events.findIndex((event) => event.messageId === nextEvent.messageId && event.userId === nextEvent.userId)
+  if (existingIndex === -1) return [...events, nextEvent]
+  if (events[existingIndex].revision >= nextEvent.revision) return events
+  const nextEvents = [...events]
+  nextEvents[existingIndex] = nextEvent
+  return nextEvents
+}
+
+/** History owns the options and its durable vote revisions; only newer live votes overlay it. */
+export function applyPollVoteEvents(messages: ChatMessage[], events: ChatPollVoteEvent[]): ChatMessage[] {
+  const byMessage = new Map<string, ChatPollVoteEvent[]>()
+  for (const event of events) {
+    const pending = byMessage.get(event.messageId) || []
+    pending.push(event)
+    byMessage.set(event.messageId, pending)
+  }
+  return messages.map((message) => {
+    if (!message.poll || !byMessage.has(message.id)) return message
+    const votes = latestPollVotes(message.poll)
+    for (const event of byMessage.get(message.id)!) {
+      if (!Number.isInteger(event.optionIndex) || event.optionIndex < 0 || event.optionIndex >= message.poll.options.length ||
+        !Number.isSafeInteger(event.revision) || event.revision < 1 || !event.userId) continue
+      const current = votes.get(event.userId)
+      if (!current || event.revision > current.revision) votes.set(event.userId, {
+        userId: event.userId, optionIndex: event.optionIndex, revision: event.revision,
+      })
+    }
+    return { ...message, poll: { options: message.poll.options, votes: [...votes.values()] } }
+  })
+}
+
+export function getPollResults(poll: ChatPoll, currentUserId: string): {
+  counts: number[]; totalVotes: number; selectedOption: number | null
+} {
+  const counts = poll.options.map(() => 0)
+  let selectedOption: number | null = null
+  for (const vote of latestPollVotes(poll).values()) {
+    counts[vote.optionIndex] += 1
+    if (vote.userId === currentUserId) selectedOption = vote.optionIndex
+  }
+  return { counts, totalVotes: counts.reduce((total, count) => total + count, 0), selectedOption }
+}
+
+function latestPollVotes(poll: ChatPoll): Map<string, ChatPollVote> {
+  const votes = new Map<string, ChatPollVote>()
+  for (const vote of poll.votes) {
+    if (!vote.userId || !Number.isInteger(vote.optionIndex) || vote.optionIndex < 0 || vote.optionIndex >= poll.options.length ||
+      !Number.isSafeInteger(vote.revision) || vote.revision < 1 || (votes.get(vote.userId)?.revision || 0) >= vote.revision) continue
+    votes.set(vote.userId, vote)
+  }
+  return votes
 }
 
 export function groupReactions(

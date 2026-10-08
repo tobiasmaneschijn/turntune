@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessageType, ChatReactionEvent, ChatReply } from './model'
+import type { ChatMessage, ChatMessageType, ChatPollVoteEvent, ChatReactionEvent, ChatReply } from './model'
 import { normalizeChatMentions } from './mentions'
 import type { User } from '../types'
 
@@ -14,6 +14,15 @@ function boundedString(value: unknown, max: number, min = 1): value is string {
 
 function messageType(value: unknown): value is ChatMessageType {
   return value === 'text' || value === 'image' || value === 'gif'
+}
+
+export function normalizeChatPollOptions(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 4) return null
+  if (value.some((option) => typeof option !== 'string')) return null
+  const options = (value as string[]).map((option) => option.trim())
+  if (options.some((option) => option.length < 1 || option.length > 80) ||
+    new Set(options.map((option) => option.toLowerCase())).size !== options.length) return null
+  return options
 }
 
 /** Broadcast content is supplied by other clients, not by a trusted database. */
@@ -66,11 +75,13 @@ export function normalizeRealtimeMessage(value: unknown): ChatMessage | null {
     !boundedString(message.createdAt, 64) || !Number.isFinite(Date.parse(message.createdAt))
   ) return null
   const user = normalizeUser(message.user)
+  const pollOptions = message.poll === undefined ? undefined : normalizeChatPollOptions(record(message.poll)?.options)
+  if (pollOptions === null || (pollOptions && (message.type !== 'text' || !boundedString(message.content.trim(), 200)))) return null
   const mediaUrl = message.type === 'text' ? undefined : safeChatMediaUrl(message.mediaUrl)
   if (!user || (message.type === 'text' ? !message.content.trim() : !mediaUrl)) return null
   return {
     id: message.id,
-    content: message.content,
+    content: pollOptions ? message.content.trim() : message.content,
     type: message.type,
     createdAt: new Date(message.createdAt).toISOString(),
     user,
@@ -79,7 +90,17 @@ export function normalizeRealtimeMessage(value: unknown): ChatMessage | null {
     mentions: normalizeChatMentions(message.mentions),
     replyTo: normalizeReply(message.replyTo),
     reactions: [],
+    // Vote authority comes from history and accepted server vote events, never message senders.
+    poll: pollOptions ? { options: pollOptions, votes: [] } : undefined,
   }
+}
+
+export function normalizeRealtimePollVote(value: unknown): ChatPollVoteEvent | null {
+  const event = record(value)
+  if (!event || !boundedString(event.messageId, 100) || !boundedString(event.userId, 100) ||
+    typeof event.optionIndex !== 'number' || !Number.isInteger(event.optionIndex) || event.optionIndex < 0 || event.optionIndex > 3 ||
+    typeof event.revision !== 'number' || !Number.isSafeInteger(event.revision) || event.revision < 1) return null
+  return { messageId: event.messageId, userId: event.userId, optionIndex: event.optionIndex, revision: event.revision }
 }
 
 export function normalizeRealtimeReaction(value: unknown): ChatReactionEvent | null {

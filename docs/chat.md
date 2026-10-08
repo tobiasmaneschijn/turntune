@@ -31,6 +31,7 @@ the database source of truth.
 | `src/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
 | `src/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
 | `src/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
+| `src/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
 | `src/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
 | `src/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
 | `src/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
@@ -171,6 +172,41 @@ shared messages, replies, delivery retries or server data. Hidden media does not
 refresh its signed URL, and hidden message IDs do not trigger mention alerts.
 If device storage is blocked, hiding still applies while this chat is mounted,
 with a notice that the choice cannot be saved.
+
+## Commands and polls
+
+Typing `/` opens keyboard-accessible command suggestions. Enter or selecting a
+suggestion runs the command; command text is not sent to the room.
+
+| Command | Action |
+| --- | --- |
+| `/queue` | Opens your queue and focuses its tab, switching the mobile room pane when needed. |
+| `/mute` | Toggles this room's notifications. It uses the same preference as the chat header bell. |
+| `/search` or `/search text` | Opens saved room-message search; supplied text is searched immediately. |
+| `/poll` or `/poll question` | Opens a poll form, optionally prefilling its question. |
+
+Polls have a question of up to 200 characters and 2–4 distinct choices of up to
+80 characters. A poll is a text message with immutable `poll.options`; its
+question remains `content`. Creation uses the existing live delivery, durable
+save and original-ID retry flow. Once the outbox owns a poll, its form closes
+and any send/save failure uses the row's retry controls. Other composer text and
+reply state are preserved. A completion from a closed or replaced form cannot
+close the next poll form.
+
+The authorized vote route derives the account from the session and checks room
+admission, the poll target and its choice index. `soundspin_poll_votes` has one
+row per `(message_id, user_id)`; selecting another choice updates that row.
+Database triggers increment a per-account vote revision. The route returns the
+accepted event and emits `chat:poll` only to freshly admitted room recipients.
+History carries the same vote revisions; the client ignores older updates and
+calculates counts from each account's latest choice. Hiding a poll conceals its
+question, choices and results through the normal hidden-message controls.
+
+Apply `20261008132716_chat_polls.sql` before deploying the matching server and
+client. It adds message options, server-only vote storage, room/choice guards,
+revision triggers and deletion cascades. Older deployments can continue to
+write ordinary messages after the migration. No live migration is applied by
+the local SQL tests.
 
 ## Mentions
 

@@ -211,6 +211,26 @@ async function canWriteRoomChat(userId: string, roomSlug: string) {
     [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
 }
 const chatWritePolicy = createChatWritePolicy();
+/** HTTP poll mutations and the relay share the same fresh admitted recipient gate. */
+async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll', payload: unknown,
+  origin: { socketId?: string; userId: string }) {
+  const recipients = [...(roomUsers.get(roomId) || [])];
+  const [allowed, canWrite] = await Promise.all([
+    store.allowedRoomReaders(roomId, recipients.map(([, user]) => user.id)),
+    canWriteRoomChat(origin.userId, roomId)
+  ]);
+  const sender = origin.socketId ? getMembership(origin.socketId) : undefined;
+  const senderAdmitted = origin.socketId
+    ? sender?.room.id === roomId && sender.user.id === origin.userId
+    : [...(roomUsers.get(roomId)?.values() || [])].some(user => user.id === origin.userId);
+  if (!canWrite || !allowed.has(origin.userId) || !senderAdmitted) {
+    throw new Error("This room session has ended. Join again before sending chat.");
+  }
+  for (const [socketId, user] of recipients) {
+    const current = getMembership(socketId);
+    if (allowed.has(user.id) && current?.room.id === roomId && current.user.id === user.id) io.to(socketId).emit(event, payload);
+  }
+}
 const chatRelay = createChatRelay({
   writePolicy: chatWritePolicy,
   getMembership,
@@ -220,27 +240,14 @@ const chatRelay = createChatRelay({
   loadMessageById: id => authEnabled ? loadStoredChatMessage(supabaseAdmin, id) : Promise.resolve(null),
   loadReply: (roomId, messageId) => loadChatReply(supabaseAdmin, roomId, messageId),
   resolveMediaUrl: async (roomId, storagePath, userId) => (await resolveChatMediaUrl(supabaseAdmin, roomId, storagePath, userId)).url,
-  emitToRoom: async (roomId, event, payload, origin) => {
-    const recipients = [...(roomUsers.get(roomId) || [])];
-    const [allowed, canWrite] = await Promise.all([
-      store.allowedRoomReaders(roomId, recipients.map(([, user]) => user.id)),
-      canWriteRoomChat(origin.userId, roomId)
-    ]);
-    const sender = getMembership(origin.socketId);
-    if (!canWrite || !allowed.has(origin.userId) || sender?.room.id !== roomId || sender.user.id !== origin.userId) {
-      throw new Error("This room session has ended. Join again before sending chat.");
-    }
-    for (const [socketId, user] of recipients) {
-      const current = getMembership(socketId);
-      if (allowed.has(user.id) && current?.room.id === roomId && current.user.id === user.id) io.to(socketId).emit(event, payload);
-    }
-  }
+  emitToRoom: emitAdmittedChat
 });
 mountChatHistoryRoutes(app, {
   writePolicy: chatWritePolicy,
   client: supabaseAdmin,
   getUserId: getApiUserId,
   canWriteRoom: canWriteRoomChat,
+  onPollVote: (roomId, event, userId) => emitAdmittedChat(roomId, 'chat:poll', { roomId, poll: event }, { userId }),
   getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
   canReadRoom: async (userId, roomSlug) => {
     const access = await store.getRoomAccess(roomSlug, userId);

@@ -4,11 +4,12 @@ import {
   applyChatUserProfiles,
   type ChatMessage,
   type ChatMessageType,
+  type ChatPoll,
   type ChatUserProfile,
 } from '@/chat/model'
 import type { User } from '@/types'
 import { normalizeChatMentions } from '@/chat/mentions'
-import { safeChatMediaUrl } from '@/chat/protocol'
+import { normalizeChatPollOptions, normalizeRealtimePollVote, safeChatMediaUrl } from '@/chat/protocol'
 
 export const CHAT_HISTORY_LIMIT = 200
 export const CHAT_SEARCH_LIMIT = 40
@@ -47,7 +48,9 @@ const CHAT_HISTORY_SELECT = [
   'avatar_seed',
   'created_at',
   'reply_to_id',
+  'poll_options',
   'soundspin_message_reactions(emoji, user_id)',
+  'soundspin_poll_votes(user_id, option_index, revision)',
 ].join(', ')
 
 export interface ChatHistoryRow {
@@ -63,6 +66,8 @@ export interface ChatHistoryRow {
   created_at: string
   reply_to_id: string | null
   soundspin_message_reactions: Array<{ emoji: string; user_id: string }> | null
+  poll_options?: string[] | null
+  soundspin_poll_votes?: Array<{ user_id: string; option_index: number; revision: number }> | null
 }
 
 export async function loadChatHistory(
@@ -217,11 +222,24 @@ function mapChatRows(history: ChatHistoryRow[], rowsById: Map<string, ChatHistor
         userId: reaction.user_id,
         userName: profileNames.get(reaction.user_id),
       })),
+      poll: pollFromRow(row),
       createdAt: row.created_at,
     }
   })
 
   return applyChatUserProfiles(messages, currentProfiles)
+}
+
+function pollFromRow(row: ChatHistoryRow): ChatPoll | undefined {
+  const options = normalizeChatPollOptions(row.poll_options)
+  if (!options || row.message_type !== 'text' || !row.content.trim() || row.content.trim().length > 200) return undefined
+  const votes = new Map<string, ChatPoll['votes'][number]>()
+  for (const value of row.soundspin_poll_votes || []) {
+    const vote = normalizeRealtimePollVote({ messageId: row.id, userId: value.user_id, optionIndex: value.option_index, revision: value.revision })
+    if (!vote || vote.optionIndex >= options.length || (votes.get(vote.userId)?.revision || 0) >= vote.revision) continue
+    votes.set(vote.userId, { userId: vote.userId, optionIndex: vote.optionIndex, revision: vote.revision })
+  }
+  return { options, votes: [...votes.values()] }
 }
 
 export async function saveChatMessage(
@@ -242,6 +260,7 @@ export async function saveChatMessage(
     storage_path: message.storagePath || null,
     mentions: message.mentions || [],
     reply_to_id: message.replyTo?.id || null,
+    poll_options: message.poll?.options || null,
     created_at: message.createdAt,
   }
   const { error } = await client.from('soundspin_messages').insert(values)
@@ -252,7 +271,7 @@ export async function saveChatMessage(
   // Verify the original owned message rather than overwriting or broadcasting it.
   const { data: existing, error: lookupError } = await client
     .from('soundspin_messages')
-    .select('id, room_slug, user_id, content, message_type, media_url, storage_path, mentions, reply_to_id, created_at')
+    .select('id, room_slug, user_id, content, message_type, media_url, storage_path, mentions, reply_to_id, poll_options, created_at')
     .eq('id', message.id)
     .eq('room_slug', roomSlug)
     .eq('user_id', currentUser.id)
@@ -261,6 +280,7 @@ export async function saveChatMessage(
   const matches = existing.content === values.content && existing.message_type === values.message_type &&
     existing.media_url === values.media_url && existing.storage_path === values.storage_path &&
     existing.reply_to_id === values.reply_to_id &&
+    JSON.stringify(existing.poll_options || null) === JSON.stringify(values.poll_options) &&
     new Date(existing.created_at).getTime() === new Date(values.created_at).getTime() &&
     JSON.stringify(normalizeChatMentions(existing.mentions).map(({ userId, userName, handle }) => [userId, userName, handle])) ===
       JSON.stringify(normalizeChatMentions(values.mentions).map(({ userId, userName, handle }) => [userId, userName, handle]))

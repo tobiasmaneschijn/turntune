@@ -142,3 +142,18 @@ test('idempotent message retry compares mention fields independently of JSONB ob
   ])
   await saveChatMessage(database.client, 'lounge', message.user, message)
 })
+
+test('poll persistence keeps immutable options and verifies them before accepting an idempotent retry', async () => {
+  const message: ChatMessage = { id: 'retry-poll', content: 'What next?', type: 'text', user: { id: 'listener-1', name: 'Listener', avatarSeed: 'seed' },
+    createdAt: '2026-10-06T10:00:00.000Z', poll: { options: ['Jazz', 'House'], votes: [] } }
+  const insertion = fakeDatabase([{ error: null }])
+  await saveChatMessage(insertion.client, 'lounge', message.user, message)
+  const inserted = insertion.calls[0].operations.find(([operation]) => operation === 'insert')?.[1] as Record<string, unknown>
+  assert.deepEqual(inserted.poll_options, ['Jazz', 'House'])
+  assert.equal(inserted.soundspin_poll_votes, undefined)
+  const duplicate = { code: '23505', message: 'Duplicate key' }
+  const matching = fakeDatabase([{ error: duplicate }, { data: row(message.id, { content: message.content, poll_options: ['Jazz', 'House'] }), error: null }])
+  await saveChatMessage(matching.client, 'lounge', message.user, message)
+  const conflicting = fakeDatabase([{ error: duplicate }, { data: row(message.id, { content: message.content, poll_options: ['House', 'Jazz'] }), error: null }])
+  await assert.rejects(saveChatMessage(conflicting.client, 'lounge', message.user, message), (error) => error === duplicate)
+})

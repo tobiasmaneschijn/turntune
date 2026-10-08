@@ -5,6 +5,9 @@ import type { SkinTones, Theme } from 'emoji-picker-react'
 import { useTheme } from 'next-themes'
 import { insertComposerText } from '@/chat/composer-edit'
 import { prepareUploadedChatImage } from '@/chat/image-upload'
+import { chatCommandSuggestions, parseChatCommand, type ChatCommandName } from '@/chat/commands'
+import { ChatPollComposer } from '@/components/chat-poll-composer'
+import '@/styles/chat-polls.css'
 import { getScopedSupabaseClient } from '@/supabase'
 import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS } from '@/lib/bounded-operation'
 import {
@@ -26,6 +29,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   applyChatUserProfiles,
   applyReactionEvents,
+  applyPollVoteEvents,
   createReplySnapshot,
   mergeChatMessages,
   CHAT_LIVE_WINDOW_LIMIT,
@@ -94,6 +98,7 @@ interface RealtimeChatProps {
   onSend?: (message: ChatMessage) => Promise<void> | void
   messages?: ChatMessage[]
   onOpenProfile?: (userId: string) => void
+  onOpenQueue?: () => void
   adminUserIds?: string[]
   roomUsers?: User[]
   isVisible?: boolean
@@ -139,6 +144,9 @@ interface ChatMessageListProps {
   saveStates: ChatSaveStates
   onRetrySave: (messageId: string) => void
   onRetrySend: (messageId: string) => void
+  onVotePoll: (message: ChatMessage, optionIndex: number) => void
+  pollVoteStates: Record<string, { pending: boolean; error?: string }>
+  pollVotingEnabled: boolean
 }
 
 const ChatMessageList = memo(function ChatMessageList({
@@ -156,6 +164,9 @@ const ChatMessageList = memo(function ChatMessageList({
   saveStates,
   onRetrySave,
   onRetrySend,
+  onVotePoll,
+  pollVoteStates,
+  pollVotingEnabled,
 }: ChatMessageListProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [openPickerId, setOpenPickerId] = useState<string | null>(null)
@@ -204,6 +215,10 @@ const ChatMessageList = memo(function ChatMessageList({
               saveStatus={message.user.id === currentUserId ? saveStates[message.id] : undefined}
               onRetrySave={onRetrySave}
               onRetrySend={onRetrySend}
+              onVotePoll={(optionIndex) => onVotePoll(message, optionIndex)}
+              pollVoting={pollVoteStates[message.id]?.pending}
+              pollVoteError={pollVoteStates[message.id]?.error}
+              pollVotingDisabled={!pollVotingEnabled}
               onResolveMediaUrl={onResolveMediaUrl}
               actionMenuOpen={openMenuId === message.id}
               onActionMenuOpenChange={(open) => { setOpenMenuId(open ? message.id : null); if (open) setOpenPickerId(null) }}
@@ -229,6 +244,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   onMessage,
   onSend,
   onOpenProfile,
+  onOpenQueue,
   adminUserIds = EMPTY_ADMIN_IDS,
   roomUsers = EMPTY_USERS,
   isVisible = true,
@@ -252,6 +268,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const mentionListId = useId()
   const composerHintId = useId()
   const mediaPanelId = useId()
+  const commandListId = useId()
   const { hiddenIds, setMessageHidden } = useChatVisibility(user.id, roomName)
   const handleHiddenChange = useCallback((messageId: string, hidden: boolean) => {
     const persisted = setMessageHidden(messageId, hidden)
@@ -284,6 +301,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     sendExistingMessage,
     broadcastReaction,
     reactionEvents,
+    pollVoteEvents,
+    applyPollVote,
     broadcastTyping,
     typingUserIds,
     isConnected,
@@ -304,6 +323,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const liveWindow = useMemo(() => recentChatMessages(mergeChatMessages(initialMessages, realtimeMessages)), [initialMessages, realtimeMessages])
   liveWindowRef.current = liveWindow
   const [draftText, setDraftText] = useState(initialDraft?.text || '')
+  const [commandMenuDismissed, setCommandMenuDismissed] = useState(false)
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0)
+  const [pollQuestion, setPollQuestion] = useState<string | null>(null)
+  const pollComposerGenerationRef = useRef(0)
+  const [pollVoteStates, setPollVoteStates] = useState<Record<string, { pending: boolean; error?: string }>>({})
+  const pendingPollVotesRef = useRef(new Set<string>())
+  const commandCandidates = commandMenuDismissed ? [] : chatCommandSuggestions(draftText)
+  const commandDraft = parseChatCommand(draftText)
   const [hasDraft, setHasDraft] = useState(Boolean(initialDraft?.text.trim()))
   const [draftRestored, setDraftRestored] = useState(Boolean(initialDraft))
   const [replyRestoreNotice, setReplyRestoreNotice] = useState('')
@@ -392,7 +419,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [mentionQuery, roomMentionOptions])
 
   const { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef,
-    sendText, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
+    sendText, sendPoll, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
     scope: `${user.id}:${roomName}`, isConnected, prepareMessage,
     deliver: (message) => boundedOperation(() => sendExistingMessage(message), { timeoutMs: SUBMISSION_TIMEOUT_MS }),
     persist: onSend ? (message) => boundedOperation(() => Promise.resolve(onSend(message)), { timeoutMs: SUBMISSION_TIMEOUT_MS }) : undefined,
@@ -415,6 +442,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
   useEffect(() => {
     setComposerError('')
+    pollComposerGenerationRef.current++
+    setPollQuestion(null)
+    setPollVoteStates({})
+    pendingPollVotesRef.current = new Set()
+    setCommandMenuDismissed(false)
     setDraftText(initialDraft?.text || '')
     draftMessageRef.current = initialDraft?.text || ''
     setHasDraft(Boolean(initialDraft?.text.trim()))
@@ -486,12 +518,12 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     [baseMessages, roomUsers]
   )
   const allMessages = useMemo(
-    () => applyReactionEvents(profiledMessages, reactionEvents, reactionNamesByUserId),
-    [profiledMessages, reactionEvents, reactionNamesByUserId]
+    () => applyPollVoteEvents(applyReactionEvents(profiledMessages, reactionEvents, reactionNamesByUserId), pollVoteEvents),
+    [profiledMessages, reactionEvents, reactionNamesByUserId, pollVoteEvents]
   )
   const visibleMessages = useMemo(() => history.context
-    ? applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId)
-    : allMessages, [history.context, roomUsers, reactionEvents, reactionNamesByUserId, allMessages])
+    ? applyPollVoteEvents(applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId), pollVoteEvents)
+    : allMessages, [history.context, roomUsers, reactionEvents, reactionNamesByUserId, pollVoteEvents, allMessages])
 
   useEffect(() => {
     const refresh = () => setPageAttended(!isAppInBackground())
@@ -686,10 +718,84 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
   useEffect(() => () => stopTyping(), [stopTyping])
 
+  const clearCommandDraft = useCallback(() => {
+    draftMessageRef.current = ''
+    draftSnapshotRef.current.draft = { ...draftSnapshotRef.current.draft, text: '', mentions: [] }
+    draftStore.save(draftSnapshotRef.current.draft)
+    setDraftText(''); setHasDraft(false); setSelectedMentions([]); setMentionQuery(null); setDraftRestored(false)
+    setCommandMenuDismissed(true)
+    stopTyping()
+  }, [draftStore, stopTyping])
+  const executeCommand = useCallback((name: ChatCommandName, argumentsText = '') => {
+    if ((name === 'queue' || name === 'mute') && argumentsText) {
+      setComposerError(`Use /${name} without extra text.`); return
+    }
+    if (name === 'queue' && !onOpenQueue) { setComposerError('The queue is unavailable in this view.'); return }
+    if (name === 'search' && !historyRoomSlug) { setComposerError('Room message search is unavailable in this view.'); return }
+    if (name === 'search' && argumentsText && (argumentsText.length < 2 || argumentsText.length > 100)) {
+      setComposerError('Enter 2–100 characters to search room messages.'); return
+    }
+    if (name === 'poll' && argumentsText.length > 200) { setComposerError('Keep the poll question to 200 characters.'); return }
+    setComposerError('')
+    clearCommandDraft()
+    setShowEmoji(false); setShowGiphy(false)
+    if (name === 'queue') onOpenQueue?.()
+    else if (name === 'mute') {
+      setRoomMuted(!roomMuted)
+      toast.info(roomMuted ? 'Room notifications unmuted.' : 'Room notifications muted.')
+      messageInputRef.current?.focus({ preventScroll: true })
+    } else if (name === 'search') {
+      setShowHistorySearch(true)
+      setHistorySearchText(argumentsText)
+      if (argumentsText) void history.search(argumentsText)
+      requestAnimationFrame(() => historySearchInputRef.current?.focus({ preventScroll: true }))
+    } else {
+      pollComposerGenerationRef.current++
+      setPollQuestion(argumentsText)
+    }
+  }, [clearCommandDraft, history.search, historyRoomSlug, onOpenQueue, roomMuted, setRoomMuted])
   const handleSendMessage = useCallback((event: React.FormEvent) => {
     event.preventDefault()
+    if (commandCandidates.length) {
+      executeCommand(commandCandidates[activeCommandIndex] || commandCandidates[0]); return
+    }
+    const command = parseChatCommand(draftMessageRef.current)
+    if (command) {
+      if (command.name) executeCommand(command.name, command.arguments)
+      else setComposerError('Unknown command. Use /queue, /mute, /search or /poll.')
+      return
+    }
     void sendText()
-  }, [sendText])
+  }, [activeCommandIndex, commandCandidates, executeCommand, sendText])
+  const closePollComposer = useCallback(() => {
+    pollComposerGenerationRef.current++
+    setPollQuestion(null)
+    requestAnimationFrame(() => messageInputRef.current?.focus({ preventScroll: true }))
+  }, [])
+  const handlePostPoll = useCallback(async (question: string, options: string[]) => {
+    const lifetime = lifetimeRef.current
+    const generation = pollComposerGenerationRef.current
+    const accepted = await sendPoll(question, options)
+    if (!lifetime.active || generation !== pollComposerGenerationRef.current) return false
+    if (accepted && !history.context) requestAnimationFrame(() => scrollToBottom('auto'))
+    return accepted
+  }, [history.context, lifetimeRef, scrollToBottom, sendPoll])
+  const handlePollVote = useCallback(async (message: ChatMessage, optionIndex: number) => {
+    const source = historySource
+    if (!source?.votePoll || !isConnected || !message.poll || pendingPollVotesRef.current.has(message.id)) return
+    const pending = pendingPollVotesRef.current
+    const lifetime = lifetimeRef.current
+    pending.add(message.id)
+    setPollVoteStates((current) => ({ ...current, [message.id]: { pending: true } }))
+    try {
+      const event = await boundedOperation(() => source.votePoll!(message.id, optionIndex), { timeoutMs: SUBMISSION_TIMEOUT_MS })
+      if (!lifetime.active) return
+      applyPollVote(event)
+      setPollVoteStates((current) => ({ ...current, [message.id]: { pending: false } }))
+    } catch (error) {
+      if (lifetime.active) setPollVoteStates((current) => ({ ...current, [message.id]: { pending: false, error: error instanceof Error ? error.message : 'Could not save vote. Try again.' } }))
+    } finally { pending.delete(message.id) }
+  }, [applyPollVote, historySource, isConnected, lifetimeRef])
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
     if (!mentionQuery) return
@@ -998,6 +1104,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           saveStates={saveStates}
           onRetrySave={handleRetrySave}
           onRetrySend={handleRetrySend}
+          onVotePoll={(message, optionIndex) => { void handlePollVote(message, optionIndex) }}
+          pollVoteStates={pollVoteStates}
+          pollVotingEnabled={isConnected && Boolean(historySource?.votePoll)}
         />
         {history.context?.hasNewer && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.contextLoading} onClick={() => void history.extendContext('newer')}>Load newer messages</Button></div>}
       </div>
@@ -1164,6 +1273,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
       {composerError && <p role="alert" className="px-4 pt-2 text-sm text-destructive">{composerError}</p>}
       {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
+      {pollQuestion !== null && <ChatPollComposer key={pollComposerGenerationRef.current} initialQuestion={pollQuestion} onSubmit={handlePostPoll} onClose={closePollComposer} disabled={!isConnected || sending || uploading} />}
       <form
         ref={composerRef}
         onSubmit={handleSendMessage}
@@ -1233,6 +1343,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             ))}
           </div>
         )}
+        {commandCandidates.length > 0 && <div id={commandListId} className="chat-command-picker" role="listbox" aria-label="Chat commands">
+          {commandCandidates.map((name, index) => <button
+            id={`${commandListId}-${name}`} key={name} type="button" role="option"
+            aria-selected={index === activeCommandIndex} className={index === activeCommandIndex ? 'active' : undefined}
+            onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActiveCommandIndex(index)}
+            onClick={() => executeCommand(name)}
+          ><code>/{name}</code><span>{name === 'queue' ? 'Open queue' : name === 'mute' ? roomMuted ? 'Unmute room notifications' : 'Mute room notifications' : name === 'search' ? 'Search room messages' : 'Create poll'}</span></button>)}
+        </div>}
         <InputGroup className="chat-composer-bar">
           <Button
             className="chat-composer-add"
@@ -1256,8 +1374,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             autoComplete="off"
             autoCorrect="off"
             aria-autocomplete="list"
-            aria-controls={mentionQuery && mentionCandidates.length ? mentionListId : undefined}
-            aria-activedescendant={mentionQuery && mentionCandidates.length ? `${mentionListId}-${activeMentionIndex}` : undefined}
+            aria-controls={commandCandidates.length ? commandListId : mentionQuery && mentionCandidates.length ? mentionListId : undefined}
+            aria-activedescendant={commandCandidates.length ? `${commandListId}-${commandCandidates[activeCommandIndex] || commandCandidates[0]}` : mentionQuery && mentionCandidates.length ? `${mentionListId}-${activeMentionIndex}` : undefined}
             data-form-type="other"
             maxLength={500}
             onSelect={(event) => { selectionRef.current = { start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd } }}
@@ -1268,6 +1386,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               draftSnapshotRef.current.draft.text = nextMessage
               draftSnapshotRef.current.draft.mentions = activeMentions(nextMessage, selectedMentions)
               setDraftText(nextMessage)
+              setCommandMenuDismissed(false)
+              setActiveCommandIndex(0)
               setDraftRestored(false)
               const nextHasDraft = Boolean(nextMessage.trim())
               setHasDraft((current) => current === nextHasDraft ? current : nextHasDraft)
@@ -1281,7 +1401,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || composingRef.current || event.keyCode === 229) return
-              if (mentionQuery && mentionCandidates.length > 0 && event.key === 'ArrowDown') {
+              if (commandCandidates.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                event.preventDefault()
+                setActiveCommandIndex((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + commandCandidates.length) % commandCandidates.length)
+              } else if (commandCandidates.length && !event.shiftKey && (event.key === 'Enter' || event.key === 'Tab')) {
+                event.preventDefault()
+                executeCommand(commandCandidates[activeCommandIndex] || commandCandidates[0])
+              } else if (mentionQuery && mentionCandidates.length > 0 && event.key === 'ArrowDown') {
                 event.preventDefault()
                 setActiveMentionIndex((current) => (current + 1) % mentionCandidates.length)
               } else if (mentionQuery && mentionCandidates.length > 0 && event.key === 'ArrowUp') {
@@ -1293,6 +1419,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               } else if (event.key === 'Escape') {
                 event.preventDefault()
                 setMentionQuery(null)
+                setCommandMenuDismissed(true)
               } else if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
@@ -1303,10 +1430,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             onClick={(event) => setMentionQuery(findMentionQuery(event.currentTarget.value, event.currentTarget.selectionStart))}
             onBlur={() => {
               setMentionQuery(null)
+              setCommandMenuDismissed(true)
               stopTyping()
             }}
             onPaste={(event) => void pasteMedia(event)}
-            placeholder="Message the room"
+            placeholder="Message the room, or / for commands"
           />
           <Button
             className="chat-composer-gif"
@@ -1336,14 +1464,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             className="chat-send-button"
             type="submit"
             size="icon"
-            disabled={!isConnected || uploading || sending || !hasDraft}
-            aria-label={sending ? 'Sending message' : 'Send message'}
-            title="Send message (Enter)"
+            disabled={(!isConnected && !commandDraft) || uploading || sending || !hasDraft}
+            aria-label={commandDraft ? 'Run chat command' : sending ? 'Sending message' : 'Send message'}
+            title={commandDraft ? 'Run chat command (Enter)' : 'Send message (Enter)'}
           >
             <Send className="size-4" />
           </Button>
         </InputGroup>
-        <span id={composerHintId} className="sr-only">Enter to send. Shift+Enter for a new line. Maximum 500 characters.</span>
+        <span id={composerHintId} className="sr-only">Enter to send. Shift+Enter for a new line. Type / for commands. Maximum 500 characters.</span>
         {(composerStatus || draftText.length >= 450) && <div className="chat-composer-hint">
           <span role="status">{composerStatus}</span>
           {draftText.length >= 450 && <span>{draftText.length}/500</span>}

@@ -18,6 +18,7 @@ import type { ChatSaveStates } from '@/chat/delivery'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Avatar } from '@/components/Avatar'
+import { ChatPollView } from '@/components/chat-poll'
 import { DevFlair } from '@/components/DevFlair'
 import { useChatPickerBounds } from '@/hooks/use-chat-picker-bounds'
 import { useChatMediaUrl } from '@/hooks/use-chat-media-url'
@@ -75,6 +76,10 @@ interface ChatMessageItemProps {
   reactionPickerOpen?: boolean
   onReactionPickerOpenChange?: (open: boolean) => void
   onResolveMediaUrl?: (storagePath: string) => Promise<string>
+  onVotePoll?: (optionIndex: number) => void
+  pollVoting?: boolean
+  pollVotingDisabled?: boolean
+  pollVoteError?: string
 }
 
 export const ChatMessageItem = memo(function ChatMessageItem({
@@ -99,6 +104,10 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   reactionPickerOpen,
   onReactionPickerOpenChange,
   onResolveMediaUrl,
+  onVotePoll,
+  pollVoting,
+  pollVotingDisabled,
+  pollVoteError,
 }: ChatMessageItemProps) {
   const { resolvedTheme } = useTheme()
   const [localReactionPicker, setLocalReactionPicker] = useState(false)
@@ -283,6 +292,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
           )}
+          {message.poll && <ChatPollView poll={message.poll} currentUserId={currentUserId} onVote={(optionIndex) => onVotePoll?.(optionIndex)} voting={pollVoting} disabled={pollVotingDisabled} error={pollVoteError} />}
         </div>}
         {saveStatus && (
           <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : undefined}>

@@ -54,6 +54,12 @@
 .chat-message-body { font-size: var(--chat-text-size); word-break: break-word; }
 .chat-message-hidden-placeholder { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
 .chat-message-hidden-placeholder svg { flex: 0 0 auto; }
+.chat-message-body:has(.chat-poll) { width: 100%; }
+.chat-command-picker { position: absolute; z-index: 15; left: 8px; right: 8px; bottom: calc(100% + 8px); padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); }
+.chat-command-picker > button { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 14px; cursor: pointer; }
+.chat-command-picker > button:hover, .chat-command-picker > button.active { background: var(--secondary); }
+.chat-command-picker code { min-width: 64px; font-family: inherit; font-weight: 600; }
+.chat-command-picker > button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .chat-mention { display: inline; margin: 0; padding: 0 2px; border: 0; border-radius: 3px; background: color-mix(in oklch, var(--primary), transparent 86%); color: var(--primary-text); font: inherit; font-weight: 650; cursor: pointer; }
 .chat-mention:hover { background: color-mix(in oklch, var(--primary), transparent 76%); text-decoration: underline; }
 .chat-platform-emoji-image { width: 1.15em; height: 1.15em; margin: 0 .04em; display: inline-block; vertical-align: -.18em; object-fit: contain; }
