@@ -6,6 +6,8 @@ export interface PlayerStatus {
   buffering: boolean;
   currentTime: number;
   duration: number;
+  /** Active broadcast; its provider clock is not a finite recording position. */
+  isLive?: boolean;
   playing?: boolean;
   trackId?: string;
 }

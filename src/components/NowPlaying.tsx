@@ -467,6 +467,7 @@ export function NowPlaying({
     ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
     : undefined);
   const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;
+  const isLive = effectiveProvider === "youtube" && statusIdentityRef.current === identity && playerStatus.trackId === track?.id && playerStatus.isLive === true;
   const effectiveMapping = preferredMapping || (track
     ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl }
     : undefined);
@@ -629,6 +630,7 @@ export function NowPlaying({
                 syncRevision={syncRevision}
                 isDj={isDj}
                 volume={volume}
+                accessToken={accessToken}
                 // The track ID lets the server reject duplicate/stale ended events.
                 onEnded={handleEnded}
                 onStatus={handleStatus}
@@ -669,19 +671,23 @@ export function NowPlaying({
             </div>
           </div>
           <div className="playback-progress">
-            <span>{formatPlaybackTime(shownPosition)}</span>
-            <Slider
-              min={0}
-              max={Math.max(playerStatus.duration, 1)}
-              step={1}
-              value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
-              disabled={controlsUnavailable || !playerStatus.duration}
-              aria-label="Playback position"
-              getAriaValueText={(_formatted, value) => `${formatPlaybackTime(value)} of ${formatPlaybackTime(playerStatus.duration)}`}
-              onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
-              onValueCommitted={commitSeek}
-            />
-            <span>{formatPlaybackTime(playerStatus.duration)}</span>
+            {isLive ? <span>Live</span> : (
+              <>
+                <span>{formatPlaybackTime(shownPosition)}</span>
+                <Slider
+                  min={0}
+                  max={Math.max(playerStatus.duration, 1)}
+                  step={1}
+                  value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
+                  disabled={controlsUnavailable || !playerStatus.duration}
+                  aria-label="Playback position"
+                  getAriaValueText={(_formatted, value) => `${formatPlaybackTime(value)} of ${formatPlaybackTime(playerStatus.duration)}`}
+                  onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
+                  onValueCommitted={commitSeek}
+                />
+                <span>{formatPlaybackTime(playerStatus.duration)}</span>
+              </>
+            )}
           </div>
           <div className="player-footer">
             <div className="sync-status" data-status={feedback.tone} role="status">
@@ -722,7 +728,7 @@ export function NowPlaying({
         </div>
       )}
       </section>
-      <TrackDetailsDialog track={track} open={detailsOpen} onOpenChange={setDetailsOpen} durationMs={track?.durationMs || playerStatus.duration * 1000} returnFocusRef={detailsButtonRef} />
+      <TrackDetailsDialog track={track} open={detailsOpen} onOpenChange={setDetailsOpen} durationMs={track?.durationMs || playerStatus.duration * 1000} isLive={isLive} returnFocusRef={detailsButtonRef} />
       {settingsOpen && (
         <DeferredDialog title="Settings" load={loadUserSettings} componentProps={{ settings: userSettings, connections, connectionError, onRetryConnections: loadConnections, accessToken, onSettingsChange: onUserSettingsChange, onConnectSpotify: connectSpotify, onDisconnectSpotify: disconnectSpotify, onClose: onCloseSettings }} />
       )}

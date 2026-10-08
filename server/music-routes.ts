@@ -23,6 +23,9 @@ interface YouTubeSearchResult { id: string; title: string; channel: string; thum
 const youtubeSearchSchema = z.object({
   q: z.string().trim().min(2).max(100)
 });
+const youtubeLiveSchema = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{11}$/)
+});
 
 const soundCloudSearchSchema = youtubeSearchSchema;
 const spotifySearchSchema = youtubeSearchSchema;
@@ -129,10 +132,13 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   const getApiUserId = options.getUserId;
   const fetchImpl = options.fetchImpl || fetch;
   const youtubeSearchCache = new BoundedCache<{ expiresAt: number; results: YouTubeSearchResult[] }>(500);
+  const youtubeLiveCache = new BoundedCache<{ expiresAt: number; isLive: boolean }>(500);
+  const youtubeLivePending = new BoundedCache<{ expiresAt: number; lookup: Promise<boolean | null> }>(500);
   const soundCloudSearchCache = new BoundedCache<{ expiresAt: number; results: SoundCloudSearchResult[] }>(500);
   const spotifySearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<SpotifyApi["searchTracks"]>> }>(500);
   const appleMusicSearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<AppleMusicApi["searchTracks"]>> }>(500);
   const youtubeSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
+  const youtubeLiveLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   app.use(["/api/youtube", "/api/soundcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], (_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
@@ -163,6 +169,70 @@ async function spotifyForUser<T>(userId: string, operation: (accessToken: string
     return trackedProvider(async () => operation(await spotifyAccounts.getAccessToken(userId)));
   }
 }
+
+app.get("/api/youtube/live", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) {
+    return response.status(401).json({ error: "Authentication required." });
+  }
+  if (!youtubeApiKey) {
+    return response.status(503).json({ error: "YouTube live status is not configured yet." });
+  }
+  const parsed = youtubeLiveSchema.safeParse(request.query);
+  if (!parsed.success) {
+    return response.status(400).json({ error: "Enter a valid YouTube video ID." });
+  }
+
+  const { id } = parsed.data;
+  const now = Date.now();
+  const cached = youtubeLiveCache.get(id);
+  if (cached) return response.json({ isLive: cached.isLive });
+
+  let pending = youtubeLivePending.get(id);
+  if (!pending) {
+    const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+    const currentLimit = youtubeLiveLimits.get(rateKey);
+    const limit = !currentLimit || currentLimit.resetAt <= now
+      ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+      : currentLimit;
+    if (limit.count >= 30) {
+      return response.status(429).json({ error: "Too many live status requests. Please try again in a few minutes." });
+    }
+    limit.count += 1;
+    youtubeLiveLimits.set(rateKey, limit);
+
+    const lookup = (async () => {
+      const params = new URLSearchParams({ key: youtubeApiKey, part: "snippet,liveStreamingDetails", id });
+      const videoResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/videos?${params}`, { signal: AbortSignal.timeout(10_000) }));
+      const payload = await videoResponse.json() as {
+        error?: { message?: string };
+        items?: Array<{ id: string; snippet?: { liveBroadcastContent?: string }; liveStreamingDetails?: { actualEndTime?: string } }>;
+      };
+      if (!videoResponse.ok) throw new Error(payload.error?.message || "Could not check YouTube live status.");
+      if (!Array.isArray(payload.items)) throw new Error("YouTube returned an invalid live status response.");
+      const video = payload.items?.find((item) => item.id === id);
+      if (!video) return null;
+      if (!video.snippet || !["live", "upcoming", "none"].includes(video.snippet.liveBroadcastContent || "")) {
+        throw new Error("YouTube returned an invalid live status response.");
+      }
+      const isLive = video.snippet?.liveBroadcastContent === "live" && !video.liveStreamingDetails?.actualEndTime;
+      youtubeLiveCache.set(id, { expiresAt: Date.now() + 60_000, isLive });
+      return isLive;
+    })();
+    pending = { expiresAt: now + 10_000, lookup };
+    youtubeLivePending.set(id, pending);
+  }
+
+  try {
+    const isLive = await pending.lookup;
+    if (isLive === null) return response.status(404).json({ error: "YouTube video is unavailable." });
+    return response.json({ isLive });
+  } catch (error) {
+    console.error("YouTube live status lookup failed", error);
+    return response.status(502).json({ error: error instanceof Error ? error.message : "Could not check YouTube live status." });
+  } finally {
+    if (youtubeLivePending.get(id) === pending) youtubeLivePending.delete(id);
+  }
+});
 
 app.get("/api/youtube/search", async (request, response) => {
   if (authEnabled && !(await getApiUserId(request))) {

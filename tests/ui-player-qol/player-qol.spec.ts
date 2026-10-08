@@ -49,6 +49,42 @@ test("sync only confirms measured local playback and ignores prior-track samples
   await expect(page.getByText("2:50", { exact: true })).toHaveCount(0);
 });
 
+test("live YouTube playback replaces its oversized timeline on desktop and phone", async ({ page }) => {
+  await page.evaluate(() => (window as any).playerQolTest.status({ ready: true, buffering: false, playing: true, currentTime: 12242447, duration: 24441632, trackId: "t1", isLive: true }));
+  const progress = page.locator(".playback-progress");
+  await expect(progress).toHaveText("Live");
+  await expect(page.getByRole("slider", { name: "Playback position", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("slider", { name: "Volume", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Next track", exact: true })).toBeEnabled();
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect(progress).toHaveText("Live");
+  await page.getByRole("button", { name: "Track details" }).click();
+  const details = page.getByRole("dialog", { name: "Track details", exact: true });
+  await expect(details.locator("dt").filter({ hasText: /^Duration$/ }).locator("+ dd")).toHaveText("Live");
+  await expect(details.getByRole("heading", { name: /A very long recording/ })).toBeVisible();
+  await expect(details.getByRole("link", { name: "Open on YouTube" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("the next recording restores its timeline and ignores stale live reports", async ({ page }) => {
+  await page.evaluate(() => (window as any).playerQolTest.status({ ready: true, buffering: false, playing: true, currentTime: 12242447, duration: 24441632, trackId: "t1", isLive: true }));
+  await expect(page.locator(".playback-progress")).toHaveText("Live");
+  await page.getByRole("button", { name: "Change track" }).click();
+  await expect(page.getByRole("slider", { name: "Playback position", exact: true })).toBeVisible();
+  await expect(page.locator(".playback-progress")).not.toHaveText("Live");
+  await page.evaluate(() => (window as any).playerQolTest.status({ ready: true, buffering: false, playing: true, currentTime: 12242447, duration: 24441632, trackId: "t1", isLive: true }));
+  await expect(page.getByRole("slider", { name: "Playback position", exact: true })).toBeVisible();
+  await expect(page.locator(".playback-progress")).not.toHaveText("Live");
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.getByRole("button", { name: "Track details" }).click();
+  const details = page.getByRole("dialog", { name: "Track details", exact: true });
+  await expect(details.locator("dt").filter({ hasText: /^Duration$/ }).locator("+ dd")).toHaveText("3:00");
+});
+
 test("track information and settings remain accessible at short phone heights", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.getByRole("button", { name: "Track details" }).click();

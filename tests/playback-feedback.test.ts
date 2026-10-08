@@ -24,3 +24,13 @@ test("alignment requires confirmed local play state and position within toleranc
   assert.equal(localPlaybackAligned({ ...status, playing: true }, true, 34), false);
   assert.equal(localPlaybackAligned({ ...status, playing: true, buffering: true }, true, 30), false);
 });
+
+test("live alignment follows confirmed play state without comparing a stream clock to room time", () => {
+  const live = { ...status, isLive: true, playing: true, currentTime: 12_242_447, duration: 0 };
+  assert.equal(localPlaybackAligned(live, true, 30), true);
+  assert.equal(localPlaybackAligned({ ...live, playing: false }, true, 30), false);
+  assert.equal(localPlaybackAligned({ ...live, buffering: true }, true, 30), false);
+  assert.equal(localPlaybackAligned({ ...live, ready: false }, true, 30), false);
+  assert.equal(localPlaybackAligned({ ...live, playing: false }, false, 30), true);
+  assert.equal(localPlaybackAligned({ ...live, isLive: false }, true, 30), false);
+});

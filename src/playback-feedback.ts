@@ -28,7 +28,7 @@ export function playbackFeedback(input: PlaybackFeedbackInput) {
 }
 
 export function localPlaybackAligned(status: PlayerStatus, roomPlaying: boolean, expectedPosition: number) {
-  return status.ready && !status.buffering && status.duration > 0 &&
+  return status.ready && !status.buffering &&
     typeof status.playing === "boolean" && status.playing === roomPlaying &&
-    Math.abs(status.currentTime - expectedPosition) <= 2.5;
+    (status.isLive || status.duration > 0 && Math.abs(status.currentTime - expectedPosition) <= 2.5);
 }

@@ -17,6 +17,20 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.6",
+    date: "2026-10-08",
+    title: "YouTube live playback",
+    sections: [
+      {
+        title: "Fixed",
+        items: [
+          "YouTube livestreams show Live instead of timestamps in the player and track details.",
+          "Livestream seek bars are hidden, and playback no longer repeatedly seeks backward.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.5",
     date: "2026-10-08",
     title: "Chat privacy, commands, and polls",

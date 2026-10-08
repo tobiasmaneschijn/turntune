@@ -15,15 +15,16 @@ export interface TrackDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Local provider duration may supplement missing source metadata in the player. */
   durationMs?: number;
+  isLive?: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
-export function TrackDetailsDialog({ track, open, onOpenChange, durationMs, returnFocusRef }: TrackDetailsDialogProps) {
+export function TrackDetailsDialog({ track, open, onOpenChange, durationMs, isLive, returnFocusRef }: TrackDetailsDialogProps) {
   const [feedback, setFeedback] = useState("");
   const narrow = useMediaQuery("(max-width: 640px)");
   useEffect(() => { setFeedback(""); }, [track, open]);
   if (!track) return null;
   const source = trackSourceUrl(track);
-  const duration = formatTrackDuration(track.durationMs || durationMs);
+  const duration = isLive ? "Live" : formatTrackDuration(track.durationMs || durationMs);
   const playedAt = formatPlayedAt(track.playedAt);
   const copy = async (link: boolean) => {
     try {
