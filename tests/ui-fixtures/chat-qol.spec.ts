@@ -62,14 +62,23 @@ test('typing during a slow send stays intact and composing Enter does not send',
 })
 
 test('touch action menu provides reply and restores its valid context', async ({ page }) => {
-  await page.getByRole('button', { name: 'Message actions for Mira' }).first().click()
+  const actions = page.getByRole('button', { name: 'Message actions for Mira' }).first()
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  const menu = page.getByRole('menu', { includeHidden: true })
+  await actions.click()
   await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+  await expect(menu).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Cancel reply' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Message room chat' })).toBeFocused()
-  await page.getByRole('textbox', { name: 'Message room chat' }).fill('reply draft')
+  await expect(composer).toBeFocused()
+  await composer.fill('reply draft')
+  await actions.click()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(actions).toBeFocused()
   await page.getByRole('button', { name: 'Navigate away' }).click()
   await page.getByRole('button', { name: 'Return to chat' }).click()
   await expect(page.getByRole('button', { name: 'Cancel reply' })).toBeVisible()
+  await expect(composer).toHaveValue('reply draft')
 })
 
 test('OS and app motion preferences govern reply jumps during a session', async ({ page }) => {

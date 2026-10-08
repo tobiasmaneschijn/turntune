@@ -282,6 +282,8 @@ test('heavy reaction updates preserve the row and use static selection without r
   await expect(reaction.locator('[aria-live]')).toHaveCount(0)
   await message.getByRole('button', { name: 'Message actions for Mira' }).click()
   await page.getByRole('menuitem', { name: 'React with ❤️' }).click()
+  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+  await expect(message.getByRole('button', { name: 'Message actions for Mira' })).toBeFocused()
   await expect(reaction).toHaveClass(/active/)
   await expect(reaction.locator('strong')).toHaveText('101')
   await expect(reaction).toHaveCSS('animation-name', 'none')
@@ -377,6 +379,8 @@ test('reaction dialog escapes row clipping, fits above the keyboard composer and
   await page.getByRole('menuitem', { name: 'More reactions' }).click()
   const dialog = page.getByRole('dialog', { name: "React to Mira's message" })
   await expect(dialog).toHaveCount(1)
+  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Close reactions' })).toBeFocused()
   await expect(dialog.getByPlaceholder('Find an emoji')).toBeVisible()
   await page.setViewportSize({ width: 390, height: 380 })
   await expect.poll(async () => {

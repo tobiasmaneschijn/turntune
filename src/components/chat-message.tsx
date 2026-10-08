@@ -100,6 +100,8 @@ export const ChatMessageItem = memo(function ChatMessageItem({
     setLocalReactionPicker(next); onReactionPickerOpenChange?.(next)
   }
   const pickerRef = useRef<HTMLDivElement>(null)
+  // Reply hands focus to the composer instead of returning to the menu trigger.
+  const replyFromMenuRef = useRef(false)
   const rowRef = useRef<HTMLDivElement>(null)
   const pickerBounds = useChatPickerBounds(showReactionPicker, rowRef, 'message')
   useEffect(() => {
@@ -151,10 +153,13 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         )}
       </div>
       <div className="chat-message-content">
-        <DropdownMenu open={actionMenuOpen} onOpenChange={onActionMenuOpenChange}>
+        <DropdownMenu open={actionMenuOpen} onOpenChange={(open) => {
+          if (open) replyFromMenuRef.current = false
+          onActionMenuOpenChange?.(open)
+        }}>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="chat-message-more" aria-label={`Message actions for ${isOwnMessage ? 'your message' : message.user.name}`} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => pickerRef.current?.querySelector<HTMLButtonElement>('button') ?? true}>
-            <DropdownMenuItem onClick={() => onReply(message)}><Reply /> Reply</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => replyFromMenuRef.current ? false : pickerRef.current?.querySelector<HTMLButtonElement>('button') ?? true}>
+            <DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> Reply</DropdownMenuItem>
             {QUICK_REACTIONS.map((emoji) => <DropdownMenuItem key={emoji} onClick={() => onReact(message, emoji)}><PlatformEmojiText text={emoji} /> React with {emoji}</DropdownMenuItem>)}
             <DropdownMenuItem onClick={() => setShowReactionPicker(true)}><SmilePlus /> More reactions</DropdownMenuItem>
           </DropdownMenuContent>
