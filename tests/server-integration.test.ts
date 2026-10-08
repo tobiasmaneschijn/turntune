@@ -9,6 +9,20 @@ import { io, type Socket } from "socket.io-client";
 import type { RoomPresence, RoomSnapshot } from "../src/types.js";
 import { hashRoomPassword } from "../server/room-password.js";
 
+function waitForSnapshot(socket: Socket, matches: (snapshot: RoomSnapshot) => boolean) {
+  return new Promise<RoomSnapshot>((resolve, reject) => {
+    const cleanup = () => { clearTimeout(timer); socket.off("room:snapshot", receive); };
+    const receive = (snapshot: RoomSnapshot) => {
+      if (!matches(snapshot)) return;
+      cleanup(); resolve(snapshot);
+    };
+    const timer = setTimeout(() => {
+      cleanup(); reject(new Error(`Expected room snapshot was not received on socket ${socket.id}.`));
+    }, 3_000);
+    socket.on("room:snapshot", receive);
+  });
+}
+
 test("two listeners can join, manage private queues, skip idempotently and reconnect", { timeout: 20_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-integration-"));
   const setId = "00000000-0000-4000-8000-000000000011";
@@ -126,17 +140,29 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     const denied = await action(listener, "room:announcement", { expectedId: null, text: "Unauthorized" });
     assert.equal(denied.ok, false);
     assert.match(denied.error || "", /owners and moderators/);
-    assert.equal((await action(host, "room:announcement", { expectedId: null, text: "Take turns; add two picks.", expiresInMinutes: 60 })).ok, true);
-    const note = aliceState.room.announcement!;
+    const createdNote = (snapshot: RoomSnapshot) => snapshot.room.id === "integration-room" && snapshot.room.announcement?.text === "Take turns; add two picks.";
+    const aliceCreated = waitForSnapshot(alice, createdNote);
+    const bobCreated = waitForSnapshot(bob, createdNote);
+    const [created, aliceWithNote, bobWithNote] = await Promise.all([
+      action(host, "room:announcement", { expectedId: null, text: "Take turns; add two picks.", expiresInMinutes: 60 }),
+      aliceCreated, bobCreated
+    ]);
+    assert.equal(created.ok, true);
+    const note = aliceWithNote.room.announcement!;
     assert.equal(note.text, "Take turns; add two picks.");
     assert.ok(note.expiresAt! > Date.now());
-    // Ordering an acknowledged command on the listener settles its preceding snapshots.
-    await action(listener, "room:announcement", { expectedId: null, text: "Stale" });
-    assert.equal(bobState.room.announcement?.id, note.id);
+    assert.deepEqual(bobWithNote.room.announcement, note);
     const stale = await action(host, "room:announcement", { expectedId: null, text: "Stale" });
     assert.equal(stale.ok, false); assert.match(stale.error || "", /changed/);
-    assert.equal((await action(host, "room:announcement", { expectedId: note.id, text: "" })).ok, true);
-    assert.equal(aliceState.room.announcement, null);
+    const clearedNote = (snapshot: RoomSnapshot) => snapshot.room.id === "integration-room" && snapshot.room.announcement === null;
+    const aliceCleared = waitForSnapshot(alice, clearedNote);
+    const bobCleared = waitForSnapshot(bob, clearedNote);
+    const [cleared, aliceWithoutNote, bobWithoutNote] = await Promise.all([
+      action(host, "room:announcement", { expectedId: note.id, text: "" }), aliceCleared, bobCleared
+    ]);
+    assert.equal(cleared.ok, true);
+    assert.equal(aliceWithoutNote.room.announcement, null);
+    assert.equal(bobWithoutNote.room.announcement, null);
     assert.equal((await action(host, "room:announcement", { expectedId: null, text: "x".repeat(501) })).ok, false);
   });
   const track = (providerId: string) => ({ provider: "youtube", providerId, title: "Test recording" });
@@ -198,10 +224,12 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     assert.deepEqual(aliceState.room.playback, playback);
     assert.equal((await action(alice, "queue:undo", { token: removed.undo.token })).ok, false);
   });
-  assert.equal((await action(bob, "queue:add", track("wxyzABCDEFG"))).ok, true);
-  // The acknowledgement on Alice's socket also settles earlier snapshots from
-  // Bob's queue update, so the regression starts with both listeners current.
-  assert.equal((await action(alice, "queue:move", { trackId: "invalid", toIndex: -1 })).ok, false);
+  const aliceWithBobQueued = waitForSnapshot(alice, snapshot => snapshot.room.id === "integration-room" && snapshot.room.queue.length === 1);
+  const bobWithTrackQueued = waitForSnapshot(bob, snapshot => snapshot.room.id === "integration-room" && snapshot.room.queue.some(value => value.providerId === "wxyzABCDEFG"));
+  const [bobQueued] = await Promise.all([
+    action(bob, "queue:add", track("wxyzABCDEFG")), aliceWithBobQueued, bobWithTrackQueued
+  ]);
+  assert.equal(bobQueued.ok, true);
   await t.test("a third listener joins and leaves without replaying playback or private queues", async (t) => {
     const aliceRoomBefore = structuredClone(aliceState.room);
     const bobRoomBefore = structuredClone(bobState.room);
