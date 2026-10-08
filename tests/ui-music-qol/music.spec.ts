@@ -51,6 +51,46 @@ test("queue-first navigation keeps the DJ roster collapsed and one membership ac
   await expect(page.getByRole("button", { name: "Join as DJ", exact: true })).toHaveCount(1);
 });
 
+test("queued tracks precede the DJ footer and leaving stays inside the expanded lineup", { tag: "@mobile" }, async ({ page }) => {
+  await open(page);
+  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  const footer = page.locator(".music-rail-minimal .dj-lineup");
+  const queue = await page.locator(".music-queue-pane .rail-track-list").boundingBox();
+  const summary = await footer.boundingBox();
+  expect(queue!.y + queue!.height).toBeLessThanOrEqual(summary!.y + 1);
+  await expect(lineup).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "Leave lineup", exact: true })).toBeHidden();
+  await lineup.press("Enter");
+  await expect(lineup).toHaveAttribute("aria-expanded", "true");
+  const leave = page.getByRole("button", { name: "Leave lineup", exact: true });
+  await expect(leave).toBeVisible();
+  await leave.focus();
+  await lineup.click();
+  await expect(lineup).toHaveAttribute("aria-expanded", "false");
+  await expect(leave).toBeHidden();
+  await expect(lineup).toBeFocused();
+  expect(await api(page, "return music.commands")).toEqual([]);
+});
+
+test("footer membership changes restore focus without changing the private queue", { tag: "@mobile" }, async ({ page }) => {
+  await open(page, "listener");
+  const queue = await api(page, "return music.snapshot().room.queue");
+  const lineup = page.getByRole("button", { name: "DJ lineup", exact: true });
+  const join = page.getByRole("button", { name: "Join as DJ", exact: true });
+  await expect(lineup).toHaveAttribute("aria-expanded", "false");
+  await join.click();
+  await expect.poll(() => api(page, "return music.commands.map(x => x.event)")).toEqual(["dj:join"]);
+  await expect(lineup).toBeFocused();
+  await expect(page.getByRole("button", { name: "Leave lineup", exact: true })).toBeHidden();
+  expect(await api(page, "return music.snapshot().room.queue")).toEqual(queue);
+  await lineup.click();
+  await page.getByRole("button", { name: "Leave lineup", exact: true }).click();
+  await expect.poll(() => api(page, "return music.commands.map(x => x.event)")).toEqual(["dj:join", "dj:leave"]);
+  await expect(join).toBeFocused();
+  expect(await api(page, "return music.snapshot().room.queue")).toEqual(queue);
+  expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
+});
+
 test("Add music traps focus, closes with Escape and preserves search and link drafts", { tag: "@mobile" }, async ({ page }) => {
   await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
   await open(page, "listener");
@@ -76,6 +116,7 @@ test("Add music traps focus, closes with Escape and preserves search and link dr
 });
 
 test("successive track adds retain search context and truthful row positions", { tag: "@mobile" }, async ({ page }) => {
+  await page.clock.install();
   await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
   await open(page);
   await search(page);
@@ -87,7 +128,12 @@ test("successive track adds retain search context and truthful row positions", {
   await page.getByRole("button", { name: "Add Third Song to your queue", exact: true }).click();
   await expect.poll(() => api(page, "return music.commands.filter(x => x.event === 'queue:add').length")).toBe(3);
   await expect(page.locator(".search-result-row").filter({ hasText: "Third Song" })).toContainText("Queued · #6");
-  await page.getByRole("button", { name: "View queue", exact: true }).click();
+  const viewQueue = page.getByRole("button", { name: "View queue", exact: true });
+  await viewQueue.focus();
+  await page.clock.fastForward(6_000);
+  await expect(viewQueue).toBeVisible();
+  await expect(viewQueue).toBeFocused();
+  await viewQueue.click();
   await expect(page.getByRole("dialog", { name: "Add music", exact: true })).toBeHidden();
   await expect(page.getByRole("tab", { name: /Queue/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".music-queue-pane .queue-track")).toHaveCount(6);
@@ -244,6 +290,9 @@ for (const scenario of ["listener", "restricted"]) {
     expect(await api(page, "return music.snapshot().room.djQueueUserIds")).toEqual(["other"]);
     expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
     if (scenario === "restricted") {
+      await expect(page.locator(".music-rail-minimal .dj-lineup")).toContainText("DJ role required");
+      await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeHidden();
+      await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
       await expect(page.locator('.music-rail-minimal')).toContainText("Ask the owner or a moderator for a DJ role.");
     }
@@ -288,9 +337,11 @@ test("real music rail fits a narrow screen and hides inactive panels from focus"
   await expect(page.getByRole("tabpanel", { name: /Queue/ })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).not.toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const box = await page.getByRole("button", { name: "Actions for Gamma", exact: true }).boundingBox();
-  expect(box!.width).toBeGreaterThanOrEqual(44);
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  for (const name of ["Actions for Gamma", "Add music", "DJ lineup"]) {
+    const box = await page.getByRole("button", { name, exact: true }).boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
   await page.getByRole("tab", { name: "My picks", exact: true }).click();
   await expect(page.getByRole("tabpanel", { name: "My picks", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).not.toBeVisible();
@@ -314,11 +365,14 @@ test("active music panes fill the rail with empty or visible feedback", { tag: "
     await expect.poll(async () => {
       const tools = await page.locator(".music-tool-tabs").boundingBox();
       const active = await pane.boundingBox();
-      return Math.abs((active!.y + active!.height) - (tools!.y + tools!.height));
+      const feedback = await page.locator(".music-tool-tabs > .music-feedback").boundingBox();
+      return Math.abs((active!.y + active!.height + (feedback?.height || 0)) - (tools!.y + tools!.height));
     }).toBeLessThanOrEqual(2);
     const rail = await page.locator(".music-rail-qol").boundingBox();
     const tools = await page.locator(".music-tool-tabs").boundingBox();
-    expect(Math.abs((tools!.y + tools!.height) - (rail!.y + rail!.height))).toBeLessThanOrEqual(2);
+    const footer = await page.locator(".music-rail-minimal .dj-lineup").boundingBox();
+    expect(tools!.y + tools!.height).toBeLessThanOrEqual(footer!.y + 2);
+    expect(footer!.y + footer!.height).toBeLessThanOrEqual(rail!.y + rail!.height + 2);
     if (hasList) {
       const active = await pane.boundingBox();
       const list = await pane.locator(".rail-track-list").boundingBox();
@@ -353,10 +407,36 @@ test("a narrow desktop rail keeps search and queue controls reachable", async ({
   const rail = await page.locator(".music-rail-qol").boundingBox();
   const add = await page.getByRole("button", { name: "Add music", exact: true }).boundingBox();
   expect(add!.x + add!.width).toBeLessThanOrEqual(rail!.x + rail!.width);
+  expect(await page.locator(".music-rail-minimal").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+  expect(await page.locator(".music-rail-minimal").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
   await search(page);
   await page.getByRole("button", { name: "Add Third Song to your queue", exact: true }).click();
   await expect(page.locator(".search-result-row").filter({ hasText: "Third Song" })).toContainText("Queued · #4");
   await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toBeVisible();
+});
+
+test("a short narrow rail keeps the expanded lineup below tracks and long names clear of its label", async ({ page }) => {
+  await page.setViewportSize({ width: 640, height: 320 });
+  await open(page);
+  await page.locator(".music-qol-harness").evaluate((element) => { (element as HTMLElement).style.width = "240px"; });
+  const name = "Casey with an exceptionally long display name that must fit beside the lineup control";
+  await api(page, `music.snapshot().djUsers.find(user => user.id === 'other').name = ${JSON.stringify(name)}; music.setDj('other')`);
+  await page.getByRole("button", { name: "DJ lineup", exact: true }).click();
+  const tools = await page.locator(".music-tool-tabs").boundingBox();
+  const footer = await page.locator(".music-rail-minimal .dj-lineup").boundingBox();
+  expect(tools!.y + tools!.height).toBeLessThanOrEqual(footer!.y + 1);
+  const summaryName = await page.locator(".dj-lineup-toggle .dj-lineup-current strong").boundingBox();
+  const label = await page.locator(".music-lineup-label").boundingBox();
+  expect(summaryName!.x + summaryName!.width).toBeLessThanOrEqual(label!.x);
+  const leave = page.getByRole("button", { name: "Leave lineup", exact: true });
+  await leave.scrollIntoViewIfNeeded();
+  // Allow less than a pixel of rounding at the panel's clipping edge.
+  await expect(leave).toBeInViewport({ ratio: 0.99 });
+  expect((await leave.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await page.locator(".music-rail-minimal").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("confirmed queue removal offers bounded Undo and restores the authoritative waiting order", async ({ page }) => {
@@ -391,6 +471,32 @@ test("Undo expiry and rejected restoration explain the outcome without inventing
   await expect(page.getByRole("button", { name: "Undo removal", exact: true })).toHaveCount(0);
 });
 
+test("success notices expire after five seconds while Undo and errors keep their own lifetime", { tag: "@mobile" }, async ({ page }) => {
+  await page.clock.install();
+  await open(page);
+  await page.getByRole("button", { name: "Actions for Beta", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Remove from my queue", exact: true }).click();
+  await expect(page.locator(".music-action-status")).toContainText("Removed Beta from your queue");
+  await page.clock.fastForward(5_001);
+  await expect(page.locator(".music-action-status")).toHaveText("");
+  await expect(page.getByRole("button", { name: "Undo removal", exact: true })).toBeEnabled();
+  await expect(page.locator(".music-feedback")).toBeVisible();
+
+  await api(page, "music.deferNextAction()");
+  await page.getByRole("button", { name: "Actions for Gamma", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Move up", exact: true }).click();
+  await api(page, "music.resolveNext({ ok: false, error: 'The track is no longer available.' })");
+  await expect(page.getByRole("alert")).toContainText("no longer available");
+  await page.clock.fastForward(5_001);
+  await expect(page.getByRole("alert")).toContainText("no longer available");
+  await expect(page.getByRole("button", { name: "Undo removal", exact: true })).toBeEnabled();
+  await page.clock.fastForward(5_001);
+  await expect(page.getByRole("button", { name: "Undo removal", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Undo expired.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("no longer available");
+  await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Alpha", "Gamma"]);
+});
+
 async function mockLibrary(page: Page) {
   let library: any = { picks: [], sets: [] };
   await page.route("**/api/library", async (route) => {
@@ -412,6 +518,40 @@ async function startSaveQueue(page: Page) {
   await expect(page.getByRole("tab", { name: "My picks", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeFocused();
 }
+
+test("pending library saves retain their status until completion and success expires afterward", async ({ page }) => {
+  await page.clock.install();
+  const library: any = { picks: [], sets: [] };
+  let pending = false;
+  let release!: () => void;
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/library", async (route) => {
+    const action = route.request().postDataJSON();
+    if (action?.type === "save-set") {
+      pending = true;
+      await responseGate;
+      library.sets.push({ id: action.id, name: action.name, tracks: action.tracks, savedAt: 100 });
+    }
+    await route.fulfill({ json: { library } });
+  });
+  await open(page, "library");
+  await startSaveQueue(page);
+  await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Slow save");
+  const save = page.getByRole("button", { name: "Save set", exact: true });
+  await save.click();
+  await expect.poll(() => pending).toBe(true);
+  await expect(page.locator(".music-action-status")).toHaveText("Saving to your private library…");
+  await expect(save).toBeDisabled();
+  await page.clock.fastForward(6_000);
+  await expect(page.locator(".music-action-status")).toHaveText("Saving to your private library…");
+  await expect(save).toBeDisabled();
+  release();
+  await expect(page.locator(".music-saved-set")).toContainText("Slow save");
+  await expect(page.locator(".music-action-status")).toHaveText("Saved set Slow save.");
+  await page.clock.fastForward(5_001);
+  await expect(page.locator(".music-action-status")).toHaveText("");
+  await expect(page.locator(".music-feedback")).toBeHidden();
+});
 
 test("repeated Queue actions preserves an open set draft and focuses it again", async ({ page }) => {
   await mockLibrary(page);
@@ -531,6 +671,7 @@ test("private picks save from history, persist across room views, expose details
 });
 
 test("Queue actions opens a focused set draft and saved sets preserve order, append, rename and clear", async ({ page }) => {
+  await page.clock.install();
   await mockLibrary(page);
   await open(page, "library");
   await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeHidden();
@@ -545,6 +686,9 @@ test("Queue actions opens a focused set draft and saved sets preserve order, app
   await expect(page.locator(".music-action-status")).toContainText("Appended 1 tracks from Evening picks · 1 skipped");
   await page.getByText("1 skipped tracks · review reasons", { exact: true }).click();
   await expect(page.locator(".music-import-summary")).toContainText("Unavailable recording — This recording is unavailable");
+  await page.clock.fastForward(5_001);
+  await expect(page.locator(".music-action-status")).toHaveText("");
+  await expect(page.locator(".music-import-summary")).toBeVisible();
   await page.getByRole("button", { name: "Actions for saved set Evening picks", exact: true }).click();
   await page.getByRole("menuitem", { name: "Rename set", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "New name for Evening picks", exact: true })).toBeFocused();
