@@ -1,6 +1,7 @@
 import { type FormEvent, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, Clock3, ExternalLink, GripVertical, Info, ListMusic, Loader2, LockKeyhole, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { ParticipantActions } from "./ParticipantActions";
 import { TrackArtwork } from "./TrackArtwork";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -23,7 +24,7 @@ import type { Provider, RoomSnapshot, Track } from "../types";
 import { allowedRoomProviders, roomAllowsProvider } from "../../shared/providers";
 import "../styles/music-qol.css";
 
-export type MusicRailActionName = "queue:add" | "queue:remove" | "queue:undo" | "queue:set-add" | "queue:move" | "queue:play-next" | "dj:join" | "dj:leave";
+export type MusicRailActionName = "queue:add" | "queue:remove" | "queue:undo" | "queue:set-add" | "queue:move" | "queue:play-next" | "queue:exception" | "queue:exception-request" | "dj:join" | "dj:leave";
 export type MusicRailAction = (event: MusicRailActionName, payload: unknown, reply: (result: SocketReply) => void) => void;
 
 export interface MusicRailProps {
@@ -256,9 +257,13 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   }, [snapshot.room.queue, snapshot.room.playback.track, addAcknowledgements]);
 
   const joinedDjQueue = snapshot.room.djQueueUserIds.includes(currentUserId);
-  const canJoinDjQueue = snapshot.room.settings.djAccess !== "roles" || snapshot.room.ownerUserId === currentUserId ||
-    snapshot.room.moderatorUserIds.includes(currentUserId) || snapshot.room.djRoleUserIds.includes(currentUserId);
+  const canJoinDjQueue = snapshot.room.capabilities?.joinDj ?? (snapshot.room.settings.djAccess !== "roles" || snapshot.room.ownerUserId === currentUserId ||
+    snapshot.room.moderatorUserIds.includes(currentUserId) || snapshot.room.djRoleUserIds.includes(currentUserId));
+  const djJoinMessage = snapshot.room.ownStatus?.rulesAccepted===false ? "Accept room rules before joining." : snapshot.room.ownStatus?.djSuspendedUntil!==undefined ? "Your DJ suspension is active." : snapshot.room.settings.djJoinLocked || snapshot.room.settings.sessionOverrides?.some(s=>s.kind==="dj-lock"&&s.expiresAt>Date.now()) ? "DJ joins are locked." : snapshot.room.settings.djCapacity&&snapshot.room.djQueueUserIds.length>=snapshot.room.settings.djCapacity ? "The DJ lineup is full." : "A DJ role is required.";
+  const djJoinLabel = snapshot.room.ownStatus?.rulesAccepted===false ? "Accept room rules" : snapshot.room.ownStatus?.djSuspendedUntil!==undefined ? "DJ suspension active" : snapshot.room.settings.djJoinLocked || snapshot.room.settings.sessionOverrides?.some(s=>s.kind==="dj-lock"&&s.expiresAt>Date.now()) ? "DJ joins locked" : snapshot.room.settings.djCapacity&&snapshot.room.djQueueUserIds.length>=snapshot.room.settings.djCapacity ? "Lineup full" : "DJ role required";
   const currentDj = snapshot.djUsers.find((user) => user.id === snapshot.room.djUserId);
+  const currentDjLabel = currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : snapshot.room.playback.origin === "fallback" && snapshot.room.playback.track ? "Room fallback" : "No DJ";
+  const onAirLabel = snapshot.room.radio?.turn && snapshot.room.radio.turn.limit > 1 ? `Song ${snapshot.room.radio.turn.used} of ${snapshot.room.radio.turn.limit}` : "On air";
   const upcomingDjs = snapshot.room.djQueueUserIds.filter((id) => id !== snapshot.room.djUserId);
   const detectedProvider = detectMusicProvider(url);
   const filteredHistory = useMemo(() => {
@@ -308,13 +313,13 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     } finally { finishOperation(operation); }
   };
 
-  const toggleDjQueue = async () => {
+  const toggleDjQueue = async (override=false) => {
     const operation: PendingOperation = { kind: "dj" };
     if (!beginOperation(operation)) return;
     const origin = document.activeElement;
     const leaving = snapshotRef.current.room.djQueueUserIds.includes(currentUserId);
     try {
-      const response = await sendAction(leaving ? "dj:leave" : "dj:join");
+      const response = await sendAction(leaving ? "dj:leave" : "dj:join",override?{override:true}:{});
       if (!activeRef.current) return;
       if (!response.ok) return showActionError(response.error || "Could not update your DJ lineup membership.");
       const message = leaving ? "Left the DJ lineup. Your queued tracks are still saved." : "Joined the DJ lineup. Your upcoming tracks are private.";
@@ -463,6 +468,10 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       setUndoReceipt(undefined); setUndoExpired(false);
     } finally { finishOperation(operation); }
   };
+  const requestException=async(track:Track)=>{
+    const operation:PendingOperation={kind:"queue",trackId:track.id};if(!beginOperation(operation))return;
+    try{const result=await sendAction(snapshot.room.capabilities?.djsPlayback?"queue:exception":"queue:exception-request",{trackId:track.id});if(!result.ok)showActionError(result.error??"Could not request a track exception.");else setNotice(snapshot.room.capabilities?.djsPlayback?"Track exception granted":"Track exception requested");}finally{finishOperation(operation);}
+  };
   const appendSavedSet = async (set: SavedSet) => {
     if (!set.tracks.some((track) => roomAllowsProvider(snapshotRef.current.room.settings, track.provider))) return showActionError("This set has no tracks from allowed services.");
     const operation: PendingOperation = { kind: "queue" };
@@ -491,7 +500,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
 
   const djAction = <Button ref={djActionButtonRef} data-dj-membership="true" size="sm" variant={joinedDjQueue ? "ghost" : "outline"} className="music-dj-action"
     disabled={!connected || Boolean(pending) || (!joinedDjQueue && !canJoinDjQueue)} onClick={() => void toggleDjQueue()}>
-    {pending?.kind === "dj" ? "Updating…" : joinedDjQueue ? "Leave lineup" : canJoinDjQueue ? "Join as DJ" : "DJ role required"}
+    {pending?.kind === "dj" ? "Updating…" : joinedDjQueue ? "Leave lineup" : canJoinDjQueue ? "Join as DJ" : djJoinLabel}
   </Button>;
   const readiness = joinedDjQueue ? <p className="music-own-readiness">
     {snapshot.room.djUserId === currentUserId ? "You’re on air." : upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next." : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}.`}
@@ -574,13 +583,14 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
             onDrop={(event) => { event.preventDefault(); if (draggedTrackId && draggedTrackId !== track.id && !pendingRef.current) { const source = snapshotRef.current.room.queue.find((item) => item.id === draggedTrackId); if (source) void queueAction("queue:move", source, index); } setDraggedTrackId(""); }}>
             <span className="queue-drag-handle" title="Drag to reorder; track actions also provide movement controls" aria-hidden="true"><span className="queue-position">{index + 1}</span><GripVertical size={14} /></span>
             <TrackArtwork track={track} compact active={tab === "queue"} />
-            <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small><span className="sr-only">Queue position {index + 1}. </span>{track.artist || providerLabel(track.provider)}</small>{!roomAllowsProvider(snapshot.room.settings, track.provider) && <small>Disabled in this room · skipped</small>}</span>
+            <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small><span className="sr-only">Queue position {index + 1}. </span>{track.artist || providerLabel(track.provider)}</small>{snapshot.room.radio?.ineligibleTracks[track.id] ? <small>{snapshot.room.radio.ineligibleTracks[track.id]}</small> : !roomAllowsProvider(snapshot.room.settings, track.provider) && <small>Disabled in this room · skipped</small>}</span>
             <span className="queue-track-actions"><DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) queueButtonRefs.current.set(track.id, button); else queueButtonRefs.current.delete(track.id); }} data-queue-action-id={track.id} render={<Button variant="ghost" size="icon" aria-label={`Actions for ${track.title}`} disabled={!connected || Boolean(pending)} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
               <DropdownMenuItem disabled={index === 0 || Boolean(pending) || !roomAllowsProvider(snapshot.room.settings, track.provider)} onClick={() => void queueAction("queue:play-next", track)}><ListMusic />First in my queue</DropdownMenuItem>
               <DropdownMenuItem disabled={index === 0 || Boolean(pending)} onClick={() => void queueAction("queue:move", track, index - 1)}><ArrowUp />Move up</DropdownMenuItem>
               <DropdownMenuItem disabled={index === snapshot.room.queue.length - 1 || Boolean(pending)} onClick={() => void queueAction("queue:move", track, index + 1)}><ArrowDown />Move down</DropdownMenuItem>
               <DropdownMenuItem disabled={!accessToken || libraryBusy || isSaved(track)} onClick={() => savePick(track)}><Bookmark />{isSaved(track) ? "Saved to my picks" : "Save to my picks"}</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openTrackDetails(track, historyButtonRefs.current.get(track.id) || queueButtonRefs.current.get(track.id))}><Info />Track details</DropdownMenuItem>
+              {/Duration|minute limit/.test(snapshot.room.radio?.ineligibleTracks[track.id]??"") && <DropdownMenuItem disabled={Boolean(pending)} onClick={()=>void requestException(track)}>{snapshot.room.capabilities?.djsPlayback?"Allow length exception":"Request length exception"}</DropdownMenuItem>}
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" disabled={Boolean(pending)} onClick={() => void queueAction("queue:remove", track)}><Trash2 />Remove from my queue</DropdownMenuItem>
             </DropdownMenuContent></DropdownMenu></span>
@@ -593,8 +603,8 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     </Tabs>
 
     <section className="dj-lineup" aria-label="DJ status">
-      <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label={`${currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"} · Lineup`} aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
-        <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDj ? currentDj.id === currentUserId ? "You" : currentDj.name : "No DJ"}</strong>{joinedDjQueue && snapshot.room.djUserId !== currentUserId ? <small>{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</small> : !joinedDjQueue && !canJoinDjQueue ? <small>DJ role required</small> : currentDj && <small>On air</small>}</span></span>
+      <Button ref={lineupButtonRef} variant="ghost" className={`dj-lineup-toggle${turnAccent ? " music-turn-accent" : ""}`} aria-label={`${currentDjLabel} · Lineup`} aria-describedby={djStatusId} aria-expanded={lineupOpen} aria-controls={lineupId} onClick={() => setLineupOpen((open) => !open)}>
+        <span className="dj-lineup-current">{currentDj && <Avatar user={currentDj} size={24} />}<span id={djStatusId} className="music-dj-copy"><strong title={currentDj?.name}>{currentDjLabel}</strong>{joinedDjQueue && snapshot.room.djUserId !== currentUserId ? <small>{upcomingDjs.indexOf(currentUserId) === 0 ? "You’re next" : `Your turn: #${upcomingDjs.indexOf(currentUserId) + 1}`}</small> : !joinedDjQueue && !canJoinDjQueue ? <small>{djJoinLabel}</small> : currentDj && <small>{onAirLabel}</small>}</span></span>
         <span className="music-lineup-label">Lineup<ChevronDown size={14} /></span>
       </Button>
       <div id={lineupId} className="music-lineup-details" hidden={!lineupOpen}>
@@ -602,12 +612,13 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
           {[...(currentDj ? [currentDj.id] : []), ...upcomingDjs].map((id) => {
             const user = snapshot.djUsers.find((candidate) => candidate.id === id);
             const position = upcomingDjs.indexOf(id) + 1;
-            return user ? <li key={id}><Avatar user={user} size={24} /><span><strong>{user.id === currentUserId ? "You" : user.name}</strong><small>{id === snapshot.room.djUserId ? "On air" : `Lineup position ${position}`}</small></span></li> : null;
+            return user ? <li key={id}><Avatar user={user} size={24} /><span><strong>{user.id === currentUserId ? "You" : user.name}</strong><small>{id === snapshot.room.djUserId ? "On air" : `Lineup position ${position}`}</small></span>{accessToken&&<ParticipantActions snapshot={snapshot} currentUserId={currentUserId} user={user} accessToken={accessToken} connected={connected} onNotice={setNotice}/>}</li> : null;
           })}
         </ol>
         {!currentDj && upcomingDjs.length === 0 && <p>No DJs in the lineup.</p>}
         {joinedDjQueue && snapshot.room.queue.length === 0 && <p>Add a track to your queue.</p>}
-        {!canJoinDjQueue && !joinedDjQueue && <p>Ask the owner or a moderator for a DJ role.</p>}
+        {!canJoinDjQueue && !joinedDjQueue && <p>{djJoinMessage}</p>}
+        {!canJoinDjQueue&&!joinedDjQueue&&snapshot.room.capabilities?.djsPlayback&&snapshot.room.ownStatus?.djSuspendedUntil===undefined&&snapshot.room.ownStatus?.rulesAccepted!==false&&<Button size="sm" variant="outline" disabled={!connected||Boolean(pending)} onClick={()=>void toggleDjQueue(true)}>Join with staff override</Button>}
         {(joinedDjQueue || !canJoinDjQueue) && !addMusicOpen && <div className="music-dj-membership">{djAction}</div>}
       </div>
       {!joinedDjQueue && canJoinDjQueue && !addMusicOpen && <div className="music-dj-membership">{djAction}</div>}

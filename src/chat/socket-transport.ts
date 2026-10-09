@@ -1,5 +1,5 @@
 import { requestSocketAction } from '../socket-request'
-import { normalizeRealtimeMessage, normalizeRealtimePollVote, normalizeRealtimeReaction, normalizeTypingEvent } from './protocol'
+import { normalizeRealtimeMessage, normalizeRealtimePollVote, normalizeRealtimeReaction, normalizeTypingEvent,normalizeChatRemoved } from './protocol'
 import { CHAT_TYPING_TTL_MS, type ChatSessionFactory } from './realtime'
 
 type EventHandler = (payload: unknown) => void
@@ -26,6 +26,7 @@ export function createSocketChatSessionFactory(socket: SocketChatTransport, room
     const receiveMessage: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const message = normalizeRealtimeMessage(payload.message); if (message) callbacks.onMessage(message) }
     const receiveReaction: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const reaction = normalizeRealtimeReaction(payload.reaction); if (reaction) callbacks.onReaction(reaction) }
     const receivePollVote: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const vote = normalizeRealtimePollVote(payload.poll); if (vote) callbacks.onPollVote?.(vote) }
+    const receiveRemoved:EventHandler=(value)=>{const payload=envelope(value);if(!active||!ready||!payload)return;const removed=normalizeChatRemoved(payload);if(removed)callbacks.onRemoved?.(removed)}
     const receiveTyping: EventHandler = (value) => {
       const payload = envelope(value)
       if (!active || !ready || !payload) return
@@ -40,7 +41,7 @@ export function createSocketChatSessionFactory(socket: SocketChatTransport, room
     }
     const disconnected: EventHandler = () => { admitted = false; connection(false) }
     const connected: EventHandler = () => connection(false) // Only the parent ACK+fresh-snapshot admission can enable chat.
-    const listeners: Array<[string, EventHandler]> = [['chat:message', receiveMessage], ['chat:reaction', receiveReaction], ['chat:poll', receivePollVote], ['chat:typing', receiveTyping], ['disconnect', disconnected], ['connect', connected]]
+    const listeners: Array<[string, EventHandler]> = [['chat:message', receiveMessage], ['chat:reaction', receiveReaction], ['chat:poll', receivePollVote], ['chat:removed',receiveRemoved], ['chat:typing', receiveTyping], ['disconnect', disconnected], ['connect', connected]]
     listeners.forEach(([event, handler]) => socket.on(event, handler))
     queueMicrotask(() => { if (active && !reportedInitial) { reportedInitial = true; callbacks.onConnection(ready) } })
     const send = (kind: 'message' | 'reaction' | 'typing', payload: unknown) => new Promise<void>((resolve, reject) => {

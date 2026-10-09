@@ -1,5 +1,5 @@
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, Globe2, Heart, LockKeyhole, LogOut, MoreHorizontal, Plus, Radio, RefreshCw, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Heart, LockKeyhole, LogOut, MoreHorizontal, Plus, Radio, RefreshCw, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Brand } from "./app-primitives";
 import { AppVersion } from "./AppVersion";
@@ -17,7 +17,6 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Switch } from "./ui/switch";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Skeleton } from "./ui/skeleton";
@@ -41,7 +40,7 @@ interface FavoriteFailure {
 function readDirectoryPreferences(userId: string) {
   try {
     const value: unknown = JSON.parse(readStoredValue(`soundspin:room-directory:${userId}`) || "{}");
-    return value && typeof value === "object" ? value as { query?: string; filter?: string; sort?: string } : {};
+    return value && typeof value === "object" ? value as { query?: string; filter?: string; sort?: string; tag?: string; language?: string } : {};
   }
   catch { return {}; }
 }
@@ -76,6 +75,8 @@ export function RoomLobby({
   const [directoryLoaded, setDirectoryLoaded] = useState(() => directoryCache.has(currentUser.id));
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState(() => { const value = readDirectoryPreferences(currentUser.id).query; return typeof value === "string" ? value : ""; });
+  const [tag, setTag] = useState(() => { const value = readDirectoryPreferences(currentUser.id).tag; return typeof value === "string" ? value : ""; });
+  const [language, setLanguage] = useState(() => { const value = readDirectoryPreferences(currentUser.id).language; return typeof value === "string" ? value : ""; });
   const [filter, setFilter] = useState<"all" | "active" | "protected">(() => {
     const saved = readDirectoryPreferences(currentUser.id).filter;
     return saved === "active" || saved === "protected" ? saved : "all";
@@ -95,7 +96,7 @@ export function RoomLobby({
   }, [currentUser.id]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
   const preferencesUserRef = useRef(currentUser.id);
-  useEffect(() => { if (preferencesUserRef.current === currentUser.id) storeValue(`soundspin:room-directory:${currentUser.id}`, JSON.stringify({ query, filter, sort })); }, [currentUser.id, query, filter, sort]);
+  useEffect(() => { if (preferencesUserRef.current === currentUser.id) storeValue(`soundspin:room-directory:${currentUser.id}`, JSON.stringify({ query, filter, sort, tag, language })); }, [currentUser.id, query, filter, sort, tag, language]);
   const [favoritePending, setFavoritePending] = useState<Set<string>>(new Set());
   const favoritePendingRef = useRef(new Set<string>());
   const [favoriteFailures, setFavoriteFailures] = useState<Record<string, FavoriteFailure>>({});
@@ -125,6 +126,8 @@ export function RoomLobby({
     if (preferencesUserRef.current !== currentUser.id) {
       const preferences = readDirectoryPreferences(currentUser.id);
       setQuery(typeof preferences.query === "string" ? preferences.query : "");
+      setTag(typeof preferences.tag === "string" ? preferences.tag : "");
+      setLanguage(typeof preferences.language === "string" ? preferences.language : "");
       setFilter(preferences.filter === "active" || preferences.filter === "protected" ? preferences.filter : "all");
       setSort(preferences.sort === "favorite" || preferences.sort === "alphabetical" ? preferences.sort : "active");
       preferencesUserRef.current = currentUser.id;
@@ -143,20 +146,23 @@ export function RoomLobby({
   }, [loadRooms]);
 
   const visibleRooms = useMemo(() => rooms.filter((room) =>
-    room.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
+    [room.name, room.description, ...(room.tags ?? []), room.language].filter(Boolean).join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
+    (!tag || room.tags?.includes(tag)) && (!language || room.language === language) &&
     (filter !== "active" || room.listenerCount > 0) && (filter !== "protected" || room.passwordProtected)
-  ).sort((left, right) => (sort === "active" ? right.listenerCount - left.listenerCount : sort === "favorite" ? Number(right.isFavorite) - Number(left.isFavorite) : 0) || left.name.localeCompare(right.name)), [rooms, query, filter, sort]);
+  ).sort((left, right) => (sort === "active" ? right.listenerCount - left.listenerCount : sort === "favorite" ? Number(right.isFavorite) - Number(left.isFavorite) : 0) || left.name.localeCompare(right.name)), [rooms, query, filter, sort, tag, language]);
+  const availableTags = [...new Set(rooms.flatMap(room => room.tags ?? []))].sort();
+  const availableLanguages = [...new Set(rooms.map(room => room.language).filter((value): value is string => Boolean(value)))].sort();
   const accessibleRecentRooms = recentVisits.map(visit => rooms.find(room => room.slug === visit.slug)).filter((room): room is RoomDirectoryEntry => Boolean(room));
   // A room belongs to one section. Recent access and membership take precedence
   // so changing its favorite state does not move those familiar cards.
   const recentSlugs = new Set(accessibleRecentRooms.map(room => room.slug));
   const favorites = visibleRooms.filter(room => room.isFavorite && room.role === null && !recentSlugs.has(room.slug));
   const memberRooms = visibleRooms.filter(room => room.role !== null && !recentSlugs.has(room.slug));
-  const isOtherPublicRoom = (room: RoomDirectoryEntry) => room.isPublic && room.role === null && !room.isFavorite && !recentSlugs.has(room.slug);
+  const isOtherPublicRoom = (room: RoomDirectoryEntry) => (room.accessMode ?? (room.isPublic ? "public" : "members")) === "public" && room.role === null && !room.isFavorite && !recentSlugs.has(room.slug);
   const publicRooms = visibleRooms.filter(isOtherPublicRoom);
   const recentRooms = accessibleRecentRooms.filter(room => visibleRooms.some(visible => visible.slug === room.slug));
   const lastRoom = accessibleRecentRooms[0] && visibleRooms.some(room => room.slug === accessibleRecentRooms[0].slug) ? accessibleRecentRooms[0] : null;
-  const filtering = Boolean(query.trim()) || filter !== "all";
+  const filtering = Boolean(query.trim() || tag || language) || filter !== "all";
 
   const enter = (room: RoomDirectoryEntry) => {
     if (room.passwordProtected) setProtectedRoom(room);
@@ -255,7 +261,11 @@ export function RoomLobby({
           </Select>
           <Button variant="outline" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0} aria-label="Refresh rooms"><RefreshCw className={refreshing ? "spin" : undefined} /><span>{refreshing ? "Refreshing…" : "Refresh"}</span></Button>
         </div>
-        <div className="lobby-filter-summary"><p role="status">{!loading && directoryLoaded && `${visibleRooms.length} ${visibleRooms.length === 1 ? "room" : "rooms"}`}</p>{(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setFilter("all"); setSort("active"); }}>Reset filters</Button>}</div>
+        {(availableTags.length > 0 || availableLanguages.length > 0) && <div className="lobby-discovery-filters">
+          {availableTags.length > 0 && <Select value={tag} onValueChange={value => setTag(String(value))}><SelectTrigger aria-label="Room tag"><SelectValue>{tag || "All tags"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">All tags</SelectItem>{availableTags.map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select>}
+          {availableLanguages.length > 0 && <Select value={language} onValueChange={value => setLanguage(String(value))}><SelectTrigger aria-label="Room language"><SelectValue>{language || "All languages"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">All languages</SelectItem>{availableLanguages.map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select>}
+        </div>}
+        <div className="lobby-filter-summary"><p role="status">{!loading && directoryLoaded && `${visibleRooms.length} ${visibleRooms.length === 1 ? "room" : "rooms"}`}</p>{(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setFilter("all"); setSort("active"); setTag(""); setLanguage(""); }}>Reset filters</Button>}</div>
         {loading ? (
           <div className="room-card-grid" aria-label="Loading rooms">
             {[0, 1, 2].map((item) => <Skeleton key={item} className="h-36 rounded-xl" />)}
@@ -368,11 +378,14 @@ function RoomSection({
               <CardContent className="room-card-content">
                 <div className="room-card-badges">
                   {room.passwordProtected && <Badge variant="outline"><LockKeyhole /> Protected</Badge>}
-                  {!room.isPublic && <Badge variant="outline">Private</Badge>}
+                  {(room.accessMode === "members" || !room.isPublic) && <Badge variant="outline">Members only</Badge>}
+                  {room.accessMode === "unlisted" && <Badge variant="outline">Unlisted</Badge>}
                   {room.role === "member" && <Badge variant="secondary">Member</Badge>}
                   {room.role === "owner" && <Badge variant="secondary">Owner</Badge>}
                   {room.role === "moderator" && <Badge variant="secondary">Moderator</Badge>}
                   {room.role === "dj" && <Badge variant="secondary">DJ role</Badge>}
+                  {room.language && <span className="room-card-language">{room.language}</span>}
+                  {room.tags?.map(tag => <span className="room-card-tag" key={tag}>{tag}</span>)}
                 </div>
                 <Button variant="secondary" size="sm" data-navigation-focus={`room:${room.slug}`} onClick={() => onEnter(room)} aria-label={`Join ${room.name}`}>
                   Join <ArrowRight />
@@ -404,7 +417,7 @@ function CreateRoomDialog({
 }) {
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [isPublic, setIsPublic] = useState(true);
+  const [roomAccess, setRoomAccess] = useState<"public" | "unlisted" | "members">("public");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeRef = useRef(true);
@@ -422,7 +435,7 @@ function CreateRoomDialog({
       const payload = await requestJson<{ room: { slug: string } }>("/api/rooms", {
         accessToken,
         method: "POST",
-        body: JSON.stringify({ name: name.trim(), isPublic, password: submittedPassword }),
+        body: JSON.stringify({ name: name.trim(), isPublic: roomAccess !== "members", accessMode: roomAccess, password: submittedPassword }),
         validate: (value): value is { room: { slug: string } } => Boolean(value && typeof value === "object" && "room" in value && value.room && typeof value.room === "object" && "slug" in value.room && typeof value.room.slug === "string" && value.room.slug.length > 0)
       });
       if (activeRef.current) onCreated(payload.room.slug, submittedPassword);
@@ -478,10 +491,7 @@ function CreateRoomDialog({
                 placeholder="No password"
               />
             </div>
-            <div className="switch-row">
-              <span><Globe2 /><span><strong>List in room directory</strong></span></span>
-              <Switch checked={isPublic} onCheckedChange={setIsPublic} aria-label="List in room directory" disabled={saving} />
-            </div>
+            <div className="grid gap-2"><Label htmlFor="new-room-access">Room access</Label><Select value={roomAccess} onValueChange={value => setRoomAccess(value as typeof roomAccess)}><SelectTrigger id="new-room-access" disabled={saving}><SelectValue>{roomAccess === "public" ? "Public" : roomAccess === "unlisted" ? "Unlisted" : "Members only"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="unlisted">Unlisted</SelectItem><SelectItem value="members">Members only</SelectItem></SelectContent></Select>{roomAccess === "unlisted" && <p className="room-setting-help">Anyone with the room address can join. Hidden from discovery.</p>}</div>
           </div>
           {error && <div className="dialog-error" role="alert">{error}</div>}
           {saving && <p className="text-sm text-muted-foreground" role="status">Wait for room creation to finish.</p>}

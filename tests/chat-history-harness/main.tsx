@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { useCallback, useMemo, useState } from 'react'
+import { Profiler, useCallback, useMemo, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import '@fontsource-variable/geist'
 import '../../src/shadcn.css'
@@ -18,6 +18,8 @@ const mira = { id: 'mira', name: 'Mira', avatarSeed: 'mira' }
 const handlers = new Map<string, (event: { payload: unknown }) => void>()
 let connection = (_status: string) => {}
 const harness = { sendIds: [] as string[], saveIds: [] as string[], failSend: false, failSave: false, failReaction: false, unread: 0,
+  performance: { stage: 'idle', samples: [] as Array<{ actualDuration:number;baseDuration:number;timelineDuration:number;timelineFound:boolean }>, geometryReads:0,
+    reset(stage:string){this.stage=stage;this.samples=[];this.geometryReads=0} },
   rotateToken: () => {},
   renamePeer: (_userId: string, _name: string) => {},
   receive: (message: unknown) => handlers.get('message')?.({ payload: message }),
@@ -26,6 +28,25 @@ const harness = { sendIds: [] as string[], saveIds: [] as string[], failSend: fa
   reconnect: () => { connection('CLOSED'); connection('SUBSCRIBED') },
 }
 Object.assign(window, { chatHistoryTest: harness })
+type ProfiledFiber={type?:{name?:string;type?:{name?:string}};actualDuration?:number;child?:ProfiledFiber;sibling?:ProfiledFiber}
+function timelineProfile(fiber:ProfiledFiber|undefined):{duration:number;found:boolean}{
+  if(!fiber)return {duration:0,found:false}
+  if((fiber.type?.name||fiber.type?.type?.name||'').startsWith('ChatMessageList'))return {duration:fiber.actualDuration||0,found:true}
+  const child=timelineProfile(fiber.child),sibling=timelineProfile(fiber.sibling)
+  return {duration:child.duration+sibling.duration,found:child.found||sibling.found}
+}
+function recordCommit(_id:string,_phase:string,actualDuration:number,baseDuration:number){
+  if(harness.performance.stage==='idle')return
+  // Read React's current profiling tree only in this development fixture.
+  const current=(mountedRoot as unknown as{_internalRoot:{current:ProfiledFiber}})._internalRoot.current
+  const timeline=timelineProfile(current)
+  harness.performance.samples.push({actualDuration,baseDuration,timelineDuration:timeline.duration,timelineFound:timeline.found})
+}
+for(const property of ['scrollHeight','clientHeight','scrollTop']){
+  const descriptor=Object.getOwnPropertyDescriptor(Element.prototype,property)
+  if(!descriptor?.get)continue
+  Object.defineProperty(Element.prototype,property,{...descriptor,get(){if(harness.performance.stage!=='idle'&&this.classList?.contains('chat-message-scroll'))harness.performance.geometryReads++;return descriptor.get!.call(this)}})
+}
 const client = {
   auth: { getSession: async () => ({ data: { session: { access_token: 'fixture' } } }) },
   channel() { return {
@@ -62,13 +83,14 @@ function Harness() {
       <button onClick={() => setSettingsOpen(true)}>Settings</button>
     </div>
     <p style={{ margin: 0, fontSize: 10 }}>Unread <span data-testid="unread-count">{harness.unread}</span></p>
-    <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><RealtimeChat key={`${user.id}:${room}`} client={client} roomName={`soundspin:${room}`} user={user} roomUsers={roomUsers}
+    <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><Profiler id="room-chat" onRender={recordCommit}><RealtimeChat key={`${user.id}:${room}`} client={client} roomName={`soundspin:${room}`} user={user} roomUsers={roomUsers}
       messages={messages} historyRoomSlug={room} historySource={source} historyLoading={loading} notifications={settings.notifications}
       onResolveMediaUrl={source.loadMediaUrl}
       isVisible={visible} onConnected={refresh} onNotificationActivate={() => setVisible(true)} onUnreadCountChange={(count) => { harness.unread = count }}
-      onSend={async (message) => { harness.saveIds.push(message.id); if (harness.failSave) throw new Error('History unavailable') }} /></div>
+      onSend={async (message) => { harness.saveIds.push(message.id); if (harness.failSave) throw new Error('History unavailable') }} /></Profiler></div>
     {settingsOpen && <UserSettingsDialog settings={settings} onSettingsChange={setSettings} connections={{ loaded: true, spotifyConfigured: false, spotifyConnected: false, appleConfigured: false }} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => setSettingsOpen(false)} />}
     <Toaster />
   </main></ThemeProvider>
 }
-createRoot(document.getElementById('root')!).render(<Harness />)
+const mountedRoot=createRoot(document.getElementById('root')!)
+mountedRoot.render(<Harness />)

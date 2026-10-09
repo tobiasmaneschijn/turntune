@@ -6,7 +6,7 @@ import type { RoomRole, SoundSpinProfile, User } from "./types.js";
 export const SOCIAL_LIMITS = { people: 100, search: 20, invitations: 30, invitationMs: 60 * 60_000 } as const;
 export type FriendState = "none" | "friends" | "incoming" | "outgoing";
 export type FriendAction = "request" | "accept" | "decline" | "remove";
-export interface SocialRoomAccess { exists: boolean; isPublic: boolean; passwordProtected: boolean; role: RoomRole | null }
+export interface SocialRoomAccess { exists: boolean; isPublic: boolean; passwordProtected: boolean; role: RoomRole | null; banned?:boolean; canInvite?:boolean }
 export interface SocialPerson { user: User; state: Exclude<FriendState, "none">; room?: { slug: string; name: string; canJoin: boolean } }
 export interface SocialInvitation { id: string; from: User; room: { slug: string; name: string }; createdAt: string; expiresAt: string }
 export interface SocialSnapshot { people: SocialPerson[]; invitations: SocialInvitation[]; shareActivity: boolean }
@@ -108,7 +108,7 @@ export class SocialStore {
     if (!this.options.supabase) return [...this.invitations.values()].filter(row => row.recipient_id === userId && !row.accepted_at && Date.parse(row.expires_at) > this.now());
     const { data, error } = await this.options.supabase.from("soundspin_room_invitations")
       .select("id, sender_id, recipient_id, room_slug, created_at, expires_at, accepted_at")
-      .eq("recipient_id", userId).is("accepted_at", null).gt("expires_at", new Date(this.now()).toISOString())
+      .eq("recipient_id", userId).is("accepted_at", null).is("cancelled_at",null).gt("expires_at", new Date(this.now()).toISOString())
       .order("created_at", { ascending: false }).limit(SOCIAL_LIMITS.invitations);
     if (error) throw new Error(`Could not load invitations: ${error.message}`);
     return (data || []) as Invitation[];
@@ -129,7 +129,7 @@ export class SocialStore {
         const activity = await this.options.getActivity?.(id);
         if (activity) {
           const access = await this.options.getRoomAccess(activity.roomSlug, viewer);
-          if (access.exists && (access.isPublic || access.role)) {
+          if (access.exists && !access.banned && (access.isPublic || access.role)) {
             const name = await this.roomName(activity.roomSlug);
             // Async metadata/access lookups may yield while a friendship or opt-in is revoked.
             const [relationship, currentSharing] = await Promise.all([this.getRelationship(viewer, id), this.sharedActivity([id])]);
@@ -145,8 +145,8 @@ export class SocialStore {
       if (!friendIds.includes(row.sender_id)) continue;
       const from = users.get(row.sender_id); if (!from) continue;
       const [inviter, recipient] = await Promise.all([this.options.getRoomAccess(row.room_slug, row.sender_id), this.options.getRoomAccess(row.room_slug, viewer)]);
-      if (!inviter.exists || !inviter.role || !recipient.exists) continue;
-      if (!recipient.isPublic && !recipient.role && inviter.role !== "owner" && inviter.role !== "moderator") continue;
+      if (!inviter.exists || !inviter.role || !recipient.exists || inviter.banned || recipient.banned || inviter.canInvite===false) continue;
+      if (inviter.canInvite===undefined&&!recipient.isPublic && !recipient.role && inviter.role !== "owner" && inviter.role !== "moderator") continue;
       const name = await this.roomName(row.room_slug);
       if (name) invitations.push({ id: row.id, from, room: { slug: row.room_slug, name }, createdAt: row.created_at, expiresAt: row.expires_at });
     }
@@ -226,7 +226,8 @@ export class SocialStore {
     const [inviterAccess, recipientAccess] = await Promise.all([this.options.getRoomAccess(roomSlug, actor), this.options.getRoomAccess(roomSlug, recipient)]);
     if (!inviterAccess.exists || !recipientAccess.exists) throw new SocialError("Room not found.", 404);
     if (!inviterAccess.role) throw new SocialError("Join this room before inviting friends.", 403);
-    if (!recipientAccess.isPublic && !recipientAccess.role && inviterAccess.role !== "owner" && inviterAccess.role !== "moderator") throw new SocialError("Only the owner or a moderator can invite a new member to this private room.", 403);
+    if(inviterAccess.banned||recipientAccess.banned||inviterAccess.canInvite===false)throw new SocialError("You cannot invite this listener to this room.",403);
+    if (inviterAccess.canInvite===undefined&&!recipientAccess.isPublic && !recipientAccess.role && inviterAccess.role !== "owner" && inviterAccess.role !== "moderator") throw new SocialError("Only the owner or a moderator can invite a new member to this private room.", 403);
     return recipientAccess;
   }
   async acceptInvitation(actorId: string, invitationId: string): Promise<{ roomSlug: string; passwordRequired: boolean }> {

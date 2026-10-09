@@ -28,8 +28,8 @@ export const chatPollVoteSchema = z.object({ optionIndex: z.number().int().min(0
 export interface ChatPollVote { userId: string; optionIndex: number; revision: number }
 export interface ChatPollVoteEvent extends ChatPollVote { messageId: string }
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>
-export interface ChatReply { id: string; content: string; type: ChatMessageInput['type']; mediaUrl?: string; mentions?: ChatMessageInput['mentions']; user: Pick<User, 'id' | 'name'> }
-export type RelayMessage = Omit<ChatMessageInput, 'replyTo' | 'poll'> & { user: User; replyTo?: ChatReply; poll?: { options: string[]; votes: ChatPollVote[] } }
+export interface ChatReply { id: string; content: string; type: ChatMessageInput['type']; mediaUrl?: string; mentions?: ChatMessageInput['mentions']; user: Pick<User, 'id' | 'name'>; removedAt?: string }
+export type RelayMessage = Omit<ChatMessageInput, 'replyTo' | 'poll'> & { user: User; replyTo?: ChatReply; poll?: { options: string[]; votes: ChatPollVote[] }; removedAt?: string }
 
 function canonicalMentions(mentions: ChatMessageInput['mentions']) {
   return [...new Map(mentions.map((item) => [item.userId, item])).values()]

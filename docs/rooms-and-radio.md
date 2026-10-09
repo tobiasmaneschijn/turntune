@@ -15,16 +15,16 @@ most authorization and rotation bugs.
 | Term | Meaning |
 | --- | --- |
 | Listener | A user with a live Socket.IO connection to the room. |
-| Eligible DJ | A user allowed to join the lineup. In an open room this is everyone; in a role-restricted room it is the owner, a moderator, or a user with the DJ role. |
+| Eligible DJ | A user allowed by DJ eligibility, rules acceptance, restrictions, join lock, and capacity. In role-restricted rooms the owner, moderators, and DJ-role holders meet the role requirement. |
 | Joined DJ | A user whose ID is in `djQueueUserIds`. They may be waiting, on air, or temporarily disconnected. |
 | Current DJ / on-air DJ | The user in `djUserId`, whose track is currently playing. |
-| Playback controller | The current DJ, owner, or moderator. |
+| Playback controller | The owner, a moderator with playback permission, or the current DJ when the room permits current-DJ controls. |
 
 A DJ role is permission, not lineup membership. Granting the role does not join
 the user, and joining the lineup does not make the user immediately current.
 
 `settings.allowedProviders` limits queue sources and listener playback services.
-Missing settings allow all services. Owners and moderators can save a nonempty
+Missing settings allow all services. Owners and moderators with music-policy permission can save a nonempty
 list; the settings and any resulting playback advance commit together. Disabled
 waiting tracks remain in private queues and are skipped in DJ rotation. Adds,
 saved-set imports, Undo, and Play next recheck the current policy on the server.
@@ -66,12 +66,16 @@ and durable grace scheduling before horizontally scaling the server.
 | `server/index.ts` | Composition root, admission, presence, timer lifecycle, room metadata/profile routes, readiness and diagnostics. |
 | `server/room-actions.ts` | Admitted DJ, queue, playback, role, note and vote commands. |
 | `server/room-command-service.ts` | Ordered durable mutation followed by personalized broadcast. |
+| `shared/room-policy.ts`, `server/room-settings.ts` | Default/effective policy, capability summaries, bounded settings validation and authorization. |
+| `server/room-access.ts`, `server/moderation-service.ts`, `server/moderation-routes.ts` | Access checks, private restrictions/logs/reports/warnings, offline members, invitations and rules acknowledgment. |
 | `server/music-routes.ts`, `server/admin-routes.ts` | Provider/catalog and administrative HTTP boundaries. |
 | `server/spotify-oauth-routes.ts` | One-use browser-bound linking flow and validated internal return destinations. |
 | `server/socket-credentials.ts` | Verified JWT expiry checks and idle socket disconnect. |
 | `server/room-entry-limiter.ts`, `server/room-password.ts` | Account/peer admission budgets and asynchronous legacy-compatible scrypt verification. |
 | `server/idle-rooms.ts`, `server/runtime-metrics.ts` | Idle cache lifetime and bounded operation diagnostics. |
 | `server/radio.ts` | Radio state normalization, DJ eligibility, round-robin advancement, private queue access, and snapshot privacy. |
+| `server/radio-policy.ts`, `server/track-metadata.ts` | Recording eligibility, trusted duration, repeat ledger, turn/stop/fallback/vote state, and theme overlays. |
+| `server/room-session-scheduler.ts` | Theme/session clock updates, finite fallback completion, presence pause/resume and restart recovery. |
 | `server/store.ts` | Live room cache, Supabase reads/writes, room directory, roles, favorites, profiles, and ordered persistence. |
 | `server/types.ts` | Authoritative private room extension of shared room fields. |
 | `shared/types.ts`, `shared/room-protocol.ts` | Public snapshots, acknowledgements and runtime command schemas shared by client and server. |
@@ -81,7 +85,8 @@ and durable grace scheduling before horizontally scaling the server.
 | `src/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
 | `src/provider-playback.ts`, `src/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
 | `src/App.tsx` | Screen composition, room view, player controls and DJ queue UI. |
-| `src/components/RoomSettingsDialog.tsx` | Room metadata, allowed music services, DJ access mode, moderator, and DJ-role controls. |
+| `src/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
+| `src/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
 | `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
 | `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
 | `src/components/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
@@ -94,6 +99,7 @@ and durable grace scheduling before horizontally scaling the server.
 | `supabase/migrations/20260716213000_initial_soundspin.sql` | Base room table and initial security. |
 | `supabase/migrations/20260716220542_room_directory.sql` | Directory metadata, memberships, favorites, and settings. |
 | `supabase/migrations/20260719151147_add_dj_role.sql` | Adds the room-level DJ role. |
+| `supabase/migrations/20261009073625_room_moderation_and_access.sql` | Access mode/revision, private moderation document, atomic membership/radio commits and current invitation checks. |
 
 ## Room state
 
@@ -103,15 +109,19 @@ fields are:
 | Field | Meaning | Sent to clients? |
 | --- | --- | --- |
 | `ownerUserId` | Room owner. | Yes |
-| `moderatorUserIds` | Users who can manage settings and playback. | Yes |
+| `moderatorUserIds` | Staff identities; enabled permission groups determine their tools. | Yes |
 | `djRoleUserIds` | Users eligible in role-restricted mode. | Yes |
 | `settings.djAccess` | `everyone` or `roles`. | Yes |
+| `settings` / `policyRevision` | Lasting room policy, visible expiring overrides, and settings revision. | Yes |
 | `djUserId` | Current on-air DJ. | Yes |
 | `djQueueUserIds` | Rotating DJ lineup; index 0 is the next candidate. | Yes |
 | `djQueues[userId]` | Every DJ's private upcoming tracks. | **Never** |
 | `playback` | Current track, playing state, position, and update timestamp. | Yes |
 | `history` | Up to 100 recently completed tracks. | Yes |
 | `vibe` | Votes for the current track instance. | Yes |
+| `radioState` | Turn, stop, copied fallback tracks, repeat ledger, exceptions and skip voters. | **Never raw** |
+| `moderation` | Private members, sanctions, reasons, reports, warnings, invitation hashes and receipts. | **Never raw** |
+| `capabilities`, `ownStatus`, `radio` | Per-recipient permissions, own warnings/status, authorized report count, and safe playback summary. | Personalized |
 
 The following state is process-only and is not stored as part of the room:
 
@@ -124,8 +134,11 @@ The following state is process-only and is not stored as part of the room:
 ### Queue privacy boundary
 
 `roomForListener(room, userId)` is the only supported conversion from the
-authoritative room to `SnapshotRoom`. It removes the full `djQueues` map and
-exposes only `djQueues[userId]` under the client-facing name `queue`.
+authoritative room to `SnapshotRoom`. It explicitly selects safe fields and
+exposes only `djQueues[userId]` under the client-facing name `queue`. It never
+spreads private moderation or radio state. Staff see full records through
+authorized management APIs; ordinary snapshots contain only the recipient's
+warnings/status and safe policy summaries.
 
 `broadcast(room)` therefore loops over sockets and creates a separate snapshot
 for each recipient. Replacing it with one `io.to(room).emit(...)` payload would
@@ -144,7 +157,7 @@ The browser connects Socket.IO and emits `room:join`. The server then:
 
 1. Validates the room ID and profile payload with Zod.
 2. Uses the verified Supabase JWT user ID instead of trusting the payload ID.
-3. Checks room existence, visibility/membership, and the scrypt password hash.
+3. Checks room existence, current bans, access mode/membership, and the scrypt password hash.
 4. Loads the room from the live cache or Supabase.
 5. Calls `normalizeRadioState` to repair old or incomplete persisted state.
 6. Records basic membership without downgrading an existing elevated role.
@@ -172,6 +185,25 @@ is verified during the server handshake. Provider player lifecycles should stay
 mounted through that refresh; changing API credentials alone is not a playback
 command.
 
+### Access modes and rules
+
+Public rooms appear in discovery. Unlisted rooms permit joining by address and
+are absent from discovery; they can still appear among authorized saved/member
+rooms. Members-only rooms require persistent membership. Passwords apply in all
+three modes. Changing a formerly public room to Members only keeps previous
+memberships; staff can review and remove them separately.
+
+Revoking a moderator/DJ role demotes the account to Member. Removing membership
+revokes Members-only admission and all of that account's current room tabs.
+Public/Unlisted admission remains possible after removal; a room ban prevents it.
+Bans also block directory disclosure, room reads/mutations, management tools and
+invitation redemption, including for an account that retains a moderator role.
+
+Optional versioned rules acceptance is off by default. Changing normalized rules
+text advances its version. When required, the current version gates chat and
+music participation; reading, private queue preparation and recovery controls
+remain available. Selection rechecks acceptance before starting another DJ track.
+
 ### Playback clocks
 
 The server's `playback.updatedAt` and snapshot `serverTime` share one clock.
@@ -188,15 +220,16 @@ updates preserve the current playback object and never translate its checkpoint.
 
 ## DJ rotation
 
-`djQueueUserIds` behaves as a ring. `advanceRadio` checks at most one complete
-lap:
+`djQueueUserIds` behaves as a ring. `advanceRadio` uses one transition path:
 
 1. Archive the previous track, retaining at most 100 history entries.
-2. Remove the first DJ ID and append it to the back of the lineup.
-3. Take one track from that DJ's private queue.
-4. If the queue is empty, continue to the next DJ without removing anyone.
-5. When a track is found, set `djUserId`, replace `playback`, and reset `vibe`.
-6. If the full lap has no music, clear the current DJ and make the room quiet.
+2. Apply pending after-track DJ removals and an armed stop-after request. A stop
+   enters durable stopped state without consuming another track.
+3. Continue the current turn if its captured one-to-three-song allowance has
+   eligible tracks remaining; otherwise rotate candidates through one full lap.
+4. Skip empty or ineligible tracks/DJs without deleting their private music.
+5. Start one eligible track, update the repeat ledger, and reset music/skip votes.
+6. If no DJ can play, use the enabled room-owned fallback; otherwise clear playback.
 
 Example with lineup `[Alice, Bob, Casey]`:
 
@@ -205,8 +238,35 @@ Example with lineup `[Alice, Bob, Casey]`:
 - Casey plays one song; lineup becomes `[Alice, Bob, Casey]`.
 - Bob remains joined and will be considered again after Alice.
 
-This produces one song per DJ per turn while allowing joined DJs to temporarily
-have an empty queue.
+One song per turn remains the default. Each turn captures its allowance when it
+starts; a skip consumes that song's slot, while pause preserves the turn. A DJ
+with no eligible next track yields the rest of the turn.
+
+### Music policy and session playback
+
+Length and recording-repeat limits are off by default. Length checks use
+server-verified provider metadata; unknown/live lengths need a logged exception
+for that item and policy revision. The repeat window uses recording identity and
+a durable recent-start ledger independent of the 100-item visible history.
+Selection rechecks both limits and leaves blocked waiting tracks saved. Length
+changes let the current track finish; disabling its provider advances immediately.
+
+Vote to skip is separate from music reactions and defaults to off. Its threshold
+uses distinct admitted online accounts, excludes the track contributor, and has
+a configurable percentage/minimum. Votes reset per play instance; losing presence
+alone does not advance the radio.
+
+Stop after this track can be cancelled while armed. Once stopped, joins, additions,
+imports and timers cannot start another track; staff use Resume. Fallback is an
+explicit copy of a saved set into room-owned state, restricted to verified finite
+recordings. Personal library edits do not change the copy. It is attributed to
+the room and yields to DJs at a track boundary. The server completes fallback
+tracks by duration, pauses when no listeners remain, and recovers its checkpoint
+after restart.
+
+Scheduled themes overlay the lasting theme during their saved start/end interval.
+An optional session note does not replace Room note. Schedule edits/cancellation
+and expiry reveal the latest underlying theme; startup restores scheduled rooms.
 
 ### Preparing a private queue
 
@@ -222,6 +282,11 @@ the lineup leaves shared playback unchanged.
 their display identity, and starts the radio if it is quiet. A newcomer is
 inserted before the current DJ's next turn, so already-waiting DJs retain their
 place.
+
+Join locks and capacity apply to new joins, including DJs retained during grace.
+Lowering capacity or locking joins keeps the existing lineup. Staff with DJ
+permission can use an explicit override. Suspension and required rules acceptance
+remain enforced separately.
 
 `dj:leave` is explicit intent and takes effect immediately. It cancels any grace
 timer, removes the DJ, and advances immediately if they were on air. Their
@@ -263,7 +328,9 @@ Clients use the checkpoint to seek their selected provider player into sync.
 Each listener may use the room source, Spotify in Lydman, Spotify Desktop,
 or Apple Music. Provider mappings are stored with the track; missing mappings
 fall back to the source provider. Only the current DJ's active adapter reports
-a natural end. The current DJ, owner, and moderators may pause, seek, or skip.
+a natural end. Manual pause/seek/skip follows the room's Current DJ and staff or
+Staff only policy and enabled moderator playback permission. Natural completion
+uses a separate current-DJ event under either policy.
 
 Spotify reads its current recording, position, and paused state before deciding
 what to change. Returning focus, making the tab visible, or restoring network
@@ -300,13 +367,18 @@ throttling can miss that observation. A future provider-event or authoritative
 completion fallback should distinguish buffering and explicit seeks from a
 natural end before advancing the radio.
 
-`queue:next` must include the current track UUID. The server advances only when
-that UUID still matches `playback.track.id`. This makes ended/skip commands
+Manual `queue:next` and natural `playback:ended` include the current track UUID.
+The server advances only when that UUID still matches `playback.track.id`;
+natural completion also checks a supplied revision and known duration. This makes ended/skip commands
 idempotent: retries, delayed events, or another tab cannot accidentally skip
 the next song too.
 
 Do not use a provider video ID for this check. The Lydman track UUID
 identifies one play instance, even if the same provider track appears later.
+
+Unknown/live natural completion retains trust in the authorized current DJ;
+track guards cannot independently prove that a remote provider ended. Controlled
+adapter tests do not establish audible playback with real provider accounts.
 
 ## Permissions
 
@@ -316,12 +388,54 @@ identifies one play instance, even if the same provider track appears later.
 | Join an open DJ lineup | Yes | — | — | Yes | Yes | Yes |
 | Join a role-restricted DJ lineup | No | — | — | Yes | Yes | Yes |
 | Edit own private queue | Yes | Yes | Yes | Yes | Yes | Yes |
-| Pause, seek, or skip | No | No | Yes | No | Yes | Yes |
-| Change room metadata or DJ access mode | No | No | No | No | Yes | Yes |
+| Pause, seek, or skip | No | No | By policy | No | DJ permission | Yes |
+| Change room details/music policy | No | No | No | No | Details/music permission | Yes |
+| Change access/password/invitations | No | No | No | No | Access permission | Yes |
+| Timeout, warn, kick, ban, remove messages | No | No | No | No | Chat/participants permission | Yes |
+| Remove/suspend a DJ | No | No | No | No | DJ permission | Yes |
 | Grant/revoke moderator or DJ roles | No | No | No | No | No | Yes |
+| Change moderator permission groups | No | No | No | No | No | Yes |
 
 All authorization is repeated on the server. Hiding a button in React is not a
 security boundary.
+
+Rules acceptance and active bans apply separately. Chat timeouts block new chat,
+media, reactions, poll participation and typing; they preserve listening, reading,
+music voting and private queue preparation. Staff-only chat has the same
+participation scope. Slow mode defaults to off, supports 5/10/30/60 seconds, and
+is bypassed by staff. Media/GIFs, links and poll creation each support
+Everyone/Staff/Nobody.
+
+### Moderation and invitations
+
+The owner controls four moderator permission groups: Chat and participants,
+DJs and playback, Room details and music policy, and Access/password/invitations.
+Missing groups default to enabled. A nonowner settings write containing owner-only
+permission fields is rejected in full. Moderators cannot sanction the owner or
+another moderator; the owner can act on moderators.
+
+Kick clears every current room connection for the target and permits rejoining.
+Ban can expire or remain permanent until reversed. DJ removal/suspension supports
+After this track or Skip and remove; private queued tracks remain saved. Temporary
+slow mode, staff-only chat and DJ lock overlay lasting settings until expiry or
+early ending, revealing any lasting policy edits made while active.
+
+Warnings are private to their recipient and authorized staff; unread warnings
+survive offline visits and can be acknowledged. Message/participant reports are
+private, collapse duplicate open targets, and allow five new reports per account
+per room per hour. The staff inbox exposes a bounded open-report count, context,
+Resolve and Dismiss. Actions, meaningful policy changes and reversals append to
+the private log. Message-removal audit commits with its chat tombstone.
+
+Direct invitations retain the accepted-friend requirement, one-hour expiry and
+30-pending limit. Invite policy defaults to members in open rooms and staff in
+Members-only rooms; Owner/Staff/Members can be chosen explicitly. Staff can cancel
+pending invites. Reusable links default to seven days/ten account uses, support
+revocation, and check current creator authority, bans and passwords. Their raw
+token is returned only at creation. Retried creation recovers the link identity;
+if the token response was lost, revoke it and create a replacement. Hashes alone
+are persisted. Replaying an already accepted invite/link cannot restore membership
+removed from a Members-only room.
 
 ## Socket.IO contract
 
@@ -333,7 +447,7 @@ Every command accepts an acknowledgement callback shaped like
 | `room:join` | `{ roomId, roomName?, password?, user }` | Authenticate, load access, establish presence, restore grace, send snapshots. |
 | `room:moderator:set` | `{ userId, moderator }` | Owner grants or revokes moderator role. |
 | `room:dj-role:set` | `{ userId, dj }` | Owner grants or revokes DJ role. |
-| `dj:join` | none | Eligible listener joins the rotation. |
+| `dj:join` | `{ override? }` or none | Eligible listener joins; authorized staff can explicitly override lock/capacity. |
 | `dj:leave` | none | DJ explicitly leaves immediately. |
 | `queue:add` | `{ provider, providerId, title }` | Add a unique track instance to the sender's private queue. |
 | `queue:remove` | `{ trackId }` | Remove from the sender's queue. |
@@ -341,13 +455,19 @@ Every command accepts an acknowledgement callback shaped like
 | `queue:set-add` | `{ setId, requestId }` | Verify the sender's private saved set and append its available, nonduplicate tracks in order. Retried request UUIDs reuse the committed outcome. |
 | `queue:play-next` | `{ trackId }` | Move a sender-owned queued track to index 0. |
 | `queue:move` | `{ trackId, toIndex }` | Reorder the sender's queue. |
-| `queue:next` | `{ trackId }` | End the matching current track and rotate. |
-| `playback:update` | `{ playing, position }` | Save an authorized playback checkpoint. |
+| `queue:next` | `{ trackId }` | Manually skip the matching current track under playback policy. |
+| `playback:ended` | `{ trackId, revision? }` | Current DJ reports natural completion separately from manual control. |
+| `playback:update` | `{ trackId, playing, position }` | Save an authorized playback checkpoint. |
+| `playback:stop-after`, `playback:resume` | `{ enabled }`, none | Arm/cancel stopping after the current track; explicitly resume a stopped room. |
+| `playback:skip-vote` | `{ trackId, vote }` | Add/remove one account's vote and advance once if threshold is met. |
+| `queue:exception-request`, `queue:exception` | `{ trackId }` | Request or authorize a logged length exception for an identified private item. |
+| `fallback:set` | `{ enabled, setId? }` | Copy/enable a finite saved set for room-owned fallback. |
 | `vibe:vote` | `{ value: -1 \| 0 \| 1 }` | Set/remove the listener's vote for the current track. |
 | `room:snapshot` | server event | Personalized room, presence, DJ identities, and server time. |
 | `room:presence` | server event | Presence and DJ identities without replaying unchanged room/playback state. |
+| `room:removed` | server event | Clear the affected tab after kick, ban or Members-only membership removal. |
 | `room:announcement` | `{ expectedId, text, expiresInMinutes? }` | Owner/moderator replaces or removes one bounded plain-text note with revision checks and optional expiry. `"keep"` retains the current expiry. |
-| `chat:message`, `chat:reaction`, `chat:typing` | `{ roomId, message/reaction/typing }` | Relay bounded chat events only between freshly authorized admitted sockets; authenticated sender identity is stamped by the server. |
+| `chat:message`, `chat:reaction`, `chat:typing` | `{ roomId, message/reaction/typing }` | Check live admission/policy; durable commands commit before publishing and acknowledge durable acceptance. See chat architecture. |
 
 Add new events in this order: define a Zod schema, resolve membership from the
 socket, authorize on the server, mutate authoritative state, await persistence,
@@ -359,10 +479,17 @@ Authenticated requests use the Supabase access token as a bearer token.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/rooms` | All accessible memberships/favorites/owned rooms, bounded public discovery, live listener counts, descriptions, and safe previews for active public unprotected rooms. |
+| `GET /api/rooms` | Accessible memberships/favorites/owned rooms, Public discovery, authorized text/tag/language filters, listener counts and safe active public previews. |
 | `POST /api/rooms` | Create a room, hash an optional password, and favorite it for the owner. |
 | `PUT /api/rooms/:slug/favorite` | Add or remove the current user's favorite. |
-| `PATCH /api/rooms/:slug` | Owner/moderator changes name, description, visibility, password, DJ access mode, or allowed music services. |
+| `PATCH /api/rooms/:slug` | Save a validated, revision-aware policy draft under enabled permission groups. |
+| `GET /api/rooms/:slug/members` | Staff search/paginate persistent member identities, roles, online status and authorized restrictions. |
+| `GET /api/rooms/:slug/moderation` | Staff paginate/search Reports, Activity, Restrictions or Warnings under applicable permissions. |
+| `POST /api/rooms/:slug/moderation/actions` | Idempotent sanctions/reversals, warnings, offline roles/membership, report decisions and temporary session controls. |
+| `POST /api/rooms/:slug/reports` | An admitted account reports a participant/message with bounded reason and rate limit. |
+| `GET /api/rooms/:slug/invitations`, `POST /invitations/actions` | Staff review/cancel direct invites and create/revoke reusable links under invitation policy. |
+| `POST /api/rooms/:slug/invite-links/redeem` | Grant eligible signed-in holder membership without bypassing a password or ban. |
+| `POST /api/rooms/:slug/rules/accept`, `POST /warnings/:id/read` | Acknowledge current rules or the authenticated target's own warning. |
 | `GET /api/library`, `POST /api/library` | Verified account's private picks and named sets, with explicit deletion and revision-aware concurrent saves. |
 | `GET /api/rooms/:slug/chat/history`, `/search`, `/context/:id`, `/messages/:id` | Authorized history pages, room search, and reply context. Timestamp/ID cursors preserve same-time entries. |
 | `POST /api/rooms/:slug/chat/messages`, `/reactions` | Freshly admitted durable chat writes and original-UUID retry; room/account/message checks precede database writes. |
@@ -379,9 +506,9 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `GET /api/spotify/playback`, `POST /api/spotify/playback` | Read or command the linked listener's playback. |
 | `GET /api/apple/token` | Short-lived Apple developer token used to configure MusicKit. |
 
-Room role changes use Socket.IO because connected clients need an immediate
-snapshot. Room metadata changes use HTTP and explicitly broadcast after the
-database/cache update.
+Both HTTP management actions and legacy Socket.IO role commands publish
+personalized updates after durable commit. Policy drafts and immediate sanctions
+are independent operations.
 
 ## Supabase persistence and security
 
@@ -392,11 +519,14 @@ against Supabase and the required environment variables must remain configured.
 Room data is split deliberately:
 
 - `soundspin_rooms.state` stores the fast-changing `Room` JSON document:
-  rotation, queues, playback, history, and vibe state.
+  rotation, private queues, playback, history, vibe, and private radio state.
 - First-class `soundspin_rooms` columns store directory and access metadata:
-  slug, name, owner, visibility, password hash, and settings.
+  slug, name, owner, access mode, password hash, settings and policy revision.
 - `soundspin_room_members` stores owner, moderator, DJ, and member roles.
 - `soundspin_room_favorites` stores each user's directory favorites.
+- `soundspin_room_moderation` stores a service-only private document containing
+  sanctions, append-only events, reports, warnings, receipts, invitation hashes,
+  rules acknowledgments and local member metadata. It is excluded from room state.
 - `soundspin_music_connections` stores encrypted, server-only Spotify refresh
   tokens. Browser roles have no grants or RLS policies for this table.
 - `soundspin_private_libraries` stores account-owned saved metadata separately
@@ -409,9 +539,12 @@ the JSON document. They are the authorization and directory source of truth.
 `Store.changeRoom` orders the complete validate/persist/commit sequence per room.
 An operation receives a cloned draft; snapshots keep reading the committed
 object while writes are pending. A failure discards the draft and preserves
-retry receipts. Role and settings changes use the service-only
-`soundspin_commit_room` SQL function to commit metadata/membership and radio
-state in one transaction. Ordinary radio changes update only state and its
+retry receipts. `Store.withRoomOperation` also orders durable chat policy checks
+against room commands without nested queues. Private moderation/metadata changes
+use service-only `soundspin_commit_room_v2` to commit metadata, membership changes,
+radio consequences, log and receipts in one transaction. Its log check rejects
+changes to earlier events. Existing simple changes retain `soundspin_commit_room`.
+Ordinary radio changes update only state and its
 timestamp. Unrelated Supabase rooms progress independently. The local fallback
 retains one atomic file queue because all rooms share a file.
 
@@ -428,18 +561,27 @@ are settled; JSON-mode rooms remain cached as their local source of truth.
 
 The server uses a secret Supabase client. The secret key must never be exposed
 through a `VITE_` variable, browser bundle, snapshot, or log. Browser access to
-room state tables is restricted; server-side handlers enforce room permissions.
+room state, membership, moderation and invitation tables is revoked;
+server-side handlers enforce fresh room permissions and bans.
 Chat history and writes use authenticated, admission-checked server routes;
 live chat uses the admitted room socket. Browser table reads are limited to the
 author's own rows, and direct browser mutations are revoked by the chat
-authorization migration. Media uploads use owner-scoped Storage rules and a
-private bucket. The server issues bounded signed URLs after checking room
+authorization migration. New uploads use authenticated room-policy server routes
+and service-only upload metadata in a private bucket; direct browser Storage insertion is revoked. The server
+issues bounded signed URLs after checking room
 access; an already issued URL remains a bearer capability until its expiry.
 See `docs/chat.md` for the transport and persistence contracts.
 
 Never edit a migration already deployed to production. Add a new timestamped
 file under `supabase/migrations` and deploy it through the configured Supabase
 workflow.
+
+The prepared migrations for this branch are ordered as
+`20261009073625_room_moderation_and_access.sql`, then
+`20261009073805_durable_room_chat.sql`. Apply both through the release workflow
+before starting the updated server: the new access/private-table reads require
+the first, and chat writes require the second. They were executed in local
+PGlite checks; they have not been applied to production by this task.
 
 ## Invariants to preserve
 
@@ -448,13 +590,16 @@ Treat these as design requirements when reviewing a room/radio change:
 1. One successful `advanceRadio` consumes at most one track from one DJ.
 2. A DJ rotates to the back before the next candidate is checked.
 3. Empty private queues are skipped, not removed from the lineup.
-4. `djUserId` matches the owner of the current track after normalization.
-5. No snapshot contains `djQueues` or another user's queued tracks.
+4. `djUserId` identifies the on-air DJ; room-owned fallback has no current DJ.
+5. No snapshot contains raw private queues, moderation/radio state, or another user's waiting tracks.
 6. Explicit DJ leave is immediate; an involuntary disconnect gets 60 seconds.
 7. Reconnecting within grace preserves lineup position and current playback.
-8. Stale `queue:next` events cannot advance a different track.
+8. Stale manual/natural completion events cannot advance a different play instance.
 9. Role-restricted rooms allow only owner, moderator, or DJ-role users to join.
 10. Every mutation is authorized server-side, persisted, then broadcast.
+11. Stopped playback consumes no next track until explicit Resume.
+12. Selection rechecks provider, rules, sanctions, length and repeat policy;
+    ineligible private tracks remain saved.
 
 ## Making changes safely
 
@@ -493,8 +638,8 @@ Run the radio privacy test immediately.
 
 ### The radio skips two songs
 
-Confirm every `queue:next` sender includes the current Lydman track UUID and
-that the server still compares it before advancing. Check whether more than the
+Confirm every manual/natural completion sender includes the current Lydman track
+UUID and that the server still compares it before advancing. Check whether more than the
 on-air browser reports natural YouTube completion.
 
 ### A DJ disappears on a short refresh
@@ -528,6 +673,8 @@ Run these after room or radio changes:
 ```bash
 npm run test:radio
 npm run test:music
+npx tsx --test server/moderation-service.test.ts server/radio-policy.test.ts server/room-music-policy.test.ts
+node --test tests/moderation-rls.test.mjs
 npm run typecheck
 npm run build
 ```
@@ -536,10 +683,16 @@ For manual testing, use two authenticated users in separate browser profiles:
 
 1. Join both to the DJ lineup and add two tracks each.
 2. Confirm neither can see the other's private queue.
-3. Confirm turns alternate one song at a time.
+3. Confirm turns alternate one song at a time with the default turn policy.
 4. Refresh the current DJ and reconnect within one minute; their place remains.
 5. Close the current DJ for more than one minute; they are removed and playback
    advances.
 6. Switch the room to role-restricted mode and verify only owner, moderator, and
    DJ-role users can join.
 7. Revoke the current DJ's role and verify immediate removal and advancement.
+
+Focused policy/moderation tests and local SQL checks passed for this branch.
+Live provider audio has not been verified. Before release, also exercise
+restricted moderator groups, offline member removal, all-tab kick/ban,
+after-track suspension, stop/resume, fallback restart, rules acceptance and
+temporary-policy expiry with separate authenticated accounts.

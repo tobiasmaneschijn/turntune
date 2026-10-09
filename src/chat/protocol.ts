@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatMessageType, ChatPollVoteEvent, ChatReactionEvent, ChatReply } from './model'
+import type {ChatRemovedEvent} from './model'
 import { normalizeChatMentions } from './mentions'
 import type { User } from '../types'
 
@@ -64,6 +65,7 @@ function normalizeReply(value: unknown): ChatReply | undefined {
     mediaUrl: reply.type === 'text' ? undefined : safeChatMediaUrl(reply.mediaUrl),
     user: { id: user.id, name: user.name, isAppAdmin: false },
     mentions: normalizeChatMentions(reply.mentions),
+    removedAt:typeof reply.removedAt==='string'&&Number.isFinite(Date.parse(reply.removedAt))?reply.removedAt:undefined,
   }
 }
 
@@ -90,10 +92,12 @@ export function normalizeRealtimeMessage(value: unknown): ChatMessage | null {
     mentions: normalizeChatMentions(message.mentions),
     replyTo: normalizeReply(message.replyTo),
     reactions: [],
+    removedAt:typeof message.removedAt==='string'&&Number.isFinite(Date.parse(message.removedAt))?message.removedAt:undefined,
     // Vote authority comes from history and accepted server vote events, never message senders.
     poll: pollOptions ? { options: pollOptions, votes: [] } : undefined,
   }
 }
+export function normalizeChatRemoved(value:unknown):ChatRemovedEvent|null { const event=record(value);if(!event||!boundedString(event.messageId,100)||!boundedString(event.removedAt,64)||!Number.isFinite(Date.parse(event.removedAt)))return null;return{messageId:event.messageId,removedAt:event.removedAt} }
 
 export function normalizeRealtimePollVote(value: unknown): ChatPollVoteEvent | null {
   const event = record(value)

@@ -74,7 +74,7 @@ test('history restores poll options and the latest vote while rejecting invalid 
   assert.deepEqual(chatMessagesFromRows([row])[0].poll, { options: ['Jazz', 'House'], votes: [{ userId: 'alice', optionIndex: 1, revision: 2 }] })
 })
 
-test('voting uses room authorization, sends only the choice and accepts a validated matching server event', async () => {
+test('voting uses room authorization and a stable retry receipt with no forged owner', async () => {
   const requests: Array<{ url: string; options?: RequestInit }> = []
   const accepted = { messageId: message.id, userId: 'alice', optionIndex: 1, revision: 2 }
   let response: unknown = accepted
@@ -82,12 +82,13 @@ test('voting uses room authorization, sends only the choice and accepts a valida
   const source = createChatHistorySource('alice-token', 'private-room', fetcher)
   assert.deepEqual(await source.votePoll!(message.id, 1), accepted)
   assert.equal(requests[0].url, `/api/rooms/private-room/chat/polls/${message.id}/vote`)
-  assert.deepEqual(JSON.parse(String(requests[0].options?.body)), { optionIndex: 1 })
+  const body=JSON.parse(String(requests[0].options?.body));assert.equal(body.optionIndex,1);assert.match(body.id,/^[0-9a-f-]{36}$/);assert.equal(body.userId,undefined)
   assert.equal(new Headers(requests[0].options?.headers).get('authorization'), 'Bearer alice-token')
   response = { ...accepted, messageId: 'other' }
   await assert.rejects(source.votePoll!(message.id, 1), /could not be confirmed/)
   response = { ...accepted, revision: '2' }
   await assert.rejects(source.votePoll!(message.id, 1), /could not be confirmed/)
+  assert.equal(JSON.parse(String(requests[1].options?.body)).id,JSON.parse(String(requests[2].options?.body)).id)
 })
 
 test('poll delivery retries retain the same message id and options through the durable outbox', async () => {

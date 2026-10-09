@@ -52,7 +52,7 @@ async function setupStore(state = room()) {
       return query;
     },
     async rpc(name: string, values: Commit) {
-      assert.equal(name, "soundspin_commit_room");
+      assert.ok(name === "soundspin_commit_room" || name === "soundspin_commit_room_v2");
       commits.push(structuredClone(values));
       await controls.beforeCommit();
       return { data: true, error: null };

@@ -447,8 +447,8 @@ export function NowPlaying({
   };
 
   const handleEnded = useCallback(() => {
-    if (track && isDj && roomConnected) requestAction("queue:next", { trackId: track.id }, () => {});
-  }, [track?.id, isDj, roomConnected, requestAction]);
+    if (track && isDj && roomConnected) requestAction("playback:ended", { trackId: track.id, revision:playback.revision }, () => {});
+  }, [track?.id, playback.revision, isDj, roomConnected, requestAction]);
 
   const shownPosition = seekPreview ?? playerStatus.currentTime;
   const preferredProvider: Provider = playbackPreference.startsWith("spotify")
@@ -730,12 +730,14 @@ export function NowPlaying({
           </div>
           </div>
           <BangOMeter snapshot={snapshot} currentUserId={currentUserId} roomConnected={roomConnected} requestAction={requestAction} />
+          {snapshot.room.settings.skipVote?.enabled && track.addedBy.id!==currentUserId && <Button variant="outline" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.skipVote.voted??false} onClick={()=>runCommand("Saving skip vote…","playback:skip-vote",{trackId:track.id,vote:!snapshot.room.radio?.skipVote.voted})}>{snapshot.room.radio?.skipVote.voted?"Retract skip vote":"Vote to skip"} · {snapshot.room.radio?.skipVote.count??0}/{snapshot.room.radio?.skipVote.required??3}</Button>}
+          {snapshot.room.capabilities?.djsPlayback && <Button variant="ghost" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.stopAfterTrackId===track.id} onClick={()=>runCommand("Updating stop after track…","playback:stop-after",{enabled:snapshot.room.radio?.stopAfterTrackId!==track.id})}>{snapshot.room.radio?.stopAfterTrackId===track.id?"Cancel stop after track":"Stop after this track"}</Button>}
         </>
       ) : (
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
-          <h2>No track playing</h2>
-          {onAddTrack ? <Button type="button" onClick={onAddTrack}>Add a track</Button> : <p>Add a track to start playback.</p>}
+          <h2>{snapshot.room.radio?.stopped ? "Room playback is stopped" : "No track playing"}</h2>
+          {snapshot.room.radio?.stopped ? snapshot.room.capabilities?.djsPlayback&&<Button disabled={!roomConnected||Boolean(pendingCommand)} onClick={()=>runCommand("Resuming room…","playback:resume",{})}>Resume room</Button> : onAddTrack ? <Button type="button" onClick={onAddTrack}>Add a track</Button> : <p>Add a track to start playback.</p>}
         </div>
       )}
       </section>

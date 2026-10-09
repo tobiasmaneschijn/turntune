@@ -1,215 +1,93 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Crown, Globe2, LockKeyhole, Shield, UserPlus, X } from "lucide-react";
-import { Avatar } from "./Avatar";
-import { Badge } from "./ui/badge";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { requestJson } from "../lib/authenticated-http";
+import type { RoomSnapshot, RoomSettings, ModeratorPermissions, ThemeSchedule } from "../types";
+import { accessMode, DEFAULT_MODERATOR_PERMISSIONS, roomCapabilities } from "../../shared/room-policy";
+import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS } from "../../shared/providers";
+import { requestPrivateLibrary, type SavedSet } from "../music-library";
+import { useMediaQuery } from "../hooks/use-media-query";
+import { socket } from "../socket";
+import { requestSocketAction } from "../socket-request";
+import { RoomMembersPanel } from "./RoomMembersPanel";
 import { Button } from "./ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
-import { socket } from "../socket";
-import { requestSocketAction } from "../socket-request";
-import { requestJson } from "../lib/authenticated-http";
-import type { RoomSnapshot } from "../types";
-import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS } from "../../shared/providers";
+import { Textarea } from "./ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import "../styles/room-management.css";
 
-export function RoomSettingsDialog({
-  snapshot,
-  currentUserId,
-  accessToken,
-  connected = false,
-  transport = socket,
-  onClose,
-  onNotice
-}: {
-  snapshot: RoomSnapshot;
-  currentUserId: string;
-  accessToken: string;
-  connected?: boolean;
-  transport?: Parameters<typeof requestSocketAction>[0];
-  onClose: () => void;
-  onNotice: (notice: string) => void;
-}) {
-  const [name, setName] = useState(snapshot.room.name);
-  const [description, setDescription] = useState(snapshot.room.settings.description || "");
-  const [isPublic, setIsPublic] = useState(snapshot.room.isPublic);
-  const [djAccess, setDjAccess] = useState<"everyone" | "roles">(snapshot.room.settings.djAccess || "everyone");
-  const [allowedProviders, setAllowedProviders] = useState(() => allowedRoomProviders(snapshot.room.settings));
-  const [passwordMode, setPasswordMode] = useState<"unchanged" | "replace" | "remove">("unchanged");
-  const [password, setPassword] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [discardOpen, setDiscardOpen] = useState(false);
-  const initial = useRef({ name: snapshot.room.name, description: snapshot.room.settings.description || "", isPublic: snapshot.room.isPublic, djAccess: snapshot.room.settings.djAccess || "everyone", allowedProviders: allowedRoomProviders(snapshot.room.settings) });
-  const servicesChanged = MUSIC_PROVIDERS.some(provider => initial.current.allowedProviders.includes(provider) !== allowedProviders.includes(provider));
-  const dirty = name !== initial.current.name || description !== initial.current.description || isPublic !== initial.current.isPublic || djAccess !== initial.current.djAccess || passwordMode !== "unchanged" || servicesChanged;
-  const isOwner = snapshot.room.ownerUserId === currentUserId;
-  const [pendingRoles, setPendingRoles] = useState<Set<string>>(new Set());
-  const pendingRolesRef = useRef(new Set<string>());
-  const activeRef = useRef(true);
-  const saveControllerRef = useRef<AbortController | null>(null);
-  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; saveControllerRef.current?.abort(); }; }, []);
+function initialPolicy(snapshot: RoomSnapshot): RoomSettings {
+  const s = snapshot.room.settings;
+  return { description: s.description ?? "", accessMode: accessMode(snapshot.room), djAccess: s.djAccess ?? "everyone", allowedProviders: allowedRoomProviders(s), invitePermission: s.invitePermission ?? "default", rulesText: s.rulesText ?? "", requireRulesAcceptance: s.requireRulesAcceptance ?? false, chatMode: s.chatMode ?? "everyone", slowModeSeconds: s.slowModeSeconds ?? 0, mediaPermission: s.mediaPermission ?? "everyone", linksPermission: s.linksPermission ?? "everyone", pollsPermission: s.pollsPermission ?? "everyone", djJoinLocked: s.djJoinLocked ?? false, djCapacity: s.djCapacity ?? null, maxTrackMinutes: s.maxTrackMinutes ?? null, repeatWindowMinutes: s.repeatWindowMinutes ?? null, manualPlayback: s.manualPlayback ?? "current-dj", songsPerTurn: s.songsPerTurn ?? 1, skipVote: s.skipVote ?? { enabled: false, percent: 60, minimum: 3 }, tags: s.tags ?? [], language: s.language ?? "", themeSchedules: s.themeSchedules ?? [] };
+}
+function Choice({ id, label, value, onChange, options, disabled }: { id: string; label: string; value: string | number; onChange: (value: string) => void; options: Array<[string | number, string]>; disabled?: boolean }) { return <div className="room-setting-row"><Label htmlFor={id}>{label}</Label><select id={id} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>{options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select></div>; }
+function Toggle({ id, label, checked, onChange, disabled }: { id: string; label: string; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) { return <div className="room-setting-row"><Label htmlFor={id}>{label}</Label><Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onChange} /></div>; }
+function NumberPolicy({ id, label, value, onChange, max, disabled, presets = [] }: { id: string; label: string; value?: number | null; onChange: (value: number | null) => void; max: number; disabled?: boolean; presets?: Array<[number, string]> }) {
+  const [custom, setCustom] = useState(value != null && !presets.some(([number]) => number === value));
+  return <div className="room-management-form"><Choice id={id} label={label} value={value == null ? "off" : custom ? "custom" : value} disabled={disabled} onChange={selected => { setCustom(selected === "custom"); onChange(selected === "off" ? null : selected === "custom" ? value ?? 10 : Number(selected)); }} options={[["off", "Off"], ...presets, ["custom", "Custom"]]} />{value != null && custom && <div className="room-setting-row"><Label htmlFor={`${id}-custom`}>{label === "Lineup capacity" ? "Accounts" : "Minutes"}</Label><Input id={`${id}-custom`} disabled={disabled} type="number" min={1} max={max} required value={value} onChange={event => onChange(event.target.value ? Number(event.target.value) : 0)} /></div>}</div>;
+}
+const featureOptions: Array<[string, string]> = [["everyone", "Everyone"], ["staff", "Staff"], ["nobody", "Nobody"]];
+const presets: Record<string, Partial<RoomSettings>> = { "Open decks": { djAccess: "everyone", maxTrackMinutes: 10, repeatWindowMinutes: 60, manualPlayback: "current-dj", songsPerTurn: 1 }, "Hosted session": { djAccess: "roles", maxTrackMinutes: 20, repeatWindowMinutes: 60, manualPlayback: "staff", songsPerTurn: 1 }, "Long mixes": { djAccess: "everyone", maxTrackMinutes: null, repeatWindowMinutes: null, manualPlayback: "current-dj", songsPerTurn: 1 } };
+const presetLabels: Record<string, string> = { djAccess: "DJ eligibility", maxTrackMinutes: "Track length", repeatWindowMinutes: "Recent repeats", manualPlayback: "Playback controls", songsPerTurn: "Songs per turn" };
+function presetValue(key: string, value: unknown) { return value == null ? "Off" : key === "djAccess" ? value === "everyone" ? "Everyone" : "DJ roles and staff" : key === "manualPlayback" ? value === "staff" ? "Staff only" : "Current DJ and staff" : key === "songsPerTurn" ? String(value) : `${value} minutes`; }
 
-  const requestClose = () => {
-    if (saveControllerRef.current || pendingRolesRef.current.size) return;
-    if (dirty) setDiscardOpen(true);
-    else onClose();
+export function RoomSettingsDialog({ snapshot, currentUserId, accessToken, connected = false, transport = socket, onClose, onNotice }: { snapshot: RoomSnapshot; currentUserId: string; accessToken: string; connected?: boolean; transport?: Parameters<typeof requestSocketAction>[0]; onClose: () => void; onNotice: (notice: string) => void }) {
+  const [tab, setTab] = useState("general"); const [name, setName] = useState(snapshot.room.name); const [policy, setPolicy] = useState(() => initialPolicy(snapshot)); const [tagsText, setTagsText] = useState((snapshot.room.settings.tags ?? []).join(", ")); const [passwordMode, setPasswordMode] = useState("unchanged"); const [password, setPassword] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState(""); const [discardOpen, setDiscardOpen] = useState(false); const [preset, setPreset] = useState(""); const [noteOpen, setNoteOpen] = useState(false);
+  const initial = useRef({ name: snapshot.room.name, policy: initialPolicy(snapshot), revision: snapshot.room.policyRevision ?? 0 }); const controller = useRef<AbortController | null>(null); const mobile = useMediaQuery("(max-width: 640px)"); const capabilities = snapshot.room.capabilities ?? roomCapabilities(snapshot.room, currentUserId, snapshot.serverTime); const dirty = name !== initial.current.name || JSON.stringify(policy) !== JSON.stringify(initial.current.policy) || passwordMode !== "unchanged";
+  const update = <K extends keyof RoomSettings>(key: K, value: RoomSettings[K]) => setPolicy(current => ({ ...current, [key]: value }));
+  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => { if (initial.current.name === snapshot.room.name && JSON.stringify(initial.current.policy) === JSON.stringify(initialPolicy(snapshot))) initial.current.revision = snapshot.room.policyRevision ?? 0; }, [snapshot.room.name, snapshot.room.settings, snapshot.room.policyRevision]);
+  const close = () => { if (controller.current) return; if (dirty) setDiscardOpen(true); else onClose(); };
+  const save = async (event: FormEvent) => { event.preventDefault(); if (controller.current || !connected) return; if (!policy.allowedProviders?.length) { setError("Allow at least one music service."); return; } if ((policy.tags ?? []).length > 6 || (policy.tags ?? []).some(tag => tag.length > 24)) { setError("Use up to six tags, with 24 characters each."); return; } if (policy.requireRulesAcceptance && !policy.rulesText?.trim()) { setError("Add rules before requiring acceptance."); return; }
+    const body: Record<string, unknown> = {}; if (name !== initial.current.name) body.name = name.trim(); for (const [key, value] of Object.entries(policy)) if (JSON.stringify(value) !== JSON.stringify(initial.current.policy[key])) body[key] = value;
+    if (passwordMode === "replace") body.password = password; if (passwordMode === "remove") body.password = null;
+    if (!Object.keys(body).length) { onClose(); return; } body.policyRevision = initial.current.revision; controller.current = new AbortController(); setSaving(true); setError(""); try { await requestJson(`/api/rooms/${snapshot.room.id}`, { method: "PATCH", accessToken, signal: controller.current.signal, body: JSON.stringify(body), errorMessage: "Could not save room settings. Try again." }); if (!controller.current.signal.aborted) { onNotice("Room settings saved"); onClose(); } } catch (cause) { if (!controller.current?.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not save room settings. Try again."); } finally { controller.current = null; setSaving(false); }
   };
+  const detailsDisabled = saving || !capabilities.roomDetailsMusic; const djsDisabled = saving || !capabilities.djsPlayback; const accessDisabled = saving || !capabilities.accessInvites; const chatDisabled = saving || !capabilities.chatParticipants;
+  return <Dialog open onOpenChange={open => { if (!open) close(); }}><DialogContent className="room-management-dialog room-settings-dialog" showCloseButton={!saving}><DialogHeader><DialogTitle>Room settings</DialogTitle></DialogHeader><Tabs value={tab} onValueChange={value => setTab(String(value))} orientation={mobile ? "horizontal" : "vertical"} className="room-management-layout"><TabsList aria-label="Room setting categories" activateOnFocus>{[["general", "General"], ["music", "Music"], ["chat", "Chat"], ["members", "Members"]].map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}</TabsList><div className="room-management-content">
+    <form id="room-policy-form" className="room-management-form" autoComplete="off" onSubmit={save}>
+    <TabsContent value="general"><div className="room-management-section"><Label htmlFor="settings-name">Room name</Label><Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" required maxLength={48} disabled={detailsDisabled} value={name} onChange={event => setName(event.target.value)} /><Label htmlFor="settings-description">Description (optional)</Label><Input id="settings-description" maxLength={240} disabled={detailsDisabled} value={policy.description ?? ""} onChange={event => update("description", event.target.value)} /><Choice id="room-access" label="Room access" value={policy.accessMode ?? "public"} disabled={accessDisabled} onChange={value => update("accessMode", value as RoomSettings["accessMode"])} options={[["public", "Public"], ["unlisted", "Unlisted"], ["members", "Members only"]]} />
+      <p className="room-setting-help">{policy.accessMode === "members" ? "Existing members retain access. Review Members to remove access." : policy.accessMode === "unlisted" ? "Anyone with the room address can join. Hidden from discovery." : "Listed in discovery. Anyone can join."}</p><Choice id="room-password-action" label="Password" value={passwordMode} disabled={accessDisabled} onChange={setPasswordMode} options={[["unchanged", "Keep"], ["replace", snapshot.room.passwordProtected ? "Change" : "Add"], ...(snapshot.room.passwordProtected ? [["remove", "Remove"] as [string, string]] : [])]} />{passwordMode === "replace" && <><Label htmlFor="settings-password">New room password</Label><Input id="settings-password" name="soundspin-new-settings-password" autoComplete="new-password" data-1p-ignore data-lpignore="true" type="password" required maxLength={128} disabled={accessDisabled} value={password} onChange={event => setPassword(event.target.value)} /></>}
+      <Choice id="room-invite-policy" label="Who can invite" value={policy.invitePermission ?? "default"} disabled={accessDisabled} onChange={value => update("invitePermission", value as RoomSettings["invitePermission"])} options={[["default", "Current access policy"], ["owner", "Owner"], ["staff", "Staff"], ["members", "Members"]]} /><p className="room-setting-help">Direct invitations require an accepted friendship.</p>
+      <Label htmlFor="room-tags">Tags (optional)</Label><Input id="room-tags" placeholder="jazz, evening" disabled={detailsDisabled} value={tagsText} onChange={event => { setTagsText(event.target.value); const tags = event.target.value.split(",").map(tag => tag.trim()).filter(Boolean); update("tags", tags.filter((tag, index) => tags.findIndex(value => value.toLowerCase() === tag.toLowerCase()) === index)); }} aria-describedby="room-tags-help" /><p id="room-tags-help" className="room-setting-help">Up to six comma-separated tags, 24 characters each.</p><Label htmlFor="room-language">Language (optional)</Label><Input id="room-language" disabled={detailsDisabled} value={policy.language ?? ""} maxLength={35} placeholder="en" onChange={event => update("language", event.target.value)} aria-describedby="room-language-help" /><p id="room-language-help" className="room-setting-help">Use a language code such as en or fr.</p>
+      <div className="room-management-actions"><Button type="button" variant="outline" disabled={!connected || !capabilities.roomDetailsMusic} onClick={() => setNoteOpen(true)}>Room note</Button></div>
+      <details><summary>Longer rules and acceptance</summary><div className="room-management-form"><Label htmlFor="room-rules">Room rules</Label><Textarea id="room-rules" disabled={accessDisabled} maxLength={5000} rows={6} value={policy.rulesText ?? ""} onChange={event => update("rulesText", event.target.value)} /><Toggle id="room-require-rules" label="Require rules acceptance" checked={Boolean(policy.requireRulesAcceptance)} disabled={accessDisabled} onChange={value => update("requireRulesAcceptance", value)} /><p className="room-setting-help">A new rules version requires another acceptance before participation.</p></div></details>
+      <details><summary>Scheduled themes</summary><ScheduleEditor schedules={policy.themeSchedules ?? []} disabled={detailsDisabled} onChange={value => update("themeSchedules", value)} /></details>
+      <details><summary>Room presets</summary><div className="room-management-form"><Choice id="room-preset" label="Preset" value={preset} disabled={detailsDisabled || djsDisabled} onChange={setPreset} options={[["", "Choose a preset"], ...Object.keys(presets).map(value => [value, value] as [string, string])]} />{preset && <div className="room-management-preview"><strong>Changes</strong><ul>{Object.entries(presets[preset]).map(([key, value]) => <li key={key}>{presetLabels[key]}: {presetValue(key, value)}</li>)}</ul><Button type="button" variant="outline" disabled={detailsDisabled || djsDisabled} onClick={() => { setPolicy(current => ({ ...current, ...presets[preset] })); setPreset(""); }}>Apply to draft</Button></div>}</div></details>
+    </div></TabsContent>
+    <TabsContent value="music"><div className="room-management-section"><Choice id="settings-dj-access" label="DJ eligibility" value={policy.djAccess ?? "everyone"} disabled={detailsDisabled} onChange={value => update("djAccess", value as RoomSettings["djAccess"])} options={[["everyone", "Everyone"], ["roles", "DJ role and staff"]]} /><Toggle id="settings-dj-lock" label="Lock DJ joins" checked={Boolean(policy.djJoinLocked)} disabled={djsDisabled} onChange={value => update("djJoinLocked", value)} /><p className="room-setting-help">Existing DJs keep their place. Private queues stay available.</p><NumberPolicy id="settings-dj-capacity" label="Lineup capacity" value={policy.djCapacity} max={100} presets={[[5, "5 DJs"], [10, "10 DJs"], [20, "20 DJs"]]} disabled={djsDisabled} onChange={value => update("djCapacity", value)} /><h3>Music services</h3>{MUSIC_PROVIDERS.map(provider => <Toggle key={provider} id={`settings-service-${provider}`} label={PROVIDER_LABELS[provider]} disabled={detailsDisabled} checked={(policy.allowedProviders ?? []).includes(provider)} onChange={enabled => update("allowedProviders", enabled ? [...(policy.allowedProviders ?? []), provider] : (policy.allowedProviders ?? []).filter(item => item !== provider))} />)}<p className="room-setting-help">Disabled services stop playing. Their queued tracks stay saved.</p><NumberPolicy id="settings-track-length" label="Track length" value={policy.maxTrackMinutes} max={1440} presets={[[5, "5 minutes"], [10, "10 minutes"], [20, "20 minutes"], [60, "60 minutes"]]} disabled={detailsDisabled} onChange={value => update("maxTrackMinutes", value)} />{Boolean(policy.maxTrackMinutes) && <p className="room-setting-help">Unknown or live lengths need a moderator exception. Current tracks finish.</p>}<NumberPolicy id="settings-repeats" label="Recent repeats" value={policy.repeatWindowMinutes} max={1440} presets={[[30, "30 minutes"], [60, "60 minutes"], [120, "2 hours"]]} disabled={detailsDisabled} onChange={value => update("repeatWindowMinutes", value)} /><details><summary>Advanced music settings</summary><div className="room-management-form"><Choice id="settings-playback" label="Playback controls" value={policy.manualPlayback ?? "current-dj"} disabled={djsDisabled} onChange={value => update("manualPlayback", value as RoomSettings["manualPlayback"])} options={[["current-dj", "Current DJ and staff"], ["staff", "Staff only"]]} /><Choice id="settings-songs-per-turn" label="Songs per turn" value={policy.songsPerTurn ?? 1} disabled={djsDisabled} onChange={value => update("songsPerTurn", Number(value) as 1 | 2 | 3)} options={[[1, "1"], [2, "2"], [3, "3"]]} /><p className="room-setting-help">Longer turns increase the wait for other DJs.</p><Toggle id="settings-vote-skip" label="Vote to skip" checked={Boolean(policy.skipVote?.enabled)} disabled={djsDisabled} onChange={enabled => update("skipVote", { percent: 60, minimum: 3, ...policy.skipVote, enabled })} />{policy.skipVote?.enabled && <><Label htmlFor="settings-skip-percent">Listener percentage</Label><Input id="settings-skip-percent" type="number" min={1} max={100} required disabled={djsDisabled} value={policy.skipVote.percent} onChange={event => update("skipVote", { ...policy.skipVote!, percent: Number(event.target.value) })} /><Label htmlFor="settings-skip-minimum">Minimum votes</Label><Input id="settings-skip-minimum" type="number" min={1} max={100} required disabled={djsDisabled} value={policy.skipVote.minimum} onChange={event => update("skipVote", { ...policy.skipVote!, minimum: Number(event.target.value) })} /></>}</div></details></div></TabsContent>
+    <TabsContent value="chat"><div className="room-management-section"><Choice id="settings-chat-posting" label="Chat posting" value={policy.chatMode ?? "everyone"} disabled={chatDisabled} onChange={value => update("chatMode", value as RoomSettings["chatMode"])} options={[["everyone", "Everyone"], ["staff", "Staff only"]]} /><Choice id="settings-slow-mode" label="Slow mode" value={policy.slowModeSeconds ?? 0} disabled={chatDisabled} onChange={value => update("slowModeSeconds", Number(value) as RoomSettings["slowModeSeconds"])} options={[[0, "Off"], [5, "5 seconds"], [10, "10 seconds"], [30, "30 seconds"], [60, "60 seconds"]]} /><p className="room-setting-help">Staff bypass slow mode.</p>{[["mediaPermission", "Images and GIFs"], ["linksPermission", "Links"], ["pollsPermission", "Poll creation"]].map(([key, label]) => <Choice key={key} id={`settings-${key}`} label={label} value={String(policy[key] ?? "everyone")} disabled={chatDisabled} options={featureOptions} onChange={value => update(key, value)} />)}</div></TabsContent>
+    </form>
+    {tab === "music" && <FallbackPanel snapshot={snapshot} accessToken={accessToken} connected={connected} disabled={!capabilities.roomDetailsMusic} transport={transport} onNotice={onNotice} />}
+    <TabsContent value="members"><RoomMembersPanel snapshot={snapshot} currentUserId={currentUserId} accessToken={accessToken} connected={connected} onNotice={onNotice} />{capabilities.owner && <ModeratorPermissionsPanel snapshot={snapshot} accessToken={accessToken} connected={connected} onNotice={onNotice} />}</TabsContent>
+  </div></Tabs>{error && <p role="alert">{error}</p>}{!connected && <p role="status">Reconnect to save changes.</p>}{snapshot.room.settings.sessionOverrides?.some(item => item.expiresAt > snapshot.serverTime) && <p className="room-setting-help">Temporary session restrictions are active. Lasting changes apply underneath them.</p>}
+    <DialogFooter className="room-management-footer">{tab === "members" ? <>{dirty && <span className="room-setting-help">Unsaved room changes</span>}<Button type="button" variant="outline" disabled={saving} onClick={close}>Close</Button></> : <><Button type="button" variant="outline" disabled={saving} onClick={close}>Cancel</Button><Button type="submit" form="room-policy-form" disabled={saving || !connected || !name.trim() || !policy.allowedProviders?.length}>{saving ? "Saving…" : "Save changes"}</Button></>}</DialogFooter>
+    <Dialog open={discardOpen} onOpenChange={setDiscardOpen}><DialogContent><DialogHeader><DialogTitle>Discard room changes?</DialogTitle></DialogHeader><DialogFooter className="room-management-footer"><Button type="button" variant="outline" onClick={() => setDiscardOpen(false)}>Keep editing</Button><Button type="button" variant="destructive" onClick={onClose}>Discard changes</Button></DialogFooter></DialogContent></Dialog>
+    {noteOpen && <RoomNoteEditor snapshot={snapshot} connected={connected} transport={transport} onClose={() => setNoteOpen(false)} onNotice={onNotice} />}
+  </DialogContent></Dialog>;
+}
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    if (saveControllerRef.current || pendingRolesRef.current.size) return;
-    if (!allowedProviders.length) { setError("Allow at least one music service."); return; }
-    const controller = new AbortController();
-    saveControllerRef.current = controller;
-    setSaving(true);
-    setError("");
-    const body: { name: string; description: string; isPublic: boolean; djAccess: "everyone" | "roles"; allowedProviders: typeof allowedProviders; password?: string | null } = { name, description: description.trim(), isPublic, djAccess, allowedProviders };
-    if (passwordMode === "replace") body.password = password;
-    if (passwordMode === "remove") body.password = null;
-    try {
-      await requestJson(`/api/rooms/${snapshot.room.id}`, {
-        method: "PATCH", accessToken, signal: controller.signal,
-        body: JSON.stringify(body), errorMessage: "Could not save room settings."
-      });
-      if (!activeRef.current || controller.signal.aborted) return;
-      onNotice("Room settings saved");
-      onClose();
-    } catch (saveError) {
-      if (activeRef.current) setError(saveError instanceof Error ? saveError.message : "Could not save room settings.");
-    } finally {
-      saveControllerRef.current = null;
-      if (activeRef.current) setSaving(false);
-    }
-  };
-
-  const changeRole = (userId: string, role: "moderator" | "dj-role", enabled: boolean) => {
-    if (!connected || !transport.connected) { setError("Reconnect before changing room roles."); return; }
-    if (pendingRolesRef.current.has(userId)) return;
-    pendingRolesRef.current.add(userId);
-    setPendingRoles(new Set(pendingRolesRef.current));
-    setError("");
-    requestSocketAction(transport, `room:${role}:set`, { roomId: snapshot.room.id, userId, [role === "moderator" ? "moderator" : "dj"]: enabled }, (result) => {
-      pendingRolesRef.current.delete(userId);
-      if (!activeRef.current) return;
-      setPendingRoles(new Set(pendingRolesRef.current));
-      if (!result.ok) setError(result.error || "Could not update room role.");
-      else onNotice(`${role === "moderator" ? "Moderator" : "DJ role"} ${enabled ? "added" : "removed"}`);
-    });
-  };
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) requestClose(); }}>
-      <DialogContent className="max-w-3xl room-settings-dialog" showCloseButton={!saving}>
-        <form className="grid gap-5" autoComplete="off" onSubmit={save}>
-          <DialogHeader>
-            <DialogTitle>Room settings</DialogTitle>
-            <DialogDescription className="sr-only">Room details, access, and roles.</DialogDescription>
-          </DialogHeader>
-
-          <div className="settings-grid">
-            <div className="settings-fields">
-              <div className="grid gap-2">
-                <Label htmlFor="settings-name">Room name</Label>
-                <Input id="settings-name" name="soundspin-room-settings-name" autoComplete="off" disabled={saving} required maxLength={48} value={name} onChange={(event) => setName(event.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="settings-description">Description <span className="font-normal text-muted-foreground">Optional</span></Label>
-                <Input id="settings-description" disabled={saving} value={description} onChange={(event) => setDescription(event.target.value)} maxLength={240} aria-describedby="settings-description-help" />
-                <p id="settings-description-help" className="room-description-help">In the directory · 240 characters max.</p>
-              </div>
-              <div className="switch-row">
-                <span><Globe2 /><span><strong>List in room directory</strong></span></span>
-                <Switch checked={isPublic} disabled={saving} onCheckedChange={setIsPublic} aria-label="List in room directory — Public room" />
-              </div>
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle>DJ queue access</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="segmented-control" role="group" aria-label="DJ queue access">
-                    <Button type="button" size="sm" disabled={saving} aria-pressed={djAccess === "everyone"} className={djAccess === "everyone" ? "segmented-active" : ""} variant={djAccess === "everyone" ? "secondary" : "ghost"} onClick={() => setDjAccess("everyone")}>Everyone</Button>
-                    <Button type="button" size="sm" disabled={saving} aria-pressed={djAccess === "roles"} className={djAccess === "roles" ? "segmented-active" : ""} variant={djAccess === "roles" ? "secondary" : "ghost"} onClick={() => setDjAccess("roles")}>DJ role and moderators</Button>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card size="sm">
-                <CardHeader><CardTitle>Music services</CardTitle></CardHeader>
-                <CardContent className="grid gap-3">
-                  {MUSIC_PROVIDERS.map(provider => (
-                    <div className="flex items-center justify-between gap-3" key={provider}>
-                      <Label htmlFor={`settings-service-${provider}`}>{PROVIDER_LABELS[provider]}</Label>
-                      <Switch id={`settings-service-${provider}`} disabled={saving} checked={allowedProviders.includes(provider)}
-                        onCheckedChange={enabled => setAllowedProviders(current => enabled ? [...current, provider] : current.filter(item => item !== provider))} />
-                    </div>
-                  ))}
-                  <p className="room-description-help">Disabled services stop playing. Their queued tracks stay saved.</p>
-                  {!allowedProviders.length && <p role="status" className="room-description-help">Allow at least one music service.</p>}
-                </CardContent>
-              </Card>
-              <Card size="sm" className="password-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle></CardHeader>
-                <CardContent className="grid gap-3">
-                  <div className="segmented-control" role="group" aria-label="Password action">
-                    <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "unchanged"} className={passwordMode === "unchanged" ? "segmented-active" : ""} variant={passwordMode === "unchanged" ? "secondary" : "ghost"} onClick={() => setPasswordMode("unchanged")}>Keep</Button>
-                    <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "replace"} className={passwordMode === "replace" ? "segmented-active" : ""} variant={passwordMode === "replace" ? "secondary" : "ghost"} onClick={() => setPasswordMode("replace")}>{snapshot.room.passwordProtected ? "Change" : "Add"}</Button>
-                    {snapshot.room.passwordProtected && <Button type="button" size="sm" disabled={saving} aria-pressed={passwordMode === "remove"} className={passwordMode === "remove" ? "segmented-active segmented-destructive" : ""} variant={passwordMode === "remove" ? "destructive" : "ghost"} onClick={() => setPasswordMode("remove")}>Remove</Button>}
-                  </div>
-                  {passwordMode === "replace" && <div className="grid gap-2"><Label htmlFor="settings-password">New room password</Label><Input id="settings-password" disabled={saving} name="soundspin-new-settings-password" autoComplete="new-password" data-1p-ignore data-lpignore="true" required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New room password" /></div>}
-                </CardContent>
-              </Card>
-            </div>
-
-            {isOwner && (
-              <Card size="sm" className="moderator-settings">
-                <CardHeader><CardTitle className="flex items-center gap-2"><Shield /> Room roles</CardTitle></CardHeader>
-                <CardContent className="moderator-list">
-                  {snapshot.users.map((user) => {
-                    const owner = user.id === snapshot.room.ownerUserId;
-                    const moderator = snapshot.room.moderatorUserIds.includes(user.id);
-                    const dj = snapshot.room.djRoleUserIds.includes(user.id);
-                    return (
-                      <div key={user.id}>
-                        <Avatar user={user} size={28} />
-                        <span><strong>{user.name}</strong>{!owner && <small>{moderator ? "Moderator" : dj ? "DJ role" : "Listener"}</small>}</span>
-                        {owner ? <Badge variant="outline"><Crown /> Owner</Badge> : (
-                          <span className="room-role-actions">
-                            <Button type="button" variant="ghost" size="sm" disabled={!connected || saving || pendingRoles.has(user.id)} aria-label={`${moderator ? "Remove mod" : "Moderator"} — ${user.name}`} onClick={() => changeRole(user.id, "moderator", !moderator)}>
-                              {moderator ? <X /> : <UserPlus />}{moderator ? "Remove mod" : "Moderator"}
-                            </Button>
-                            {!moderator && (
-                              <Button type="button" variant="ghost" size="sm" disabled={!connected || saving || pendingRoles.has(user.id)} aria-label={`${dj ? "Remove DJ" : "DJ role"} — ${user.name}`} onClick={() => changeRole(user.id, "dj-role", !dj)}>
-                                {dj ? <X /> : <UserPlus />}{dj ? "Remove DJ" : "DJ role"}
-                              </Button>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {!connected && <p role="status">Reconnect to update room roles.</p>}
-          {error && <div className="dialog-error" role="alert">{error}</div>}
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={saving || pendingRoles.size > 0} onClick={requestClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || pendingRoles.size > 0 || !name.trim() || !allowedProviders.length}>{saving ? "Saving…" : "Save changes"}</Button>
-          </DialogFooter>
-        </form>
-        <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Discard room changes?</DialogTitle></DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDiscardOpen(false)}>Keep editing</Button>
-              <Button variant="destructive" onClick={() => { setDiscardOpen(false); onClose(); }}>Discard changes</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </DialogContent>
-    </Dialog>
-  );
+function ModeratorPermissionsPanel({ snapshot, accessToken, connected, onNotice }: { snapshot: RoomSnapshot; accessToken: string; connected: boolean; onNotice: (text: string) => void }) {
+  const [pending, setPending] = useState(false); const [error, setError] = useState(""); const controller = useRef<AbortController | null>(null); const permissions = { ...DEFAULT_MODERATOR_PERMISSIONS, ...snapshot.room.settings.moderatorPermissions }; useEffect(() => () => controller.current?.abort(), []);
+  const update = async (key: keyof ModeratorPermissions, enabled: boolean) => { if (controller.current || !connected) return; controller.current = new AbortController(); setPending(true); setError(""); try { await requestJson(`/api/rooms/${snapshot.room.id}`, { method: "PATCH", accessToken, signal: controller.current.signal, body: JSON.stringify({ moderatorPermissions: { ...permissions, [key]: enabled } }) }); if (!controller.current.signal.aborted) onNotice("Moderator permissions updated"); } catch (cause) { if (!controller.current?.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not save permissions."); } finally { controller.current = null; setPending(false); } };
+  return <section className="room-management-section"><h3>Moderator permissions</h3><p className="room-setting-help">Changes apply immediately. Role appointment stays owner-only.</p>{([["chatParticipants", "Chat and participants"], ["djsPlayback", "DJs and playback"], ["roomDetailsMusic", "Room details and music policy"], ["accessInvites", "Access, password, and invitations"]] as Array<[keyof ModeratorPermissions, string]>).map(([key, label]) => <Toggle key={key} id={`moderator-permission-${key}`} label={label} checked={permissions[key]} disabled={pending || !connected} onChange={enabled => void update(key, enabled)} />)}{error && <p role="alert">{error}</p>}</section>;
+}
+function FallbackPanel({ snapshot, accessToken, connected, disabled, transport, onNotice }: { snapshot: RoomSnapshot; accessToken: string; connected: boolean; disabled: boolean; transport: Parameters<typeof requestSocketAction>[0]; onNotice: (text: string) => void }) {
+  const [sets, setSets] = useState<SavedSet[]>([]); const [setId, setSetId] = useState(""); const [pending, setPending] = useState(false); const [error, setError] = useState(""); const active = useRef(true); const pendingRef = useRef(false);
+  useEffect(() => { active.current = true; const controller = new AbortController(); void requestPrivateLibrary(accessToken, undefined, controller.signal).then(library => { if (active.current) setSets(library.sets); }).catch(cause => { if (active.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load saved sets."); }); return () => { active.current = false; controller.abort(); }; }, [accessToken]);
+  const change = (enabled: boolean, copy = false) => { if (pendingRef.current || !connected || disabled) return; pendingRef.current = true; setPending(true); setError(""); requestSocketAction(transport, "fallback:set", { enabled, ...(copy ? { setId } : {}) }, result => { pendingRef.current = false; if (!active.current) return; setPending(false); if (!result.ok) setError(result.error || "Could not update fallback music."); else onNotice("Fallback music updated"); }); };
+  return <section className="room-management-section"><details><summary>Fallback music</summary><div className="room-management-form"><p className="room-setting-help">{snapshot.room.radio?.fallbackCount ?? 0} room-owned tracks. Plays when DJs have no eligible tracks.</p><Toggle id="room-fallback-enabled" label="Enable fallback" checked={Boolean(snapshot.room.radio?.fallbackEnabled)} disabled={disabled || pending || !connected || !snapshot.room.radio?.fallbackCount} onChange={enabled => change(enabled)} /><Choice id="room-fallback-set" label="Copy saved set" value={setId} disabled={disabled || pending} onChange={setSetId} options={[["", "Choose a saved set"], ...sets.map(set => [set.id, `${set.name} (${set.tracks.length})`] as [string, string])]} /><p className="room-setting-help">The copied tracks become room content. Later private-library edits do not change them.</p><Button type="button" variant="outline" disabled={disabled || pending || !connected || !setId} onClick={() => change(true, true)}>{pending ? "Copying…" : "Copy to room fallback"}</Button>{error && <p role="alert">{error}</p>}</div></details></section>;
+}
+function RoomNoteEditor({ snapshot, connected, transport, onClose, onNotice }: { snapshot: RoomSnapshot; connected: boolean; transport: Parameters<typeof requestSocketAction>[0]; onClose: () => void; onNotice: (text: string) => void }) {
+  const [text, setText] = useState(snapshot.room.announcement?.text ?? ""); const [expiry, setExpiry] = useState(snapshot.room.announcement?.expiresAt ? "keep" : "none"); const [pending, setPending] = useState(false); const [error, setError] = useState(""); const expectedId = useRef(snapshot.room.announcement?.id ?? null); const active = useRef(true); const pendingRef = useRef(false); useEffect(() => () => { active.current = false; }, []);
+  const save = (remove = false) => { if (pendingRef.current || !connected) return; pendingRef.current = true; setPending(true); setError(""); requestSocketAction(transport, "room:announcement", { expectedId: expectedId.current, text: remove ? "" : text.trim(), expiresInMinutes: expiry === "keep" ? "keep" : expiry === "none" ? null : Number(expiry) }, result => { pendingRef.current = false; if (!active.current) return; setPending(false); if (!result.ok) setError(result.error ?? "Could not save note."); else { onNotice("Room note updated"); onClose(); } }); };
+  return <Dialog open onOpenChange={open => { if (!open && !pending) onClose(); }}><DialogContent showCloseButton={!pending}><DialogHeader><DialogTitle>Room note</DialogTitle></DialogHeader><form className="room-management-form" onSubmit={event => { event.preventDefault(); save(); }}><Label htmlFor="settings-note-text">Note</Label><Textarea id="settings-note-text" maxLength={500} value={text} disabled={pending} onChange={event => setText(event.target.value)} /><Choice id="settings-note-expiry" label="Remove after" value={expiry} disabled={pending} onChange={setExpiry} options={[...(snapshot.room.announcement?.expiresAt ? [["keep", "Keep expiry"] as [string, string]] : []), ["none", "Until removed"], ["60", "1 hour"], ["1440", "1 day"], ["10080", "7 days"]]} />{error && <p role="alert">{error}</p>}<DialogFooter className="room-management-footer">{expectedId.current && <Button type="button" variant="outline" disabled={pending} onClick={() => save(true)}>Remove note</Button>}<Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button><Button type="submit" disabled={pending || !connected || !text.trim()}>{pending ? "Saving…" : "Save note"}</Button></DialogFooter></form></DialogContent></Dialog>;
+}
+function dateInZone(timestamp: number, zone: string) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(timestamp); const part = (type: string) => parts.find(value => value.type === type)?.value; return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`; }
+function timestampInZone(local: string, zone: string) { const naive = Date.parse(`${local}Z`); if (!Number.isFinite(naive)) throw new Error("Choose a start and end time."); let candidate = naive; for (let step = 0; step < 3; step++) candidate += naive - Date.parse(`${dateInZone(candidate, zone)}Z`); if (dateInZone(candidate, zone) !== local) throw new Error("That time does not exist in the selected timezone."); return candidate; }
+function ScheduleEditor({ schedules, disabled, onChange }: { schedules: ThemeSchedule[]; disabled: boolean; onChange: (value: ThemeSchedule[]) => void }) {
+  const [editing, setEditing] = useState<string | null>(null); const [theme, setTheme] = useState(""); const [zone, setZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone); const [starts, setStarts] = useState(""); const [ends, setEnds] = useState(""); const [note, setNote] = useState(""); const [error, setError] = useState("");
+  const add = () => { try { const startsAt = timestampInZone(starts, zone), endsAt = timestampInZone(ends, zone); if (endsAt <= startsAt) throw new Error("End time must be after start time."); if (schedules.filter(item => item.id !== editing).some(item => startsAt < item.endsAt && endsAt > item.startsAt)) throw new Error("Theme schedules cannot overlap."); if (!editing && schedules.length >= 10) throw new Error("Use up to ten upcoming schedules."); onChange([...schedules.filter(item => item.id !== editing), { id: editing ?? crypto.randomUUID(), theme: theme.trim(), startsAt, endsAt, timeZone: zone, ...(note.trim() ? { note: note.trim() } : {}) }].sort((a, b) => a.startsAt - b.startsAt)); setEditing(null); setTheme(""); setStarts(""); setEnds(""); setNote(""); setError(""); } catch (cause) { setError(cause instanceof Error ? cause.message : "Check the schedule times."); } };
+  return <div className="room-management-form"><ul className="room-management-list">{schedules.map(item => <li key={item.id}><strong>{item.theme}</strong><small>{new Date(item.startsAt).toLocaleString(undefined, { timeZone: item.timeZone })} — {new Date(item.endsAt).toLocaleString(undefined, { timeZone: item.timeZone })} ({item.timeZone})</small><div className="room-management-actions"><Button type="button" variant="outline" disabled={disabled} onClick={() => { setEditing(item.id); setTheme(item.theme); setZone(item.timeZone); setStarts(dateInZone(item.startsAt, item.timeZone)); setEnds(dateInZone(item.endsAt, item.timeZone)); setNote(item.note ?? ""); }}>Edit</Button><Button type="button" variant="ghost" disabled={disabled} onClick={() => onChange(schedules.filter(value => value.id !== item.id))}>Remove schedule</Button></div></li>)}</ul><Label htmlFor="scheduled-theme">Theme</Label><Input id="scheduled-theme" value={theme} maxLength={160} disabled={disabled} onChange={event => setTheme(event.target.value)} /><Label htmlFor="scheduled-theme-zone">Timezone</Label><Input id="scheduled-theme-zone" value={zone} disabled={disabled} onChange={event => setZone(event.target.value)} /><Label htmlFor="scheduled-theme-start">Start</Label><Input id="scheduled-theme-start" type="datetime-local" value={starts} disabled={disabled} onChange={event => setStarts(event.target.value)} /><Label htmlFor="scheduled-theme-end">End</Label><Input id="scheduled-theme-end" type="datetime-local" value={ends} disabled={disabled} onChange={event => setEnds(event.target.value)} /><Label htmlFor="scheduled-theme-note">Session note (optional)</Label><Textarea id="scheduled-theme-note" maxLength={500} value={note} disabled={disabled} onChange={event => setNote(event.target.value)} />{error && <p role="alert">{error}</p>}<Button type="button" variant="outline" disabled={disabled || !theme.trim() || !starts || !ends} onClick={add}>{editing ? "Update schedule draft" : "Add schedule to draft"}</Button><p className="room-setting-help">Save changes to apply schedules. Session notes keep the room note intact.</p></div>;
 }

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS, roomAllowsProvider } from "../shared/providers.js";
 import type { Room, SnapshotRoom, Track, User } from "./types.js";
+import { effectiveRoomPolicy, roomCapabilities } from "../shared/room-policy.js";
+import { activeDjRestriction, radioState, recordTrackStart, roomSession, skipVoteSummary, trackEligibility } from "./radio-policy.js";
+import { appendModerationLog } from "./room-access.js";
 
 export class GracePeriodRegistry {
   private timers = new Map<string, NodeJS.Timeout>();
@@ -78,7 +81,9 @@ export function normalizeRadioState(room: Room) {
     position: playingTrack && typeof playback.position === "number" && Number.isFinite(playback.position)
       ? Math.max(0, playback.position) : 0,
     updatedAt: typeof playback.updatedAt === "number" && Number.isFinite(playback.updatedAt)
-      ? playback.updatedAt : Date.now()
+      ? playback.updatedAt : Date.now(),
+    origin: playback.origin === "fallback" ? "fallback" : "dj",
+    revision: typeof playback.revision === "number" ? playback.revision : 0
   };
   room.createdAt = typeof room.createdAt === "number" && Number.isFinite(room.createdAt) ? room.createdAt : Date.now();
   room.isPublic = typeof room.isPublic === "boolean" ? room.isPublic : true;
@@ -95,7 +100,8 @@ export function normalizeRadioState(room: Room) {
   }
   delete room.queue;
 
-  if (room.playback.track) {
+  radioState(room);
+  if (room.playback.track && room.playback.origin !== "fallback") {
     room.djUserId = room.playback.track.addedBy.id;
     if (!room.djQueueUserIds.includes(room.djUserId)) room.djQueueUserIds.push(room.djUserId);
   } else {
@@ -125,7 +131,10 @@ function isUsableTrack(value: unknown): value is Track {
 }
 
 export function canJoinDjQueue(room: Room, userId: string) {
-  return room.settings.djAccess !== "roles" ||
+  const policy=effectiveRoomPolicy(room);
+  if (activeDjRestriction(room,userId)) return false;
+  if (!room.djQueueUserIds.includes(userId) && (policy.djJoinLocked || (policy.djCapacity && room.djQueueUserIds.length>=policy.djCapacity))) return false;
+  return policy.djAccess !== "roles" ||
     room.ownerUserId === userId ||
     room.moderatorUserIds.includes(userId) ||
     room.djRoleUserIds.includes(userId);
@@ -150,28 +159,48 @@ export function archiveCurrentTrack(room: Room) {
  */
 export function advanceRadio(room: Room, now = Date.now()) {
   archiveCurrentTrack(room);
-
+  const state=radioState(room,now),revision=(room.playback.revision??0)+1;
+  const endingId=room.playback.track?.id;
+  for(const restriction of room.moderation?.restrictions??[]) if(restriction.deferUntilTrackId===endingId&&restriction.revokedAt===null){
+    if(restriction.expiresAt===null||restriction.expiresAt>now)removeDj(room,restriction.userId);
+    delete restriction.deferUntilTrackId;
+    if(restriction.removeAfterTrackOnly){restriction.revokedAt=now;appendModerationLog(room,{actorId:restriction.actorId,action:"dj-removal-completed",targetUserId:restriction.userId,reason:"",restrictionId:restriction.id},now);}
+  }
+  const clear=()=>{room.djUserId=null;room.playback={track:null,playing:false,position:0,updatedAt:now,origin:"dj",revision};room.vibe=null;state.skipVotes={trackId:null,userIds:[]};return null;};
+  if (state.stopAfterTrackId && state.stopAfterTrackId===endingId) {state.stopped=true;state.stopAfterTrackId=null;state.turn=undefined;return clear();}
+  if (state.stopped) return clear();
+  const start=(track:Track,userId:string|null,origin:"dj"|"fallback")=>{
+    track.playedAt=now;room.djUserId=userId;room.playback={track,playing:true,position:0,updatedAt:now,origin,revision};room.vibe={trackId:track.id,votes:{}};recordTrackStart(room,track,now);return track;
+  };
+  const rulesAccepted=(userId:string)=>!room.settings.requireRulesAcceptance||room.moderation?.rulesAcceptance?.[userId]===(room.settings.rulesVersion??1);
+  if(state.turn && state.turn.used<state.turn.limit && room.djQueueUserIds.includes(state.turn.userId) && !activeDjRestriction(room,state.turn.userId,now) && rulesAccepted(state.turn.userId)) {
+    const queue=room.djQueues[state.turn.userId]??[],index=queue.findIndex(t=>!trackEligibility(room,t,now));
+    if(index>=0){state.turn.used++;return start(queue.splice(index,1)[0],state.turn.userId,"dj");}
+  }
+  state.turn=undefined;
   const turnsToCheck = room.djQueueUserIds.length;
   for (let index = 0; index < turnsToCheck; index += 1) {
     const userId = room.djQueueUserIds.shift()!;
     room.djQueueUserIds.push(userId);
     const queue = room.djQueues[userId] || [];
-    const trackIndex = queue.findIndex(track => roomAllowsProvider(room.settings, track.provider));
+    if(activeDjRestriction(room,userId,now)||!rulesAccepted(userId)) continue;
+    const trackIndex = queue.findIndex(track => !trackEligibility(room,track,now));
     if (trackIndex < 0) continue;
     const [track] = queue.splice(trackIndex, 1);
 
-    track.playedAt = now;
-
-    room.djUserId = userId;
-    room.playback = { track, playing: true, position: 0, updatedAt: now };
-    room.vibe = { trackId: track.id, votes: {} };
-    return track;
+    state.turn={userId,limit:effectiveRoomPolicy(room,now).songsPerTurn??1,used:1};
+    return start(track,userId,"dj");
   }
 
-  room.djUserId = null;
-  room.playback = { track: null, playing: false, position: 0, updatedAt: now };
-  room.vibe = null;
-  return null;
+  if(state.fallback.enabled&&state.fallback.tracks.length){
+    for(let offset=0;offset<state.fallback.tracks.length;offset++) {
+      const index=(state.fallback.cursor+offset)%state.fallback.tracks.length,source=state.fallback.tracks[index];
+      if(trackEligibility(room,source,now,true))continue;
+      state.fallback.cursor=(index+1)%state.fallback.tracks.length;
+      return start({...structuredClone(source),id:randomUUID()},null,"fallback");
+    }
+  }
+  return clear();
 }
 
 export function privateQueue(room: Room, userId: string): Track[] {
@@ -307,7 +336,7 @@ export function sameRecording(first: Pick<Track, "provider" | "providerId" | "ca
 export function pruneUnauthorizedDjs(room: Room) {
   if (room.settings.djAccess !== "roles") return;
   const previousDj = room.djUserId;
-  room.djQueueUserIds = room.djQueueUserIds.filter(id => canJoinDjQueue(room, id));
+  room.djQueueUserIds = room.djQueueUserIds.filter(id => room.ownerUserId===id||room.moderatorUserIds.includes(id)||room.djRoleUserIds.includes(id));
   if (previousDj && !room.djQueueUserIds.includes(previousDj)) advanceRadio(room);
 }
 
@@ -339,8 +368,31 @@ export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track,
  * This is the queue-privacy boundary: `djQueues` must never cross it. The
  * snapshot's `queue` field is only the requesting listener's own queue.
  */
-export function roomForListener(room: Room, userId: string): SnapshotRoom {
-  const { djQueues: _privateQueues, queue: _legacyQueue, ...sharedRoom } = room;
+export function roomForListener(room: Room, userId: string, onlineIds:string[]=[]): SnapshotRoom {
   const queue = Object.hasOwn(room.djQueues, userId) ? room.djQueues[userId] : [];
-  return { ...sharedRoom, queue: [...queue] };
+  const state=radioState(room),session=roomSession(room);
+  const status=room.moderation?.restrictions?.filter(r=>r.userId===userId&&r.revokedAt===null&&(r.expiresAt===null||r.expiresAt>Date.now()))??[];
+  const capabilities=roomCapabilities(room,userId);
+  const openReports=capabilities.staff?Math.min(999,(room.moderation?.reports??[]).filter(report=>report.status==="open"&&(capabilities.chatParticipants||report.category==="track-exception"&&capabilities.djsPlayback)).length):undefined;
+  return {
+    id:room.id,name:room.name,ownerUserId:room.ownerUserId,
+    moderatorUserIds:[...room.moderatorUserIds],djRoleUserIds:[...room.djRoleUserIds],
+    isPublic:room.isPublic,passwordProtected:room.passwordProtected,settings:{...room.settings},
+    activeTheme:session.theme,announcement:room.announcement,djUserId:room.djUserId,
+    djQueueUserIds:[...room.djQueueUserIds],history:[...room.history],
+    playback:structuredClone(room.playback),vibe:room.vibe,createdAt:room.createdAt,
+    policyRevision:room.policyRevision,queue:[...queue],sessionNote:session.sessionNote,capabilities,
+    ownStatus:{
+      chatTimeoutUntil:status.find(r=>r.kind==="chat-timeout")?.expiresAt,
+      djSuspendedUntil:status.find(r=>r.kind==="dj-suspension")?.expiresAt,
+      rulesAccepted:!room.settings.requireRulesAcceptance||room.moderation?.rulesAcceptance?.[userId]===(room.settings.rulesVersion??1),
+      warnings:room.moderation?.warnings.filter(w=>w.userId===userId&&w.readAt===null).map(w=>({id:w.id,text:w.text,createdAt:w.createdAt}))??[],openReports
+    },
+    radio:{stopped:state.stopped,stopAfterTrackId:state.stopAfterTrackId,
+      fallbackEnabled:state.fallback.enabled,fallbackCount:state.fallback.tracks.length,
+      turn:room.playback.origin!=="fallback"&&state.turn?{used:state.turn.used,limit:state.turn.limit}:undefined,
+      skipVote:skipVoteSummary(room,userId,onlineIds),
+      ineligibleTracks:Object.fromEntries(queue.flatMap(track=>{const error=trackEligibility(room,track);return error?[[track.id,error]]:[];}))
+    }
+  };
 }

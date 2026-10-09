@@ -4,6 +4,8 @@ import { ChatRateLimit, ChatWriteConflict, createChatWritePolicy, type ChatWrite
 import { canonicalMessage, chatMessageSchema, chatReactionSchema, chatPollVoteSchema, immutableMessageKey, type ChatMessageInput, type ChatPollVoteEvent, type ChatReply, type RelayMessage } from './chat-validation.js'
 import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
+import type { ChatCommandService } from './chat-command-service.js'
+import { mountDurableChatRoutes } from './chat-command-routes.js'
 
 interface Cursor { createdAt: string; id: string }
 interface HistoryRow {
@@ -22,6 +24,7 @@ export interface ChatHistoryRouteOptions {
   getUser?: (userId: string, roomSlug: string) => Promise<User | null>
   writePolicy?: ChatWritePolicy
   onPollVote?: (roomSlug: string, event: ChatPollVoteEvent, userId: string) => Promise<void>
+  commands?: ChatCommandService
 }
 const SELECT = 'id, content, message_type, media_url, storage_path, mentions, user_id, user_name, avatar_seed, created_at, reply_to_id, poll_options, soundspin_message_reactions(emoji, user_id), soundspin_poll_votes(user_id, option_index, revision)'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -97,6 +100,7 @@ async function enrich(client: SupabaseClient, roomSlug: string, rows: HistoryRow
 
 /** Every endpoint authorizes BEFORE privileged reads, including target/reply/context queries. */
 export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOptions) {
+  if(options.commands){mountDurableChatRoutes(app,options,options.commands);return}
   const writePolicy = options.writePolicy || createChatWritePolicy()
   const replyWithReadCheck = async (userId: string, room: string, response: Response, payload: unknown) => {
     if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }

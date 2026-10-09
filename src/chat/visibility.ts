@@ -76,5 +76,5 @@ export function createChatVisibilityState(store: ReturnType<typeof createChatVis
 }
 
 export function getVisibleMessagePreview(message: ChatMessage | ChatReply, hiddenIds: ReadonlySet<string>) {
-  return hiddenIds.has(message.id) ? HIDDEN_MESSAGE_PREVIEW : getMessagePreview(message)
+  return !message.removedAt&&hiddenIds.has(message.id) ? HIDDEN_MESSAGE_PREVIEW : getMessagePreview(message)
 }

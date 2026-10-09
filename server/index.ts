@@ -22,13 +22,21 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
 import { profileUpdateSchema } from "./profile-fields.js";
-import { allowedProvidersSchema } from "./room-settings.js";
+import { roomSettingsPatchSchema } from "./room-settings.js";
+import { accessMode, chatParticipationError, effectiveRoomPolicy, isRoomStaff } from "../shared/room-policy.js";
+import { canInviteRoom, isRoomBanned, requireNotBanned, requireProtectedTarget, requireRoomCapability } from "./room-access.js";
+import { ChatCommandService } from "./chat-command-service.js";
+import { verifyTrackDuration } from "./track-metadata.js";
+import { RoomSessionScheduler } from "./room-session-scheduler.js";
+import { radioState } from "./radio-policy.js";
+import { ModerationService } from "./moderation-service.js";
+import { mountModerationRoutes } from "./moderation-routes.js";
 import { mountPrivateLibraryRoutes } from "./library-routes.js";
 import { mountSocialRoutes } from "./social-routes.js";
 import { SocialStore } from "./social-store.js";
 import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./chat-history.js";
 import { createChatRelay } from "./chat-relay.js";
-import { resolveChatMediaUrl } from "./chat-media.js";
+import { cleanupExpiredChatMedia, resolveChatMediaUrl } from "./chat-media.js";
 import { withPublicRoomPreview } from "./directory-preview.js";
 import { createSavedSetResolver, SetImportRegistry } from "./saved-set.js";
 import { validateServerConfig } from "./config.js";
@@ -101,7 +109,8 @@ const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const queueUndo = new QueueUndoRegistry();
 const setImports = new SetImportRegistry();
 const roomEntryLimiter = new RoomEntryLimiter();
-const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi });
+const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey });
+const sessionScheduler=new RoomSessionScheduler(roomCommands,broadcast,id=>uniqueUsers(roomUsers.get(id)?.values()??[]).length);
 const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
   await roomCommands.execute(room, draft => {
     if (draft.announcement?.expiresAt !== null && draft.announcement?.expiresAt !== undefined && draft.announcement.expiresAt <= Date.now()) draft.announcement = null;
@@ -112,30 +121,25 @@ const signupAttemptLimiter = new SignupAttemptLimiter(10, 15 * 60 * 1000);
 const idleRooms = new IdleRoomRegistry(roomId => {
   if (roomUsers.get(roomId)?.size) return true;
   const room = store.getRoom(roomId);
+  if(room&&(room.settings.themeSchedules?.some(s=>s.endsAt>Date.now())||radioState(room).fallback.enabled))return false;
   if (room?.djQueueUserIds.some(id => hasPendingDjEviction(roomId, id))) return false;
   if (!store.releaseRoom(roomId)) return false;
   announcementExpiries.cancel(roomId);
   queueUndo.releaseRoom(roomId);
   setImports.releaseRoom(roomId);
   roomDjUsers.delete(roomId);
+  sessionScheduler.release(roomId);
   return true;
 });
 function watchIdleRoom(roomId: string) { if (store.usesSupabase && !roomUsers.get(roomId)?.size) idleRooms.schedule(roomId); }
 const roomCreateSchema = z.object({
   name: z.string().trim().min(1).max(48),
   isPublic: z.boolean().default(true),
+  accessMode:z.enum(["public","unlisted","members"]).optional(),
   password: z.string().max(128).optional()
 });
 
-const roomSettingsSchema = z.object({
-  name: z.string().trim().min(1).max(48).optional(),
-  description: z.string().trim().max(240).optional(),
-  isPublic: z.boolean().optional(),
-  password: z.union([z.string().max(128), z.null()]).optional(),
-  djAccess: z.enum(["everyone", "roles"]).optional(),
-  themePrompt: z.string().trim().max(160).nullable().optional(),
-  allowedProviders: allowedProvidersSchema.optional()
-}).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
+const roomSettingsSchema = roomSettingsPatchSchema;
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
 
@@ -195,7 +199,8 @@ const socialStore = new SocialStore({
   supabase: supabaseAdmin,
   getRoomAccess: async (slug, userId) => {
     const access = await store.getRoomAccess(slug, userId);
-    return { ...access, passwordProtected: Boolean(access.passwordHash) };
+    const room=await store.loadRoom(slug);
+    return { ...access, canInvite:Boolean(room&&canInviteRoom(room,userId,Date.now(),access.role)), passwordProtected: Boolean(access.passwordHash) };
   },
   getProfile: userId => store.getProfile(userId),
   getRoom: async slug => { const room = await store.loadRoom(slug); return room ? { name: room.name } : null; },
@@ -208,13 +213,15 @@ const socialStore = new SocialStore({
 });
 mountSocialRoutes(app, socialStore, getApiUserId);
 async function canWriteRoomChat(userId: string, roomSlug: string) {
+  const room=await store.loadRoom(roomSlug);
+  if(!room||isRoomBanned(room,userId))return false;
   const access = await store.getRoomAccess(roomSlug, userId);
-  return access.exists && (access.isPublic || Boolean(access.role)) &&
+  return access.exists && !access.banned && (access.isPublic || Boolean(access.role)) &&
     [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
 }
 const chatWritePolicy = createChatWritePolicy();
 /** HTTP poll mutations and the relay share the same fresh admitted recipient gate. */
-async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll', payload: unknown,
+async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll' | 'chat:removed', payload: unknown,
   origin: { socketId?: string; userId: string }) {
   const recipients = [...(roomUsers.get(roomId) || [])];
   const [allowed, canWrite] = await Promise.all([
@@ -233,18 +240,29 @@ async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:re
     if (allowed.has(user.id) && current?.room.id === roomId && current.user.id === user.id) io.to(socketId).emit(event, payload);
   }
 }
+const chatCommands=new ChatCommandService({client:supabaseAdmin,
+  withRoomOperation:(roomId,run)=>store.withRoomOperation(roomId,run),
+  getUser:async(userId,roomId)=>[...(roomUsers.get(roomId)?.values()??[])].find(u=>u.id===userId)??null,
+  authorize:async(userId,roomId,kind,targetUserId)=>{
+    if(!await canWriteRoomChat(userId,roomId))throw new Error("Join this room before participating.");
+    const room=await store.loadRoom(roomId);if(!room)throw new Error("Room not found.");requireNotBanned(room,userId);
+    if(kind==="remove"){requireRoomCapability(room,userId,"chatParticipants");if(targetUserId&&room.ownerUserId!==userId)requireProtectedTarget(room,userId,targetUserId);return;}
+    const error=chatParticipationError(room,userId,kind);if(error)throw new Error(error);
+    return{slowModeSeconds:effectiveRoomPolicy(room).slowModeSeconds??0,bypassSlowMode:isRoomStaff(room,userId)};
+  },emit:(roomId,event,payload,userId)=>emitAdmittedChat(roomId,event,payload,{userId})});
 const chatRelay = createChatRelay({
+  commands:chatCommands,
   writePolicy: chatWritePolicy,
   getMembership,
   canWriteRoom: canWriteRoomChat,
-  // The standalone JSON mode has no durable chat table. Configured production
-  // always checks stored IDs and propagates lookup failure before broadcasting.
+  // The command service owns durable messages in Supabase and standalone mode.
   loadMessageById: id => authEnabled ? loadStoredChatMessage(supabaseAdmin, id) : Promise.resolve(null),
   loadReply: (roomId, messageId) => loadChatReply(supabaseAdmin, roomId, messageId),
   resolveMediaUrl: async (roomId, storagePath, userId) => (await resolveChatMediaUrl(supabaseAdmin, roomId, storagePath, userId)).url,
   emitToRoom: emitAdmittedChat
 });
 mountChatHistoryRoutes(app, {
+  commands:chatCommands,
   writePolicy: chatWritePolicy,
   client: supabaseAdmin,
   getUserId: getApiUserId,
@@ -252,13 +270,28 @@ mountChatHistoryRoutes(app, {
   onPollVote: (roomId, event, userId) => emitAdmittedChat(roomId, 'chat:poll', { roomId, poll: event }, { userId }),
   getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
   canReadRoom: async (userId, roomSlug) => {
+    const room=await store.loadRoom(roomSlug);if(!room||isRoomBanned(room,userId))return false;
     const access = await store.getRoomAccess(roomSlug, userId);
-    if (!access.exists || (!access.isPublic && !access.role)) return false;
+    if (!access.exists || access.banned || (!access.isPublic && !access.role)) return false;
     if (access.isPublic && !access.passwordHash) return true;
     // Protected/private history requires the same live admission as the room.
     return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
   }
 });
+const moderation=new ModerationService(store,{
+  broadcast,isAdmitted:(roomId,userId)=>[...(roomUsers.get(roomId)?.values()??[])].some(u=>u.id===userId),
+  onlineUsers:roomId=>uniqueUsers(roomUsers.get(roomId)?.values()??[]),cancelDjEviction,forgetDj:forgetDjUser,
+  revokeAdmission:async(roomId,userId,reason)=>{
+    cancelDjEviction(roomId,userId);
+    for(const [socketId,user] of [...(roomUsers.get(roomId)??[])])if(user.id===userId){socketRooms.delete(socketId);roomUsers.get(roomId)?.delete(socketId);const socket=io.sockets.sockets.get(socketId);await socket?.leave(roomId);socket?.emit("room:removed",{roomId,error:reason});}
+    if(!roomUsers.get(roomId)?.size)roomUsers.delete(roomId);
+    const room=store.getRoom(roomId);if(room){await sessionScheduler.reconcilePresence(room);broadcastPresence(room);watchIdleRoom(roomId);}
+  },
+  removeMessage:(roomId,actorId,messageId,requestId,reason)=>chatCommands.removeMessage(roomId,actorId,messageId,requestId,reason),
+  externalLog:roomId=>chatCommands.listRemovalLog(roomId),
+  validateMessage:async(roomId,messageId)=>{const message=await chatCommands.loadMessage(messageId);return message?.roomId===roomId?{userId:message.userId}:null;}
+});
+mountModerationRoutes(app,moderation,getApiUserId);
 
 app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
   response.set("Cache-Control", "no-store");
@@ -322,8 +355,9 @@ function createRoom(id: string, ownerUserId: string, name?: string): Room {
 /** Build the personalized state sent to one listener. */
 function snapshot(room: Room, userId: string): RoomSnapshot {
   announcementExpiries.watch(room);
+  sessionScheduler.watch(room);
   return {
-    room: { ...roomForListener(room, userId), announcement: activeAnnouncement(room.announcement) },
+    room: { ...roomForListener(room, userId,uniqueUsers(roomUsers.get(room.id)?.values()??[]).map(u=>u.id)), announcement: activeAnnouncement(room.announcement) },
     // Presence is socket-based internally, but listeners are unique accounts.
     users: uniqueUsers(roomUsers.get(room.id)?.values() || []),
     djUsers: [...(roomDjUsers.get(room.id)?.values() || [])]
@@ -340,6 +374,8 @@ function broadcastPresence(room: Room) {
     roomUsers.get(room.id)?.values() || [],
     roomDjUsers.get(room.id)?.values() || []
   ));
+  const onlineIds=uniqueUsers(roomUsers.get(room.id)?.values()??[]).map(u=>u.id);
+  for(const [socketId,user] of roomUsers.get(room.id)??[])io.to(socketId).emit("room:radio",{roomId:room.id,radio:roomForListener(room,user.id,onlineIds).radio});
 }
 
 function broadcast(room: Room) {
@@ -416,7 +452,7 @@ function getMembership(socketId: string) {
   if (!roomId) return null;
   const room = store.getRoom(roomId);
   const user = roomUsers.get(roomId)?.get(socketId);
-  return room && user ? { room, user } : null;
+  return room && user && !isRoomBanned(room,user.id) ? { room, user } : null;
 }
 
 async function leaveCurrentRoom(socketId: string) {
@@ -435,6 +471,7 @@ async function leaveCurrentRoom(socketId: string) {
     scheduleDjEviction(room, leavingUser);
   }
   if (users?.size === 0) roomUsers.delete(roomId);
+  await sessionScheduler.reconcilePresence(room);
   broadcastPresence(room);
   watchIdleRoom(roomId);
 }
@@ -508,6 +545,8 @@ io.on("connection", (socket) => {
         }
       }
       const access = await store.getRoomAccess(roomId, user.id);
+      const admissionRoom=await store.loadRoom(roomId);
+      if(admissionRoom&&isRoomBanned(admissionRoom,user.id))return reply?.({ok:false,error:"You are banned from this room."});
       if (authEnabled && !access.exists) {
         return reply?.({ ok: false, error: "That room does not exist." });
       }
@@ -525,7 +564,7 @@ io.on("connection", (socket) => {
 
       const room = await store.loadRoom(roomId) ||
         store.getOrCreateLocalRoom(roomId, () => createRoom(roomId, user.id, roomName));
-      await store.recordRoomMember(roomId, user.id);
+      await store.recordRoomMember(roomId, user.id,user);
       if (!socket.connected) return;
 
       // Switch rooms only after the destination has been authorized and loaded.
@@ -547,6 +586,7 @@ io.on("connection", (socket) => {
       const changed = await store.changeRoom(room, draft => {
         assertAuthorized();
         if (!socket.connected || socketRooms.get(socket.id) !== roomId) throw new RoomCommandError("This room session has ended.");
+        requireNotBanned(draft,user.id);
         if (!draft.ownerUserId) draft.ownerUserId = user.id;
         normalizeRadioState(draft);
         if (draft.vibe && draft.playback.track) delete draft.vibe.votes[draft.playback.track.addedBy.id];
@@ -559,6 +599,7 @@ io.on("connection", (socket) => {
         } };
       });
       if (!socket.connected) return;
+      await sessionScheduler.reconcilePresence(room);
       if (changed) {
         // Legacy normalization or stale-lineup cleanup changed shared radio state.
         broadcast(room);
@@ -594,7 +635,8 @@ io.on("connection", (socket) => {
     socket, onAction, store, commands: roomCommands, getMembership, assertAuthorized,
     broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
     watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
-    resolveTrack: track => resolveTrackMappings(track, spotifyApi, appleMusicApi), resolveSavedRecording
+    resolveTrack: async track => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi);return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};}, resolveSavedRecording,
+    onlineUserIds:id=>uniqueUsers(roomUsers.get(id)?.values()??[]).map(u=>u.id)
   });
   for (const kind of ["message", "reaction", "typing"] as const) {
     onAction(`chat:${kind}`, async (payload, reply) => { reply?.(await chatRelay.handle(socket.id, kind, payload)); });
@@ -650,7 +692,8 @@ app.get("/api/rooms", async (request, response) => {
       [...roomUsers.entries()].map(([slug, users]) => [slug, uniqueUsers(users.values()).length])
     );
     const rooms = await store.listRooms(userId, listenerCounts);
-    response.json({ rooms: rooms.map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
+    const q=typeof request.query.q==="string"?request.query.q.trim().toLowerCase().slice(0,100):"",tag=typeof request.query.tag==="string"?request.query.tag.trim().toLowerCase():"",language=typeof request.query.language==="string"?request.query.language.trim().toLowerCase():"";
+    response.json({ rooms: rooms.filter(room=>(!q||`${room.name} ${room.description??""} ${(room.tags??[]).join(" ")}`.toLowerCase().includes(q))&&(!tag||room.tags?.some(t=>t.toLowerCase()===tag))&&(!language||room.language?.toLowerCase()===language)).map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
   } catch (error) {
     response.status(500).json({ error: error instanceof Error ? error.message : "Could not load rooms." });
   }
@@ -665,7 +708,8 @@ app.post("/api/rooms", express.json(), async (request, response) => {
   }
   try {
     const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
-    room.isPublic = parsed.data.isPublic;
+    room.settings.accessMode=parsed.data.accessMode??(parsed.data.isPublic?"public":"members");
+    room.isPublic = room.settings.accessMode!=="members";
     room.passwordProtected = Boolean(parsed.data.password?.trim());
     await store.createRoom(room, await hashRoomPassword(parsed.data.password));
     watchIdleRoom(room.id);
@@ -684,7 +728,7 @@ app.put("/api/rooms/:slug/favorite", express.json(), async (request, response) =
   if (!slug.success || !parsed.success) return response.status(400).json({ error: "Invalid favorite." });
   try {
     const access = await store.getRoomAccess(slug.data, userId);
-    if (!access.exists || (!access.isPublic && !access.role)) {
+    if (!access.exists || access.banned || (!access.isPublic && !access.role)) {
       return response.status(404).json({ error: "Room not found." });
     }
     await store.setFavorite(slug.data, userId, parsed.data.favorite);
@@ -704,14 +748,10 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
   }
   try {
     const previousDjs = [...(store.getRoom(slug.data)?.djQueueUserIds || [])];
+    const {password,...settings}=parsed.data;
     const room = await store.updateRoomSettings(slug.data, userId, {
-      name: parsed.data.name,
-      isPublic: parsed.data.isPublic,
+      ...settings,
       passwordHash: parsed.data.password === undefined ? undefined : await hashRoomPassword(parsed.data.password),
-      djAccess: parsed.data.djAccess,
-      description: parsed.data.description,
-      themePrompt: parsed.data.themePrompt,
-      allowedProviders: parsed.data.allowedProviders
     });
     if (room) {
       for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {
@@ -783,6 +823,18 @@ if (process.env.NODE_ENV === "production") {
 }
 
 await store.init();
+for(const room of await store.listSessionRooms())await sessionScheduler.recover(room);
+let mediaCleanup: Promise<void> | null = null;
+function cleanChatMedia() {
+  if (!supabaseAdmin || mediaCleanup || shuttingDown) return;
+  mediaCleanup = cleanupExpiredChatMedia(supabaseAdmin)
+    .then(() => undefined)
+    .catch(error => { console.error("Could not clean up expired chat uploads.", error); })
+    .finally(() => { mediaCleanup = null; });
+}
+cleanChatMedia();
+const mediaCleanupTimer = setInterval(cleanChatMedia, 15 * 60 * 1000);
+mediaCleanupTimer.unref();
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
   const address = httpServer.address();
   console.log(`Lydman listening on http://${process.env.HOST || "0.0.0.0"}:${typeof address === "object" && address ? address.port : port}`);
@@ -793,12 +845,15 @@ async function shutdown() {
   shuttingDown = true;
   djEvictions.clear();
   announcementExpiries.clear();
+  sessionScheduler.clear();
+  clearInterval(mediaCleanupTimer);
   idleRooms.clear();
   const deadline = setTimeout(() => process.exit(1), 10_000);
   deadline.unref();
   try {
     await new Promise<void>((resolve) => io.close(() => resolve()));
     await Promise.allSettled([...activeSocketActions]);
+    if (mediaCleanup) await mediaCleanup;
     await store.flush();
     clearTimeout(deadline);
   } catch (error) {

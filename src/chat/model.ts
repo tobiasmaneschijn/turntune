@@ -14,6 +14,7 @@ export interface ChatMessage {
   reactions?: ChatReaction[]
   poll?: ChatPoll
   createdAt: string
+  removedAt?: string
 }
 
 /** A small immutable snapshot keeps replies readable without loading a thread. */
@@ -24,6 +25,17 @@ export interface ChatReply {
   mediaUrl?: string
   user: Pick<User, 'id' | 'name' | 'isAppAdmin'>
   mentions?: ChatMention[]
+  removedAt?: string
+}
+export interface ChatRemovedEvent { messageId:string;removedAt:string }
+export function applyRemovalEvents(messages:ChatMessage[],events:ChatRemovedEvent[]):ChatMessage[]{
+  const removed=new Map(events.map(event=>[event.messageId,event.removedAt]))
+  return messages.map(message=>{
+    const removedAt=message.removedAt||removed.get(message.id)
+    const replyRemoved=message.replyTo?.removedAt||removed.get(message.replyTo?.id||'')
+    const replyTo=message.replyTo&&replyRemoved?{...message.replyTo,content:'Message removed',type:'text' as const,mediaUrl:undefined,mentions:[],removedAt:replyRemoved}:message.replyTo
+    return removedAt?{id:message.id,user:message.user,createdAt:message.createdAt,content:'Message removed',type:'text',removedAt,replyTo,reactions:[]}:replyTo!==message.replyTo?{...message,replyTo}:message
+  })
 }
 
 export interface ChatMention {
@@ -94,6 +106,7 @@ export function createReplySnapshot(message: ChatMessage): ChatReply {
       name: message.user.name,
       isAppAdmin: message.user.isAppAdmin,
     },
+    removedAt:message.removedAt,
   }
 }
 
@@ -109,7 +122,7 @@ export function mergeChatMessages(
 
   for (const message of persistedMessages) messagesById.set(message.id, message)
   for (const message of realtimeMessages) {
-    if (!messagesById.has(message.id)) messagesById.set(message.id, message)
+    if (!messagesById.has(message.id)||message.removedAt&&!messagesById.get(message.id)?.removedAt) messagesById.set(message.id, message)
   }
 
   return [...messagesById.values()].sort(compareChatMessages)
@@ -298,8 +311,8 @@ export function reactionLabel(group: ReactionGroup, currentUserId: string): stri
     : visibleNames.join(', ')
 }
 
-export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type'>): string {
-  return message.content || (message.type === 'gif' ? 'GIF' : 'Image')
+export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type' | 'removedAt'>): string {
+  return message.removedAt?'Message removed':message.content || (message.type === 'gif' ? 'GIF' : 'Image')
 }
 
 export function startsNewDay(message: ChatMessage, previous?: ChatMessage): boolean {

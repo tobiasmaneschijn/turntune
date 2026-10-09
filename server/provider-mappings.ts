@@ -39,7 +39,7 @@ export async function resolveTrackMappings(
   input: TrackInput,
   spotify: SpotifyApi,
   appleMusic: AppleMusicApi
-): Promise<Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs">>> {
+): Promise<Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>> {
   const mappings: NonNullable<Track["mappings"]> = {
     [input.provider]: sourceMapping(input)
   };
@@ -47,6 +47,7 @@ export async function resolveTrackMappings(
   if (input.provider === "mixcloud") return { ...input, canonicalId: `mixcloud:${input.providerId}`, mappings };
   let source = { ...input };
   let isrc: string | undefined;
+  let durationVerified = false;
 
   try {
     if (input.provider === "spotify" && spotify.configured) {
@@ -60,6 +61,7 @@ export async function resolveTrackMappings(
         durationMs: resolved.durationMs
       };
       isrc = resolved.isrc;
+      durationVerified = Boolean(resolved.durationMs);
       mappings.spotify = mapping(resolved, "source");
     } else if (input.provider === "apple" && appleMusic.configured) {
       const resolved = await appleMusic.getTrack(input.providerId);
@@ -72,6 +74,7 @@ export async function resolveTrackMappings(
         durationMs: resolved.durationMs
       };
       isrc = resolved.isrc;
+      durationVerified = Boolean(resolved.durationMs);
       mappings.apple = mapping(resolved, "source");
     }
   } catch (error) {
@@ -121,5 +124,6 @@ export async function resolveTrackMappings(
     canonicalId: isrc ? `isrc:${isrc}` : `${input.provider}:${input.providerId}`,
     isrc,
     mappings
+    ,durationVerified,isLive:false
   };
 }

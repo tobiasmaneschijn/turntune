@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   applyChatUserProfiles,
   applyReactionEvents,
+  applyRemovalEvents,
   groupReactions,
   reactionLabel,
   mergeChatMessages,
@@ -83,6 +84,17 @@ test('live reaction events resolve names from trusted room profiles', () => {
 test('history and repeated broadcasts show one durable message per id', () => {
   const persisted = { ...message, reactions: [{ userId: 'other', emoji: '❤️' }] }
   assert.deepEqual(mergeChatMessages([persisted], [message, message]), [persisted])
+})
+
+test('removal markers hide delayed media, reaction state and quote previews in either merge order', () => {
+  const original = { ...message, type: 'image' as const, content: 'Secret', mediaUrl: 'https://example.test/private.png', storagePath: 'owner/room/image.png', reactions: [{ userId: 'other', emoji: '❤️' }] }
+  const quote = { ...message, id: 'reply', replyTo: { ...original, user: { id: message.user.id, name: message.user.name } } }
+  const removedAt = '2026-10-09T10:00:00.000Z'
+  const [removed, reply] = applyRemovalEvents([original, quote], [{ messageId: message.id, removedAt }])
+  assert.equal(removed.content, 'Message removed'); assert.equal(removed.mediaUrl, undefined); assert.equal(removed.storagePath, undefined); assert.deepEqual(removed.reactions, [])
+  assert.equal(reply.replyTo?.content, 'Message removed'); assert.equal(reply.replyTo?.mediaUrl, undefined)
+  assert.equal(mergeChatMessages([original], [removed])[0].removedAt, removedAt)
+  assert.equal(mergeChatMessages([removed], [original])[0].content, 'Message removed')
 })
 
 test('timeline sorts actual instants across timezone offsets and timestamp formats', () => {

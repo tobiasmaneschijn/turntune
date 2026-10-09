@@ -54,6 +54,9 @@ export interface Track {
   artworkUrl?: string;
   permalinkUrl?: string;
   durationMs?: number;
+  /** Set only by a provider lookup on the server. */
+  durationVerified?: boolean;
+  isLive?: boolean;
   mappings?: Partial<Record<Provider, ProviderTrackMapping>>;
   addedBy: User;
   addedAt: number;
@@ -74,6 +77,8 @@ export interface Playback {
   playing: boolean;
   position: number;
   updatedAt: number;
+  origin?: "dj" | "fallback";
+  revision?: number;
 }
 
 export interface VibeState {
@@ -96,8 +101,39 @@ export interface RoomSettings {
   allowedProviders?: Provider[];
   description?: string;
   themePrompt?: string;
+  accessMode?: "public" | "unlisted" | "members";
+  moderatorPermissions?: ModeratorPermissions;
+  invitePermission?: "default" | "owner" | "staff" | "members";
+  rulesText?: string;
+  rulesVersion?: number;
+  requireRulesAcceptance?: boolean;
+  chatMode?: "everyone" | "staff";
+  slowModeSeconds?: 0 | 5 | 10 | 30 | 60;
+  mediaPermission?: FeaturePermission;
+  linksPermission?: FeaturePermission;
+  pollsPermission?: FeaturePermission;
+  djJoinLocked?: boolean;
+  djCapacity?: number | null;
+  maxTrackMinutes?: number | null;
+  repeatWindowMinutes?: number | null;
+  manualPlayback?: "current-dj" | "staff";
+  songsPerTurn?: 1 | 2 | 3;
+  skipVote?: { enabled: boolean; percent: number; minimum: number };
+  tags?: string[];
+  language?: string;
+  themeSchedules?: ThemeSchedule[];
+  sessionOverrides?: SessionOverride[];
   [key: string]: unknown;
 }
+
+export type FeaturePermission = "everyone" | "staff" | "nobody";
+export interface ModeratorPermissions { chatParticipants: boolean; djsPlayback: boolean; roomDetailsMusic: boolean; accessInvites: boolean }
+export type RoomCapability = keyof ModeratorPermissions;
+export interface ThemeSchedule { id: string; theme: string; startsAt: number; endsAt: number; timeZone: string; note?: string }
+export interface SessionOverride { id: string; kind: "slow-mode" | "staff-chat" | "dj-lock"; expiresAt: number; value?: number; authorId: string }
+export interface RoomCapabilities extends ModeratorPermissions { owner: boolean; staff: boolean; invite: boolean; chat: boolean; media: boolean; links: boolean; polls: boolean; joinDj: boolean; playback: boolean }
+export interface OwnRoomStatus { chatTimeoutUntil?: number | null; djSuspendedUntil?: number | null; rulesAccepted?: boolean; warnings?: Array<{id:string;text:string;createdAt:number}>; openReports?: number }
+export interface RadioSummary { stopped: boolean; stopAfterTrackId: string | null; fallbackEnabled: boolean; fallbackCount: number; turn?: {used:number;limit:number}; skipVote: { trackId: string | null; count: number; required: number; voted: boolean }; ineligibleTracks: Record<string,string> }
 
 export interface RoomBase {
   id: string;
@@ -117,6 +153,12 @@ export interface RoomBase {
   playback: Playback;
   vibe: VibeState | null;
   createdAt: number;
+  policyRevision?: number;
+  capabilities?: RoomCapabilities;
+  ownStatus?: OwnRoomStatus;
+  radio?: RadioSummary;
+  sessionNote?: { id: string; text: string; expiresAt: number } | null;
+  activeTheme?: string;
 }
 
 /** Public listener state never carries the server's private queue map. */
@@ -129,6 +171,7 @@ export interface RoomDirectoryEntry {
   name: string;
   ownerId: string;
   isPublic: boolean;
+  accessMode?: "public" | "unlisted" | "members";
   passwordProtected: boolean;
   isFavorite: boolean;
   role: RoomRole | null;
@@ -136,6 +179,8 @@ export interface RoomDirectoryEntry {
   createdAt: string;
   updatedAt: string;
   description?: string;
+  tags?: string[];
+  language?: string;
   /** Bounded, public/unprotected room preview; never a private DJ queue. */
   preview?: { title: string; artist?: string; artworkUrl?: string; provider?: Provider; playing: boolean; observedAt: number };
 }

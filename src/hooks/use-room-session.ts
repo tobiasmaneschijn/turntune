@@ -5,6 +5,7 @@ import { rememberNavigationFocus } from "./use-route-focus";
 import { socket } from "../socket";
 import { takeAuthDestination } from "../lib/auth-destination";
 import type { RoomSnapshot, User } from "../types";
+import { requestJson } from "../lib/authenticated-http";
 
 export type AppRoute = { kind: "lobby" } | { kind: "room"; roomId: string } |
   { kind: "profile"; profileId: string; backgroundRoomId?: string } | { kind: "admin" };
@@ -35,6 +36,22 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
   const [roomPasswordRequired, setRoomPasswordRequired] = useState(false);
   const [roomJoinError, setRoomJoinError] = useState("");
   const roomId = routeRoomId(route);
+  const inviteToken = route.kind === "room" ? new URLSearchParams(location.search).get("invite") : null;
+  const [inviteReady,setInviteReady]=useState(!inviteToken);
+  const [inviteAttempt,setInviteAttempt]=useState(0);
+  const inviteRequest=useRef<{token:string;requestId:string}|null>(null);
+  useEffect(()=>{
+    if(!inviteToken||!roomId){setInviteReady(true);return;}
+    setInviteReady(false);
+    if(!auth.session?.access_token)return;
+    const controller=new AbortController();
+    if(inviteRequest.current?.token!==inviteToken)inviteRequest.current={token:inviteToken,requestId:crypto.randomUUID()};
+    void requestJson(`/api/rooms/${roomId}/invite-links/redeem`,{method:"POST",accessToken:auth.session.access_token,signal:controller.signal,body:JSON.stringify({token:inviteToken,requestId:inviteRequest.current.requestId}),errorMessage:"Could not accept this room invitation."}).then(()=>{
+      if(controller.signal.aborted)return;
+      const url=new URL(location.href);url.searchParams.delete("invite");history.replaceState(history.state,"",url.pathname+url.search+url.hash);setInviteReady(true);setRoomJoinError("");
+    }).catch(error=>{if(!controller.signal.aborted)setRoomJoinError(error instanceof Error?error.message:"Could not accept this room invitation.");});
+    return()=>controller.abort();
+  },[inviteToken,roomId,auth.session?.access_token,inviteAttempt]);
   const navigationContext = `${auth.session?.user.id || "guest"}:${appRouteContext(route)}`;
 
   const adoptRoute = useCallback((next: AppRoute) => {
@@ -62,10 +79,14 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     if (parsed.kind === "profile" && routeRef.current.kind === "profile" && parsed.profileId === routeRef.current.profileId) parsed.backgroundRoomId = routeRef.current.backgroundRoomId;
     adoptRoute(parsed);
   }, [auth.enabled, auth.session?.user.id, auth.recovery, adoptRoute]);
-  const retryRoom = useRoomConnection({ roomId, password: roomPassword, profile, transport,
-    ready: !auth.loading && !auth.error && Boolean(auth.client && auth.session && profile.id === auth.session.user.id && profileReady),
+  const retryConnection = useRoomConnection({ roomId, password: roomPassword, profile, transport,
+    ready: inviteReady && !auth.loading && !auth.error && Boolean(auth.client && auth.session && profile.id === auth.session.user.id && profileReady),
     accessToken: auth.session?.access_token, onConnected: setConnected, onSnapshot: setSnapshot,
     onPasswordRequired: setRoomPasswordRequired, onJoinError: setRoomJoinError, onNotice });
+  const retryRoom = () => {
+    if (inviteToken && !inviteReady) { setRoomJoinError(""); setInviteAttempt(attempt => attempt + 1); }
+    else retryConnection();
+  };
 
   const navigate = (next: AppRoute, path: string, state: Record<string, unknown> = {}) => {
     rememberNavigationFocus(navigationContext); history.pushState(state, "", path); adoptRoute(next);

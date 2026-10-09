@@ -48,7 +48,12 @@ DJ guidance distinguishes lineup membership, waiting, an on-air turn, empty queu
 
 The multiline composer uses Enter to send and Shift+Enter for a newline, with IME protection. Draft text, mention IDs, and reply IDs are scoped to account and room in session storage, expire after 12 hours, and clear on sign out/account change. Blob data and attachment bytes are not stored in drafts. Text typed during a pending send survives completion.
 
-Messages distinguish sending/broadcast outcome from durable history saving. A failed broadcast can retry the same immutable UUID; a failed history save retries the original payload without another broadcast. Server-stamped identity, immutable duplicate checks, concurrent request coalescing, and bounded deduplication prevent misleading success or duplicate history in the supported retry window. Failure remains beside the affected message even with system notifications disabled.
+Accepted sends now persist before live delivery, and successful acknowledgment
+confirms durable acceptance. An uncertain send retries or recovers the same
+immutable UUID; it does not create another message. Server-stamped identity,
+immutable duplicate checks and durable receipts prevent duplicate history.
+Drafts and inline failure feedback remain available during recovery, even with
+system notifications disabled.
 
 Chat initially loads a bounded recent page. Older pages use a timestamp-plus-ID cursor, retain the visible scroll anchor, and merge concurrent live messages without duplicates. History hydration does not increment unread or generate old mention alerts. Search returns bounded room-scoped results; opening a result/reply loads its surrounding context, explains unavailable targets, and provides a return to live conversation.
 
@@ -180,3 +185,37 @@ Run the existing [local setup](../README.md#local-development). Use the isolated
 6. As owner/moderator, add/edit/remove/expire a note; as listener, dismiss/reopen it. Submit feedback with attachments and observe actual upload/save stages. Toggle OS and app reduced motion during all these flows.
 
 The original suggestion document remains the audit baseline. Its source links describe pre-extraction files and its first-release/deferred language records the original sequencing recommendation. This document records the final implemented scope and the limits of its validation.
+
+## Pending room settings and moderation changes — 9 October 2026
+
+These branch changes are prepared for release; they have not been deployed or
+assigned a new application version.
+
+- Room settings has General, Music, Chat and Members categories, with retained
+  policy drafts and previews for Open decks, Hosted session and Long mixes presets.
+- Public, Unlisted and Members only are separate access choices. Tags/language
+  support directory filtering. Passwords still apply, and existing memberships
+  survive changing a public room to Members only.
+- Staff can find offline members, manage invitations, warn or time out chat,
+  remove messages, kick or ban accounts, and remove/suspend DJs. The owner controls
+  moderator permission groups and handles actions against moderators.
+- Reports, activity, restrictions and temporary slow mode/staff-only chat/DJ locks
+  have a private moderation panel. Warnings reach their recipient on a later
+  visit; staff see a bounded open-report count.
+- Chat posting, slow mode, media/GIFs, links and polls follow room policy. Accepted
+  sends commit before live delivery; removed messages keep a stable tombstone.
+- Music policy supports track length, recent-recording repeats, manual playback
+  authority, vote to skip and one-to-three-song turns. Waiting tracks stay private
+  and saved when ineligible. Stop after this track requires explicit Resume;
+  room-owned fallback resumes from durable state.
+- Rooms can schedule theme/session-note intervals, require optional versioned
+  rules acceptance, and create expiring reusable invite links. Link tokens are
+  shown once; lost creation responses require revoking and replacing the link.
+
+The prepared migration order is
+`20261009073625_room_moderation_and_access.sql`, then
+`20261009073805_durable_room_chat.sql`, before deploying the matching server.
+Neither was applied to production by this task. Focused room/moderation tests and
+local SQL checks passed. Live provider audio and physical-device behavior remain
+release checks. See [room architecture](rooms-and-radio.md) and
+[chat architecture](chat.md) for the implemented contracts.

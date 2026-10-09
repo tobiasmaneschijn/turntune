@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChatSaveTracker, type ChatSaveStates } from '@/chat/delivery'
 import { mergeChatMessages, type ChatMedia, type ChatMention, type ChatMessage, type ChatReply } from '@/chat/model'
 
-export interface ChatComposerSnapshot { text: string; mentions: ChatMention[]; replyTo: ChatReply | null }
+export interface ChatComposerSnapshot { text: string; mentions: ChatMention[]; replyTo: ChatReply | null; revision: number }
 interface Options {
   scope: string
   isConnected: boolean
@@ -11,6 +11,7 @@ interface Options {
   persist?: (message: ChatMessage) => Promise<void> | void
   composer: () => ChatComposerSnapshot
   confirmed: (snapshot: ChatComposerSnapshot, text: boolean) => void
+  confirmedSend?: () => void
   beforeTextSend?: () => void
   onError: (message: string) => void
 }
@@ -29,7 +30,8 @@ export function useChatDelivery(options: Options) {
   const uploadingRef = useRef(false)
   const lifetimeRef = useRef({ active: true })
   const trackerRef = useRef<ReturnType<typeof createChatSaveTracker> | null>(null)
-  const completionRef = useRef(new Map<string, { snapshot: ChatComposerSnapshot; text: boolean }>())
+  const completionRef = useRef(new Map<string, { snapshot: ChatComposerSnapshot; text: boolean; poll: boolean }>())
+  const textSubmissionRef = useRef<{ key: string; messageId: string } | null>(null)
 
   useEffect(() => {
     const lifetime = { active: true }
@@ -41,6 +43,7 @@ export function useChatDelivery(options: Options) {
     })
     trackerRef.current = tracker
     completionRef.current = new Map()
+    textSubmissionRef.current = null
     sendingRef.current = false; uploadingRef.current = false
     setSaveStates({}); setOutboxMessages([]); setSending(false); setUploading(false)
     return () => { lifetime.active = false; tracker.dispose() }
@@ -51,7 +54,9 @@ export function useChatDelivery(options: Options) {
     const completion = completionRef.current.get(messageId)
     if (!completion) return
     completionRef.current.delete(messageId)
-    optionsRef.current.confirmed(completion.snapshot, completion.text)
+    if (textSubmissionRef.current?.messageId === messageId) textSubmissionRef.current = null
+    optionsRef.current.confirmedSend?.()
+    if(!completion.poll)optionsRef.current.confirmed(completion.snapshot, completion.text)
   }, [])
 
   const send = useCallback(async (media?: ChatMedia, caption?: string, accepted?: () => void, pollOptions?: string[]) => {
@@ -59,15 +64,25 @@ export function useChatDelivery(options: Options) {
     const snapshot = current.composer()
     const content = pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || 'Shared image') : snapshot.text.trim()
     if (!current.isConnected || !content || sendingRef.current || (uploadingRef.current && !media?.storagePath)) return false
-    if (Object.values(saveStatesRef.current).filter((entry) => entry.state === 'failed' || entry.state === 'send-failed').length >= 100) {
+    const textKey = !media && !pollOptions ? JSON.stringify([snapshot.revision, snapshot.text, snapshot.mentions, snapshot.replyTo?.id]) : null
+    const previous = textKey && textSubmissionRef.current?.key === textKey ? textSubmissionRef.current : null
+    if (!previous && Object.values(saveStatesRef.current).filter((entry) => entry.state === 'failed' || entry.state === 'send-failed').length >= 100) {
       current.onError('Retry pending messages before sending more.'); return false
     }
     const lifetime = lifetimeRef.current
     const tracker = trackerRef.current
     sendingRef.current = true; setSending(true); current.onError('')
     try {
+      // A lost acknowledgement can hide an accepted send. Keep its UUID until
+      // confirmation or a real composer edit, rather than submitting it twice.
+      if (previous) {
+        const delivered = await tracker?.retrySend(previous.messageId)
+        if (delivered) finish(previous.messageId, lifetime)
+        return Boolean(delivered)
+      }
       const message = current.prepareMessage(content, media, pollOptions ? undefined : snapshot.replyTo || undefined, media || pollOptions ? [] : snapshot.mentions, pollOptions)
-      if (!pollOptions) completionRef.current.set(message.id, { snapshot, text: !media })
+      if (textKey) textSubmissionRef.current = { key: textKey, messageId: message.id }
+      completionRef.current.set(message.id, { snapshot, text: !media, poll: Boolean(pollOptions) })
       setOutboxMessages((messages) => mergeChatMessages(messages, [message]))
       accepted?.()
       if (!media && !pollOptions) current.beforeTextSend?.()

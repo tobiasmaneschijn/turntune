@@ -8,12 +8,14 @@ import {
   coalescePollVoteEvent,
   mergeChatMessages,
   recentChatMessages,
+  applyRemovalEvents,
   type ChatMedia,
   type ChatMention,
   type ChatMessage,
   type ChatReactionEvent,
   type ChatPollVoteEvent,
   type ChatReply,
+  type ChatRemovedEvent,
 } from '@/chat/model'
 import { normalizeRealtimeMessage, normalizeRealtimePollVote } from '@/chat/protocol'
 import { createRealtimeChatSession, type ChatSessionFactory, type RealtimeChatCallbacks, type RealtimeChatSession } from '@/chat/realtime'
@@ -36,6 +38,9 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
   const [pollVoteEvents, setPollVoteEvents] = useState<ChatPollVoteEvent[]>([])
   const [typingUserIds, setTypingUserIds] = useState<string[]>([])
+  const [removalEvents,setRemovalEvents]=useState<ChatRemovedEvent[]>([])
+  const removalMarkersRef=useRef(new Map<string,ChatRemovedEvent>())
+  const applyRemoval=useCallback((event:ChatRemovedEvent)=>{removalMarkersRef.current.set(event.messageId,event);setRemovalEvents(current=>current.some(item=>item.messageId===event.messageId)?current:[...current,event])},[])
   const sessionRef = useRef<RealtimeChatSession | null>(null)
   const connectedCallbackRef = useRef(onConnected)
   connectedCallbackRef.current = onConnected
@@ -49,6 +54,8 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
 
   useEffect(() => {
     setMessages([])
+    setRemovalEvents([])
+    removalMarkersRef.current.clear()
     messageBufferRef.current = []
     setReactionEvents([])
     setPollVoteEvents([])
@@ -56,13 +63,15 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     setIsConnected(false)
     const callbacks: RealtimeChatCallbacks = {
       onMessage: (message) => {
+        message=applyRemovalEvents([message],[...removalMarkersRef.current.values()])[0]
         const next = mergeChatMessages(messageBufferRef.current, [message])
-        beforeMessageRef.current?.(message, next)
+        if(!message.removedAt)beforeMessageRef.current?.(message, next)
         messageBufferRef.current = recentChatMessages(next)
         setMessages(messageBufferRef.current)
       },
       onReaction: (event) => setReactionEvents((current) => coalesceReactionEvent(current, event).slice(-4000)),
       onPollVote: applyPollVote,
+      onRemoved:applyRemoval,
       onTyping: setTypingUserIds,
       onConnection: (connected) => {
         if (connected) {
@@ -78,7 +87,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
       sessionRef.current = null
       session.dispose()
     }
-  }, [client, roomName, user.id, transport, applyPollVote])
+  }, [client, roomName, user.id, transport, applyPollVote,applyRemoval])
 
   const sendMessage = useCallback(async (
     content: string,
@@ -120,5 +129,5 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     await sessionRef.current?.sendTyping(active)
   }, [])
 
-  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, pollVoteEvents, applyPollVote, broadcastTyping, typingUserIds, isConnected }
+  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, pollVoteEvents, applyPollVote,removalEvents,applyRemoval, broadcastTyping, typingUserIds, isConnected }
 }

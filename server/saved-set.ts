@@ -5,11 +5,12 @@ import type { AppleMusicApi } from "./apple-music.js";
 import type { SoundCloudApi } from "./soundcloud.js";
 import { MixcloudApi } from "./mixcloud.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
+import { verifyTrackDuration } from "./track-metadata.js";
 
 export type ResolvedSetTrack = Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">;
 export interface SetImportOutcome { added: number; skipped: Array<{ title: string; reason: string }>; started: boolean }
 
-export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch }) {
+export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string }) {
   const mixcloudApi = mixcloud || new MixcloudApi(fetchImpl);
   return async (track: LibraryTrack, signal: AbortSignal): Promise<ResolvedSetTrack> => {
     signal.throwIfAborted();
@@ -49,7 +50,8 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
     if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata.");
-    return { ...mappings, ...safeMapped.data };
+    const duration = track.provider === "youtube" ? await verifyTrackDuration(safeMapped.data,{youtubeApiKey,soundCloud,fetcher:fetchImpl}) : {durationMs:verified.durationMs,durationVerified:Boolean(verified.durationMs),isLive:false};
+    return { ...mappings, ...safeMapped.data,...duration };
   };
 }
 

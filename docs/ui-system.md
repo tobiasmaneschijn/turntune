@@ -21,3 +21,29 @@ The following controls intentionally keep product-owned markup because their sem
 - `.admin-sidebar` and feedback rows: semantic dashboard navigation and master/detail selection.
 
 These wrappers must retain a semantic button or field role, an accessible name, a visible `:focus-visible` treatment, disabled explanations where applicable, and a 44px target at mobile breakpoints.
+
+## Room management
+
+Room settings uses General, Music, Chat and Members categories. Policy edits share
+one draft across categories; Save errors retain it, and dirty dismissal requires
+discard confirmation. Presets preview the fields they change before applying.
+Volume, provider/device preferences, notifications, appearance and layout remain
+personal settings.
+
+Member roles, sanctions and invitation actions apply immediately, independently
+of the policy draft. Persistent members can be searched while offline. Participant
+actions remain separate from profile buttons and use named 44px mobile targets.
+The server's per-recipient capabilities determine which tools are available;
+disabled or stale UI state never substitutes for server authorization.
+
+Moderation groups Reports, Activity, Restrictions and Session controls. Its staff
+inbox badge shows a bounded open-report count. Private warnings have acknowledgment
+controls; optional versioned rules require acceptance before participation.
+Timeouts preserve listening, reading and private queues. Active temporary controls
+show expiry and an authorized End action.
+
+The music surface exposes current turn progress, ineligible private items, length
+exception requests, skip votes, stop/resume and room-owned fallback. Scheduled
+themes and session notes overlay lasting room settings. Reusable link tokens are
+shown only after creation; a lost response requires revoking and replacing the
+link. Pending actions preserve their identity and report errors at the control.

@@ -150,6 +150,7 @@ test("concurrent room loads share one authoritative object and database read", a
       select() { return query; },
       eq() { return query; },
       async maybeSingle() {
+        if (table === "soundspin_room_moderation") return { data: null, error: null };
         reads += 1;
         started.resolve();
         await release.promise;

@@ -3,6 +3,7 @@ import { canonicalMessage, chatMessageSchema, chatReactionSchema, immutableMessa
 import type { User } from './types.js'
 import type { StoredChatMessage } from './chat-history.js'
 import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
+import type { ChatCommandService } from './chat-command-service.js'
 
 type EventKind = 'message' | 'reaction' | 'typing'
 type Reply = { ok: boolean; error?: string }
@@ -16,6 +17,7 @@ export interface ChatRelayOptions {
   resolveMediaUrl?: (roomId: string, storagePath: string, userId: string) => Promise<string>
   now?: () => number
   writePolicy?: ChatWritePolicy
+  commands?: ChatCommandService
 }
 
 /** Room admission is checked for every event, including duplicate retries. Never opens a public topic. */
@@ -49,6 +51,14 @@ export function createChatRelay(options: ChatRelayOptions) {
         if (!latest || latest.room.id !== envelope.roomId || latest.user.id !== membership.user.id) return { ok: false, error: 'This room session has ended.' }
         const roomId = envelope.roomId
         const user = latest.user
+        if (options.commands && kind === 'message') {
+          await options.commands.message(roomId,user.id,envelope.message)
+          return {ok:true}
+        }
+        if (options.commands && kind === 'reaction') {
+          await options.commands.reaction(roomId,user.id,envelope.reaction)
+          return {ok:true}
+        }
         if (kind === 'message') {
           const input = chatMessageSchema.parse(envelope.message)
           const message = canonicalMessage(input, user)
@@ -86,7 +96,8 @@ export function createChatRelay(options: ChatRelayOptions) {
           })
         } else {
           const input = z.object({ active: z.boolean() }).parse(envelope.typing)
-          writePolicy.typing(roomId, user.id)
+          if(options.commands)await options.commands.typing(roomId,user.id)
+          else writePolicy.typing(roomId, user.id)
           await options.emitToRoom(roomId, 'chat:typing', { roomId, typing: { userId: user.id, active: input.active, sentAt: now() } }, { socketId, userId: user.id })
         }
         return { ok: true }

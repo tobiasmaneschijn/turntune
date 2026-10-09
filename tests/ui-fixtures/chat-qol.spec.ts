@@ -1,12 +1,82 @@
 import { expect, test } from '@playwright/test'
 
-type ChatQolHarness = { broadcastIds: string[]; saveIds: string[]; failSave: boolean; holdDelivery: boolean; releaseDelivery(): void; scrollBehaviors: string[] }
+type ChatQolHarness = { broadcastIds: string[]; saveIds: string[]; failSave: boolean; failSend: boolean; holdDelivery: boolean; releaseDelivery(): void; scrollBehaviors: string[] }
 declare global { interface Window { chatQolTest: ChatQolHarness } }
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false } }))
   await page.goto('/tests/chat-qol-harness/index.html')
   await expect(page.getByRole('textbox', { name: 'Message room chat' })).toBeEnabled()
+})
+
+test('rapid double Enter sends one UUID per draft with an immediate acknowledgement and no success label', async ({ page }) => {
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  const content = 'Rapid Enter message'
+  for (const [index, microtasks] of [0, 32].entries()) {
+    await composer.fill(content)
+    await composer.evaluate(async (element, turns) => {
+      const enter = () => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+      enter()
+      for (let turn = 0; turn < turns; turn++) await Promise.resolve()
+      enter()
+    }, microtasks)
+    await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(index + 1)
+    await expect(composer).toHaveValue('')
+    const counts = await page.evaluate(() => ({ sends: window.chatQolTest.broadcastIds, saves: window.chatQolTest.saveIds }))
+    expect(counts.sends, `${microtasks ? 'Across immediate ACK microtasks' : 'Same event task'} sends`).toHaveLength(index + 1)
+    expect(counts.sends).toEqual(counts.saves)
+    expect(new Set(counts.sends).size).toBe(index + 1)
+  }
+  // The same text entered again is a new message, rather than a duplicate submission.
+  await composer.fill(content)
+  await composer.press('Enter')
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(3)
+  await expect(composer).toHaveValue('')
+  const counts = await page.evaluate(() => ({ sends: window.chatQolTest.broadcastIds, saves: window.chatQolTest.saveIds }))
+  expect(counts.sends).toHaveLength(3)
+  expect(new Set(counts.sends).size).toBe(3)
+  expect(counts.saves).toEqual(counts.sends)
+  const rows = page.locator('.chat-message-item').filter({ has: page.getByText(content, { exact: true }) })
+  await expect(rows).toHaveCount(3)
+  await page.evaluate(() => { window.chatQolTest.holdDelivery = true })
+  await composer.fill('Pending Enter message')
+  await composer.press('Enter')
+  await composer.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true })
+  await composer.press('Enter')
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.broadcastIds.length)).toBe(4)
+  expect(await page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(3)
+  await page.evaluate(() => { window.chatQolTest.holdDelivery = false; window.chatQolTest.releaseDelivery() })
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(4)
+  await expect(composer).toHaveValue('')
+
+  const uncertainContent = 'Unconfirmed Enter message'
+  await page.evaluate(() => { window.chatQolTest.failSend = true })
+  await composer.fill(uncertainContent)
+  await composer.evaluate(async element => {
+    const enter = () => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
+    enter()
+    for (let turn = 0; turn < 32; turn++) await Promise.resolve()
+    enter()
+  })
+  await expect(page.getByText('Could not confirm send', { exact: true }).first()).toBeVisible()
+  const unconfirmedIds = await page.evaluate(() => window.chatQolTest.broadcastIds.slice(4))
+  expect(new Set(unconfirmedIds).size, 'An unchanged draft with an uncertain ACK keeps its original UUID').toBe(1)
+  const uncertainRows = page.locator('.chat-message-item').filter({ has: page.getByText(uncertainContent, { exact: true }) })
+  await expect(uncertainRows).toHaveCount(1)
+  await page.evaluate(() => { window.chatQolTest.failSend = false })
+  await composer.press('Enter')
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(5)
+  expect(await page.evaluate(() => window.chatQolTest.saveIds[4])).toBe(unconfirmedIds[0])
+  await expect(composer).toHaveValue('')
+  // Deliberately retyping the same text after confirmation creates a fresh message.
+  await composer.fill(uncertainContent)
+  await composer.press('Enter')
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(6)
+  expect(await page.evaluate(() => window.chatQolTest.saveIds[5])).not.toBe(unconfirmedIds[0])
+  await expect(uncertainRows).toHaveCount(2)
+  const savedIds = await page.evaluate(() => window.chatQolTest.saveIds)
+  expect(new Set(savedIds).size).toBe(6)
+  await expect(page.locator('.chat-message-save-state')).toHaveCount(0)
 })
 
 test('multiline drafts survive navigation, reload and room changes without account leakage', async ({ page }) => {
@@ -36,10 +106,11 @@ test('failed history retry keeps the UUID and never rebroadcasts', async ({ page
   await page.evaluate(() => { window.chatQolTest.failSave = true })
   await page.getByRole('textbox', { name: 'Message room chat' }).fill('keep this message')
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
-  await expect(page.getByText('Sent live · history save failed')).toBeVisible()
+  await expect(page.getByText('Could not confirm save', { exact: true })).toBeVisible()
   await page.evaluate(() => { window.chatQolTest.failSave = false })
   await page.getByRole('button', { name: 'Retry save' }).click()
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(2)
+  await expect(page.locator('.chat-message-save-state')).toHaveCount(0)
   const counts = await page.evaluate(() => ({ broadcasts: window.chatQolTest.broadcastIds, saves: window.chatQolTest.saveIds }))
   expect(counts.broadcasts).toHaveLength(1)
   expect(counts.saves).toEqual([counts.broadcasts[0], counts.broadcasts[0]])
@@ -53,7 +124,8 @@ test('typing during a slow send stays intact and composing Enter does not send',
   await expect(page.getByRole('button', { name: 'Sending message' })).toBeDisabled()
   await composer.fill('next draft')
   await page.evaluate(() => { window.chatQolTest.releaseDelivery() })
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(1)
+  await expect(page.locator('.chat-message-save-state')).toHaveCount(0)
   await expect(composer).toHaveValue('next draft')
   await composer.dispatchEvent('compositionstart')
   await composer.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true })

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Copy, House, Keyboard, LayoutDashboard, Lightbulb, LogOut, MoreHorizontal, PanelsTopLeft, RotateCcw, Settings, Shield, UserRound, Users } from "lucide-react";
 import type { User } from "../types";
 import type { FeedbackDiagnosticContext } from "../feedback-diagnostics";
@@ -20,7 +20,7 @@ import "../styles/layout-completion.css";
 const FeedbackButton = lazy(() => import("./FeedbackDialog").then((module) => ({ default: module.FeedbackButton })));
 
 export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, diagnosticContext,
-  onHome, onSettings, onRoomSettings, onAdmin, onProfile, onSignOut, onResetLayout, onNotice, connected = true, onReconnect,
+  onHome, onSettings, onRoomSettings, onModeration, moderationCount = 0, onRules, participantActions, onAdmin, onProfile, onSignOut, onResetLayout, onNotice, connected = true, onReconnect,
   participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange }: {
   roomName: string;
   roomSlug: string;
@@ -30,6 +30,10 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   onHome: () => void;
   onSettings: () => void;
   onRoomSettings?: () => void;
+  onModeration?: () => void;
+  moderationCount?: number;
+  onRules?: () => void;
+  participantActions?: (user: User) => ReactNode;
   onAdmin?: () => void;
   onProfile: () => void;
   onSignOut?: () => void;
@@ -72,7 +76,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     try {
       await navigator.clipboard.writeText(new URL(`/room/${roomSlug}`, location.origin).href);
       setCopied(true);
-      onNotice("Invite link copied");
+      onNotice("Room link copied");
       if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
       copiedTimer.current = window.setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -86,7 +90,10 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     ...(onFocusChat ? [{ id: "chat", label: "Focus room chat", key: "/", run: onFocusChat }] : []),
     ...(onToggleMute ? [{ id: "mute", label: muted ? "Unmute my audio" : "Mute my audio", key: "M", run: onToggleMute }] : []),
     { id: "settings", label: "Open settings", key: "G", run: onSettings },
-    { id: "invite", label: "Copy room invite", key: "I", run: () => void copyInvite() },
+    { id: "invite", label: "Copy room link", key: "I", run: () => void copyInvite() },
+    ...(onRoomSettings ? [{ id: "room-settings", label: "Room settings", run: onRoomSettings }] : []),
+    ...(onModeration ? [{ id: "moderation", label: moderationCount ? `Moderation (${moderationCount} open reports)` : "Moderation", run: onModeration }] : []),
+    ...(onRules ? [{ id: "rules", label: "Room rules", run: onRules }] : []),
     { id: "rooms", label: "Open room directory", run: onHome },
     { id: "profile", label: "Open my profile", run: onProfile },
     ...(onFriends ? [{ id: "friends", label: "Friends", run: onFriends }] : []),
@@ -112,7 +119,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
       <div className="header-actions">
         <Button variant="ghost" size="sm" className="header-directory-button" onClick={onHome} title="Room directory" aria-label="Rooms — Room directory"><House /><span>Rooms</span></Button>
         <ThemeToggle compact />
-        <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Copied — invite link" : "Invite — copy room invite link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Invite"}</span></Button>
+        <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? "Copied — room link" : "Copy room link"} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? "Copied" : "Room link"}</span></Button>
         <Button variant="ghost" size="icon" className="header-profile-button" data-navigation-focus="room-profile" onClick={onProfile} title="Open your profile" aria-label="Open your profile"><Avatar user={currentUser} size={30} /></Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button ref={moreRef} variant="ghost" size="icon" className="room-more-actions" data-navigation-focus="room-actions" aria-label="More room actions" />}><MoreHorizontal /></DropdownMenuTrigger>
@@ -140,12 +147,14 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
               <DropdownMenuItem onClick={onProfile} data-navigation-focus="room-actions"><UserRound /> Your profile</DropdownMenuItem>
               {onFriends && <DropdownMenuItem onClick={onFriends}><Users /> Friends</DropdownMenuItem>}
               {participants && onOpenProfile && <DropdownMenuItem onClick={() => { peopleReturnRef.current = moreRef.current; setPeopleOpen(true); }}><Users /> Room listeners</DropdownMenuItem>}
+              {onRules && <DropdownMenuItem onClick={onRules}>Room rules</DropdownMenuItem>}
             </DropdownMenuGroup>
-            {(onRoomSettings || onThemeNight || onAdmin) && <>
+            {(onRoomSettings || onModeration || onThemeNight || onAdmin) && <>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Room management</DropdownMenuLabel>
                 {onRoomSettings && <DropdownMenuItem onClick={onRoomSettings}><Shield /> Room settings</DropdownMenuItem>}
+                {onModeration && <DropdownMenuItem onClick={onModeration}><Shield /> Moderation{moderationCount > 0 && <span className="room-moderation-count" aria-label={`${moderationCount} open reports`}>{moderationCount}</span>}</DropdownMenuItem>}
                 {onThemeNight && <DropdownMenuItem onClick={onThemeNight}>Theme night</DropdownMenuItem>}
                 {onAdmin && <DropdownMenuItem onClick={onAdmin}><LayoutDashboard /> Admin dashboard</DropdownMenuItem>}
               </DropdownMenuGroup>
@@ -163,7 +172,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     </header>
     {!connected && <div className="room-connection-banner" role="status"><span>Connection lost · reconnecting…</span>{onReconnect && <Button size="sm" variant="outline" onClick={onReconnect}>Retry connection</Button>}</div>}
     {feedbackMounted && <Suspense fallback={null}><FeedbackButton userId={currentUser.id} roomSlug={roomSlug} diagnosticContext={diagnosticContext} open={feedbackOpen} onOpenChange={setFeedbackOpen} hideTrigger finalFocus={moreRef} /></Suspense>}
-    {participants && onOpenProfile && <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={participants} currentUserId={currentUser.id} ownerUserId={ownerUserId} moderatorUserIds={moderatorUserIds} djUserId={djUserId} onOpenProfile={onOpenProfile} finalFocus={peopleReturnRef} anchor={listenersRef} />}
+    {participants && onOpenProfile && <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={participants} currentUserId={currentUser.id} ownerUserId={ownerUserId} moderatorUserIds={moderatorUserIds} djUserId={djUserId} onOpenProfile={onOpenProfile} participantActions={participantActions} finalFocus={peopleReturnRef} anchor={listenersRef} />}
     <RoomCommandMenu open={commandsOpen} onOpenChange={setCommandsOpen} commands={commands} finalFocus={moreRef} />
     <Dialog open={helpOpen} onOpenChange={setHelpOpen}><DialogContent className="room-keyboard-help" finalFocus={moreRef}>
       <DialogHeader><DialogTitle>Keyboard help</DialogTitle><DialogDescription>The chat shortcut is ignored while typing in a field.</DialogDescription></DialogHeader>

@@ -6,11 +6,10 @@ message, reaction, or typing event and again before delivering it to current
 authorized recipients. Production chat never opens a public Supabase Broadcast
 topic. The Supabase transport remains only as a compatibility seam for fixtures.
 
-Postgres stores durable messages and reactions through room-authorized server
-routes. A live acknowledgement and a durable save are separate results: a message
-can be visible live while its row still needs a history retry. Joining or
-reconnecting loads authorized saved history rather than treating live events as
-the database source of truth.
+Socket and HTTP mutations use `ChatCommandService`. It commits messages,
+reactions, poll votes, cooldowns and immutable operation receipts before live
+delivery. Supabase uses a service-only transactional RPC; standalone mode uses
+an atomic local chat file. Joining or reconnecting loads authorized saved history.
 
 ## Code map
 
@@ -22,6 +21,8 @@ the database source of truth.
 | `src/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
 | `src/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
 | `server/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
+| `server/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
+| `server/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
 | `server/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
 | `server/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
 | `server/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
@@ -63,17 +64,17 @@ When a user sends a message:
 2. `chat:message` sends `{ roomId, message }` on the admitted socket. The server
    stamps the sender from its authenticated membership and resolves any reply
    against the same room. It checks bounded content, safe media, storage ownership
-   and timestamp bounds, then waits for authorized live delivery before ACK.
+   and timestamp bounds, then commits the message and receipt before authorized
+   live delivery and ACK. Room policy and sanctions share the room operation lock.
 3. The sender merges the acknowledged message. Echoes and duplicate received
    UUIDs merge into the existing row. Failure shows Could not confirm send and
    Retry send; the draft and original UUID remain available.
-4. `RealtimeChat` invokes `onSend` for durable persistence after live acceptance.
+4. `RealtimeChat` invokes `onSend` for HTTP confirmation after socket acceptance.
 5. `RoomChat` calls `historySource.saveMessage` with the same UUID and payload.
-   The route verifies fresh live admission and inserts the server-stamped row.
+   The route verifies fresh live admission and confirms the same durable receipt.
 
-This gives the room low-latency delivery while retaining a durable history. If
-step 5 fails, the message may have appeared live but will not return after a
-reload; the affected row shows Saving, Saved, or a save failure with Retry.
+An acknowledged socket send is durable even if the later HTTP confirmation
+fails. A persistence failure blocks live delivery and leaves Retry send available.
 Retry save persists the original message UUID and payload using its original room
 callback, without another live event. If a previous insert succeeded but its
 response was lost, an identical row for the same user and room counts as success.
@@ -81,9 +82,13 @@ A duplicate ID with conflicting content is rejected rather than overwritten.
 
 Only one send or upload can run at a time. Text edited while a send is pending
 is preserved, and completion from a departed room cannot update a new room.
+Submitting an unchanged draft again after an uncertain send retries its original
+UUID. Composer edits mark a new draft; deliberately repeating the same text
+after confirmation remains possible. Successful sends have no persistent status label;
+pending operations and failures retain their status and retry controls.
 Successful initial sends and retries use the same completion path: an unchanged
 composer snapshot is cleared, while a newly typed draft or changed reply remains.
-Completed delivery payloads are released; at most 200 completed status labels are
+Completed delivery payloads are released; at most 200 completed status records are
 retained. Failed send/save rows retain their original recovery records, with a
 100-row recovery limit before another new send is accepted.
 The stable socket factory exposes `setAdmitted(boolean)`. Reconnects update
@@ -91,20 +96,13 @@ connection state without replacing the transport or erasing unsaved live rows.
 Fresh admission reloads durable history and clears obsolete reaction overlays.
 Raw socket connection and a snapshot alone cannot enable chat.
 
-The relay shares concurrent retries of the same immutable UUID, rejects a UUID
-with changed content/account/room, and keeps a bounded in-memory acceptance cache
-for up to 24 hours. This is not cross-process durable delivery state. The durable
-API independently verifies a duplicate against the exact stored row, never
-overwrites it, and rejects a conflict. Revoked/departed sessions cannot use retry
-to bypass fresh room admission.
+The command service shares durable immutable UUID receipts between the relay
+and HTTP API. Identical retries after restart confirm acceptance without another
+message broadcast or cooldown charge. Conflicting content, account or room is
+rejected. Revoked/departed sessions cannot use retry to bypass fresh room admission.
 
-On a fresh relay/cache miss, a privileged UUID lookup checks the persisted row
-before any live publish. A stored UUID in another room/account or with different
-immutable content is rejected. An identical stored original confirms the retry
-without rebroadcasting it, including after a server restart. Lookup errors fail
-closed: a complete database outage blocks fresh live sends and preserves the
-draft/Retry send. An insert failure after a successful lookup/live ACK can still
-produce Sent live / history save failed with Retry save.
+Privileged UUID lookup and persistence errors fail closed: an unavailable
+repository blocks fresh live sends and preserves the draft and Retry send.
 
 History, search, context, media signing and durable mutation requests carry a
 15-second abort signal. Timeout copy offers retry, and a save timeout retains the
@@ -173,6 +171,18 @@ refresh its signed URL, and hidden message IDs do not trigger mention alerts.
 If device storage is blocked, hiding still applies while this chat is mounted,
 with a notice that the choice cannot be saved.
 
+Staff message removal replaces the shared message with `Message removed` and
+records a private moderation event. Durable tombstones also reserve an unsaved
+UUID, so a delayed send or retry cannot restore content. History, search, replies,
+polls, reactions, sender recovery and live hydration all apply the removal.
+Reporting sends the selected message and reason to the room's private report list.
+
+Room chat mode, slow mode and separate media/link/poll permissions are checked
+by the server. Chat timeouts, bans and required rules acceptance gate participation;
+history remains available to an admitted user with a chat timeout. Slow mode
+applies to accepted new messages, including media and polls, and exempts staff.
+The client keeps drafts while participation is restricted.
+
 ## Commands and polls
 
 Typing `/` opens keyboard-accessible command suggestions. Enter or selecting a
@@ -202,11 +212,8 @@ History carries the same vote revisions; the client ignores older updates and
 calculates counts from each account's latest choice. Hiding a poll conceals its
 question, choices and results through the normal hidden-message controls.
 
-Apply `20261008132716_chat_polls.sql` before deploying the matching server and
-client. It adds message options, server-only vote storage, room/choice guards,
-revision triggers and deletion cascades. Older deployments can continue to
-write ordinary messages after the migration. No live migration is applied by
-the local SQL tests.
+Apply the chat migrations before deploying the matching server and client.
+Local SQL tests do not apply a live migration.
 
 ## Mentions
 
@@ -308,12 +315,15 @@ The chat schema is introduced incrementally by these migrations:
   reaction SELECT with own-row recovery, revokes direct authenticated mutations,
   adds the stable cursor index, makes uploaded chat media private and restricts
   direct storage metadata to the owning account.
+- `20261008132716_chat_polls.sql` adds immutable poll options and revisioned votes.
+- `20261009073805_durable_room_chat.sql` adds service-only chat receipts,
+  cooldowns, removal markers and upload records, and revokes browser media uploads.
 
 Browser code uses only the publishable key and signed-in access token. Secrets
 remain server-side. Direct Data API reads expose only the account's own rows for
 recovery, and INSERT/UPDATE/DELETE cannot bypass the server admission gate.
-Own-row recovery intentionally continues to expose an author's own historical
-content; it does not grant another listener's room history.
+Own-row recovery returns removed-message placeholders after moderation; it does
+not grant another listener's room history.
 
 Read routes allow a signed-in user to read an existing public unprotected room;
 protected/private rooms require the fresh room role and currently admitted room
@@ -330,8 +340,8 @@ transport. The same immutable operation UUID spends rate capacity once across
 the live ACK and durable save; a conflicting account, room or payload is rejected.
 An identical durable original proves an older message retry without treating it
 as a new send. Reactions carry their operation UUID through both stages for the
-same reason. These receipts are bounded process-local state; the database's
-immutable-original check remains the authority after a restart.
+same reason. Rate protection is process-local; durable immutable receipts and
+cooldowns remain authoritative after restart.
 
 Never edit a migration that has already reached production. Create a new
 timestamped migration and let the configured Supabase GitHub integration apply
@@ -340,9 +350,10 @@ it from the production branch.
 ## Media
 
 - Uploaded images go to the private `chat-media` bucket under
-  `user-id/canonical-room/uuid.extension`. The owning account may view its own
-  storage metadata; another listener obtains a display URL only through fresh
-  authorized room history or the room media route.
+  `user-id/canonical-room/uuid.extension` through an authenticated upload route.
+  The server verifies image signatures, ownership and room media policy, stores
+  private metadata and permits one message to claim each upload. Browser Storage
+  uploads and metadata reads are revoked for this bucket.
 - URLs expire after five minutes. Legacy upload paths are accepted only when an
   existing message in the authorized room references them. History and reply
   hydration mint new URLs rather than reusing old public/signed URLs.
@@ -354,6 +365,10 @@ it from the production branch.
   can use it until expiry. Private bucket access does not retroactively retract a
   previously downloaded file or an externally pasted URL.
 - Uploads are restricted to supported image MIME types and 6 MB.
+- Unclaimed uploads expire after 15 minutes. Client cleanup can remove only its
+  own unclaimed upload. A server cleanup pass retires abandoned or removed
+  objects after outstanding signed URLs expire. An uncertain send keeps its
+  existing upload and message UUID for retry.
 - GIF search uses the server-side GIPHY proxy and is disabled when no
   `GIPHY_API_KEY` is configured.
 - Opening the picker loads trending GIFs. Searches run after a short debounce

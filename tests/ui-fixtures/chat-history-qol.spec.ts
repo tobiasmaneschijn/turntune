@@ -1,17 +1,17 @@
 import { expect, test, type Page } from '@playwright/test'
 
-type Row = { id: string; room_slug: string; created_at: string; reply_to_id: string | null; content: string; user_id: string; user_name: string; avatar_seed: string; message_type: string; mentions: unknown[]; soundspin_message_reactions: unknown[] }
+type Row = { id: string; room_slug: string; created_at: string; reply_to_id: string | null; content: string; user_id: string; user_name: string; avatar_seed: string; message_type: string; mentions: unknown[]; soundspin_message_reactions: unknown[];media_url?:string;poll_options?:string[];soundspin_poll_votes?:unknown[] }
 type Database = { rows: Row[]; allowed: boolean; holdOlder: boolean; releaseOlder: (() => void) | null; holdSearch: boolean; releaseSearch: (() => void) | null; searches: string[]; mediaRequests: string[] }
 const databases = new WeakMap<Page, Database>()
 const id = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 declare global { interface Window {
-  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; typing(userId: string, active: boolean): void; renamePeer(userId: string, name: string): void; reconnect(): void; rotateToken(): void }
+  chatHistoryTest: { sendIds: string[]; saveIds: string[]; failSend: boolean; failSave: boolean; failReaction: boolean; unread: number; receive(message: unknown): void; react(reaction: unknown): void; typing(userId: string, active: boolean): void; renamePeer(userId: string, name: string): void; reconnect(): void; rotateToken(): void;performance:{stage:string;geometryReads:number;samples:Array<{actualDuration:number;baseDuration:number;timelineDuration:number;timelineFound:boolean}>;reset(stage:string):void} }
   notificationTest: { permission: string; requests: number; events: Array<{ title: string; tag: string }>; visible: boolean; focused: boolean; setAttention(visible: boolean, focused: boolean): void; activateLatest(): void }
 } }
 const incoming = (index: number, mention = true) => ({ id: id(index), content: mention ? 'Hello @Alice' : 'Another live message', type: 'text', user: { id: 'mira', name: 'Mira', avatarSeed: 'mira' },
   createdAt: new Date().toISOString(), mentions: mention ? [{ userId: 'alice', userName: 'Alice', handle: 'Alice' }] : [] })
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page },testInfo) => {
   await page.addInitScript(() => {
     const state = { permission: 'granted', requests: 0, events: [] as Array<{ title: string; tag: string }>, visible: true, focused: true, activateLatest: () => {},
       setAttention(visible: boolean, focused: boolean) { state.visible = visible; state.focused = focused; document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event(focused ? 'focus' : 'blur')) } }
@@ -31,6 +31,12 @@ test.beforeEach(async ({ page }) => {
     content: index >= 4 && index < 50 ? `needle message ${index + 1}` : `Room message ${index + 1}`, user_id: 'mira', user_name: 'Mira', avatar_seed: 'mira', message_type: 'text',
     mentions: [{ userId: 'alice', userName: 'Alice', handle: 'Alice' }], soundspin_message_reactions: [] }))
   rows.push({ ...rows[0], id: id(800), room_slug: 'other-room', content: 'Other room message' }, { ...rows[0], id: id(900), room_slug: 'secret-room', content: 'needle private message' })
+  if(testInfo.title.includes('crowded timeline'))for(const[index,row]of rows.slice(220,420).entries()){
+    if(index%10===0){row.message_type=index%20===0?'gif':'image';row.media_url=`https://media.example.test/${index}.gif`;row.content='Room image'}
+    else if(index%10===1){row.content='Which song next?';row.poll_options=['Jazz','House'];row.soundspin_poll_votes=[{user_id:'bob',option_index:0,revision:1}]}
+    else if(index%10===2)row.reply_to_id=id(221)
+    else if(index%10===3)row.soundspin_message_reactions=[{user_id:'bob',emoji:'❤️'}]
+  }
   const database: Database = { rows, allowed: true, holdOlder: false, releaseOlder: null, holdSearch: false, releaseSearch: null, searches: [], mediaRequests: [] }
   databases.set(page, database)
   const enrich = (selected: Row[]) => ({ rows: selected, replies: rows.filter((row) => selected.some((message) => message.reply_to_id === row.id) && row.room_slug === selected[0]?.room_slug), profiles: [] })
@@ -76,6 +82,79 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('.chat-message-item')).toHaveCount(200)
 })
 
+test('typing and scrolling keep a crowded timeline idle while original-UUID retries and history jumps still work', async ({ page }) => {
+  const composer = page.getByRole('textbox', { name: 'Message room chat' })
+  const scroll = page.locator('.chat-message-scroll')
+  await scroll.evaluate(element => { element.scrollTop = element.scrollHeight * 0.45; element.dispatchEvent(new Event('scroll')) })
+  const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await settle()
+  await expect.poll(() => page.locator('.chat-message-list img').evaluateAll(images => images.filter(image => { const bounds=image.getBoundingClientRect();return bounds.bottom>=0&&bounds.top<=innerHeight }).every(image => (image as HTMLImageElement).complete))).toBe(true)
+  await page.evaluate(() => window.chatHistoryTest.performance.reset('input'))
+  await composer.pressSequentially('Typing a crowded room')
+  await settle()
+  const input = await page.evaluate(() => ({ samples:window.chatHistoryTest.performance.samples,geometryReads:window.chatHistoryTest.performance.geometryReads }))
+  await page.evaluate(() => window.chatHistoryTest.performance.reset('scroll'))
+  await scroll.evaluate(async element => {
+    const top = element.scrollTop
+    for (let index = 0; index < 24; index++) {
+      element.scrollTop = top + (index + 1) * 12
+      element.dispatchEvent(new Event('scroll'))
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    }
+  })
+  await settle()
+  const scrolling = await page.evaluate(() => ({ samples:window.chatHistoryTest.performance.samples,geometryReads:window.chatHistoryTest.performance.geometryReads }))
+  await page.evaluate(() => window.chatHistoryTest.performance.reset('idle'))
+  const summarize = (measurement: typeof input) => ({ commits: measurement.samples.length, geometryReads: measurement.geometryReads,
+    timelineFound: measurement.samples.every(sample => sample.timelineFound),
+    timelineCommits: measurement.samples.filter(sample => sample.timelineDuration > 0.01).length,
+    totalMs: Number(measurement.samples.reduce((total, sample) => total + sample.actualDuration, 0).toFixed(2)),
+    maxMs: Number(Math.max(0, ...measurement.samples.map(sample => sample.actualDuration)).toFixed(2)),
+    timelineMs: Number(measurement.samples.reduce((total, sample) => total + sample.timelineDuration, 0).toFixed(2)) })
+  const metrics = { input: summarize(input), scroll: summarize(scrolling) }
+  console.log(`Crowded chat profile ${JSON.stringify(metrics)}`)
+  await test.info().attach('crowded-chat-profile', { body: JSON.stringify(metrics, null, 2), contentType: 'application/json' })
+  expect(metrics.input.commits).toBeGreaterThan(0)
+  expect(metrics.input.timelineFound, 'Fixture profiling finds the real message list').toBe(true)
+  expect(metrics.input.timelineCommits, 'Typing does not render the unchanged message list').toBe(0)
+  expect(metrics.scroll.timelineCommits, 'Scrolling does not render the unchanged message list').toBe(0)
+  expect(metrics.scroll.commits, 'Scroll position without a near-bottom transition needs no chat commit').toBeLessThanOrEqual(2)
+
+  await page.evaluate(() => { window.chatHistoryTest.failSend = true })
+  await composer.press('Enter')
+  await expect(page.getByText('Could not confirm send', { exact: true })).toBeVisible()
+  await page.evaluate(() => { window.chatHistoryTest.failSend = false })
+  await composer.press('Enter')
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.saveIds.length)).toBe(1)
+  const ids = await page.evaluate(() => ({ sends: window.chatHistoryTest.sendIds, saves: window.chatHistoryTest.saveIds }))
+  expect(ids.sends).toEqual([ids.saves[0], ids.saves[0]])
+  await expect(composer).toHaveValue('')
+  const ownMessage = page.locator(`#chat-message-${ids.saves[0]}`)
+  await expect(ownMessage.locator('.chat-message-save-state')).toHaveCount(0)
+  await page.locator(`#chat-message-${id(420)} .chat-message-reply`).click()
+  await expect(page.locator('.chat-message-jump-target')).toHaveAttribute('id', `chat-message-${id(5)}`)
+  await page.getByRole('button', { name: 'Back to live messages', exact: true }).click()
+  await expect(page.locator('.chat-message-item')).toHaveCount(201)
+  await expect(ownMessage.locator('.chat-message-save-state')).toHaveCount(0)
+
+  const selectedMessage = page.locator(`#chat-message-${id(419)}`)
+  await selectedMessage.getByRole('button', { name: 'Message actions for Mira' }).click()
+  await page.getByRole('menuitem', { name: 'Hide message', exact: true }).click()
+  await expect(selectedMessage).toHaveClass(/chat-message-hidden/)
+  await expect(page.locator(`#chat-message-${id(418)}`)).not.toHaveClass(/chat-message-hidden/)
+  await selectedMessage.getByRole('button', { name: 'Message actions for Mira' }).click()
+  await page.getByRole('menuitem', { name: 'Unhide message', exact: true }).click()
+  await expect(selectedMessage).toContainText('Room message 419')
+  await selectedMessage.hover()
+  await selectedMessage.getByRole('button', { name: 'More reactions' }).click()
+  const picker = page.getByRole('dialog', { name: "React to Mira's message" })
+  await expect(picker).toBeVisible()
+  await picker.locator('button.epr-emoji').first().click()
+  await expect(picker).toHaveCount(0)
+  await expect(selectedMessage.locator('.chat-message-reactions > button')).toHaveCount(1)
+  await expect(page.locator(`#chat-message-${id(418)} .chat-message-reactions > button`)).toHaveCount(0)
+})
+
 test('older pages preserve the reader anchor and first unread marker while a new message arrives during loading', async ({ page }) => {
   const database = databases.get(page)!
   await page.evaluate(() => window.notificationTest.setAttention(false, false))
@@ -101,6 +180,15 @@ test('older pages preserve the reader anchor and first unread marker while a new
   await expect(page.getByRole('button', { name: 'Load older messages', exact: true })).toHaveCount(0)
   const ids = await page.locator('.chat-message-item').evaluateAll((elements) => elements.map((element) => element.id))
   expect(new Set(ids).size).toBe(422)
+  await page.getByRole('button', { name: 'Hide chat pane', exact: true }).click()
+  await page.evaluate((message) => window.chatHistoryTest.receive(message), incoming(1001, false))
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(3)
+  await page.getByRole('button', { name: 'Show chat pane', exact: true }).click()
+  await page.evaluate(() => window.notificationTest.setAttention(true, true))
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(3)
+  await page.getByRole('button', { name: '3 new', exact: true }).click()
+  await expect(page.locator(`#chat-message-${id(1001)}`)).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.unread)).toBe(0)
 })
 
 test('full saved-room search pages through older results and opens chronological context without mixing another room', async ({ page }, testInfo) => {
@@ -142,7 +230,8 @@ test('retry send reuses its UUID and one durable save while preserving a separat
   await composer.fill('new draft during recovery')
   await page.evaluate(() => { window.chatHistoryTest.failSend = false })
   await page.getByRole('button', { name: 'Retry send', exact: true }).click()
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.saveIds.length)).toBe(1)
+  await expect(page.locator('.chat-message-save-state')).toHaveCount(0)
   await expect(composer).toHaveValue('new draft during recovery')
   const ids = await page.evaluate(() => ({ sends: window.chatHistoryTest.sendIds, saves: window.chatHistoryTest.saveIds }))
   expect(ids.sends).toEqual([ids.saves[0], ids.saves[0]])
@@ -157,7 +246,8 @@ test('successful retry clears its unchanged draft and pressing Enter cannot dupl
   await expect(page.getByText('Could not confirm send', { exact: true })).toBeVisible()
   await page.evaluate(() => { window.chatHistoryTest.failSend = false })
   await page.getByRole('button', { name: 'Retry send', exact: true }).click()
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.chatHistoryTest.saveIds.length)).toBe(1)
+  await expect(page.locator('.chat-message-save-state')).toHaveCount(0)
   await expect(composer).toHaveValue('')
   await composer.press('Enter')
   expect(await page.evaluate(() => window.chatHistoryTest.saveIds)).toHaveLength(1)

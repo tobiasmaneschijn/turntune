@@ -49,6 +49,7 @@ const CHAT_HISTORY_SELECT = [
   'created_at',
   'reply_to_id',
   'poll_options',
+  'removed_at',
   'soundspin_message_reactions(emoji, user_id)',
   'soundspin_poll_votes(user_id, option_index, revision)',
 ].join(', ')
@@ -64,6 +65,7 @@ export interface ChatHistoryRow {
   user_name: string
   avatar_seed: string
   created_at: string
+  removed_at?:string|null
   reply_to_id: string | null
   soundspin_message_reactions: Array<{ emoji: string; user_id: string }> | null
   poll_options?: string[] | null
@@ -212,6 +214,7 @@ function mapChatRows(history: ChatHistoryRow[], rowsById: Map<string, ChatHistor
         type: reply.message_type,
         mediaUrl: safeChatMediaUrl(reply.media_url),
         mentions: normalizeChatMentions(reply.mentions),
+        removedAt:reply.removed_at||undefined,
         user: {
           id: reply.user_id,
           name: reply.user_name,
@@ -224,6 +227,7 @@ function mapChatRows(history: ChatHistoryRow[], rowsById: Map<string, ChatHistor
       })),
       poll: pollFromRow(row),
       createdAt: row.created_at,
+      removedAt:row.removed_at||undefined,
     }
   })
 

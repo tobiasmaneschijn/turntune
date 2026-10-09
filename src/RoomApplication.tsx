@@ -10,6 +10,11 @@ import { PanelErrorBoundary } from "./components/AppErrorBoundary";
 import { Brand } from "./components/app-primitives";
 import { AppVersion } from "./components/AppVersion";
 import { RoomHeader } from "./components/RoomHeader";
+import { ParticipantActions } from "./components/ParticipantActions";
+import { RoomModerationDialog } from "./components/RoomModerationDialog";
+import { RoomRulesDialog, RoomSessionNotices } from "./components/RoomRulesDialog";
+import { effectiveRoomPolicy, roomCapabilities } from "../shared/room-policy";
+import { roomManagementRequest, roomModerationAction } from "./room-management";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { RoomMiniPlayer } from "./components/RoomMiniPlayer";
 import { ListeningChecklist } from "./components/ListeningChecklist";
@@ -73,6 +78,8 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
   const isNarrowRoomLayout = useMediaQuery("(max-width: 1024px)");
   const isTabletDualRoomLayout = useMediaQuery("(min-width: 900px) and (max-width: 1024px) and (min-height: 560px)");
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
+  const [moderationOpen, setModerationOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [themeNightOpen, setThemeNightOpen] = useState(false);
@@ -92,7 +99,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
     invitationRequests.current.clear();
   }, [auth.session?.user.id, roomId]);
   useEffect(() => {
-    setFriendsOpen(false); setThemeNightOpen(false); setRoomSettingsOpen(false); setUserSettingsOpen(false);
+    setFriendsOpen(false); setThemeNightOpen(false); setRoomSettingsOpen(false); setUserSettingsOpen(false); setModerationOpen(false); setRulesOpen(false);
   }, [auth.session?.user.id, roomId]);
   useEffect(() => {
     if (!roomId) { recordedVisitRef.current = null; return; }
@@ -285,18 +292,24 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
   // Being allowed to DJ, joining the lineup, and currently being on air are
   // separate states. Only the on-air browser reports a natural track end.
   const isDj = snapshot.room.djUserId === profile.id;
-  const canControlPlayback = isDj ||
+  const canControlPlayback = snapshot.room.capabilities?.playback ?? (isDj ||
     snapshot.room.ownerUserId === profile.id ||
-    snapshot.room.moderatorUserIds.includes(profile.id);
+    snapshot.room.moderatorUserIds.includes(profile.id));
+  const capabilities = snapshot.room.capabilities ?? roomCapabilities(snapshot.room, profile.id, snapshot.serverTime);
+  const participantActions = auth.session ? (user: User) => <ParticipantActions snapshot={snapshot} currentUserId={profile.id} user={user} accessToken={auth.session!.access_token} connected={connected} onNotice={setNotice} /> : undefined;
 
   return (
     <main className={`app-shell ${connected ? "" : "room-is-reconnecting"}`}>
       <RoomHeader roomName={snapshot.room.name} roomSlug={snapshot.room.id} listenerCount={snapshot.users.length}
         currentUser={profile} onHome={goHome} onSettings={() => setUserSettingsOpen(true)}
-        onRoomSettings={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id) ? () => setRoomSettingsOpen(true) : undefined}
+        onRoomSettings={capabilities.staff ? () => setRoomSettingsOpen(true) : undefined}
+        onModeration={capabilities.staff ? () => setModerationOpen(true) : undefined}
+        moderationCount={snapshot.room.ownStatus?.openReports ?? 0}
+        onRules={snapshot.room.settings.rulesText || snapshot.room.settings.requireRulesAcceptance ? () => setRulesOpen(true) : undefined}
+        participantActions={participantActions}
         onAdmin={profile.isAppAdmin ? openAdmin : undefined} onProfile={() => openProfile(profile.id)}
         onFriends={() => setFriendsOpen(true)}
-        onThemeNight={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id) ? () => setThemeNightOpen(true) : undefined}
+        onThemeNight={capabilities.roomDetailsMusic ? () => setThemeNightOpen(true) : undefined}
         onSignOut={auth.enabled ? () => { void auth.client?.auth.signOut(); } : undefined}
         onResetLayout={resetRoomLayout} onNotice={setNotice}
         layoutPreset={roomLayouts.layoutPreset} onLayoutPresetChange={roomLayouts.onLayoutPresetChange}
@@ -327,8 +340,8 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
           onLayoutChanged={roomLayouts.onLayoutChanged}
           miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={localPlayback.muted} localVolumeSupported={localPlayback.localVolumeSupported} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
-          roomNotice={<>{snapshot.room.settings.themePrompt && <RoomThemeBanner prompt={snapshot.room.settings.themePrompt} />}
-            <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} /></>}
+          roomNotice={<>{(snapshot.room.activeTheme ?? snapshot.room.settings.themePrompt) && <RoomThemeBanner prompt={(snapshot.room.activeTheme ?? snapshot.room.settings.themePrompt)!} />}
+            <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={capabilities.roomDetailsMusic} connected={connected} />{auth.session && <RoomSessionNotices key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onRules={() => setRulesOpen(true)} />}</>}
           radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
@@ -380,6 +393,8 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
       {roomSettingsOpen && auth.session && (
         <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
+      {moderationOpen && auth.session && <RoomModerationDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} currentUserId={profile.id} accessToken={auth.session.access_token} connected={connected} onClose={() => setModerationOpen(false)} onNotice={setNotice} onOpenProfile={id => { setModerationOpen(false); openProfile(id); }} />}
+      {rulesOpen && auth.session && <RoomRulesDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onClose={() => setRulesOpen(false)} onNotice={setNotice} />}
       {auth.session && <RoomProfileDialog profileId={profilePageId} accessToken={auth.session.access_token}
         currentUser={profile} onClose={backFromProfile} onUpdate={updateOwnProfile} onInvite={userId => { void inviteFriend(userId); }} />}
       {friendsOpen && auth.session && <Dialog open onOpenChange={setFriendsOpen}>
@@ -486,6 +501,7 @@ function RoomChat({
   const activeRef = useRef(true);
   const chatRef = useRef<RealtimeChatHandle>(null);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const managementRequestIds = useRef(new Map<string, string>());
   const [chatHeaderActions, setChatHeaderActions] = useState<HTMLDivElement | null>(null);
   const peopleButtonRef = useRef<HTMLButtonElement>(null);
   const adminUserIds = [...new Set(
@@ -523,6 +539,12 @@ function RoomChat({
   }, [client, snapshot.room.id]);
 
   const persistMessage = useCallback((message: ChatMessage) => historySourceRef.current.saveMessage(message), []);
+  const capabilities = snapshot.room.capabilities ?? roomCapabilities(snapshot.room, currentUser.id, snapshot.serverTime);
+  const effectivePolicy = effectiveRoomPolicy(snapshot.room, snapshot.serverTime);
+  const requestIdFor = (key: string) => { if (!managementRequestIds.current.has(key)) managementRequestIds.current.set(key, crypto.randomUUID()); return managementRequestIds.current.get(key)!; };
+  const removeMessage = async (message: ChatMessage, reason: string) => { const key = `remove:${message.id}:${reason}`; await roomModerationAction(snapshot.room.id, accessToken, { action: "remove-message", messageId: message.id, reason }, requestIdFor(key)); managementRequestIds.current.delete(key); };
+  const reportMessage = async (message: ChatMessage, reason: string) => { const key = `report:${message.id}:${reason}`; await roomManagementRequest(snapshot.room.id, "reports", accessToken, { method: "POST", body: JSON.stringify({ requestId: requestIdFor(key), messageId: message.id, targetUserId: message.user.id, reason }) }); managementRequestIds.current.delete(key); };
+  const restrictionMessage = capabilities.chat ? undefined : snapshot.room.ownStatus?.chatTimeoutUntil !== undefined ? `Chat timeout${snapshot.room.ownStatus.chatTimeoutUntil ? ` until ${new Date(snapshot.room.ownStatus.chatTimeoutUntil).toLocaleString()}` : ""}.` : snapshot.room.settings.requireRulesAcceptance && !snapshot.room.ownStatus?.rulesAccepted ? "Accept the room rules before participating." : "Chat is limited to room staff.";
 
   return (
     <aside className="chat panel">
@@ -545,6 +567,12 @@ function RoomChat({
           transport={chatTransport}
           roomName={`soundspin:${snapshot.room.id}`}
           user={currentUser}
+          capabilities={capabilities}
+          slowModeSeconds={capabilities.staff ? 0 : effectivePolicy.slowModeSeconds ?? 0}
+          restrictionMessage={restrictionMessage}
+          onRemoveMessage={capabilities.chatParticipants ? removeMessage : undefined}
+          canRemoveMessage={message => capabilities.owner || (message.user.id !== snapshot.room.ownerUserId && !snapshot.room.moderatorUserIds.includes(message.user.id))}
+          onReportMessage={reportMessage}
           messages={messages}
           onSend={persistMessage}
           onConnected={refreshHistory}
@@ -564,7 +592,7 @@ function RoomChat({
           onNotificationActivate={onActivate}
         />
       </div>
-      <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={snapshot.users} currentUserId={currentUser.id} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={onOpenProfile} finalFocus={peopleButtonRef} />
+      <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={snapshot.users} currentUserId={currentUser.id} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={onOpenProfile} participantActions={user => <ParticipantActions snapshot={snapshot} currentUserId={currentUser.id} user={user} accessToken={accessToken} connected={connected} onNotice={text => toast.info(text)} />} finalFocus={peopleButtonRef} />
     </aside>
   );
 }
