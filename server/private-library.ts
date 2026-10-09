@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { isMixcloudShowKey, mixcloudShowKey } from "../shared/mixcloud.js";
 
 export const LIBRARY_LIMITS = { picks: 500, sets: 30, setTracks: 50 } as const;
 export const libraryTrackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
+  provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
@@ -14,8 +15,12 @@ export const libraryTrackSchema = z.object({
   const valid = track.provider === "youtube" ? /^[\w-]{11}$/.test(track.providerId)
     : track.provider === "spotify" ? /^[A-Za-z0-9]{22}$/.test(track.providerId)
     : track.provider === "apple" ? /^\d+$/.test(track.providerId)
+    : track.provider === "mixcloud" ? isMixcloudShowKey(track.providerId)
     : /^soundcloud:tracks:\d+$/.test(track.providerId);
   if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid individual track identifier." });
+  if (track.provider === "mixcloud" && (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId)) {
+    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A matching Mixcloud show URL is required." });
+  }
 });
 const id = z.string().uuid();
 const setName = z.string().trim().min(1).max(60);

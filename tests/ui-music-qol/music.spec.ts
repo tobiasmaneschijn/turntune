@@ -26,6 +26,97 @@ async function openAddMusic(page: Page) {
   return dialog;
 }
 
+test("Mixcloud searches and show links add canonical recordings", { tag: "@mobile" }, async ({ page }) => {
+  const show = { provider: "mixcloud", id: "/fixture/midnight/", title: "Midnight Show", artist: "Fixture DJ", durationMs: 3_600_000, permalinkUrl: "https://www.mixcloud.com/fixture/midnight/" };
+  await page.route("**/api/mixcloud/search?**", (route) => route.fulfill({ json: { results: [show] } }));
+  await page.route("**/api/mixcloud/resolve?**", (route) => route.fulfill({ json: { result: { ...show, id: "/fixture/another/", title: "Another Show" } } }));
+  await open(page);
+  await openAddMusic(page);
+  await page.getByRole("combobox", { name: "Music provider", exact: true }).click();
+  await page.getByRole("option", { name: "Mixcloud", exact: true }).click();
+  await search(page, "midnight");
+  await expect(page.locator(".search-result-row")).toContainText("Fixture DJ · 1:00:00");
+  await page.getByRole("button", { name: "Add Midnight Show to your queue", exact: true }).click();
+  await expect.poll(() => api(page, "return music.commands.at(-1).payload.provider")).toBe("mixcloud");
+  await expect.poll(() => api(page, "return music.commands.at(-1).payload.providerId")).toBe("/fixture/midnight/");
+  await page.getByRole("button", { name: "Add by link", exact: true }).click();
+  await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://mixcloud.com/fixture/another/?utm_source=copy");
+  await page.getByRole("button", { name: "Find track", exact: true }).click();
+  await expect(page.locator(".music-link-preview")).toContainText("Another Show");
+  await page.getByRole("button", { name: "Add to my queue", exact: true }).click();
+  await expect.poll(() => api(page, "return music.commands.at(-1).payload.providerId")).toBe("/fixture/another/");
+});
+
+test("room services filter search, replace disabled preferences and cancel stale results", { tag: "@mobile" }, async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "mixcloud"));
+  let requestStarted = false;
+  let release!: () => void;
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/mixcloud/search?**", async (route) => {
+    requestStarted = true;
+    await responseGate;
+    await route.fulfill({ json: { results: [{ id: "/fixture/stale/", title: "Stale Mixcloud Show", artist: "DJ" }] } }).catch(() => {});
+  });
+  await open(page);
+  await search(page);
+  await expect.poll(() => requestStarted).toBe(true);
+  await api(page, "music.setAllowedProviders(['soundcloud', 'spotify'])");
+  await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toContainText("SoundCloud");
+  release();
+  await expect(page.locator(".search-result-list")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator(".search-result-row")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
+  await page.getByRole("combobox", { name: "Music provider", exact: true }).click();
+  await expect(page.getByRole("option")).toHaveText(["SoundCloud", "Spotify"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Add by link", exact: true }).click();
+  await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://mixcloud.com/fixture/show/");
+  await expect(page.getByText("Mixcloud · disabled in this room", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Find track", exact: true })).toBeDisabled();
+  expect(await api(page, "return music.commands")).toEqual([]);
+});
+
+test("disabled services retain queue, history, picks and sets with blocked add controls", { tag: "@mobile" }, async ({ page }) => {
+  const savedTrack = { provider: "spotify", providerId: "5bJ1DrEM4hNCafcDd1oxHx", title: "Saved Recording", artist: "Fixture Artist" };
+  await page.route("**/api/library", (route) => route.fulfill({ json: { library: {
+    picks: [{ id: "saved-pick", track: savedTrack, savedAt: 100 }],
+    sets: [{ id: "saved-set", name: "Saved Set", tracks: [savedTrack], savedAt: 100 }]
+  } } }));
+  await open(page, "library");
+  await api(page, "music.setAllowedProviders(['mixcloud'])");
+  await expect(page.locator(".queue-track")).toHaveCount(3);
+  await expect(page.locator(".queue-track").filter({ hasText: "Gamma" })).toContainText("Disabled in this room · skipped");
+  await page.getByRole("button", { name: "Actions for Gamma", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: "First in my queue", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Remove from my queue", exact: true })).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(page.locator(".music-history-row")).toHaveCount(2);
+  await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: "Add to my queue", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "My picks", exact: true }).click();
+  await expect(page.locator(".music-library-row")).toContainText("Disabled in this room");
+  await expect(page.getByRole("button", { name: "Add saved pick Saved Recording to my queue", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Append set to my queue", exact: true })).toBeDisabled();
+  await api(page, "music.setAllowedProviders(['spotify'])");
+  await expect(page.getByRole("button", { name: "Add saved pick Saved Recording to my queue", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Append set to my queue", exact: true })).toBeEnabled();
+  expect(await api(page, "return music.commands")).toEqual([]);
+});
+
+test("rooms with no searchable services retain link input and disable catalog controls", { tag: "@mobile" }, async ({ page }) => {
+  await open(page);
+  await api(page, "music.setAllowedProviders(['apple'])");
+  await openAddMusic(page);
+  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toBeDisabled();
+  await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Go", exact: true })).toBeDisabled();
+  await expect(page.getByText("No searchable music services allowed in this room.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add by link", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Track link", exact: true })).toBeEnabled();
+});
+
 test("external queue command opens and focuses the private queue", { tag: "@mobile" }, async ({ page }) => {
   await open(page);
   await page.getByRole("tab", { name: "History", exact: true }).click();

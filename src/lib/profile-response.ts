@@ -5,7 +5,7 @@ const nullableString = (value: unknown) => value === null || typeof value === "s
 function profileTrack(value: unknown): value is ProfileTrack {
   if (!value || typeof value !== "object") return false;
   const track = value as Record<string, unknown>;
-  return ["youtube", "spotify", "apple", "soundcloud"].includes(String(track.provider)) &&
+  return ["youtube", "spotify", "apple", "soundcloud", "mixcloud"].includes(String(track.provider)) &&
     typeof track.providerId === "string" && typeof track.title === "string" && track.title.length > 0 &&
     (track.artist === undefined || typeof track.artist === "string") &&
     ["artworkUrl", "permalinkUrl"].every(key => track[key] === undefined || (typeof track[key] === "string" && /^https:\/\//.test(track[key]))) &&

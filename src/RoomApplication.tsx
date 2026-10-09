@@ -301,7 +301,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
         onResetLayout={resetRoomLayout} onNotice={setNotice}
         layoutPreset={roomLayouts.layoutPreset} onLayoutPresetChange={roomLayouts.onLayoutPresetChange}
         onFocusSearch={focusMusicSearch} onOpenQueue={openMusicQueue} onOpenPlayer={() => setMobileRoomPane("player")}
-        onToggleMute={() => playerControls.current?.toggleMute()} muted={userSettings.playback.defaultVolume === 0} onFocusChat={focusChat}
+        onToggleMute={localPlayback.localVolumeSupported === false ? undefined : () => playerControls.current?.toggleMute()} muted={localPlayback.muted} onFocusChat={focusChat}
         connected={connected} onReconnect={retryRoom}
         participants={snapshot.users} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={openProfile}
         diagnosticContext={{
@@ -325,7 +325,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
           defaultLayout={roomLayouts.defaultLayout}
           groupRef={roomPanelGroupRef}
           onLayoutChanged={roomLayouts.onLayoutChanged}
-          miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={userSettings.playback.defaultVolume === 0} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
+          miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={localPlayback.muted} localVolumeSupported={localPlayback.localVolumeSupported} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
           roomNotice={<>{snapshot.room.settings.themePrompt && <RoomThemeBanner prompt={snapshot.room.settings.themePrompt} />}
             <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={snapshot.room.ownerUserId === profile.id || snapshot.room.moderatorUserIds.includes(profile.id)} connected={connected} /></>}

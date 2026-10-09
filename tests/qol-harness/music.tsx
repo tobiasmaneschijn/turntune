@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { MusicRail, type MusicRailAction, type MusicRailActionName, type MusicRailControls } from "../../src/components/MusicRail";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import type { SocketReply } from "../../src/socket-request";
-import type { RoomSnapshot, Track, User } from "../../src/types";
+import type { Provider, RoomSnapshot, Track, User } from "../../src/types";
 import "../../src/shadcn.css";
 import "../../src/styles.css";
 import "./music.css";
@@ -50,6 +50,7 @@ declare global {
       snapshot(): RoomSnapshot;
       setDj(userId: string | null): void;
       setTrackMetadata(trackId: string, title: string, artist: string): void;
+      setAllowedProviders(providers: Provider[]): void;
       openQueue(): void;
     };
   }
@@ -125,6 +126,7 @@ function Harness() {
     setConnected,
     setDj: (userId) => update({ ...latest.current, room: { ...latest.current.room, djUserId: userId } }),
     setTrackMetadata: (trackId, title, artist) => update({ ...latest.current, room: { ...latest.current.room, queue: latest.current.room.queue.map((track) => track.id === trackId ? { ...track, title, artist } : track) } }),
+    setAllowedProviders: (allowedProviders) => update({ ...latest.current, room: { ...latest.current.room, settings: { ...latest.current.room.settings, allowedProviders } } }),
     snapshot: () => latest.current,
     openQueue: () => controlsRef.current?.openQueue()
   };

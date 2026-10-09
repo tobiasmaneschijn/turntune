@@ -122,3 +122,14 @@
 .room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #chat { width: calc(50% - 4px) !important; opacity: 1; visibility: visible; pointer-events: auto; }
 .room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #player { left: 0 !important; right: auto !important; }
 .room-layout.room-tablet-dual:not(.room-radio-active) .room-panels > #chat { left: auto !important; right: 0 !important; }
+
+/* Mixcloud's widget API requires a visible player, including during mobile chat. */
+@media (max-width: 1024px) {
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active):has(.has-mixcloud) .room-panels:has(#player[data-active="false"]) > [data-active="true"] { height: calc(100% - 190px) !important; }
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active):has(.has-mixcloud) .room-panels > #player[data-active="false"] { top: auto !important; bottom: 0; height: 182px !important; min-height: 182px; opacity: 1; visibility: visible; pointer-events: auto; z-index: 2; border-top: 1px solid var(--border); }
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active) #player[data-active="false"]:has(.has-mixcloud) .now-playing { padding: 0; }
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active) #player[data-active="false"]:has(.has-mixcloud) .now-playing > :not(.now-playing-main),
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active) #player[data-active="false"]:has(.has-mixcloud) .player-details { display: none; }
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active) #player[data-active="false"]:has(.has-mixcloud) .now-playing-main { display: block; }
+  :is(.room-layout:not(.room-tablet-dual), .room-layout.room-radio-active) #player[data-active="false"] .track-stage.has-mixcloud { height: 182px !important; min-height: 182px !important; width: 100% !important; }
+}

@@ -4,6 +4,7 @@ import "@fontsource-variable/geist";
 import "../../src/shadcn.css";
 import "../../src/styles.css";
 import { NowPlaying } from "../../src/components/NowPlaying";
+import { RoomSettingsDialog } from "../../src/components/RoomSettingsDialog";
 import { MusicRail } from "../../src/components/MusicRail";
 import { RealtimeChat } from "../../src/components/realtime-chat";
 import { RoomHeader } from "../../src/components/RoomHeader";
@@ -19,7 +20,7 @@ import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { Button } from "../../src/components/ui/button";
 import { readUserSettings } from "../../src/playback-settings";
 import type { YouTubePlayer, PlayerStatus } from "../../src/components/YouTubePlayer";
-import type { RoomSnapshot, Track } from "../../src/types";
+import type { Provider, RoomSnapshot, Track } from "../../src/types";
 import type { SocketReply } from "../../src/socket-request";
 const polished = new URLSearchParams(location.search).has("workspace");
 const reactingListener = new URLSearchParams(location.search).has("listener");
@@ -45,12 +46,13 @@ const chatHistorySource: ChatHistorySource = {
   saveReaction: async () => {},
   loadMediaUrl: async () => "",
 };
-type TestState = { mounts: number; calls: string[]; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void };
-const qa: TestState = { mounts: 0, calls: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {} };
+type TestState = { mounts: number; calls: string[]; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void; setAllowedProviders: (providers: Provider[]) => void; useMixcloud: () => void; savedRoomSettings?: { allowedProviders: Provider[] } };
+const qa: TestState = { mounts: 0, calls: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {}, setAllowedProviders: () => {}, useMixcloud: () => {} };
 declare global { interface Window { playerQolTest: TestState } }
 window.playerQolTest = qa;
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, init) => {
   if (String(url).includes("/api/music/connections")) return qa.failConnections ? Response.json({}, { status: 503 }) : Response.json({ spotify: { configured: false, connected: false }, apple: { configured: false } });
+  if (String(url).includes("/api/rooms/") && init?.method === "PATCH") qa.savedRoomSettings = JSON.parse(String(init.body));
   return Response.json({});
 };
 function FixturePlayer({ playback, onStatus, onError, syncRevision, volume }: React.ComponentProps<typeof YouTubePlayer>) {
@@ -60,9 +62,11 @@ function FixturePlayer({ playback, onStatus, onError, syncRevision, volume }: Re
   useEffect(() => {
     onStatus({ ready: qa.ready, buffering: qa.buffering, playing: qa.actualPlaying, currentTime: playback.position + (playback.playing ? Math.max(0, Date.now() - playback.updatedAt) / 1000 : 0), duration: 180, trackId: playback.track?.id });
   }, [playback.track?.id, playback.playing, playback.updatedAt, syncRevision, onStatus]);
-  return <div className="provider-player-shell"><span>Fixture provider · volume {volume}</span></div>;
+  return playback.track?.provider === "mixcloud"
+    ? <div className="mixcloud-shell"><iframe title="Fixture Mixcloud player" style={{ width: "100%", height: 120, border: 0 }} /><button type="button">Play Mixcloud</button></div>
+    : <div className="provider-player-shell"><span>Fixture provider · volume {volume}</span></div>;
 }
-const adapters = { youtube: FixturePlayer };
+const adapters = { youtube: FixturePlayer, mixcloud: FixturePlayer };
 const requestAction = (event: string, _payload: unknown, reply: (result: SocketReply) => void) => { qa.calls.push(event); qa.pending = reply; };
 function ReadyDialog({ onClose }: { onClose: () => void }) { return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}><DialogContent><DialogTitle>Deferred panel</DialogTitle><DialogDescription>Ready</DialogDescription></DialogContent></Dialog>; }
 let releaseModule: () => void;
@@ -76,10 +80,13 @@ function Harness() {
   const [room, setRoom] = useState(snapshot);
   const [connected, setConnected] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [delayedOpen, setDelayedOpen] = useState(false);
   const [flakyOpen, setFlakyOpen] = useState(false);
   qa.update = () => setRevision(value => value + 1);
+  qa.setAllowedProviders = allowedProviders => setRoom(value => ({ ...value, room: { ...value.room, settings: { ...value.room.settings, allowedProviders } } }));
+  qa.useMixcloud = () => { setSettings(value => ({ ...value, playback: { ...value.playback, preference: "source", defaultVolume: 0 } })); setRoom(value => ({ ...value, room: { ...value.room, playback: { ...value.room.playback, track: { ...track, provider: "mixcloud", providerId: "/artist/show/", permalinkUrl: "https://www.mixcloud.com/artist/show/" }, updatedAt: Date.now() } } })); };
   qa.setVotes = votes => setRoom(value => ({ ...value, users: [user, ...Object.keys(votes).map(id => ({ id, name: id, avatarSeed: id }))], room: { ...value.room, vibe: { trackId: value.room.playback.track!.id, votes } } }));
   return <main className="app-shell">
     {polished ? <RoomHeader roomName={room.room.name} roomSlug={room.room.id} listenerCount={room.users.length} currentUser={user} onHome={() => {}} onSettings={() => setSettingsOpen(true)} onProfile={() => {}} onResetLayout={() => {}} onNotice={() => {}} connected={connected} participants={room.users} ownerUserId={user.id} djUserId={user.id} onOpenProfile={() => {}} /> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: 8 }}>
@@ -89,6 +96,7 @@ function Harness() {
       <Button onClick={() => setDelayedOpen(true)}>Open delayed panel</Button>
       <Button onClick={() => releaseModule?.()}>Resolve panel module</Button>
       <Button onClick={() => setFlakyOpen(true)}>Open flaky panel</Button>
+      <Button onClick={() => setRoomSettingsOpen(true)}>Open room settings</Button>
     </div>}
     <RoomWorkspace value={pane} onValueChange={setPane} defaultLayout={{ radio: 20, player: 45, chat: 35 }}
       roomNotice={polished && <><RoomThemeBanner prompt={new URLSearchParams(location.search).get("theme") || "After hours"} /><RoomAnnouncementBanner roomId={room.room.id} userId={user.id} announcement={{ id: "fixture-note", text: "One song per turn. Pick something you love.", authorId: user.id, updatedAt: 1, expiresAt: null }} serverTime={room.serverTime} canEdit={false} connected={connected} /></>}
@@ -97,6 +105,7 @@ function Harness() {
       player={<div className="player-column" data-revision={revision}><NowPlaying snapshot={room} currentUserId={reactingListener ? "listener" : user.id} isDj canControlPlayback accessToken="fixture" compact={settings.playback.compactPlayer} onToggleCompact={() => setSettings(value => ({ ...value, playback: { ...value.playback, compactPlayer: !value.playback.compactPlayer } }))} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} userSettings={settings} onUserSettingsChange={setSettings} roomConnected={connected} onOpenSettings={() => setSettingsOpen(true)} requestAction={requestAction} providerPlayers={adapters} /></div>} />
     {delayedOpen && <DeferredDialog title="Deferred panel" load={loadDelayed} componentProps={{ onClose: () => setDelayedOpen(false) }} />}
     {flakyOpen && <DeferredDialog title="Deferred panel" load={loadFlaky} componentProps={{ onClose: () => setFlakyOpen(false) }} />}
+    {roomSettingsOpen && <RoomSettingsDialog snapshot={room} currentUserId={user.id} accessToken="fixture" connected={connected} onNotice={() => { if (qa.savedRoomSettings) qa.setAllowedProviders(qa.savedRoomSettings.allowedProviders); }} onClose={() => setRoomSettingsOpen(false)} />}
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}><TooltipProvider><Harness /></TooltipProvider></ThemeProvider>);

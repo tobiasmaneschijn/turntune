@@ -1,4 +1,4 @@
-export type Provider = "youtube" | "spotify" | "apple" | "soundcloud";
+export type Provider = "youtube" | "spotify" | "apple" | "soundcloud" | "mixcloud";
 
 export interface User {
   id: string;
@@ -93,6 +93,7 @@ export interface RoomAnnouncement {
 
 export interface RoomSettings {
   djAccess?: DjAccess;
+  allowedProviders?: Provider[];
   description?: string;
   themePrompt?: string;
   [key: string]: unknown;

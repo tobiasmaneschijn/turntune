@@ -43,6 +43,8 @@ export async function resolveTrackMappings(
   const mappings: NonNullable<Track["mappings"]> = {
     [input.provider]: sourceMapping(input)
   };
+  // A Mixcloud show can contain many recordings; song catalog matches are invalid.
+  if (input.provider === "mixcloud") return { ...input, canonicalId: `mixcloud:${input.providerId}`, mappings };
   let source = { ...input };
   let isrc: string | undefined;
 

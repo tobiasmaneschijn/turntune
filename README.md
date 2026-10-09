@@ -17,7 +17,8 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - Persistent rooms, queues, and recent messages
 - Persistent Supabase Auth sessions with automatic token refresh
 - Supabase-backed room ownership and storage
-- YouTube, SoundCloud, Spotify, and Apple Music catalog search
+- YouTube, SoundCloud, Spotify, Apple Music, and Mixcloud catalog search
+- Room settings for allowed music services
 - Provider-neutral tracks with per-listener synchronized playback
 - Visible app version and in-app changelog
 - Single-container deployment for Dokploy
@@ -33,6 +34,15 @@ and includes round-robin DJ turns, real-time chat, presence, and generated avata
 - Profiles with handles, status, and up to three favorite songs
 - Mutual friends, room invitations, and optional activity sharing with friends
 - Profile drawers that keep the room player running, and host-controlled theme nights
+
+Owners and moderators can choose allowed music services in Room settings.
+Disabled services are excluded from search and queue additions, and their waiting
+tracks stay saved until re-enabled. Disabling the current track's service advances
+the room to the next allowed track. Existing rooms allow all services by default.
+
+Mixcloud uses its public catalog API and official embedded player; no API key is
+needed. Mixcloud may refuse seeks, which limits room synchronization. Use device
+volume for Mixcloud; its widget stays visible while listening on phones.
 
 ## Local development
 

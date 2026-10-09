@@ -1,5 +1,7 @@
 import { readStoredValue } from "./lib/browser-storage";
 import type { Provider, Track } from "./types";
+import { PROVIDER_LABELS } from "../shared/providers";
+import { isMixcloudShowKey, mixcloudShowKey, mixcloudShowUrl } from "../shared/mixcloud";
 
 export const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
 
@@ -15,13 +17,13 @@ export interface ProviderSearchResult {
 }
 
 export function providerLabel(provider: Provider) {
-  return { youtube: "YouTube", soundcloud: "SoundCloud", spotify: "Spotify", apple: "Apple Music" }[provider];
+  return PROVIDER_LABELS[provider];
 }
 
 export function readSearchProvider(): Provider {
   const provider = readStoredValue(SEARCH_PROVIDER_STORAGE_KEY);
   // Apple catalog search is still hidden behind the existing Coming Soon option.
-  return provider === "soundcloud" || provider === "spotify" ? provider : "youtube";
+  return provider === "soundcloud" || provider === "spotify" || provider === "mixcloud" ? provider : "youtube";
 }
 
 function isHost(hostname: string, domain: string) {
@@ -38,6 +40,7 @@ export function detectMusicProvider(value: string): Provider | null {
     if (isHost(url.hostname, "spotify.com")) return "spotify";
     if (isHost(url.hostname, "soundcloud.com")) return "soundcloud";
     if (isHost(url.hostname, "music.apple.com")) return "apple";
+    if (url.hostname === "mixcloud.com" || url.hostname === "www.mixcloud.com") return "mixcloud";
   } catch {
     // Bare IDs are deliberately interpreted only by the selected provider.
   }
@@ -76,7 +79,7 @@ export function parseMusicLink(value: string, selectedProvider: Provider): Music
   }
   if (/^[A-Za-z0-9]{22}$/.test(input) && selectedProvider === "spotify") return { provider: "spotify", url: input };
   const provider = detectMusicProvider(input);
-  if (!provider) return { error: "Use a YouTube, Spotify, SoundCloud, or Apple Music track link." };
+  if (!provider) return { error: "Use a YouTube, Spotify, SoundCloud, Apple Music, or Mixcloud link." };
   const url = new URL(input);
   if (provider === "youtube") {
     const id = youtubeId(input);
@@ -91,6 +94,11 @@ export function parseMusicLink(value: string, selectedProvider: Provider): Music
   }
   if (provider === "apple" && !/^\d+$/.test(url.searchParams.get("i") || "") && !/\/song\/[^/]+\/\d+\/?$/.test(url.pathname)) {
     return { error: "Paste an Apple Music song link. Album links need the selected song’s i= parameter." };
+  }
+  if (provider === "mixcloud") {
+    const providerId = mixcloudShowKey(input);
+    if (!providerId) return { error: "Paste a secure Mixcloud show link, not a profile or playlist link." };
+    return { provider, providerId, url: mixcloudShowUrl(providerId) };
   }
   return { provider, url: input };
 }
@@ -120,6 +128,9 @@ export function trackSourceUrl(track: Pick<Track, "provider" | "providerId" | "p
   }
   if (track.provider === "spotify" && /^[A-Za-z0-9]{22}$/.test(track.providerId)) {
     return `https://open.spotify.com/track/${track.providerId}`;
+  }
+  if (track.provider === "mixcloud" && isMixcloudShowKey(track.providerId)) {
+    return mixcloudShowUrl(track.providerId);
   }
   if (!track.permalinkUrl) return undefined;
   try {

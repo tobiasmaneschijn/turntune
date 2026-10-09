@@ -1,6 +1,68 @@
 import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => { await page.goto("/tests/player-qol-harness/index.html"); await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeVisible(); });
 
+test("room service controls save the allowlist and protect unsaved changes", async ({ page }, testInfo) => {
+  await page.getByRole("button", { name: "Open room settings", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Room settings", exact: true });
+  for (const name of ["YouTube", "SoundCloud", "Spotify", "Apple Music", "Mixcloud"]) {
+    await expect(dialog.getByRole("switch", { name, exact: true })).toHaveAttribute("aria-checked", "true");
+  }
+  await dialog.getByRole("switch", { name: "Spotify", exact: true }).click();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Discard room changes?", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath("room-music-services.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.getByRole("switch", { name: "Mixcloud", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: testInfo.outputPath("room-music-services-mobile.png") });
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => window.playerQolTest.savedRoomSettings?.allowedProviders)).toEqual(["youtube", "soundcloud", "apple", "mixcloud"]);
+  await page.getByRole("button", { name: "Open room settings", exact: true }).click();
+  await expect(dialog.getByRole("switch", { name: "Spotify", exact: true })).toHaveAttribute("aria-checked", "false");
+  for (const name of ["YouTube", "SoundCloud", "Apple Music", "Mixcloud"]) await dialog.getByRole("switch", { name, exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("status")).toContainText("Allow at least one music service.");
+});
+
+test("room policy overrides a disabled playback preference", async ({ page }) => {
+  await page.getByRole("button", { name: "Use silent fallback", exact: true }).click();
+  await expect(page.getByText("This track is silent on your device")).toBeVisible();
+  await page.evaluate(() => window.playerQolTest.setAllowedProviders(["youtube", "mixcloud"]));
+  await expect(page.getByText("Fixture provider · volume 80")).toBeVisible();
+  await expect(page.getByText("Spotify is disabled in this room · using YouTube")).toBeVisible();
+});
+
+test("Mixcloud stays visible in compact mode and does not claim app mute", async ({ page }) => {
+  await page.evaluate(() => window.playerQolTest.useMixcloud());
+  await expect(page.getByText("Use your device volume for Mixcloud.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Mute my audio", exact: true })).toBeDisabled();
+  await expect(page.getByText("Your audio is muted · room playback continues")).toHaveCount(0);
+  await page.getByRole("button", { name: "Focus chat", exact: true }).click();
+  const iframe = page.getByTitle("Fixture Mixcloud player");
+  const activation = page.getByRole("button", { name: "Play Mixcloud", exact: true });
+  const assertActivationFits = async () => {
+    const stage = await page.locator(".track-stage.has-mixcloud").boundingBox();
+    const button = await activation.boundingBox();
+    expect(stage).not.toBeNull(); expect(button).not.toBeNull();
+    expect(button!.y).toBeGreaterThanOrEqual(stage!.y);
+    expect(button!.y + button!.height).toBeLessThanOrEqual(stage!.y + stage!.height);
+  };
+  await expect(iframe).toBeVisible();
+  await assertActivationFits();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("tab", { name: "Chat", exact: true }).click();
+  await expect(iframe).toBeVisible();
+  await expect(activation).toBeVisible();
+  await assertActivationFits();
+  await expect(page.getByRole("textbox", { name: "Chat draft", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 960, height: 800 });
+  await expect(page.locator(".room-layout")).toHaveClass(/room-tablet-dual/);
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeVisible();
+  await expect(page.getByText("Use your device volume for Mixcloud.")).toBeVisible();
+});
+
 test("room commands show pending and inline recovery without repeated dispatch", async ({ page }) => {
   await page.getByRole("button", { name: "Pause room", exact: true }).click();
   await expect(page.getByText("Pausing room…")).toBeVisible();

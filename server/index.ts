@@ -22,6 +22,7 @@ import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./store.js";
 import { profileUpdateSchema } from "./profile-fields.js";
+import { allowedProvidersSchema } from "./room-settings.js";
 import { mountPrivateLibraryRoutes } from "./library-routes.js";
 import { mountSocialRoutes } from "./social-routes.js";
 import { SocialStore } from "./social-store.js";
@@ -132,7 +133,8 @@ const roomSettingsSchema = z.object({
   isPublic: z.boolean().optional(),
   password: z.union([z.string().max(128), z.null()]).optional(),
   djAccess: z.enum(["everyone", "roles"]).optional(),
-  themePrompt: z.string().trim().max(160).nullable().optional()
+  themePrompt: z.string().trim().max(160).nullable().optional(),
+  allowedProviders: allowedProvidersSchema.optional()
 }).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
 
 const favoriteSchema = z.object({ favorite: z.boolean() });
@@ -708,7 +710,8 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
       passwordHash: parsed.data.password === undefined ? undefined : await hashRoomPassword(parsed.data.password),
       djAccess: parsed.data.djAccess,
       description: parsed.data.description,
-      themePrompt: parsed.data.themePrompt
+      themePrompt: parsed.data.themePrompt,
+      allowedProviders: parsed.data.allowedProviders
     });
     if (room) {
       for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {

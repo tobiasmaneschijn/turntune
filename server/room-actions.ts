@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import type { Socket } from "socket.io";
 import { trackSchema, queueTrackSchema, queueMoveSchema, queueNextSchema, playbackSchema, vibeVoteSchema, moderatorSchema, djRoleSchema, roomCommandSchemas } from "../shared/room-protocol.js";
+import { PROVIDER_LABELS, roomAllowsProvider } from "../shared/providers.js";
 import { announcementSchema, changeAnnouncement } from "./announcements.js";
 import { advanceRadio, appendQueueSet, canJoinDjQueue, privateQueue, removeDj, sameRecording, type QueueUndoRegistry } from "./radio.js";
 import { resolveSavedSet, type SetImportRegistry, type createSavedSetResolver } from "./saved-set.js";
@@ -95,10 +96,12 @@ export function mountRoomActions(options: RoomActionOptions) {
     const parsed = trackSchema.safeParse(payload); const member = currentMember();
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid track." });
     assertCurrent(member);
+    if (!roomAllowsProvider(member.room.settings, parsed.data.provider)) fail(`${PROVIDER_LABELS[parsed.data.provider]} is disabled in this room.`);
     const resolved = await options.resolveTrack(parsed.data);
     const result = await commands.execute(member.room, draft => {
       assertCurrent(member);
       const recording = { ...parsed.data, ...resolved };
+      if (!roomAllowsProvider(draft.settings, recording.provider)) fail(`${PROVIDER_LABELS[recording.provider]} is disabled in this room.`);
       if (draft.playback.track && sameRecording(draft.playback.track, recording)) fail("That track is already playing.");
       const queue = privateQueue(draft, member.user.id);
       const duplicate = queue.findIndex(track => sameRecording(track, recording));
@@ -123,7 +126,8 @@ export function mountRoomActions(options: RoomActionOptions) {
       const resolved = await resolveSavedSet(set!.tracks, options.resolveSavedRecording);
       return commands.execute(member.room, draft => {
         assertCurrent(member);
-        if (privateQueue(draft, member.user.id).length + resolved.tracks.length > 1000) fail("Your waiting queue is full. Remove tracks before adding this set.");
+        const enabledTracks = resolved.tracks.filter(track => roomAllowsProvider(draft.settings, track.provider));
+        if (privateQueue(draft, member.user.id).length + enabledTracks.length > 1000) fail("Your waiting queue is full. Remove tracks before adding this set.");
         const appended = resolved.tracks.length ? appendQueueSet(draft, member.user, resolved.tracks) : { added: 0, skipped: [], started: false };
         const outcome = { ...appended, skipped: [...resolved.skipped, ...appended.skipped] };
         return { result: outcome, committed: () => markCommitted(outcome) };
@@ -141,7 +145,9 @@ export function mountRoomActions(options: RoomActionOptions) {
   });
   action("queue:play-next", queueTrackSchema, (draft, member, input) => {
     const queue = privateQueue(draft, member.user.id); const index = queue.findIndex(track => track.id === input.trackId);
-    if (index < 0) fail("Track not found."); queue.unshift(...queue.splice(index, 1)); return { result: {} };
+    if (index < 0) fail("Track not found.");
+    if (!roomAllowsProvider(draft.settings, queue[index].provider)) fail(`${PROVIDER_LABELS[queue[index].provider]} is disabled in this room.`);
+    queue.unshift(...queue.splice(index, 1)); return { result: {} };
   });
   action("queue:move", queueMoveSchema, (draft, member, input) => {
     const queue = privateQueue(draft, member.user.id); const index = queue.findIndex(track => track.id === input.trackId);

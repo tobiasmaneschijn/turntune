@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS, roomAllowsProvider } from "../shared/providers.js";
 import type { Room, SnapshotRoom, Track, User } from "./types.js";
 
 export class GracePeriodRegistry {
@@ -50,6 +51,11 @@ export function normalizeRadioState(room: Room) {
   const tracks = (value: unknown): Track[] => Array.isArray(value) ? value.filter(isUsableTrack) : [];
   if (!object(room.settings)) room.settings = {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
+  if (Array.isArray(room.settings.allowedProviders)) {
+    const providers = allowedRoomProviders(room.settings);
+    if (providers.length) room.settings.allowedProviders = providers;
+    else delete room.settings.allowedProviders;
+  } else delete room.settings.allowedProviders;
   if (typeof room.settings.themePrompt === "string" && room.settings.themePrompt.trim().length <= 160 && room.settings.themePrompt.trim()) {
     room.settings.themePrompt = room.settings.themePrompt.trim();
   } else delete room.settings.themePrompt;
@@ -114,7 +120,7 @@ function isUsableTrack(value: unknown): value is Track {
   const user = track.addedBy as Partial<User> | undefined;
   return typeof track.id === "string" && track.id.length > 0 &&
     typeof track.title === "string" && typeof track.providerId === "string" &&
-    ["youtube", "soundcloud", "spotify", "apple"].includes(track.provider || "") &&
+    MUSIC_PROVIDERS.some(provider => provider === track.provider) &&
     Boolean(user && typeof user.id === "string" && user.id.length > 0);
 }
 
@@ -150,8 +156,9 @@ export function advanceRadio(room: Room, now = Date.now()) {
     const userId = room.djQueueUserIds.shift()!;
     room.djQueueUserIds.push(userId);
     const queue = room.djQueues[userId] || [];
-    const track = queue.shift();
-    if (!track) continue;
+    const trackIndex = queue.findIndex(track => roomAllowsProvider(room.settings, track.provider));
+    if (trackIndex < 0) continue;
+    const [track] = queue.splice(trackIndex, 1);
 
     track.playedAt = now;
 
@@ -253,6 +260,7 @@ export class QueueUndoRegistry {
     }
     if (entry.room !== room || entry.userId !== userId) throw new Error("This Undo belongs to a different room or account.");
     if (entry.phase !== "removed") throw new Error("This queue change is still being saved. Wait before trying Undo again.");
+    if (!roomAllowsProvider(draft.settings, entry.track.provider)) throw new Error(`${PROVIDER_LABELS[entry.track.provider]} is disabled in this room.`);
     const queue = privateQueue(draft, userId);
     const same = (track: Track) => track.id === entry.track.id || sameRecording(track, entry.track);
     if ((draft.playback.track && same(draft.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
@@ -310,6 +318,10 @@ export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track,
   const skipped: Array<{ title: string; reason: string }> = [];
   let added = 0;
   for (const input of inputs) {
+    if (!roomAllowsProvider(room.settings, input.provider)) {
+      skipped.push({ title: input.title, reason: `${PROVIDER_LABELS[input.provider]} is disabled in this room` });
+      continue;
+    }
     if ((room.playback.track && sameRecording(room.playback.track, input)) || queue.some((track) => sameRecording(track, input))) {
       skipped.push({ title: input.title, reason: "Already playing or in your queue" });
       continue;

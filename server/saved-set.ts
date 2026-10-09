@@ -3,12 +3,14 @@ import type { Room, Track } from "./types.js";
 import type { SpotifyApi } from "./spotify.js";
 import type { AppleMusicApi } from "./apple-music.js";
 import type { SoundCloudApi } from "./soundcloud.js";
+import { MixcloudApi } from "./mixcloud.js";
 import { resolveTrackMappings } from "./provider-mappings.js";
 
 export type ResolvedSetTrack = Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">;
 export interface SetImportOutcome { added: number; skipped: Array<{ title: string; reason: string }>; started: boolean }
 
-export function createSavedSetResolver({ spotify, appleMusic, soundCloud, fetchImpl = fetch }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; fetchImpl?: typeof fetch }) {
+export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch }) {
+  const mixcloudApi = mixcloud || new MixcloudApi(fetchImpl);
   return async (track: LibraryTrack, signal: AbortSignal): Promise<ResolvedSetTrack> => {
     signal.throwIfAborted();
     let verified = { ...track };
@@ -27,6 +29,10 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, fetchI
     } else if (track.provider === "apple") {
       if (!appleMusic.configured) throw new Error("Apple Music catalog verification is unavailable. Try this recording later.");
       const source = await appleMusic.getTrack(track.providerId);
+      verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
+    } else if (track.provider === "mixcloud") {
+      const source = await mixcloudApi.resolveTrack(track.permalinkUrl || track.providerId, signal);
+      if (source.id !== track.providerId) throw new Error("This Mixcloud link now resolves to a different show.");
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else {
       if (!soundCloud.configured || !track.permalinkUrl) throw new Error("SoundCloud verification needs a configured catalog and a saved source link.");

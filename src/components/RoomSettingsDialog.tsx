@@ -12,6 +12,7 @@ import { socket } from "../socket";
 import { requestSocketAction } from "../socket-request";
 import { requestJson } from "../lib/authenticated-http";
 import type { RoomSnapshot } from "../types";
+import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS } from "../../shared/providers";
 
 export function RoomSettingsDialog({
   snapshot,
@@ -34,13 +35,15 @@ export function RoomSettingsDialog({
   const [description, setDescription] = useState(snapshot.room.settings.description || "");
   const [isPublic, setIsPublic] = useState(snapshot.room.isPublic);
   const [djAccess, setDjAccess] = useState<"everyone" | "roles">(snapshot.room.settings.djAccess || "everyone");
+  const [allowedProviders, setAllowedProviders] = useState(() => allowedRoomProviders(snapshot.room.settings));
   const [passwordMode, setPasswordMode] = useState<"unchanged" | "replace" | "remove">("unchanged");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [discardOpen, setDiscardOpen] = useState(false);
-  const initial = useRef({ name: snapshot.room.name, description: snapshot.room.settings.description || "", isPublic: snapshot.room.isPublic, djAccess: snapshot.room.settings.djAccess || "everyone" });
-  const dirty = name !== initial.current.name || description !== initial.current.description || isPublic !== initial.current.isPublic || djAccess !== initial.current.djAccess || passwordMode !== "unchanged";
+  const initial = useRef({ name: snapshot.room.name, description: snapshot.room.settings.description || "", isPublic: snapshot.room.isPublic, djAccess: snapshot.room.settings.djAccess || "everyone", allowedProviders: allowedRoomProviders(snapshot.room.settings) });
+  const servicesChanged = MUSIC_PROVIDERS.some(provider => initial.current.allowedProviders.includes(provider) !== allowedProviders.includes(provider));
+  const dirty = name !== initial.current.name || description !== initial.current.description || isPublic !== initial.current.isPublic || djAccess !== initial.current.djAccess || passwordMode !== "unchanged" || servicesChanged;
   const isOwner = snapshot.room.ownerUserId === currentUserId;
   const [pendingRoles, setPendingRoles] = useState<Set<string>>(new Set());
   const pendingRolesRef = useRef(new Set<string>());
@@ -57,11 +60,12 @@ export function RoomSettingsDialog({
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (saveControllerRef.current || pendingRolesRef.current.size) return;
+    if (!allowedProviders.length) { setError("Allow at least one music service."); return; }
     const controller = new AbortController();
     saveControllerRef.current = controller;
     setSaving(true);
     setError("");
-    const body: { name: string; description: string; isPublic: boolean; djAccess: "everyone" | "roles"; password?: string | null } = { name, description: description.trim(), isPublic, djAccess };
+    const body: { name: string; description: string; isPublic: boolean; djAccess: "everyone" | "roles"; allowedProviders: typeof allowedProviders; password?: string | null } = { name, description: description.trim(), isPublic, djAccess, allowedProviders };
     if (passwordMode === "replace") body.password = password;
     if (passwordMode === "remove") body.password = null;
     try {
@@ -130,6 +134,20 @@ export function RoomSettingsDialog({
                   </div>
                 </CardContent>
               </Card>
+              <Card size="sm">
+                <CardHeader><CardTitle>Music services</CardTitle></CardHeader>
+                <CardContent className="grid gap-3">
+                  {MUSIC_PROVIDERS.map(provider => (
+                    <div className="flex items-center justify-between gap-3" key={provider}>
+                      <Label htmlFor={`settings-service-${provider}`}>{PROVIDER_LABELS[provider]}</Label>
+                      <Switch id={`settings-service-${provider}`} disabled={saving} checked={allowedProviders.includes(provider)}
+                        onCheckedChange={enabled => setAllowedProviders(current => enabled ? [...current, provider] : current.filter(item => item !== provider))} />
+                    </div>
+                  ))}
+                  <p className="room-description-help">Disabled services stop playing. Their queued tracks stay saved.</p>
+                  {!allowedProviders.length && <p role="status" className="room-description-help">Allow at least one music service.</p>}
+                </CardContent>
+              </Card>
               <Card size="sm" className="password-settings">
                 <CardHeader><CardTitle className="flex items-center gap-2"><LockKeyhole /> Password</CardTitle></CardHeader>
                 <CardContent className="grid gap-3">
@@ -179,7 +197,7 @@ export function RoomSettingsDialog({
           {error && <div className="dialog-error" role="alert">{error}</div>}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={saving || pendingRoles.size > 0} onClick={requestClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || pendingRoles.size > 0 || !name.trim()}>{saving ? "Saving…" : "Save changes"}</Button>
+            <Button type="submit" disabled={saving || pendingRoles.size > 0 || !name.trim() || !allowedProviders.length}>{saving ? "Saving…" : "Save changes"}</Button>
           </DialogFooter>
         </form>
         <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>

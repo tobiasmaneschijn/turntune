@@ -17,6 +17,19 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.7",
+    date: "2026-10-09",
+    title: "Mixcloud and room music services",
+    sections: [{
+      title: "Added",
+      items: [
+        "Mixcloud search, show links, saved picks, and playback.",
+        "Owners and moderators can choose which music services a room allows.",
+        "Disabled tracks stay saved in private queues and are skipped until their service is allowed again.",
+      ],
+    }],
+  },
+  {
     version: "0.1.6",
     date: "2026-10-08",
     title: "YouTube live playback",

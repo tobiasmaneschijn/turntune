@@ -4,11 +4,14 @@ import path from "node:path";
 import { createAdminClient } from "@supabase/server/core";
 import { profileUpdateSchema, type ProfileUpdate } from "./profile-fields.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
+import { advanceRadio, normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
+import { roomAllowsProvider } from "../shared/providers.js";
+import { allowedProvidersSchema } from "./room-settings.js";
 import { runtimeMetrics } from "./runtime-metrics.js";
 import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, type LibraryMutation, type PrivateLibrary } from "./private-library.js";
 import type {
   DjAccess,
+  Provider,
   Room,
   RoomDirectoryEntry,
   RoomRole,
@@ -549,10 +552,12 @@ export class Store {
   async updateRoomSettings(
     roomSlug: string,
     userId: string,
-    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string; themePrompt?: string | null }
+    update: { name?: string; isPublic?: boolean; passwordHash?: string | null; djAccess?: DjAccess; description?: string; themePrompt?: string | null; allowedProviders?: Provider[] }
   ) {
     if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError("Room descriptions can contain at most 240 characters.");
     if (update.themePrompt !== undefined && update.themePrompt !== null && (typeof update.themePrompt !== "string" || update.themePrompt.trim().length > 160)) throw new RoomCommandError("Themes can contain at most 160 characters.");
+    const providers = update.allowedProviders === undefined ? undefined : allowedProvidersSchema.safeParse(update.allowedProviders);
+    if (providers && !providers.success) throw new RoomCommandError(providers.error.issues[0]?.message || "Invalid music services.");
     const room = await this.loadRoom(roomSlug);
     if (!room) throw new RoomCommandError("This room no longer exists.");
     await this.changeRoom(room, async draft => {
@@ -563,13 +568,15 @@ export class Store {
       if (update.isPublic !== undefined) { draft.isPublic = update.isPublic; metadata.is_public = update.isPublic; }
       if (update.passwordHash !== undefined) { draft.passwordProtected = Boolean(update.passwordHash); metadata.password_hash = update.passwordHash; }
       if (update.djAccess !== undefined) draft.settings.djAccess = update.djAccess;
+      if (providers?.success) draft.settings.allowedProviders = providers.data;
       if (update.description !== undefined) draft.settings.description = update.description.trim();
       if (update.themePrompt !== undefined) {
         if (update.themePrompt?.trim()) draft.settings.themePrompt = update.themePrompt.trim();
         else delete draft.settings.themePrompt;
       }
-      if (update.djAccess !== undefined || update.description !== undefined || update.themePrompt !== undefined) metadata.settings = draft.settings;
+      if (update.djAccess !== undefined || update.description !== undefined || update.themePrompt !== undefined || update.allowedProviders !== undefined) metadata.settings = draft.settings;
       pruneUnauthorizedDjs(draft);
+      if (update.allowedProviders !== undefined && (!draft.playback.track || !roomAllowsProvider(draft.settings, draft.playback.track.provider))) advanceRadio(draft);
       return { result: undefined, metadata };
     });
     return room;

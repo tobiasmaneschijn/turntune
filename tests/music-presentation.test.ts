@@ -6,12 +6,27 @@ test("music links detect their provider without trusting lookalike hosts", () =>
   assert.equal(detectMusicProvider("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx"), "spotify");
   assert.equal(detectMusicProvider("https://soundcloud.com/artist/song"), "soundcloud");
   assert.equal(detectMusicProvider("https://music.apple.com/us/song/song/123"), "apple");
+  assert.equal(detectMusicProvider("https://www.mixcloud.com/artist/show/"), "mixcloud");
+  assert.equal(detectMusicProvider("https://mixcloud.com/artist/show/"), "mixcloud");
+  assert.equal(detectMusicProvider("https://api.mixcloud.com/artist/show/"), null);
+  assert.equal(detectMusicProvider("https://mixcloud.com.evil.test/artist/show/"), null);
   assert.equal(detectMusicProvider("https://evilyoutube.com/watch?v=dQw4w9WgXcQ"), null);
   assert.equal(detectMusicProvider("https://open.spotify.com.evil.test/track/5bJ1DrEM4hNCafcDd1oxHx"), null);
   assert.equal(detectMusicProvider("javascript:alert(1)"), null);
   assert.equal(detectMusicProvider("https://user:password@open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx"), null);
   assert.equal(youtubeId("https://evilyoutube.com/watch?v=dQw4w9WgXcQ"), null);
   assert.equal(youtubeId("https://www.youtube.com/watch?v=malformed"), null);
+});
+
+test("Mixcloud links resolve only individual shows and keep canonical source paths", () => {
+  assert.deepEqual(parseMusicLink("https://mixcloud.com/Artist/midnight-show?utm_source=copy", "youtube"), {
+    provider: "mixcloud", providerId: "/Artist/midnight-show/", url: "https://www.mixcloud.com/Artist/midnight-show/"
+  });
+  for (const link of ["http://mixcloud.com/artist/show/", "https://mixcloud.com:8080/artist/show/", "https://mixcloud.com/artist/", "https://mixcloud.com/artist/playlists/set/", "https://mixcloud.com/artist/%2Fshow/", "https://www.mixcloud.com/artist/show/extra", "https://user:pass@mixcloud.com/artist/show/", "https://mixcloud.com/artist/../artist/show/"]) {
+    assert.ok("error" in parseMusicLink(link, "mixcloud"), link);
+  }
+  assert.equal(trackSourceUrl({ provider: "mixcloud", providerId: "/artist/show/" }), "https://www.mixcloud.com/artist/show/");
+  assert.equal(trackSourceUrl({ provider: "mixcloud", providerId: "/artist/" }), undefined);
 });
 
 test("pasted links override interpretation but bare IDs require the chosen provider", () => {

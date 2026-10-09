@@ -14,6 +14,8 @@ import { SoundCloudPlayer } from "./SoundCloudPlayer";
 import { SpotifyPlayer } from "./SpotifyPlayer";
 import { AppleMusicPlayer } from "./AppleMusicPlayer";
 import { YouTubePlayer } from "./YouTubePlayer";
+import { MixcloudPlayer } from "./MixcloudPlayer";
+import { allowedRoomProviders, PROVIDER_LABELS, roomAllowsProvider } from "../../shared/providers";
 import type { PlayerStatus } from "../provider-playback";
 import { requestJson } from "../lib/authenticated-http";
 import { socket } from "../socket";
@@ -35,13 +37,11 @@ export interface NowPlayingLocalState {
   statusText: string;
   statusTone: "error" | "pending" | "quiet" | "live";
   muted: boolean;
+  localVolumeSupported?: boolean;
 }
 
 function providerLabel(provider: Provider) {
-  if (provider === "soundcloud") return "SoundCloud";
-  if (provider === "spotify") return "Spotify";
-  if (provider === "apple") return "Apple Music";
-  return "YouTube";
+  return PROVIDER_LABELS[provider];
 }
 
 function formatPlaybackTime(seconds: number) {
@@ -251,6 +251,7 @@ export function NowPlaying({
     soundcloud: ComponentType<React.ComponentProps<typeof SoundCloudPlayer>>;
     spotify: ComponentType<React.ComponentProps<typeof SpotifyPlayer>>;
     apple: ComponentType<React.ComponentProps<typeof AppleMusicPlayer>>;
+    mixcloud: ComponentType<React.ComponentProps<typeof MixcloudPlayer>>;
   }>;
 }) {
   const playback = snapshot.room.playback;
@@ -289,7 +290,7 @@ export function NowPlaying({
   const syncStartedRef = useRef<number | null>(null);
   const lastAudibleVolumeRef = useRef(volume > 0 ? volume : 80);
   const aliveRef = useRef(true);
-  const identity = `${snapshot.room.id}:${track?.id || ""}:${playbackPreference}`;
+  const identity = `${snapshot.room.id}:${track?.id || ""}:${playbackPreference}:${allowedRoomProviders(snapshot.room.settings).join(",")}`;
   const identityRef = useRef(identity);
   const statusIdentityRef = useRef("");
   const accessTokenRef = useRef(accessToken);
@@ -300,6 +301,7 @@ export function NowPlaying({
   const Soundcloud = providerPlayers?.soundcloud || SoundCloudPlayer;
   const Spotify = providerPlayers?.spotify || SpotifyPlayer;
   const Apple = providerPlayers?.apple || AppleMusicPlayer;
+  const Mixcloud = providerPlayers?.mixcloud || MixcloudPlayer;
 
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   useEffect(() => () => connectionRequestRef.current?.abort(), []);
@@ -455,7 +457,9 @@ export function NowPlaying({
       ? "apple"
       : track?.provider || "youtube";
   const mappedPreferredTrack = track?.mappings?.[preferredProvider];
-  const trustedPreferredMapping = mappedPreferredTrack && (
+  const preferredAllowed = roomAllowsProvider(snapshot.room.settings, preferredProvider);
+  const sourceAllowed = Boolean(track && roomAllowsProvider(snapshot.room.settings, track.provider));
+  const trustedPreferredMapping = preferredAllowed && mappedPreferredTrack && (
     preferredProvider !== "spotify" ||
     track?.provider === "spotify" ||
     mappedPreferredTrack.matchMethod === "isrc" ||
@@ -463,29 +467,31 @@ export function NowPlaying({
   )
     ? mappedPreferredTrack
     : undefined;
-  const preferredMapping = trustedPreferredMapping || (track?.provider === preferredProvider
+  const preferredMapping = trustedPreferredMapping || (preferredAllowed && track?.provider === preferredProvider
     ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl }
     : undefined);
-  const effectiveProvider = preferredMapping ? preferredProvider : track?.provider;
+  const effectiveProvider = preferredMapping ? preferredProvider : sourceAllowed ? track?.provider : undefined;
   const isLive = effectiveProvider === "youtube" && statusIdentityRef.current === identity && playerStatus.trackId === track?.id && playerStatus.isLive === true;
-  const effectiveMapping = preferredMapping || (track
+  const effectiveMapping = preferredMapping || (track && sourceAllowed
     ? { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl }
     : undefined);
   const previewArtwork = effectiveMapping?.artworkUrl || (track ? trackArtworkUrl(track) : undefined);
-  const providerFallback = Boolean(track && preferredProvider !== effectiveProvider);
-  const fallbackNeedsApproval = providerFallback && userSettings.playback.fallback === "ask" && fallbackApprovedTrackId !== track?.id;
-  const fallbackIsSilent = providerFallback && userSettings.playback.fallback === "silent";
+  const providerFallback = Boolean(track && effectiveProvider && preferredProvider !== effectiveProvider);
+  const fallbackNeedsApproval = providerFallback && preferredAllowed && userSettings.playback.fallback === "ask" && fallbackApprovedTrackId !== track?.id;
+  const fallbackIsSilent = providerFallback && preferredAllowed && userSettings.playback.fallback === "silent";
   const fallbackSuppressed = fallbackIsSilent && fallbackApprovedTrackId !== track?.id;
   const spotifyReady = Boolean(accessToken && connections.spotifyConnected);
   const webPlaybackAllowed = playbackPreference !== "spotify-desktop" && playbackPreference !== "apple";
-  const keepSpotifyWebMounted = spotifyReady && webPlaybackAllowed && (
+  const keepSpotifyWebMounted = roomAllowsProvider(snapshot.room.settings, "spotify") && spotifyReady && webPlaybackAllowed && (
     effectiveProvider === "spotify" ||
     (!track && spotifyWebStarted)
   );
   const providerName = effectiveProvider ? providerLabel(effectiveProvider) : playbackPreference === "source" ? "Room source" : providerLabel(preferredProvider);
+  const localVolumeSupported = effectiveProvider !== "mixcloud";
+  const locallyMuted = localVolumeSupported && volume === 0;
   const feedback = playbackFeedback({
     connected: roomConnected, roomPlaying: playback.playing, status: playerStatus,
-    error: localPlaybackError, provider: providerName, muted: volume === 0,
+    error: localPlaybackError, provider: providerName, muted: locallyMuted,
     fallback: fallbackNeedsApproval ? "ask" : fallbackSuppressed ? "silent" : undefined,
     needsConnection: effectiveProvider === "spotify" && !spotifyReady
   });
@@ -494,7 +500,7 @@ export function NowPlaying({
   const setVolume = (next: number) => onUserSettingsChange({
     ...userSettings, playback: { ...userSettings.playback, defaultVolume: next }
   });
-  const toggleMute = () => setVolume(volume === 0 ? lastAudibleVolumeRef.current : 0);
+  const toggleMute = () => { if (localVolumeSupported) setVolume(volume === 0 ? lastAudibleVolumeRef.current : 0); };
   const retryLocalPlayback = () => {
     if ((fallbackNeedsApproval || fallbackSuppressed) && track) setFallbackApprovedTrackId(track.id);
     syncPlayback();
@@ -506,13 +512,13 @@ export function NowPlaying({
     checkedProvider === "apple" && connections.loaded && !connections.appleConfigured ? "unconfigured" :
     checkedProvider === "spotify" && connections.loaded && !spotifyReady ? "needs-connection" :
     !track ? "idle" : playerStatus.ready ? "ready" : "loading";
-  const audioState: NowPlayingLocalState["audioState"] = !track ? "quiet" : volume === 0 ? "muted" : fallbackSuppressed ? "suppressed" :
+  const audioState: NowPlayingLocalState["audioState"] = !track ? "quiet" : locallyMuted ? "muted" : fallbackSuppressed ? "suppressed" :
     Boolean(localPlaybackError) ? "error" : fallbackNeedsApproval || (playback.playing && playerStatus.playing === false) ? "needs-activation" :
     playerStatus.playing === true && !playerStatus.buffering ? "playing" :
     !playback.playing ? "paused" : "loading";
   useEffect(() => {
-    onLocalStateChange?.({ providerName, providerState, audioState, statusText: track ? feedback.text : "Waiting for the next track", statusTone: feedback.tone, muted: volume === 0 });
-  }, [onLocalStateChange, providerName, providerState, audioState, feedback.text, feedback.tone, Boolean(track), volume === 0]);
+    onLocalStateChange?.({ providerName, providerState, audioState, statusText: track ? feedback.text : "Waiting for the next track", statusTone: feedback.tone, muted: locallyMuted, localVolumeSupported });
+  }, [onLocalStateChange, providerName, providerState, audioState, feedback.text, feedback.tone, Boolean(track), locallyMuted, localVolumeSupported]);
   useEffect(() => {
     if (!webPlaybackAllowed) setSpotifyWebStarted(false);
     else if (effectiveProvider === "spotify") setSpotifyWebStarted(true);
@@ -520,10 +526,10 @@ export function NowPlaying({
   }, [effectiveProvider, playbackPreference, track?.id, webPlaybackAllowed]);
 
   useEffect(() => {
-    if (!providerFallback || !track || !userSettings.notifications.unavailableTrack || unavailableNotifiedTrackRef.current === track.id) return;
+    if (!providerFallback || !preferredAllowed || !track || !userSettings.notifications.unavailableTrack || unavailableNotifiedTrackRef.current === track.id) return;
     unavailableNotifiedTrackRef.current = track.id;
     notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:fallback:${track.id}:${preferredProvider}`, title: "Playback fallback needed", body: `${track.title} is not available on ${providerLabel(preferredProvider)}.`, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
-  }, [providerFallback, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id]);
+  }, [providerFallback, preferredAllowed, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id]);
 
   useEffect(() => {
     const message = localPlaybackError;
@@ -561,7 +567,7 @@ export function NowPlaying({
       {track ? (
         <>
           <div className="now-playing-main">
-          <div className={`track-stage ${effectiveProvider === "spotify" && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""}`}>
+          <div className={`track-stage ${effectiveProvider === "spotify" && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""} ${effectiveProvider === "mixcloud" ? "has-mixcloud" : ""}`}>
             <TrackArtwork track={track} />
             {effectiveProvider === "spotify" && previewArtwork && (
               <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={`${track.title} album artwork`} />
@@ -624,6 +630,9 @@ export function NowPlaying({
                 onStatus={handleStatus}
                 onError={handleError}
               />
+            ) : effectiveProvider === "mixcloud" ? (
+              <Mixcloud playback={playback} syncRevision={syncRevision} isDj={isDj} volume={volume}
+                onEnded={handleEnded} onStatus={handleStatus} onError={handleError} />
             ) : effectiveProvider === "youtube" ? (
               <Youtube
                 playback={playback}
@@ -693,23 +702,25 @@ export function NowPlaying({
             <div className="sync-status" data-status={feedback.tone} role="status">
               <span />{feedback.text}
             </div>
-            {providerFallback && <small className="provider-fallback">No {providerLabel(preferredProvider)} match · {fallbackNeedsApproval ? "awaiting your choice" : fallbackSuppressed ? "local playback silent" : `using ${providerLabel(effectiveProvider!)}`}</small>}
+            {providerFallback && <small className="provider-fallback">{preferredAllowed ? `No ${providerLabel(preferredProvider)} match` : `${providerLabel(preferredProvider)} is disabled in this room`} · {fallbackNeedsApproval ? "awaiting your choice" : fallbackSuppressed ? "local playback silent" : `using ${providerLabel(effectiveProvider!)}`}</small>}
             <div className="volume-control">
-              <Button variant="ghost" size="icon" onClick={toggleMute} aria-label={volume === 0 ? "Unmute my audio" : "Mute my audio"} aria-pressed={volume === 0}>{volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}</Button>
+              <Button variant="ghost" size="icon" disabled={!localVolumeSupported} onClick={toggleMute} aria-label={locallyMuted ? "Unmute my audio" : "Mute my audio"} aria-pressed={locallyMuted}>{locallyMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</Button>
               <Slider
                 min={0}
                 max={100}
                 value={[volume]}
                 aria-label="Volume"
+                disabled={!localVolumeSupported}
                 getAriaValueText={(_formatted, value) => `${value} percent`}
                 onValueChange={(value) => setVolume(typeof value === "number" ? value : value[0])}
               />
             </div>
+            {!localVolumeSupported && <small className="playback-control-help">Use your device volume for Mixcloud.</small>}
           </div>
           <div className="player-secondary-actions">
             <details className="playback-options">
               <summary>Controls help</summary>
-              <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
+              <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : !localVolumeSupported ? canControlPlayback ? "Playback controls affect the room." : "The DJ controls playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
             </details>
             {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={`Playback settings · Playback source: ${providerName}${playbackPreference === "spotify-desktop" ? " Desktop" : ""}`} onClick={onOpenSettings}><SettingsIcon size={14} /> Playback settings</Button>}
           </div>

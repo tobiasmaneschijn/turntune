@@ -136,6 +136,13 @@ section.now-playing.panel.compact .now-playing-main:has(.requires-action) { disp
 section.now-playing.panel.compact .track-stage.requires-action { width: 100%; height: 160px; min-height: 160px; }
 section.now-playing.panel.compact .track-stage.requires-action .provider-player-shell { display: flex; }
 section.now-playing.panel.compact .track-stage.requires-action + .player-details .current-track { margin-top: 8px; }
+section.now-playing.panel.compact .now-playing-main:has(.has-mixcloud) { display: flex; }
+section.now-playing .track-stage.has-mixcloud { min-height: 180px; }
+section.now-playing.panel.compact .track-stage.has-mixcloud { width: 100%; height: 180px; min-height: 180px; }
+section.now-playing.panel.compact .track-stage.has-mixcloud .provider-player-shell { display: flex; }
+.mixcloud-shell { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 6px; padding: 8px; background: var(--card); }
+.mixcloud-shell > iframe { flex: 0 0 120px; width: 100%; }
+.mixcloud-shell > button { min-height: 32px; align-self: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--secondary); color: var(--foreground); }
 section.now-playing.panel.compact .current-track { padding: 0; flex-direction: column; align-items: stretch; gap: 8px; }
 section.now-playing.compact .current-track h3 { font-size: 1rem; }
 section.now-playing.compact .player-controls { align-self: flex-start; }

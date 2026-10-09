@@ -5,6 +5,8 @@ import type { SpotifyApi } from "./spotify.js";
 import type { SpotifyAccounts } from "./spotify-accounts.js";
 import type { AppleMusicApi } from "./apple-music.js";
 import type { GiphyApi } from "./giphy.js";
+import { MixcloudApi, type MixcloudSearchResult } from "./mixcloud.js";
+import { mixcloudShowKey } from "../shared/mixcloud.js";
 import { BoundedCache } from "./bounded-cache.js";
 import { runtimeMetrics } from "./runtime-metrics.js";
 
@@ -17,6 +19,7 @@ export interface MusicRouteOptions {
   spotifyAccounts: Pick<SpotifyAccounts, "configured" | "connected" | "disconnect" | "getAccessToken" | "invalidate">;
   appleMusicApi: Pick<AppleMusicApi, "configured" | "storefront" | "searchTracks" | "getTrack" | "getDeveloperToken">;
   giphyApi: Pick<GiphyApi, "configured" | "gifs">;
+  mixcloudApi?: Pick<MixcloudApi, "searchTracks" | "resolveTrack">;
   fetchImpl?: typeof fetch;
 }
 interface YouTubeSearchResult { id: string; title: string; channel: string; thumbnail: string; duration?: string; durationMs?: number }
@@ -28,6 +31,9 @@ const youtubeLiveSchema = z.object({
 });
 
 const soundCloudSearchSchema = youtubeSearchSchema;
+const mixcloudSearchSchema = youtubeSearchSchema;
+const mixcloudResolveSchema = z.object({ url: z.string().trim().url().max(2048) })
+  .refine(value => Boolean(mixcloudShowKey(value.url)), "Enter a valid Mixcloud show URL.");
 const spotifySearchSchema = youtubeSearchSchema;
 const appleMusicSearchSchema = youtubeSearchSchema.extend({
   storefront: z.string().regex(/^[a-z]{2}$/i).optional()
@@ -131,17 +137,19 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   const { authEnabled, youtubeApiKey, soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi } = options;
   const getApiUserId = options.getUserId;
   const fetchImpl = options.fetchImpl || fetch;
+  const mixcloudApi = options.mixcloudApi || new MixcloudApi(fetchImpl);
   const youtubeSearchCache = new BoundedCache<{ expiresAt: number; results: YouTubeSearchResult[] }>(500);
   const youtubeLiveCache = new BoundedCache<{ expiresAt: number; isLive: boolean }>(500);
   const youtubeLivePending = new BoundedCache<{ expiresAt: number; lookup: Promise<boolean | null> }>(500);
   const soundCloudSearchCache = new BoundedCache<{ expiresAt: number; results: SoundCloudSearchResult[] }>(500);
+  const mixcloudSearchCache = new BoundedCache<{ expiresAt: number; results: MixcloudSearchResult[] }>(500);
   const spotifySearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<SpotifyApi["searchTracks"]>> }>(500);
   const appleMusicSearchCache = new BoundedCache<{ expiresAt: number; results: Awaited<ReturnType<AppleMusicApi["searchTracks"]>> }>(500);
   const youtubeSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const youtubeLiveLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
-  app.use(["/api/youtube", "/api/soundcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], (_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
+  app.use(["/api/youtube", "/api/soundcloud", "/api/mixcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], (_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
   const trackedProvider = async <T>(operation: () => Promise<T>): Promise<T> => {
     const started = Date.now();
     try { const result = await operation(); runtimeMetrics.observe("provider_request", Date.now() - started, result instanceof Response && !result.ok); return result; }
@@ -405,6 +413,35 @@ app.get("/api/soundcloud/resolve", async (request, response) => {
     response.status(400).json({
       error: error instanceof Error ? error.message : "Could not resolve that SoundCloud URL."
     });
+  }
+});
+
+app.get("/api/mixcloud/search", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) return response.status(401).json({ error: "Authentication required." });
+  const parsed = mixcloudSearchSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter at least 2 characters to search." });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many searches. Please try again shortly." });
+  const key = parsed.data.q.toLocaleLowerCase();
+  const cached = mixcloudSearchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
+  try {
+    const results = await trackedProvider(() => mixcloudApi.searchTracks(parsed.data.q));
+    mixcloudSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
+    response.json({ results });
+  } catch (error) {
+    console.error("Mixcloud search failed", error);
+    response.status(502).json({ error: error instanceof Error ? error.message : "Mixcloud search failed." });
+  }
+});
+
+app.get("/api/mixcloud/resolve", async (request, response) => {
+  if (authEnabled && !(await getApiUserId(request))) return response.status(401).json({ error: "Authentication required." });
+  const parsed = mixcloudResolveSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter a valid Mixcloud show URL." });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many requests. Please try again shortly." });
+  try { response.json({ result: await trackedProvider(() => mixcloudApi.resolveTrack(parsed.data.url)) }); }
+  catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Mixcloud URL." });
   }
 });
 

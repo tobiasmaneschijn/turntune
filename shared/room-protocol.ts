@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMixcloudShowKey, mixcloudShowKey } from './mixcloud.js';
 
 export const userSchema = z.object({
   id: z.string().min(1).max(100),
@@ -14,7 +15,7 @@ export const joinSchema = z.object({
 });
 
 export const trackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple", "soundcloud"]),
+  provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
@@ -30,6 +31,14 @@ export const trackSchema = z.object({
   }
   if (track.provider === "apple" && !/^\d+$/.test(track.providerId)) {
     context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid Apple Music song ID." });
+  }
+  if (track.provider === "mixcloud") {
+    if (!isMixcloudShowKey(track.providerId)) {
+      context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid Mixcloud show key." });
+    }
+    if (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId) {
+      context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A matching Mixcloud show URL is required." });
+    }
   }
   if (track.provider !== "soundcloud") return;
   if (!/^soundcloud:tracks:\d+$/.test(track.providerId)) {

@@ -17,6 +17,7 @@ async function fixture(run: (base: string, state: { calls: Array<{ kind: string;
       getAccessToken: async (user: string) => { state.calls.push({ kind: "token", value: user }); return "fixture-token"; }, invalidate: (user: string) => { state.calls.push({ kind: "invalidate", value: user }); }, disconnect: async (user: string) => { state.calls.push({ kind: "disconnect", value: user }); } },
     appleMusicApi: { configured: true, storefront: "us", searchTracks: async () => [], getTrack: async () => ({}), getDeveloperToken: () => "developer-fixture" },
     giphyApi: { configured: true, gifs: async () => [] },
+    mixcloudApi: { searchTracks: async (q: string) => { state.calls.push({ kind: "mixcloud-search", value: q }); return []; }, resolveTrack: async (url: string) => { state.calls.push({ kind: "mixcloud-resolve", value: url }); return {}; } },
     fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => { assert.ok(init?.signal); state.calls.push({ kind: "youtube-request", value: String(input) }); return Response.json({ items: [] }); }
   } as unknown as MusicRouteOptions;
   const app = express();
@@ -27,9 +28,27 @@ async function fixture(run: (base: string, state: { calls: Array<{ kind: string;
   finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }
 const authenticated = { headers: { Authorization: "Bearer alice" } };
+test("Mixcloud routes cache searches and reject unsafe source links before catalog access", async () => {
+  await fixture(async (base, state) => {
+    for (const q of ["long set", "LONG SET"]) assert.equal((await fetch(`${base}/api/mixcloud/search?q=${encodeURIComponent(q)}`, authenticated)).status, 200);
+    assert.equal(state.calls.filter(call => call.kind === "mixcloud-search").length, 1);
+    assert.equal((await fetch(`${base}/api/mixcloud/search?q=x`, authenticated)).status, 400);
+    for (const url of ["https://evil.test/artist/show/", "http://mixcloud.com/artist/show/", "https://www.mixcloud.com/artist/", "https://www.mixcloud.com/artist/show/embed-html/"]) {
+      assert.equal((await fetch(`${base}/api/mixcloud/resolve?url=${encodeURIComponent(url)}`, authenticated)).status, 400);
+    }
+    assert.equal(state.calls.filter(call => call.kind === "mixcloud-resolve").length, 0);
+    const url = "https://www.mixcloud.com/artist/show/";
+    const response = await fetch(`${base}/api/mixcloud/resolve?url=${encodeURIComponent(url)}`, authenticated);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(state.calls.at(-1), { kind: "mixcloud-resolve", value: url });
+    for (let n = 0; n < 37; n++) assert.equal((await fetch(`${base}/api/mixcloud/search?q=long%20set`, authenticated)).status, 200);
+    assert.equal((await fetch(`${base}/api/mixcloud/search?q=long%20set`, authenticated)).status, 429);
+  });
+});
 test("music routes deny missing authentication before catalogs/accounts and prevent sensitive caching", async () => {
   await fixture(async (base, state) => {
-    for (const path of ["youtube/search?q=mix", "youtube/live?id=aaaaaaaaaaa", "soundcloud/search?q=mix", "soundcloud/resolve?url=https://soundcloud.com/artist/song", "spotify/search?q=mix", "spotify/resolve?url=abcdefghijk123456789012", "apple/search?q=mix", "apple/resolve?url=https://music.apple.com/us/song/song/123", "giphy", "music/connections", "spotify/token", "spotify/devices", "spotify/playback", "apple/token"]) {
+    for (const path of ["youtube/search?q=mix", "youtube/live?id=aaaaaaaaaaa", "soundcloud/search?q=mix", "soundcloud/resolve?url=https://soundcloud.com/artist/song", "mixcloud/search?q=mix", "mixcloud/resolve?url=https://www.mixcloud.com/artist/show/", "spotify/search?q=mix", "spotify/resolve?url=abcdefghijk123456789012", "apple/search?q=mix", "apple/resolve?url=https://music.apple.com/us/song/song/123", "giphy", "music/connections", "spotify/token", "spotify/devices", "spotify/playback", "apple/token"]) {
       const response = await fetch(`${base}/api/${path}`);
       assert.equal(response.status, 401, path);
       assert.equal(response.headers.get("cache-control"), "no-store");

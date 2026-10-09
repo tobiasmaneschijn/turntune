@@ -6,12 +6,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { TrackArtwork } from "./TrackArtwork";
 import { providerLabel } from "../music-presentation";
 import { libraryTrack, type LibraryMutation, type LibraryTrack, type PrivateLibrary, type SavedSet } from "../music-library";
-import type { Track } from "../types";
+import type { Provider, Track } from "../types";
 import "../styles/music-library.css";
 
 export interface MusicLibraryPanelProps {
   library: PrivateLibrary | null; loading: boolean; error: string; busy: boolean; signedIn: boolean;
   canEnqueue: boolean; queue: Track[]; refresh: () => void;
+  allowsProvider: (provider: Provider) => boolean;
   mutate: (mutation: LibraryMutation) => Promise<boolean>;
   enqueue: (track: LibraryTrack) => void; addSet: (set: SavedSet) => void;
   details: (track: LibraryTrack, trigger?: HTMLElement) => void; isQueued: (track: LibraryTrack) => boolean;
@@ -19,7 +20,7 @@ export interface MusicLibraryPanelProps {
   active?: boolean; saveSetInputRef?: RefObject<HTMLInputElement | null>;
 }
 
-export function MusicLibraryPanel({ library, loading, error, busy, signedIn, canEnqueue, queue, refresh, mutate, enqueue, addSet, details, isQueued, saveSetOpen, onSaveSetOpenChange, active = true, saveSetInputRef }: MusicLibraryPanelProps) {
+export function MusicLibraryPanel({ library, loading, error, busy, signedIn, canEnqueue, allowsProvider, queue, refresh, mutate, enqueue, addSet, details, isQueued, saveSetOpen, onSaveSetOpenChange, active = true, saveSetInputRef }: MusicLibraryPanelProps) {
   const [filter, setFilter] = useState("");
   const [setName, setSetName] = useState("");
   const [localSaveSetOpen, setLocalSaveSetOpen] = useState(false);
@@ -90,12 +91,14 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
       <h3>Picks {library.picks.length >= 450 && <small>{library.picks.length}/500</small>}</h3>
       {picks.map((pick, index) => {
         const queued = isQueued(pick.track);
+        const providerDisabled = !allowsProvider(pick.track.provider);
         return <div className="music-library-row" key={pick.id}>
           <TrackArtwork track={pick.track} compact active={active} />
           <div className="music-library-pick-copy">
             <strong title={pick.track.title}>{pick.track.title}</strong><small title={pick.track.artist || providerLabel(pick.track.provider)}>{pick.track.artist || providerLabel(pick.track.provider)}</small>
+            {providerDisabled && <small>Disabled in this room</small>}
           </div>
-          <Button className="music-library-add" variant="ghost" size="icon" aria-label={`Add saved pick ${pick.track.title} to my queue`} title={queued ? "Already in room" : "Add to queue"} disabled={busy || !canEnqueue || queued} onClick={() => enqueue(pick.track)}>{queued ? <Check /> : <Plus />}</Button>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label={`Add saved pick ${pick.track.title} to my queue`} title={providerDisabled ? "Disabled in this room" : queued ? "Already in room" : "Add to queue"} disabled={busy || !canEnqueue || queued || providerDisabled} onClick={() => enqueue(pick.track)}>{queued ? <Check /> : <Plus />}</Button>
           <DropdownMenu>
             <DropdownMenuTrigger ref={(button) => { if (button) pickActionsRefs.current.set(pick.id, button); else pickActionsRefs.current.delete(pick.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved pick ${pick.track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? pickActionsRefs.current.get(pick.id) || filterRef.current || true : false}>
@@ -137,11 +140,11 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
       {sets.map((set, index) => <section key={set.id} className="music-saved-set">
         <details className="music-set-tracks">
           <summary><h4><span title={set.name}>{set.name}</span><small>{set.tracks.length} {set.tracks.length === 1 ? "track" : "tracks"}</small></h4><ChevronDown size={15} aria-hidden="true" /></summary>
-          <ol>{set.tracks.map((track, trackIndex) => <li key={`${track.provider}:${track.providerId}:${trackIndex}`}>{track.title}{track.artist ? ` — ${track.artist}` : ""} · {providerLabel(track.provider)}</li>)}</ol>
-          <p>Playing and queued tracks are skipped.</p>
+          <ol>{set.tracks.map((track, trackIndex) => <li key={`${track.provider}:${track.providerId}:${trackIndex}`}>{track.title}{track.artist ? ` — ${track.artist}` : ""} · {providerLabel(track.provider)}{!allowsProvider(track.provider) ? " · Disabled in this room" : ""}</li>)}</ol>
+          <p>Playing, queued, and disabled tracks are skipped.</p>
         </details>
         <div className="music-library-row-actions">
-          <Button className="music-library-add" variant="ghost" size="icon" aria-label="Append set to my queue" title={`Append ${set.name} to queue`} disabled={busy || !canEnqueue} onClick={() => addSet(set)}><Plus /></Button>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label="Append set to my queue" title={`Append ${set.name} to queue`} disabled={busy || !canEnqueue || !set.tracks.some((track) => allowsProvider(track.provider))} onClick={() => addSet(set)}><Plus /></Button>
           <DropdownMenu>
             <DropdownMenuTrigger ref={(button) => { if (button) setActionsRefs.current.set(set.id, button); else setActionsRefs.current.delete(set.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved set ${set.name}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? (renameSetIdRef.current === set.id && renameRef.current) || setActionsRefs.current.get(set.id) || filterRef.current || true : false}>

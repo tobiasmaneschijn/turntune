@@ -7,6 +7,21 @@ import type { SoundCloudApi } from "./soundcloud.js";
 import type { Room } from "./types.js";
 const track = { provider: "youtube" as const, providerId: "dQw4w9WgXcQ", title: "Saved title" };
 const room = () => ({ id: "test-room" }) as Room;
+test("saved Mixcloud shows are verified and keep their source metadata and mapping", async () => {
+  let requested = "";
+  const resolve = createSavedSetResolver({ spotify: { configured: false } as SpotifyApi, appleMusic: { configured: false } as AppleMusicApi,
+    soundCloud: { configured: false } as SoundCloudApi, fetchImpl: (async (input, init) => {
+      requested = String(input); assert.ok(init?.signal);
+      return Response.json({ key: "/dj/show/", name: "Current show", audio_length: 3600, user: { name: "Uploader" } });
+    }) as typeof fetch });
+  const input = { provider: "mixcloud" as const, providerId: "/dj/show/", title: "Old title", permalinkUrl: "https://www.mixcloud.com/dj/show/" };
+  const result = await resolve(input, new AbortController().signal);
+  assert.equal(requested, "https://api.mixcloud.com/dj/show/");
+  assert.equal(result.title, "Current show"); assert.equal(result.artist, "Uploader");
+  assert.equal(result.durationMs, 3_600_000);
+  assert.deepEqual(Object.keys(result.mappings || {}), ["mixcloud"]);
+  await assert.rejects(resolve({ ...input, providerId: "/dj/different/" }, new AbortController().signal), /different show/);
+});
 test("set verification preserves intended order and explains every unavailable source", async () => {
   const inputs = [track, { ...track, title: "Unavailable" }, { ...track, title: "Third" }];
   const result = await resolveSavedSet(inputs, async (input) => {

@@ -23,6 +23,16 @@ most authorization and rotation bugs.
 A DJ role is permission, not lineup membership. Granting the role does not join
 the user, and joining the lineup does not make the user immediately current.
 
+`settings.allowedProviders` limits queue sources and listener playback services.
+Missing settings allow all services. Owners and moderators can save a nonempty
+list; the settings and any resulting playback advance commit together. Disabled
+waiting tracks remain in private queues and are skipped in DJ rotation. Adds,
+saved-set imports, Undo, and Play next recheck the current policy on the server.
+
+Mixcloud shows use source playback without song catalog matching. The visible
+widget supports playback status and seeks, but seeks can be refused and there
+is no SDK volume control. On phones the widget remains visible during chat.
+
 ## Architecture
 
 ```mermaid
@@ -71,9 +81,10 @@ and durable grace scheduling before horizontally scaling the server.
 | `src/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
 | `src/provider-playback.ts`, `src/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
 | `src/App.tsx` | Screen composition, room view, player controls and DJ queue UI. |
-| `src/components/RoomSettingsDialog.tsx` | Room metadata, DJ access mode, moderator, and DJ-role controls. |
+| `src/components/RoomSettingsDialog.tsx` | Room metadata, allowed music services, DJ access mode, moderator, and DJ-role controls. |
 | `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
 | `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
+| `src/components/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
 | `src/components/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
 | `src/components/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
 | `server/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
@@ -351,7 +362,7 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `GET /api/rooms` | All accessible memberships/favorites/owned rooms, bounded public discovery, live listener counts, descriptions, and safe previews for active public unprotected rooms. |
 | `POST /api/rooms` | Create a room, hash an optional password, and favorite it for the owner. |
 | `PUT /api/rooms/:slug/favorite` | Add or remove the current user's favorite. |
-| `PATCH /api/rooms/:slug` | Owner/moderator changes name, description, visibility, password, or DJ access mode. |
+| `PATCH /api/rooms/:slug` | Owner/moderator changes name, description, visibility, password, DJ access mode, or allowed music services. |
 | `GET /api/library`, `POST /api/library` | Verified account's private picks and named sets, with explicit deletion and revision-aware concurrent saves. |
 | `GET /api/rooms/:slug/chat/history`, `/search`, `/context/:id`, `/messages/:id` | Authorized history pages, room search, and reply context. Timestamp/ID cursors preserve same-time entries. |
 | `POST /api/rooms/:slug/chat/messages`, `/reactions` | Freshly admitted durable chat writes and original-UUID retry; room/account/message checks precede database writes. |
@@ -359,6 +370,7 @@ Authenticated requests use the Supabase access token as a bearer token.
 | `GET /api/youtube/search` | Authenticated, cached server-side YouTube search; the API key stays secret. |
 | `GET /api/soundcloud/search` | Authenticated, cached server-side SoundCloud search; client credentials and OAuth tokens stay secret. |
 | `GET /api/soundcloud/resolve` | Authenticated SoundCloud URL resolution; only playable public tracks are returned. |
+| `GET /api/mixcloud/search`, `GET /api/mixcloud/resolve` | Authenticated Mixcloud show search and URL resolution. |
 | `GET /api/spotify/search`, `GET /api/spotify/resolve` | Spotify catalog search and URL/URI resolution. |
 | `GET /api/apple/search`, `GET /api/apple/resolve` | Storefront-aware Apple Music catalog search and URL resolution. |
 | `GET /api/music/connections` | Current listener's provider readiness without exposing credentials. |
