@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, CircleCheck, Link2, MonitorSpeaker, Music2, Palette, Radio, RefreshCw, Unplug } from "lucide-react";
+import { Bell, CircleCheck, Link2, MonitorSpeaker, Music2, Palette, Radio, RefreshCw, ShieldCheck, Unplug } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { PlaybackPreference, SoundSpinUserSettings } from "../playback-settings";
 import { Badge } from "./ui/badge";
@@ -14,6 +14,10 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { useMediaQuery } from "../hooks/use-media-query";
 import { notificationPermissionDescription, readNotificationPermission, requestNotificationPermission } from "../notifications";
 import { readStoredValue } from "../lib/browser-storage";
+import { Input } from "./ui/input";
+import { getSupabaseClient } from "../supabase";
+import { requestJson } from "../lib/authenticated-http";
+import { resetProviderSession } from "../provider-session";
 
 interface SpotifyDevice {
   id: string | null;
@@ -75,7 +79,7 @@ export function UserSettingsDialog({
   onRetryConnections?: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance">("playback");
+  const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance" | "account">("playback");
   const isMobile = useMediaQuery("(max-width: 600px)");
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const { theme = settings.appearance.theme, setTheme } = useTheme();
@@ -86,6 +90,73 @@ export function UserSettingsDialog({
   const [appleAuthorized, setAppleAuthorized] = useState(readAppleAuthorization);
   const [notificationPermission, setNotificationPermission] = useState(readNotificationPermission);
   const [requestingPermission, setRequestingPermission] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [accountStatus, setAccountStatus] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [deleteOwnedRooms, setDeleteOwnedRooms] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaFactor, setMfaFactor] = useState<{ id: string; qrCode?: string; secret?: string } | null>(null);
+  const accountActiveRef = useRef(true);
+  useEffect(() => { accountActiveRef.current = true; return () => { accountActiveRef.current = false; }; }, []);
+  const accountOperation = async (operation: () => Promise<string>) => {
+    setAccountBusy(true); setAccountError(""); setAccountStatus("");
+    try { const status = await operation(); if (accountActiveRef.current) setAccountStatus(status); }
+    catch (error) { if (accountActiveRef.current) setAccountError(error instanceof Error ? error.message : "Could not complete the request. Try again."); }
+    finally { if (accountActiveRef.current) setAccountBusy(false); }
+  };
+  const startMfa = () => accountOperation(async () => {
+    const client = await getSupabaseClient();
+    const factors = await client.auth.mfa.listFactors();
+    if (factors.error) throw new Error("Could not load authentication factors. Sign in again.");
+    const verified = factors.data.totp.find((factor) => factor.status === "verified");
+    if (verified) { setMfaFactor({ id: verified.id }); return "Enter the code from your authenticator."; }
+    for (const factor of factors.data.all.filter((factor) => factor.status === "unverified" && factor.friendly_name === "SoundSpin")) {
+      const removed = await client.auth.mfa.unenroll({ factorId: factor.id });
+      if (removed.error) throw new Error("Could not clear an unfinished setup. Try again after signing in.");
+    }
+    const enrollment = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "SoundSpin" });
+    if (enrollment.error) throw new Error("Could not set up an authenticator. Check your account factors in Supabase.");
+    if (accountActiveRef.current) setMfaFactor({ id: enrollment.data.id, qrCode: enrollment.data.totp.qr_code, secret: enrollment.data.totp.secret });
+    return "Add this account to your authenticator, then enter its code.";
+  });
+  const verifyMfa = () => accountOperation(async () => {
+    if (!mfaFactor || !/^\d{6}$/.test(mfaCode)) throw new Error("Enter a six-digit authenticator code.");
+    const client = await getSupabaseClient();
+    const verified = await client.auth.mfa.challengeAndVerify({ factorId: mfaFactor.id, code: mfaCode });
+    if (verified.error) throw new Error("Code was not accepted. Enter the current code.");
+    if (accountActiveRef.current) { setMfaFactor(null); setMfaCode(""); }
+    return "Authenticator verified for this session.";
+  });
+  const requestDeletion = () => accountOperation(async () => {
+    const result = await requestJson<{ request: { id: string } }>("/api/account/deletion-request", {
+      accessToken, method: "POST", body: JSON.stringify({ confirmation, deleteOwnedRooms }),
+      validate: (value): value is { request: { id: string } } => Boolean(value && typeof value === "object" && "request" in value && value.request &&
+        typeof value.request === "object" && "id" in value.request && typeof value.request.id === "string" && /^[0-9a-f-]{36}$/i.test(value.request.id))
+    });
+    setConfirmation("");
+    return `Deletion requested. Reference: ${result.request.id}. An operator will verify your identity before deleting the account.`;
+  });
+  const exportAccount = () => accountOperation(async () => {
+    const categories = ["profile", "library", "feedback", "messages", "reactions", "votes", "memberships", "roomFavorites", "ownedRooms", "friendships", "invitations", "blocks", "providerConnections"];
+    const exportData: Record<string, unknown[]> = {};
+    let size = 0;
+    for (const category of categories) {
+      exportData[category] = [];
+      for (let page = 0; ; page++) {
+        const payload = await requestJson<{ data: unknown[]; hasMore: boolean }>(`/api/account/export/${category}?page=${page}`, { accessToken,
+          validate: (value): value is { data: unknown[]; hasMore: boolean } => Boolean(value && typeof value === "object" && "data" in value && Array.isArray(value.data) && "hasMore" in value && typeof value.hasMore === "boolean") });
+        size += JSON.stringify(payload.data).length;
+        if (size > 20_000_000 || page > 1000) throw new Error("This export needs operator assistance. Contact the privacy support channel.");
+        exportData[category].push(...payload.data);
+        if (!payload.hasMore) break;
+      }
+    }
+    if (!accountActiveRef.current) return "";
+    const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = "soundspin-account-data.json"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return "Account data downloaded. Keep this file private.";
+  });
   useEffect(() => {
     const refresh = () => setNotificationPermission(readNotificationPermission());
     window.addEventListener("focus", refresh);
@@ -160,9 +231,39 @@ export function UserSettingsDialog({
             <TabsTrigger value="connections" data-settings-category="connections"><Link2 /> Connections</TabsTrigger>
             <TabsTrigger value="notifications" data-settings-category="notifications"><Bell /> Notifications</TabsTrigger>
             <TabsTrigger value="appearance" data-settings-category="appearance"><Palette /> Appearance</TabsTrigger>
+            <TabsTrigger value="account" data-settings-category="account"><ShieldCheck /> Account</TabsTrigger>
           </TabsList>
 
           <div className="settings-tab-panel">
+            <TabsContent value="account">
+              <div className="settings-panel-stack">
+                <section className="settings-control-group">
+                  <strong>Authenticator</strong>
+                  <p>Administrator actions require an authenticator code for the current session.</p>
+                  {!mfaFactor ? <Button variant="outline" onClick={() => void startMfa()} disabled={accountBusy || !accessToken}>Set up or verify authenticator</Button> : <>
+                    {mfaFactor.qrCode && <img src={mfaFactor.qrCode} alt="Authenticator setup QR code" width={180} height={180} />}
+                    {mfaFactor.secret && <p>Setup key: <code className="break-all">{mfaFactor.secret}</code></p>}
+                    <Label htmlFor="authenticator-code">Authenticator code</Label>
+                    <Input id="authenticator-code" inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
+                    <Button onClick={() => void verifyMfa()} disabled={accountBusy || mfaCode.length !== 6}>Verify code</Button>
+                  </>}
+                </section>
+                <section className="settings-control-group">
+                  <strong>Account data</strong>
+                  <Button variant="outline" disabled={accountBusy || !accessToken} onClick={() => void exportAccount()}>Download account data</Button>
+                </section>
+                <section className="settings-control-group">
+                  <strong>Delete account</strong>
+                  <p>Deletion removes your account, uploads, and every room you own, including other listeners’ room history. An operator verifies your identity before processing the request.</p>
+                  <SettingSwitch title="Delete all rooms I own" checked={deleteOwnedRooms} onChange={setDeleteOwnedRooms} />
+                  <Label htmlFor="delete-account-confirmation">Type DELETE to request deletion</Label>
+                  <Input id="delete-account-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} maxLength={6} />
+                  <Button variant="destructive" disabled={accountBusy || !accessToken || confirmation !== "DELETE" || !deleteOwnedRooms} onClick={() => void requestDeletion()}>Request account deletion</Button>
+                </section>
+                {accountError && <p role="alert" className="settings-field-error">{accountError}</p>}
+                {accountStatus && <p role="status">{accountStatus}</p>}
+              </div>
+            </TabsContent>
             <TabsContent value="playback">
               <div className="settings-panel-stack">
                 <section>
@@ -247,6 +348,7 @@ export function UserSettingsDialog({
                   <span className="connection-logo apple">A</span>
                   <span><strong>Apple Music</strong></span>
                   <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
+                  {appleAuthorized && <Button variant="ghost" size="sm" aria-label="Disconnect Apple Music" onClick={() => void resetProviderSession("apple")}><Unplug /> Disconnect</Button>}
                 </div>
                 {deviceError && <div className="dialog-error">{deviceError}</div>}
                 {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}

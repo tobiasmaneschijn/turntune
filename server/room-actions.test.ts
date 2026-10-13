@@ -80,8 +80,8 @@ for (const event of ["queue:add", "queue:set-add"] as const) {
       mountRoomActions({ socket: { id: "socket", connected: true }, getMembership: () => admitted ? { room, user } : null,
         assertAuthorized: () => { if (expired) throw new RoomCommandError("Session expired."); },
         onAction: (name: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(name, safeSocketHandler(handler)),
-        commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown }) => {
-          const draft = structuredClone(room); const result = change(draft); Object.assign(room, draft); writes++; return result.result;
+        commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown } | Promise<{ result: unknown }>) => {
+          const draft = structuredClone(room); const result = await change(draft); Object.assign(room, draft); writes++; return result.result;
         } },
         store: { getPrivateLibrary: async () => ({ picks: [], sets: [{ id: target, name: "Picks", savedAt: 1, tracks: [recording] }] }) },
         resolveTrack: async () => { started.release(); await unblock.promise; return {}; },
@@ -220,8 +220,8 @@ test("real queue handlers preserve deliberate receipt errors and reject set impo
   mountRoomActions({ socket: { id: "socket", connected: true }, getMembership: () => admitted ? { room, user } : null, assertAuthorized: () => {},
     onAction: (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(event, safeSocketHandler(handler, () => {})),
     queueUndo: new QueueUndoRegistry(),
-    commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown }) => {
-      const result = change(structuredClone(room));
+    commands: { execute: async (_room: Room, change: (draft: Room) => { result: unknown } | Promise<{ result: unknown }>) => {
+      const result = await change(structuredClone(room));
       if (storageFails) throw new Error("Private database internals");
       return result.result;
     } },
@@ -239,4 +239,53 @@ test("real queue handlers preserve deliberate receipt errors and reject set impo
   admitted = true;
   storageFails = true;
   assert.equal((await run("dj:join", undefined))?.error, "Could not save this change. Reconnect and check the room before trying again.");
+});
+
+
+for (const event of ["queue:add", "queue:set-add", "fallback:set"] as const) test(`${event} rechecks current resource authorization inside the queued mutation after provider work`, async () => {
+  const started = gate(), unblock = gate(); let allowed = true, gateCalls = 0, writes = 0;
+  const user: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
+  const room: Room = { id: "room-one", name: "One", ownerUserId: user.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
+    passwordProtected: false, settings: {}, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
+    playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
+  const client = { from() { return { update() { writes++; const query = { eq() { return query; }, select() { return query; }, async maybeSingle() { return { data: { slug: room.id }, error: null }; } }; return query; } }; } } as unknown as SupabaseClient;
+  const store = new Store({ supabase: client }); await store.saveRoom(room); writes = 0;
+  const recording = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Pick", durationMs: 180_000, durationVerified: true, isLive: false };
+  const handlers = new Map<string, ReturnType<typeof safeSocketHandler>>();
+  mountRoomActions({ socket: { id: "socket", connected: true }, store, commands: new RoomCommandService(store, () => assert.fail("revoked command broadcast")),
+    getMembership: () => ({ room, user }), assertAuthorized: () => {},
+    authorizeCurrent: async (roomId: string, userId: string) => { gateCalls++; assert.equal(roomId, room.id); assert.equal(userId, user.id); if (!allowed) throw new RoomCommandError("Access revoked."); },
+    onAction: (name: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(name, safeSocketHandler(handler, () => {})),
+    resolveTrack: async () => { started.release(); await unblock.promise; return {}; },
+    resolveSavedRecording: async () => { started.release(); await unblock.promise; return recording; },
+    setImports: new SetImportRegistry(),
+    queueUndo: new QueueUndoRegistry()
+  } as unknown as Parameters<typeof mountRoomActions>[0]);
+  Object.assign(store, { getPrivateLibrary: async () => ({ picks: [], sets: [{ id: target, name: "Picks", savedAt: 1, tracks: [recording] }] }) });
+  let result: { ok?: boolean; error?: string } | undefined;
+  const payload = event === "queue:add" ? recording : event === "fallback:set" ? { setId: target, enabled: true } : { setId: target, requestId: target };
+  const pending = handlers.get(event)!(payload, (reply: typeof result) => { result = reply; });
+  await started.promise; assert.equal(gateCalls, 0); allowed = false; unblock.release(); await pending;
+  assert.equal(gateCalls, 1); assert.equal(result?.ok, false); assert.match(result?.error || "", /Access revoked/);
+  assert.equal(writes, 0); assert.deepEqual(room.djQueues, {}); assert.equal(room.playback.track, null);
+});
+
+test("standard room commands recheck the same live session after an awaited resource authorization", async () => {
+  const started = gate(), unblock = gate(); let admitted = true, writes = 0;
+  const user: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
+  const room: Room = { id: "room-one", name: "One", ownerUserId: user.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
+    passwordProtected: false, settings: {}, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
+    playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
+  const store = new Store({ supabase: { from() { return { update() { writes++; const query = { eq() { return query; }, select() { return query; }, async maybeSingle() { return { data: { slug: room.id }, error: null }; } }; return query; } }; } } as unknown as SupabaseClient });
+  await store.saveRoom(room); writes = 0;
+  const handlers = new Map<string, ReturnType<typeof safeSocketHandler>>();
+  mountRoomActions({ socket: { id: "socket", connected: true }, store, commands: new RoomCommandService(store, () => assert.fail("departed command broadcast")),
+    getMembership: () => admitted ? { room, user } : null, assertAuthorized: () => {},
+    authorizeCurrent: async () => { started.release(); await unblock.promise; },
+    onAction: (name: string, handler: Parameters<typeof safeSocketHandler>[0]) => handlers.set(name, safeSocketHandler(handler, () => {}))
+  } as unknown as Parameters<typeof mountRoomActions>[0]);
+  let result: { ok?: boolean; error?: string } | undefined;
+  const pending = handlers.get("dj:join")!(undefined, (reply: typeof result) => { result = reply; });
+  await started.promise; admitted = false; unblock.release(); await pending;
+  assert.equal(result?.ok, false); assert.match(result?.error || "", /session changed/); assert.equal(writes, 0); assert.deepEqual(room.djQueueUserIds, []);
 });

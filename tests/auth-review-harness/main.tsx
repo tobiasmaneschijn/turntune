@@ -24,6 +24,6 @@ const snapshot = { room: { id: 'lounge', name: 'Lounge', ownerUserId: alice.id, 
 if (!roles) history.replaceState({}, '', '/login')
 function Harness() {
   const [open, setOpen] = useState(true)
-  return <ThemeProvider>{roles ? <main><h1>Room directory</h1>{open && <RoomSettingsDialog snapshot={snapshot} currentUserId={alice.id} accessToken="fixture-token" onClose={() => setOpen(false)} onNotice={() => {}} />}</main> : <PublicEntry client={client} />}</ThemeProvider>
+  return <ThemeProvider>{roles ? <main><h1>Room directory</h1>{open && <RoomSettingsDialog snapshot={snapshot} currentUserId={alice.id} accessToken="fixture-token" connected onClose={() => setOpen(false)} onNotice={() => {}} />}</main> : <PublicEntry client={client} />}</ThemeProvider>
 }
 createRoot(document.getElementById('root')!).render(<Harness />)

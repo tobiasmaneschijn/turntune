@@ -1,3 +1,4 @@
+import { providerSignal } from "./provider-http.js";
 import type { AppleMusicApi } from "./apple-music.js";
 import { bestCertainCatalogMatch, type CatalogTrack, type ProviderTrackMapping } from "./music.js";
 import type { SpotifyApi } from "./spotify.js";
@@ -38,8 +39,11 @@ function sourceMapping(track: TrackInput): ProviderTrackMapping {
 export async function resolveTrackMappings(
   input: TrackInput,
   spotify: SpotifyApi,
-  appleMusic: AppleMusicApi
+  appleMusic: AppleMusicApi,
+  signal?: AbortSignal
 ): Promise<Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>> {
+  signal = providerSignal(signal);
+  signal.throwIfAborted();
   const mappings: NonNullable<Track["mappings"]> = {
     [input.provider]: sourceMapping(input)
   };
@@ -51,7 +55,7 @@ export async function resolveTrackMappings(
 
   try {
     if (input.provider === "spotify" && spotify.configured) {
-      const resolved = await spotify.getTrack(input.providerId);
+      const resolved = await spotify.getTrack(input.providerId, signal);
       source = {
         ...source,
         title: resolved.title,
@@ -64,7 +68,7 @@ export async function resolveTrackMappings(
       durationVerified = Boolean(resolved.durationMs);
       mappings.spotify = mapping(resolved, "source");
     } else if (input.provider === "apple" && appleMusic.configured) {
-      const resolved = await appleMusic.getTrack(input.providerId);
+      const resolved = await appleMusic.getTrack(input.providerId, undefined, signal);
       source = {
         ...source,
         title: resolved.title,
@@ -78,7 +82,8 @@ export async function resolveTrackMappings(
       mappings.apple = mapping(resolved, "source");
     }
   } catch (error) {
-    console.warn(`Could not resolve source metadata for ${input.provider}:${input.providerId}`, error);
+    signal?.throwIfAborted();
+    console.warn("Could not resolve source metadata.");
   }
 
   const query = [source.artist, source.title].filter(Boolean).join(" ");
@@ -89,14 +94,15 @@ export async function resolveTrackMappings(
       try {
         const matchedByIsrc = Boolean(isrc);
         const result = matchedByIsrc
-          ? await spotify.findByIsrc(isrc!)
-          : bestCertainCatalogMatch(await spotify.searchTracks(query), source);
+          ? await spotify.findByIsrc(isrc!, signal)
+          : bestCertainCatalogMatch(await spotify.searchTracks(query, undefined, signal), source);
         if (result) {
           mappings.spotify = mapping(result, matchedByIsrc ? "isrc" : "exact-metadata");
           isrc ||= result.isrc;
         }
       } catch (error) {
-        console.warn("Spotify counterpart resolution failed", error);
+        signal?.throwIfAborted();
+        console.warn("Spotify counterpart resolution failed.");
       }
     })());
   }
@@ -106,19 +112,21 @@ export async function resolveTrackMappings(
       try {
         const matchedByIsrc = Boolean(isrc);
         const result = matchedByIsrc
-          ? await appleMusic.findByIsrc(isrc!)
-          : bestCertainCatalogMatch(await appleMusic.searchTracks(query), source);
+          ? await appleMusic.findByIsrc(isrc!, undefined, signal)
+          : bestCertainCatalogMatch(await appleMusic.searchTracks(query, undefined, undefined, signal), source);
         if (result) {
           mappings.apple = mapping(result, matchedByIsrc ? "isrc" : "exact-metadata");
           isrc ||= result.isrc;
         }
       } catch (error) {
-        console.warn("Apple Music counterpart resolution failed", error);
+        signal?.throwIfAborted();
+        console.warn("Apple Music counterpart resolution failed.");
       }
     })());
   }
 
   await Promise.all(jobs);
+  signal?.throwIfAborted();
   return {
     ...source,
     canonicalId: isrc ? `isrc:${isrc}` : `${input.provider}:${input.providerId}`,

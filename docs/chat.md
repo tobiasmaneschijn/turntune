@@ -351,7 +351,8 @@ it from the production branch.
 
 - Uploaded images go to the private `chat-media` bucket under
   `user-id/canonical-room/uuid.extension` through an authenticated upload route.
-  The server verifies image signatures, ownership and room media policy, stores
+  The server reserves durable account/room quotas before buffering and verifies
+  complete decoded raster data, dimensions/frames, ownership and room media policy, stores
   private metadata and permits one message to claim each upload. Browser Storage
   uploads and metadata reads are revoked for this bucket.
 - URLs expire after five minutes. Legacy upload paths are accepted only when an
@@ -369,6 +370,9 @@ it from the production branch.
   own unclaimed upload. A server cleanup pass retires abandoned or removed
   objects after outstanding signed URLs expire. An uncertain send keeps its
   existing upload and message UUID for retry.
+- The durable deletion outbox survives account/room cascades and late uploads;
+  cleanup runs each minute in bounded batches. See
+  `docs/managed-upload-release.md` for limits, backlog alerts and hosted release checks.
 - GIF search uses the server-side GIPHY proxy and is disabled when no
   `GIPHY_API_KEY` is configured.
 - Opening the picker loads trending GIFs. Searches run after a short debounce

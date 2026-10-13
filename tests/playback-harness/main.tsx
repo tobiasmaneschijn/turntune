@@ -3,6 +3,7 @@ import "../../src/shadcn.css";
 import "../../src/styles.css";
 import { SpotifyPlayer } from "../../src/components/SpotifyPlayer";
 import type { PlayerStatus } from "../../src/components/YouTubePlayer";
+import { resetProviderSession, setProviderAccount } from "../../src/provider-session";
 import type { Playback, ProviderTrackMapping, Track } from "../../src/types";
 
 interface MockState {
@@ -30,6 +31,7 @@ let sdkUpdatedAt = Date.now();
 let deferredState: { state: MockState | null; resolve: (state: MockState | null) => void } | undefined;
 let deferNextState = false;
 let sdkPlayer: MockSpotifyPlayer | undefined;
+const sdkPlayers: MockSpotifyPlayer[] = [];
 let deferNextPlay = false;
 let deferredPlay: (() => void) | undefined;
 
@@ -56,7 +58,7 @@ class MockSpotifyPlayer {
   private listeners = new Map<string, Array<(payload: never) => void>>();
 
   constructor(private options: { getOAuthToken: (callback: (token: string) => void) => void }) {
-    sdkPlayer = this;
+    sdkPlayer = this; sdkPlayers.push(this);
   }
 
   async connect() {
@@ -116,6 +118,8 @@ class MockSpotifyPlayer {
   async activateElement() {
     commands.push({ source: "sdk", action: "activateElement" });
   }
+
+  requestTokenCallback(callback: (token: string) => void) { this.options.getOAuthToken(callback); }
 
   requestToken() {
     return new Promise<string>((resolve) => this.options.getOAuthToken(resolve));
@@ -179,6 +183,7 @@ let playback: Playback = { track: createTrack("track-a"), playing: true, positio
 let mapping: ProviderTrackMapping | undefined = { providerId: "track-a" };
 let resumeAfterReconnect = new URLSearchParams(location.search).get("resume") !== "false";
 let accessToken = "mock-app-access-token";
+let userId = "listener-one";
 const mode = new URLSearchParams(location.search).get("mode") === "desktop" ? "desktop" : "web";
 const root = createRoot(document.getElementById("root")!);
 const onStatus = (status: PlayerStatus) => { statuses.push(status); };
@@ -195,6 +200,7 @@ function render() {
     isDj={false}
     volume={75}
     accessToken={accessToken}
+    userId={userId}
     resumeAfterReconnect={resumeAfterReconnect}
     onEnded={onEnded}
     onStatus={onStatus}
@@ -214,7 +220,11 @@ export interface PlaybackHarness {
   resolvePendingState(): void;
   sync(): void;
   refreshAccessToken(token: string): void;
+  switchAccount(id: string, token: string): void;
+  disconnectProvider(): Promise<void>;
+  logout(): void;
   requestSdkToken(): Promise<string | undefined>;
+  requestOldSdkToken(): void;
   deferNextPlay(): void;
   resolvePendingPlay(): void;
   fallback(): void;
@@ -270,6 +280,10 @@ window.playbackHarness = {
   sync: () => { window.dispatchEvent(new Event("soundspin:playback-sync")); },
   refreshAccessToken: (token) => { accessToken = token; render(); },
   requestSdkToken: async () => sdkPlayer?.requestToken(),
+  requestOldSdkToken: () => sdkPlayers[0]?.requestTokenCallback(() => commands.push({source:"sdk", action:"stale-token"})),
+  switchAccount: (id, token) => { userId = id; accessToken = token; setProviderAccount(id); render(); },
+  disconnectProvider: () => resetProviderSession("spotify"),
+  logout: () => { setProviderAccount(null); mounted = false; render(); },
   deferNextPlay: () => { deferNextPlay = true; },
   resolvePendingPlay: () => { const resolve = deferredPlay; deferredPlay = undefined; resolve?.(); },
   fallback: () => { mounted = false; render(); },

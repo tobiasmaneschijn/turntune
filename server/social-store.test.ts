@@ -8,6 +8,7 @@ function fixture() {
   let now = 1_000, activityReads = 0;
   let beforeRoomName: (() => Promise<void>) | undefined;
   const users = new Map<string, User>([[alice, { id: alice, name: "Alice", avatarSeed: alice }], [bob, { id: bob, name: "Bob", avatarSeed: bob }], [carol, { id: carol, name: "Carol", avatarSeed: carol }]]);
+  const visible = new Set(users.keys());
   const roles = new Map<string, RoomRole>([[alice, "owner"]]);
   const room = { name: "Lounge", isPublic: true, passwordProtected: true, roles };
   const activity = new Map([[bob, { roomSlug: "lounge" }], [carol, { roomSlug: "lounge" }]]);
@@ -16,11 +17,12 @@ function fixture() {
     ? { exists: true, isPublic: room.isPublic, passwordProtected: room.passwordProtected, role: roles.get(userId) || null }
     : { exists: false, isPublic: false, passwordProtected: false, role: null };
   const store = new SocialStore({ supabase: null, now: () => now, getProfile: async id => users.get(id) || null,
+    isProfileVisible: id => visible.has(id),
     searchProfiles: async q => [...users.values()].filter(user => user.name.toLowerCase().includes(q.toLowerCase())),
     getRoomAccess, getRoom: async slug => { await beforeRoomName?.(); return slug === "lounge" ? { name: room.name } : null; },
     getActivity: id => { activityReads++; return activity.get(id) || null; },
     grantRoomMember: async (slug, id) => { assert.equal(slug, "lounge"); grants.push(id); roles.set(id, "member"); } });
-  return { store, users, room, roles, grants, activity, now: () => now, advance: (ms: number) => { now += ms; }, activityReads: () => activityReads,
+  return { store, users, visible, room, roles, grants, activity, now: () => now, advance: (ms: number) => { now += ms; }, activityReads: () => activityReads,
     beforeRoomName: (run: () => Promise<void>) => { beforeRoomName = run; } };
 }
 async function befriend(store: SocialStore, a = alice, b = bob) { await store.actOnFriend(a, b, "request"); await store.actOnFriend(b, a, "accept"); }
@@ -137,4 +139,115 @@ test("ordinary private-room members cannot grant access but may invite an alread
   await store.acceptInvitation(bob, id);
   assert.equal(roles.get(bob), "moderator");
   assert.deepEqual(grants, []);
+});
+
+
+test("declines impose a cooldown, blocks revoke friendship/activity/invites, and unblock remains explicit", async () => {
+  const { store, advance } = fixture();
+  await store.actOnFriend(alice,bob,"request");
+  await store.actOnFriend(bob,alice,"remove");
+  await assert.rejects(store.actOnFriend(alice,bob,"request"),/cannot receive/);
+  advance(SOCIAL_LIMITS.declineMs);
+  await befriend(store);
+  await store.setShareActivity(bob,true);
+  const id=await store.createInvitation(alice,bob,"lounge");
+  await store.setBlocked(bob,alice,true);
+  assert.equal(await store.isBlocked(alice,bob),true);
+  assert.equal((await store.snapshot(alice)).people.length,0);
+  assert.equal((await store.snapshot(bob)).blockedPeople[0].id,alice);
+  await assert.rejects(store.actOnFriend(alice,bob,"request"),/cannot receive/);
+  await assert.rejects(store.createInvitation(alice,bob,"lounge"),/accepted friends/);
+  await assert.rejects(store.acceptInvitation(bob,id),/not found/);
+  await store.setBlocked(bob,alice,false);
+  assert.equal(await store.isBlocked(alice,bob),false);
+  assert.equal(await store.getRelationship(alice,bob),"none");
+  await store.setReceiveRequests(bob,false);
+  await assert.rejects(store.actOnFriend(alice,bob,"request"),/cannot receive/);
+  await store.setReceiveRequests(bob,true);
+  await store.actOnFriend(alice,bob,"request");
+  advance(SOCIAL_LIMITS.requestMs);
+  assert.equal(await store.getRelationship(alice,bob),"none");
+  await assert.rejects(store.actOnFriend(bob,alice,"accept"),/not found/);
+});
+
+test("blocking during activity lookup prevents a late disclosure", async () => {
+  const { store,beforeRoomName }=fixture();
+  await befriend(store); await store.setShareActivity(bob,true);
+  beforeRoomName(()=>store.setBlocked(bob,alice,true));
+  assert.equal((await store.snapshot(alice)).people[0].room,undefined);
+});
+
+test("service RPC quota rejections remain actionable while database diagnostics stay private", async () => {
+  const makeStore = (error: { code: string; message: string }) => new SocialStore({
+    supabase: { rpc: async () => ({ data: null, error }) } as unknown as import("@supabase/supabase-js").SupabaseClient,
+    getRoomAccess: async () => ({ exists: false, isPublic: false, passwordProtected: false, role: null }),
+  });
+  await assert.rejects(makeStore({ code: "P0001", message: "Too many pending friend requests." }).actOnFriend(alice,bob,"request"),
+    (error: unknown) => error instanceof Error && "status" in error && error.status === 429);
+  await assert.rejects(makeStore({ code: "42P01", message: "relation secret_internal_table does not exist" }).actOnFriend(alice,bob,"request"),
+    (error: unknown) => error instanceof Error && !error.message.includes("secret_internal_table") && !("status" in error));
+});
+
+test("hidden subjects disappear from social identities while anonymous owner-held blocks remain removable", async () => {
+  const { store, visible, roles, users } = fixture();
+  roles.set(bob, "member");
+  users.set(carol, { ...users.get(carol)!, avatarKey: "pulse", avatarUrl: "https://fixture.supabase.co/storage/v1/object/public/profile-avatars/private.png", isAppAdmin: true });
+  await befriend(store);
+  await store.createInvitation(bob, alice, "lounge");
+  await store.setBlocked(alice, carol, true);
+  const active = await store.snapshot(alice);
+  assert.equal(active.people[0].user.name, "Bob");
+  assert.equal(active.invitations[0].from.name, "Bob");
+  assert.equal(active.blockedPeople[0].name, "Carol");
+
+  visible.delete(bob); visible.delete(carol);
+  const hidden = await store.snapshot(alice);
+  assert.deepEqual(hidden.people, []);
+  assert.deepEqual(hidden.invitations, []);
+  assert.deepEqual(hidden.blockedPeople, [{ id: carol, name: "Unavailable listener", avatarSeed: carol }]);
+  assert.deepEqual(await store.searchPeople(alice, "Bo"), []);
+  await store.setBlocked(alice, carol, false);
+  assert.deepEqual((await store.snapshot(alice)).blockedPeople, []);
+  visible.add(bob);
+  assert.equal((await store.snapshot(alice)).people[0].user.name, "Bob");
+});
+
+test("service social identities use one bounded active-subject RPC rather than a bypass-RLS profile read", async () => {
+  const calls: Array<{ name: string; args: unknown }> = [];
+  const profiles = new Map([[bob, { user_id: bob, display_name: "Bob", avatar_key: "pulse", avatar_url: null, is_app_admin: false }]]);
+  const rows = [{ user_low: alice, user_high: bob, requested_by: alice, status: "accepted", updated_at: new Date().toISOString() },
+    { user_low: alice, user_high: carol, requested_by: alice, status: "accepted", updated_at: new Date().toISOString() }];
+  const db = {
+    rpc: async (name: string, args: { p_ids?: string[] }) => {
+      calls.push({ name, args });
+      if (name === "soundspin_users_blocked") return { data: false, error: null };
+      assert.equal(name, "soundspin_social_profiles");
+      assert.ok(args.p_ids && args.p_ids.length <= 500);
+      return { data: args.p_ids.flatMap(id => profiles.has(id) ? [profiles.get(id)] : []), error: null };
+    },
+    from(table: string) {
+      assert.notEqual(table, "soundspin_profiles", "the service client must not bypass subject visibility through SELECT");
+      let status = "", columns = "";
+      const query = {
+        select(value: string) { columns = value; return query; },
+        eq(column: string, value: string) { if (column === "status") status = value; return query; },
+        or() { return query; }, in() { return query; }, is() { return query; }, gt() { return query; },
+        order() { return query; }, limit() { return query; },
+        async maybeSingle() { return { data: table === "soundspin_social_settings" ? { share_activity: false, receive_requests: true } : null, error: null }; },
+        then(resolve: (value: unknown) => unknown) {
+          const data = table === "soundspin_friendships" && status === "accepted" ? rows
+            : table === "soundspin_user_blocks" ? [{ blocked_id: carol }]
+            : table === "soundspin_social_settings" && columns === "user_id" ? [] : [];
+          return Promise.resolve({ data, error: null }).then(resolve);
+        }
+      };
+      return query;
+    }
+  } as unknown as import("@supabase/supabase-js").SupabaseClient;
+  const store = new SocialStore({ supabase: db, getRoomAccess: async () => ({ exists: false, isPublic: false, passwordProtected: false, role: null }) });
+  const snapshot = await store.snapshot(alice);
+  assert.deepEqual(snapshot.people.map(person => person.user.id), [bob]);
+  assert.deepEqual(snapshot.blockedPeople, [{ id: carol, name: "Unavailable listener", avatarSeed: carol }]);
+  const profileCalls = calls.filter(call => call.name === "soundspin_social_profiles");
+  assert.equal(profileCalls.length, 2, "friends and owned block identities use bounded batch projections");
 });

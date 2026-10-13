@@ -23,6 +23,7 @@ interface RoomActionOptions {
   commands: RoomCommandService;
   getMembership: (socketId: string) => Membership | null;
   assertAuthorized: () => void;
+  authorizeCurrent?: (roomId: string, userId: string) => Promise<void>;
   broadcast: (room: Room) => void;
   rememberDj: (roomId: string, user: User) => void;
   forgetDj: (roomId: string, userId: string) => void;
@@ -52,12 +53,19 @@ export function mountRoomActions(options: RoomActionOptions) {
     if (!socket.connected || !current || current.room !== member.room || current.user.id !== member.user.id) fail("Your room session changed. Join the room again.");
     if(member.room.moderation?.restrictions?.some(r=>r.userId===member.user.id&&r.kind==="room-ban"&&r.revokedAt===null&&(r.expiresAt===null||r.expiresAt>Date.now()))) fail("You are banned from this room.");
   };
+  const assertFreshCurrent = async (member: Membership) => {
+    assertCurrent(member);
+    await options.authorizeCurrent?.(member.room.id, member.user.id);
+    // The external check yields. Keep the socket, actor and live room bound to
+    // the same captured session immediately before touching the queued draft.
+    assertCurrent(member);
+  };
   const action = <T>(event: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, change: (draft: Room, member: Membership, input: T) => RoomChange<Record<string, unknown>>) => {
     onAction(event, async (payload, reply) => {
       const input = schema.safeParse(payload);
       if (!input.success) return reply?.({ ok: false, error: "Invalid room command." });
       const member = currentMember();
-      const result = await commands.execute(member.room, draft => { assertCurrent(member);if(["dj:join","queue:next","playback:update","playback:skip-vote","vibe:vote"].includes(event)&&draft.settings.requireRulesAcceptance&&draft.moderation?.rulesAcceptance?.[member.user.id]!==(draft.settings.rulesVersion??1))fail("Accept the room rules before participating.");return change(draft, member, input.data); });
+      const result = await commands.execute(member.room, async draft => { await assertFreshCurrent(member);if(["dj:join","queue:next","playback:update","playback:skip-vote","vibe:vote"].includes(event)&&draft.settings.requireRulesAcceptance&&draft.moderation?.rulesAcceptance?.[member.user.id]!==(draft.settings.rulesVersion??1))fail("Accept the room rules before participating.");return change(draft, member, input.data); });
       reply?.({ ok: true, ...result });
     });
   };
@@ -71,7 +79,7 @@ export function mountRoomActions(options: RoomActionOptions) {
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid moderator change." });
     if (parsed.data.roomId !== undefined && parsed.data.roomId !== member.room.id) fail("Your room session changed. Join the room again.");
     const previous = [...member.room.djQueueUserIds]; assertCurrent(member);
-    await store.setModerator(member.room.id, member.user.id, parsed.data.userId, parsed.data.moderator, () => assertCurrent(member));
+    await store.setModerator(member.room.id, member.user.id, parsed.data.userId, parsed.data.moderator, () => assertFreshCurrent(member));
     cleanupRemoved(member.room, previous); options.broadcast(member.room); reply?.({ ok: true });
   });
   onAction("room:dj-role:set", async (payload, reply) => {
@@ -79,7 +87,7 @@ export function mountRoomActions(options: RoomActionOptions) {
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid DJ role change." });
     if (parsed.data.roomId !== undefined && parsed.data.roomId !== member.room.id) fail("Your room session changed. Join the room again.");
     const previous = [...member.room.djQueueUserIds]; assertCurrent(member);
-    await store.setDjRole(member.room.id, member.user.id, parsed.data.userId, parsed.data.dj, () => assertCurrent(member));
+    await store.setDjRole(member.room.id, member.user.id, parsed.data.userId, parsed.data.dj, () => assertFreshCurrent(member));
     cleanupRemoved(member.room, previous); options.broadcast(member.room); reply?.({ ok: true });
   });
   action("dj:join", roomCommandSchemas["dj:join"], (draft, member, input) => {
@@ -104,8 +112,8 @@ export function mountRoomActions(options: RoomActionOptions) {
     assertCurrent(member);
     if (!roomAllowsProvider(member.room.settings, parsed.data.provider)) fail(`${PROVIDER_LABELS[parsed.data.provider]} is disabled in this room.`);
     const resolved = await options.resolveTrack(parsed.data);
-    const result = await commands.execute(member.room, draft => {
-      assertCurrent(member);
+    const result = await commands.execute(member.room, async draft => {
+      await assertFreshCurrent(member);
       const recording = { ...parsed.data, ...resolved };
       if (!roomAllowsProvider(draft.settings, recording.provider)) fail(`${PROVIDER_LABELS[recording.provider]} is disabled in this room.`);
       if (draft.playback.track && sameRecording(draft.playback.track, recording)) fail("That track is already playing.");
@@ -130,8 +138,8 @@ export function mountRoomActions(options: RoomActionOptions) {
       const set = library.sets.find(value => value.id === input.data.setId);
       if (!set) fail("This saved set is no longer in your private library.");
       const resolved = await resolveSavedSet(set!.tracks, options.resolveSavedRecording);
-      return commands.execute(member.room, draft => {
-        assertCurrent(member);
+      return commands.execute(member.room, async draft => {
+        await assertFreshCurrent(member);
         const enabledTracks = resolved.tracks.filter(track => roomAllowsProvider(draft.settings, track.provider));
         if (privateQueue(draft, member.user.id).length + enabledTracks.length > 1000) fail("Your waiting queue is full. Remove tracks before adding this set.");
         const appended = resolved.tracks.length ? appendQueueSet(draft, member.user, resolved.tracks) : { added: 0, skipped: [], started: false };
@@ -211,7 +219,7 @@ export function mountRoomActions(options: RoomActionOptions) {
     if(!hasRoomCapability(member.room,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");
     let tracks:Awaited<ReturnType<typeof resolveSavedSet>>|undefined;
     if(data.setId){const library=await store.getPrivateLibrary(member.user.id);const set=library.sets.find(s=>s.id===data.setId);if(!set)fail("Saved set not found.");tracks=await resolveSavedSet(set!.tracks,options.resolveSavedRecording);if(tracks.skipped.length)fail("Every fallback track must be available. Fix the saved set and try again.");}
-    await commands.execute(member.room,draft=>{assertCurrent(member);if(!hasRoomCapability(draft,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");const state=radioState(draft);if(tracks){const copies=tracks.tracks.map(t=>({...t,id:crypto.randomUUID(),addedBy:member.user,addedAt:Date.now()}));if(copies.some(t=>!t.durationVerified||!t.durationMs||t.isLive))fail("Fallback requires verified finite recordings.");state.fallback.tracks=copies;state.fallback.cursor=0;}if(data.enabled&&!state.fallback.tracks.length)fail("Choose a saved set first.");state.fallback.enabled=data.enabled;appendModerationLog(draft,{actorId:member.user.id,action:"fallback-set",reason:"",details:{enabled:data.enabled,replaced:Boolean(tracks),count:state.fallback.tracks.length}});if(!draft.playback.track)advanceRadio(draft);return{result:{}};});reply?.({ok:true});
+    await commands.execute(member.room,async draft=>{await assertFreshCurrent(member);if(!hasRoomCapability(draft,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");const state=radioState(draft);if(tracks){const copies=tracks.tracks.map(t=>({...t,id:crypto.randomUUID(),addedBy:member.user,addedAt:Date.now()}));if(copies.some(t=>!t.durationVerified||!t.durationMs||t.isLive))fail("Fallback requires verified finite recordings.");state.fallback.tracks=copies;state.fallback.cursor=0;}if(data.enabled&&!state.fallback.tracks.length)fail("Choose a saved set first.");state.fallback.enabled=data.enabled;appendModerationLog(draft,{actorId:member.user.id,action:"fallback-set",reason:"",details:{enabled:data.enabled,replaced:Boolean(tracks),count:state.fallback.tracks.length}});if(!draft.playback.track)advanceRadio(draft);return{result:{}};});reply?.({ok:true});
   });
   action("playback:update", playbackSchema, (draft, member, input) => {
     if (!controlsPlayback(draft, member.user.id)) fail("Only the current DJ or a room moderator controls playback.");

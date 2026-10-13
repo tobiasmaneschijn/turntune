@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images";
 import { FormEvent, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
@@ -324,7 +325,7 @@ export function FeedbackButton({
                   <div className="feedback-previews" aria-label="Attached screenshots">
                     {screenshots.map((attachment, index) => (
                       <div className="feedback-preview" key={attachment.id}>
-                        <img src={attachment.previewUrl} alt={`Screenshot ${index + 1}`} />
+                        <img referrerPolicy="no-referrer" src={approvedImageUrl(attachment.previewUrl)} alt={`Screenshot ${index + 1}`} />
                         <Button
                           type="button"
                           variant="secondary"

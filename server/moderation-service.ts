@@ -17,11 +17,13 @@ export const moderationActionSchema = z.object({
   value: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(30), z.literal(60)]).optional(), overrideId: uuid.optional(), warningId: uuid.optional()
 }).strict();
 export type ModerationAction = z.infer<typeof moderationActionSchema>;
-export const roomReportSchema = z.object({ requestId: uuid, targetUserId: id.optional(), messageId: uuid.optional(), reason: z.string().trim().min(1).max(500), category: z.string().trim().min(1).max(48).default("other") }).strict().refine(value => value.targetUserId || value.messageId, "Choose a message or participant to report.");
+export const roomReportSchema = z.object({ requestId: uuid, targetUserId: id.optional(), messageId: uuid.optional(), reason: z.string().trim().min(1).max(500), category: z.string().trim().min(1).max(48).default("other").refine(value => value !== "track-exception", "This report category is reserved.") }).strict().refine(value => value.targetUserId || value.messageId, "Choose a message or participant to report.");
 export const invitationActionSchema = z.object({ requestId: uuid, action: z.enum(["cancel", "create-link", "revoke-link"]), invitationId: uuid.optional(), linkId: uuid.optional(), durationDays: z.number().int().min(1).max(365).optional(), maxUses: z.number().int().min(1).max(1000).optional() }).strict();
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (message: string): never => { throw new RoomCommandError(message); };
 const target = (input: ModerationAction) => input.userId || fail("Choose a participant.");
+export const MODERATION_RECEIPT_TTL_MS = 24 * 60 * 60_000;
+export const MODERATION_MAX_RECEIPTS = 1000;
 const page = <T>(items: T[], cursor?: string, limit = 50) => {
   const offset = cursor === undefined ? 0 : Number(cursor);
   if (!Number.isSafeInteger(offset) || offset < 0) fail("Invalid page cursor.");
@@ -39,11 +41,17 @@ export interface ModerationServiceOptions {
   removeMessage?: (roomId: string, actorId: string, messageId: string, requestId: string, reason: string) => Promise<unknown>;
   externalLog?: (roomId: string) => Promise<ModerationEvent[]>;
   validateMessage?: (roomId: string, messageId: string) => Promise<{ userId: string } | null>;
+  /** Private indexed archive read, called only after current room staff/capability validation. */
+  readArchive?: (roomId: string, tab: "reports" | "log" | "restrictions" | "warnings", query: string, cursor?: string) => Promise<{ items: Array<Record<string, unknown>>; cursor: string | null }>;
+  memberPage?: (roomId: string, query: string, cursor?: string) => Promise<{ members: Array<{ user: User; role: "owner" | "moderator" | "dj" | "member"; joinedAt: number }>; cursor: string | null }>;
+  /** Fresh platform account/room status, including commands that waited in the room queue. */
+  authorizeActor?: (roomId: string, actorId: string) => Promise<void>;
 }
 
 /** One room queue orders policy, participant and radio effects; only committed state is published. */
 export class ModerationService {
   private readonly now: () => number;
+  private readonly reportBudgets = new Map<string, { expiresAt: number; requests: Map<string, string> }>();
   constructor(readonly store: Store, private readonly options: ModerationServiceOptions = {}) { this.now = options.now || Date.now; }
   ownStatus(room: Room, userId: string) {
     const openReports = isRoomStaff(room, userId) ? Math.min(999, (room.moderation?.reports || []).filter(report => report.status === "open" && (hasRoomCapability(room, userId, "chatParticipants") || (report.category === "track-exception" && hasRoomCapability(room, userId, "djsPlayback")))).length) : undefined;
@@ -54,7 +62,9 @@ export class ModerationService {
   }
   private async room(roomId: string) { return await this.store.loadRoom(roomId) || fail("Room not found."); }
   private async actor(room: Room, actorId: string) {
+    await this.options.authorizeActor?.(room.id, actorId);
     const access = await this.store.getRoomAccess(room.id, actorId);
+    await this.options.authorizeActor?.(room.id, actorId);
     if (access.banned) fail("You are banned from this room.");
     requireNotBanned(room, actorId, this.now());
     return access;
@@ -71,12 +81,54 @@ export class ModerationService {
   }
   private receipt(room: Room, actorId: string, requestId: string, value: unknown) {
     const state = ensureModeration(room), key = `${actorId}:${requestId}`, hash = digest(JSON.stringify(value));
-    const previous = Object.hasOwn(state.receipts, key) ? state.receipts[key] : undefined;
+    const candidate = Object.hasOwn(state.receipts, key) ? state.receipts[key] : undefined;
+    const previous = candidate && Number.isFinite(candidate.createdAt) && candidate.createdAt + MODERATION_RECEIPT_TTL_MS > this.now() ? candidate : undefined;
     if (previous && previous.hash !== hash) fail("This request ID already belongs to another action.");
-    return { previous, commit: (result: Record<string, unknown>) => { Object.defineProperty(state.receipts, key, { value: { hash, result, createdAt: this.now() }, writable: true, configurable: true, enumerable: true }); } };
+    return { previous, commit: (result: Record<string, unknown>) => {
+      for (const [key, item] of Object.entries(state.receipts)) if (!Number.isFinite(item.createdAt) || item.createdAt + MODERATION_RECEIPT_TTL_MS <= this.now()) delete state.receipts[key];
+      // Ordinary report/invite traffic cannot spend the staff's intervention reserve.
+      const maximum = isRoomStaff(room, actorId) ? MODERATION_MAX_RECEIPTS : MODERATION_MAX_RECEIPTS - 200;
+      if (Object.keys(state.receipts).length >= maximum) fail("Room action limit reached. Try again later.");
+      Object.defineProperty(state.receipts, key, { value: { hash, result, createdAt: this.now() }, writable: true, configurable: true, enumerable: true });
+      this.retainRecent(room);
+    } };
+  }
+  private reportSubmission(actorId: string, requestId: string, input: unknown) {
+    const now = this.now(), hash = digest(JSON.stringify(input));
+    for (const [key, value] of this.reportBudgets) if (value.expiresAt <= now) this.reportBudgets.delete(key);
+    const budget = this.reportBudgets.get(actorId) || { expiresAt: now + 3600000, requests: new Map<string, string>() };
+    const previous = budget.requests.get(requestId);
+    if (previous) { if (previous !== hash) fail("This request ID already belongs to another action."); return; }
+    if (budget.requests.size >= 5) fail("Report limit reached. Try again in an hour.");
+    if (!this.reportBudgets.has(actorId) && this.reportBudgets.size >= 10_000) fail("Reports are temporarily unavailable. Try again shortly.");
+    budget.requests.set(requestId, hash); this.reportBudgets.set(actorId, budget);
+  }
+  /** SQL archives evicted evidence transactionally; local development never drops evidence. */
+  private retainRecent(room: Room) {
+    if (!this.store.usesSupabase) return;
+    const state = ensureModeration(room), now = this.now();
+    const retain = <T>(items: T[], isInactive: (item: T) => boolean, date: (item: T) => number) => {
+      const recent = items.filter(isInactive).sort((a, b) => date(b) - date(a)).slice(0, 500);
+      const retained = new Set(recent);
+      return items.filter(item => !isInactive(item) || retained.has(item));
+    };
+    state.log = state.log.slice(-500);
+    state.reports = retain(state.reports, item => item.status !== "open", item => item.resolvedAt || item.createdAt);
+    state.restrictions = retain(state.restrictions, item => item.revokedAt !== null || (item.expiresAt !== null && item.expiresAt <= now), item => item.revokedAt || item.expiresAt || item.createdAt);
+    state.warnings = retain(state.warnings, item => item.readAt !== null, item => item.readAt || item.createdAt);
+    state.inviteLinks = retain(state.inviteLinks, item => item.revokedAt !== null || item.expiresAt <= now, item => item.revokedAt || item.expiresAt);
+    state.cancelledInvitations = state.cancelledInvitations.slice(-500);
   }
   async members(roomId: string, actorId: string, query = "", cursor?: string) {
     const room = await this.room(roomId); await this.staff(room, actorId);
+    if (this.options.memberPage) {
+      const result = await this.options.memberPage(roomId, query, cursor);
+      await this.staff(room, actorId);
+      const online = new Map((this.options.onlineUsers?.(roomId) || []).map(user => [user.id, user]));
+      return { ...result, members: result.members.map(member => ({ ...member, user: online.get(member.user.id) || member.user, online: online.has(member.user.id),
+        restrictions: (room.moderation?.restrictions || []).filter(item => item.userId === member.user.id && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > this.now()) &&
+          (hasRoomCapability(room, actorId, "chatParticipants") || (item.kind === "dj-suspension" && hasRoomCapability(room, actorId, "djsPlayback")))) })) };
+    }
     const all = await this.store.listRoomMembers(roomId), online = new Map((this.options.onlineUsers?.(roomId) || []).map(user => [user.id, user]));
     const restrictions = room.moderation?.restrictions || [];
     const items = all.filter(member => member.user.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a, b) => a.user.name.localeCompare(b.user.name) || a.user.id.localeCompare(b.user.id)).map(member => ({ ...member, user: online.get(member.user.id) || member.user, online: online.has(member.user.id), restrictions: restrictions.filter(item => item.userId === member.user.id && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > this.now()) && (hasRoomCapability(room, actorId, "chatParticipants") || (item.kind === "dj-suspension" && hasRoomCapability(room, actorId, "djsPlayback")))) }));
@@ -84,6 +136,16 @@ export class ModerationService {
   }
   async view(roomId: string, actorId: string, tab: "reports" | "log" | "restrictions" | "warnings", query = "", cursor?: string) {
     const room = await this.room(roomId); await this.staff(room, actorId);
+    if (tab === "warnings") requireRoomCapability(room, actorId, "chatParticipants", this.now());
+    if (cursor?.startsWith("archive:")) {
+      // Staff with playback-only powers cannot browse archived personal reports/restrictions.
+      if (tab !== "log") requireRoomCapability(room, actorId, "chatParticipants", this.now());
+      if (!this.options.readArchive) return { items: [], cursor: null };
+      const result = await this.options.readArchive(roomId, tab, query, cursor.slice(8) || undefined);
+      await this.staff(room, actorId);
+      if (tab !== "log") requireRoomCapability(room, actorId, "chatParticipants", this.now());
+      return { ...result, cursor: result.cursor ? `archive:${result.cursor}` : null };
+    }
     const state = ensureModeration(structuredClone(room));
     let items: Array<ModerationEvent | RoomRestriction | typeof state.reports[number] | typeof state.warnings[number]>;
     if (tab === "log") items = [...state.log, ...await this.options.externalLog?.(roomId) || []];
@@ -92,7 +154,8 @@ export class ModerationService {
     else { requireRoomCapability(room, actorId, "chatParticipants", this.now()); items = state.warnings; }
     if (tab === "restrictions" && !hasRoomCapability(room, actorId, "chatParticipants")) items = items.filter(item => "kind" in item && item.kind === "dj-suspension" && hasRoomCapability(room, actorId, "djsPlayback"));
     const needle = query.trim().toLocaleLowerCase();
-    return page(items.filter(item => !needle || JSON.stringify(item).toLocaleLowerCase().includes(needle)).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), cursor);
+    const result = page(items.filter(item => !needle || JSON.stringify(item).toLocaleLowerCase().includes(needle)).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), cursor);
+    return { ...result, cursor: result.cursor || (this.options.readArchive && (tab === "log" || hasRoomCapability(room, actorId, "chatParticipants")) ? "archive:" : null) };
   }
   async act(roomId: string, actorId: string, value: unknown) {
     const input = moderationActionSchema.parse(value), room = await this.room(roomId);
@@ -103,11 +166,11 @@ export class ModerationService {
       if (message && room.ownerUserId !== actorId) requireProtectedTarget(room, actorId, message.userId);
       return { ok: true, result: await removeMessage(roomId, actorId, messageId, input.requestId, input.reason || "") };
     }
-    const outcome = await this.store.changeRoom(room, async draft => {
+    const outcome = await this.store.changeRoom<Record<string, unknown>>(room, async draft => {
       const state = ensureModeration(draft), now = this.now();
       const access = input.action === "warning-read" ? await this.reader(draft, actorId) : (await this.staff(draft, actorId), await this.actor(draft, actorId));
       const receipt = this.receipt(draft, actorId, input.requestId, input);
-      if (receipt.previous) return { result: { ...receipt.previous.result, replayed: true } };
+      if (receipt.previous) return { result: { ...receipt.previous.result, replayed: true }, unchanged: true };
       let result: Record<string, unknown> = { ok: true };
       let member: RoomChange<unknown>["member"], memberDeletes: string[] | undefined;
       const reason = input.reason || "";
@@ -119,6 +182,7 @@ export class ModerationService {
         requireProtectedTarget(draft, actorId, userId);
         if (input.action === "warn") {
           if (!reason) fail("Write a warning.");
+          if (state.warnings.filter(item => item.userId === userId && item.readAt === null).length >= 100 || state.warnings.filter(item => item.readAt === null).length >= 2000) fail("Unread warning limit reached.");
           const warning = { id: randomUUID(), userId, actorId, text: reason, createdAt: now, readAt: null }; state.warnings.push(warning); result.warning = warning;
         } else {
           if (["timeout", "ban", "dj-suspend"].includes(input.action)) {
@@ -160,12 +224,14 @@ export class ModerationService {
         requireRoomCapability(draft, actorId, restriction.kind === "dj-suspension" ? "djsPlayback" : "chatParticipants", now);
         if (access.role !== "owner" && (await this.store.getRoomAccess(roomId, restriction.userId)).role === "moderator") fail("Only the owner can moderate another moderator.");
         requireProtectedTarget(draft, actorId, restriction.userId);
+        if (restriction.revokedAt !== null) return { result: { ok: true, replayed: true }, unchanged: true };
         if (restriction.revokedAt === null) { restriction.revokedAt = now; restriction.revokedBy = actorId; }
         appendModerationLog(draft, { action: "restriction-revoke", actorId, targetUserId: restriction.userId, restrictionId: restriction.id, reason, requestId: input.requestId });
       } else if (input.action === "role") {
         if (access.role !== "owner") fail("Only the owner can change room roles.");
         const userId = target(input); if (userId === draft.ownerUserId) fail("The owner already has full room access.");
         const role = input.enabled === false || input.role === "member" ? "member" : input.role || fail("Choose a room role.");
+        if ((await this.store.getRoomAccess(roomId, userId)).role === role) return { result: { ok: true, replayed: true }, unchanged: true };
         draft.moderatorUserIds = draft.moderatorUserIds.filter(id => id !== userId); draft.djRoleUserIds = draft.djRoleUserIds.filter(id => id !== userId);
         if (role === "moderator") draft.moderatorUserIds.push(userId); if (role === "dj") draft.djRoleUserIds.push(userId);
         const current = state.members[userId]; Object.defineProperty(state.members, userId, { value: { user: current?.user || { id: userId, name: userId, avatarSeed: userId }, role, joinedAt: current?.joinedAt || now }, enumerable: true, writable: true, configurable: true });
@@ -176,6 +242,7 @@ export class ModerationService {
       } else if (input.action.startsWith("report-")) {
         const report = state.reports.find(item => item.id === input.reportId) || fail("Report not found.");
         requireRoomCapability(draft, actorId, report.category === "track-exception" ? "djsPlayback" : "chatParticipants", now);
+        if (report.status !== "open") return { result: { ok: true, replayed: true }, unchanged: true };
         report.status = input.action === "report-resolve" ? "resolved" : "dismissed"; report.resolvedAt = now; report.resolvedBy = actorId;
         appendModerationLog(draft, { action: input.action, actorId, targetUserId: report.targetUserId, messageId: report.messageId, reason, requestId: input.requestId, details: { reportId: report.id } });
       } else if (input.action === "session" || input.action === "session-end") {
@@ -192,6 +259,7 @@ export class ModerationService {
         appendModerationLog(draft, { action: input.action, actorId, reason, requestId: input.requestId, details: { kind } });
       } else if (input.action === "warning-read") {
         const warning = state.warnings.find(item => item.id === input.warningId && item.userId === actorId) || fail("Warning not found.");
+        if (warning.readAt !== null) return { result: { ok: true, replayed: true }, unchanged: true };
         warning.readAt = now;
       }
       receipt.commit(result);
@@ -208,36 +276,44 @@ export class ModerationService {
   }
   async report(roomId: string, actorId: string, value: unknown) {
     const input = roomReportSchema.parse(value), room = await this.room(roomId);
+    await this.reader(room, actorId);
+    if (this.options.isAdmitted && !this.options.isAdmitted(roomId, actorId)) fail("Join this room before reporting a participant.");
     const message = input.messageId ? await this.options.validateMessage?.(roomId, input.messageId) : undefined;
     if (input.messageId && this.options.validateMessage && !message) fail("This message is unavailable.");
     if (message && input.targetUserId && message.userId !== input.targetUserId) fail("The reported participant does not match this message.");
     const targetUserId = message?.userId || input.targetUserId;
-    const outcome = await this.store.changeRoom(room, async draft => {
+    const outcome = await this.store.changeRoom<Record<string, unknown>>(room, async draft => {
       await this.reader(draft, actorId);
       if (this.options.isAdmitted && !this.options.isAdmitted(roomId, actorId)) fail("Join this room before reporting a participant.");
       const receipt = this.receipt(draft, actorId, input.requestId, input), state = ensureModeration(draft);
-      if (receipt.previous) return { result: receipt.previous.result };
-      const existing = state.reports.find(item => item.reporterId === actorId && item.status === "open" && item.messageId === input.messageId && item.targetUserId === targetUserId);
-      if (existing) { const result = { ok: true, report: existing }; receipt.commit(result); return { result }; }
+      if (receipt.previous) return { result: { ...receipt.previous.result, replayed: true }, unchanged: true };
+      this.reportSubmission(actorId, input.requestId, input);
       if (state.reports.filter(item => item.reporterId === actorId && item.createdAt > this.now() - 3600000).length >= 5) fail("Report limit reached. Try again in an hour.");
+      const existing = state.reports.find(item => item.reporterId === actorId && item.status === "open" && item.messageId === input.messageId && item.targetUserId === targetUserId);
+      if (existing) return { result: { ok: true, report: existing, replayed: true }, unchanged: true };
+      if (state.reports.filter(item => item.status === "open").length >= 1000) fail("This room has too many unresolved reports. Contact support.");
       const report = { id: randomUUID(), reporterId: actorId, targetUserId, messageId: input.messageId, reason: input.reason, category: input.category, createdAt: this.now(), status: "open" as const };
       state.reports.push(report); const result = { ok: true, report }; receipt.commit(result); return { result };
     });
-    this.options.broadcast?.(room); return outcome;
+    if (!outcome.replayed) this.options.broadcast?.(room); return outcome;
   }
   async acceptRules(roomId: string, actorId: string, version: number) {
     const room = await this.room(roomId);
-    await this.store.changeRoom(room, async draft => {
+    const changed = await this.store.changeRoom(room, async draft => {
       await this.reader(draft, actorId);
       if (!draft.settings.rulesText || version !== (draft.settings.rulesVersion ?? 1)) fail("The room rules changed. Read the current version.");
+      if (ensureModeration(draft).rulesAcceptance[actorId] === version) return { result: false, unchanged: true };
       Object.defineProperty(ensureModeration(draft).rulesAcceptance, actorId, { value: version, configurable: true, writable: true, enumerable: true });
-      return { result: undefined };
+      return { result: true };
     });
-    this.options.broadcast?.(room); return { ok: true };
+    if (changed) this.options.broadcast?.(room); return { ok: true };
   }
-  async invitations(roomId: string, actorId: string) {
+  async invitations(roomId: string, actorId: string, cursor?: string) {
     const room = await this.room(roomId); await this.staff(room, actorId); requireRoomCapability(room, actorId, "accessInvites", this.now());
-    return { invitations: await this.store.listRoomInvitations(roomId), links: (room.moderation?.inviteLinks || []).map(({ tokenHash: _hash, uses, ...link }) => ({ ...link, uses: uses.length })) };
+    const live = (link: { revokedAt: number | null; expiresAt: number }) => link.revokedAt === null && link.expiresAt > this.now() ? 1 : 0;
+    const links = page((room.moderation?.inviteLinks || []).map(({ tokenHash: _hash, uses, ...link }) => ({ ...link, uses: uses.length })).sort((a, b) => live(b) - live(a) || b.createdAt - a.createdAt), cursor);
+    const invitations = page(await this.store.listRoomInvitations(roomId), cursor);
+    return { invitations: invitations.items, links: links.items, cursor: invitations.cursor || links.cursor };
   }
   async invitationAction(roomId: string, actorId: string, value: unknown) {
     const input = invitationActionSchema.parse(value), room = await this.room(roomId);
@@ -249,18 +325,21 @@ export class ModerationService {
         const eligible = policy === "owner" ? actorId === draft.ownerUserId : policy === "staff" || (policy === "default" && accessMode(draft) === "members") ? hasRoomCapability(draft, actorId, "accessInvites") : Boolean(access.role);
         if (!eligible) fail("You cannot invite members to this room.");
       } else requireRoomCapability(draft, actorId, "accessInvites", now);
-      const receipt = this.receipt(draft, actorId, input.requestId, input); if (receipt.previous) return { result: receipt.previous.result };
+      const receipt = this.receipt(draft, actorId, input.requestId, input); if (receipt.previous) return { result: { ...receipt.previous.result, replayed: true }, unchanged: true };
       let result: Record<string, unknown> = { ok: true };
       if (input.action === "create-link") {
         if (state.inviteLinks.filter(item => !item.revokedAt && item.expiresAt > now).length >= 50) fail("This room has too many active invite links.");
         const token = randomBytes(32).toString("base64url"), link = { id: randomUUID(), tokenHash: digest(token), createdBy: actorId, createdAt: now, expiresAt: now + (input.durationDays || 7) * 86400000, maxUses: input.maxUses || 10, uses: [] as string[], revokedAt: null };
         state.inviteLinks.push(link); const { tokenHash: _hash, uses, ...safe } = link; result = { ok: true, token, link: { ...safe, uses: uses.length } };
       } else if (input.action === "revoke-link") {
-        const link = state.inviteLinks.find(item => item.id === input.linkId) || fail("Invite link not found."); link.revokedAt = now;
+        const link = state.inviteLinks.find(item => item.id === input.linkId) || fail("Invite link not found.");
+        if (link.revokedAt !== null) return { result: { ok: true, replayed: true }, unchanged: true };
+        link.revokedAt = now;
       } else {
         const invitationId = input.invitationId || fail("Choose an invitation.");
         if (!invitations.some(item => item.id === invitationId)) fail("Invitation not found.");
-        if (!state.cancelledInvitations.includes(invitationId)) state.cancelledInvitations.push(invitationId);
+        if (state.cancelledInvitations.includes(invitationId)) return { result: { ok: true, replayed: true }, unchanged: true };
+        state.cancelledInvitations.push(invitationId);
       }
       appendModerationLog(draft, { action: input.action, actorId, reason: "", requestId: input.requestId });
       // A lost creation response can recover the link identity, but its bearer
@@ -268,7 +347,7 @@ export class ModerationService {
       receipt.commit(input.action === "create-link" ? { ok: true, link: result.link, tokenUnavailable: true } : result);
       return { result };
     });
-    this.options.broadcast?.(room); return result;
+    if (!result.replayed) this.options.broadcast?.(room); return result;
   }
   async redeemLink(roomId: string, actorId: string, token: string, requestId: string) {
     if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !uuid.safeParse(requestId).success) fail("Invalid invite link.");
@@ -280,9 +359,10 @@ export class ModerationService {
       if (link.revokedAt !== null || link.expiresAt <= now) fail("This invite link has expired or was revoked.");
       const creator = await this.store.getRoomAccess(roomId, link.createdBy), policy = draft.settings.invitePermission || "default";
       if (creator.banned || !creator.role || (policy === "owner" && link.createdBy !== draft.ownerUserId) || ((policy === "staff" || (policy === "default" && accessMode(draft) === "members")) && !hasRoomCapability(draft, link.createdBy, "accessInvites"))) fail("This invite can no longer grant room access.");
-      const receipt = this.receipt(draft, actorId, requestId, { tokenHash: hash }); if (receipt.previous) return { result: receipt.previous.result };
+      const receipt = this.receipt(draft, actorId, requestId, { tokenHash: hash }); if (receipt.previous) return { result: receipt.previous.result, unchanged: true };
       const access = await this.store.getRoomAccess(roomId, actorId);
       if (link.uses.includes(actorId) && accessMode(draft) === "members" && !access.role) fail("Your room access was removed.");
+      if (link.uses.includes(actorId) && access.role) return { result: { ok: true, roomSlug: roomId, passwordRequired: draft.passwordProtected }, unchanged: true };
       if (!link.uses.includes(actorId)) { if (link.uses.length >= link.maxUses) fail("This invite link has reached its use limit."); link.uses.push(actorId); }
       const role = access.role || "member", previous = state.members[actorId];
       Object.defineProperty(state.members, actorId, { value: { user: previous?.user || { id: actorId, name: "Listener", avatarSeed: actorId }, role, joinedAt: previous?.joinedAt || now }, enumerable: true, writable: true, configurable: true });

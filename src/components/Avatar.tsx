@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images";
 import type { User } from "../types";
 
 const BUILT_IN_AVATARS = new Set(["pulse", "sunset", "orbit", "midnight", "prism", "voltage"]);
@@ -9,7 +10,7 @@ function hash(value: string) {
 export function Avatar({ user, size = 36 }: { user: User; size?: number }) {
   const hue = hash(user.avatarSeed) % 360;
   const avatarKey = user.avatarKey && BUILT_IN_AVATARS.has(user.avatarKey) ? user.avatarKey : "pulse";
-  const imageUrl = user.avatarUrl || `/avatars/${avatarKey}.svg`;
+  const imageUrl = approvedImageUrl(user.avatarUrl) || `/avatars/${avatarKey}.svg`;
   const initials = user.name
     .split(/\s+/)
     .slice(0, 2)
@@ -30,6 +31,7 @@ export function Avatar({ user, size = 36 }: { user: User; size?: number }) {
     >
       <span className="avatar-initials" aria-hidden="true">{initials}</span>
       <img
+        referrerPolicy="no-referrer"
         key={imageUrl}
         src={imageUrl}
         alt=""

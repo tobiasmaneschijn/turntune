@@ -211,3 +211,15 @@ test("YouTube live status does not cache unavailable videos, upstream failures, 
     assert.equal(requests, outcomes.length);
   }, { fetchImpl: async () => outcomes[requests++]() });
 });
+
+
+test("provider resolution and playback endpoints charge authenticated account and IP budgets before provider work", async () => {
+  await fixture(async (base, state) => {
+    for (let index = 0; index < 60; index++) assert.equal((await fetch(`${base}/api/spotify/resolve?url=abcdefghij123456789012`, authenticated)).status, 200);
+    const calls = state.calls.length;
+    assert.equal((await fetch(`${base}/api/spotify/resolve?url=abcdefghij123456789012`, authenticated)).status, 429);
+    assert.equal(state.calls.length, calls);
+    // Another endpoint has its own limit; the same verified account remains authoritative.
+    assert.equal((await fetch(`${base}/api/spotify/devices`, authenticated)).status, 200);
+  });
+});

@@ -27,6 +27,10 @@ export function UpdatePasswordForm({
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (password.length < 12 || password.length > 128) {
+      setError('Use a password with 12–128 characters.')
+      return
+    }
     setIsLoading(true)
     setError(null)
 
@@ -55,10 +59,15 @@ export function UpdatePasswordForm({
                 <Input
                   id="password"
                   type="password"
+                  autoComplete="new-password"
+                  minLength={12}
+                  maxLength={128}
+                  aria-describedby="password-requirements"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                <p id="password-requirements" className="text-xs text-muted-foreground">Use 12–128 characters.</p>
               </div>
               {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>

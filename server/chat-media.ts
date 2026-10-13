@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { randomUUID } from 'node:crypto'
+import { PublicRequestError } from './public-request-error.js'
+import { cleanupManagedUploads, queueManagedUpload, reserveManagedUpload, uploadReservedImage, type UploadLease } from './managed-uploads.js'
 
 export const CHAT_MEDIA_URL_TTL_SECONDS = 5 * 60
 export function validChatStoragePath(path: unknown): path is string {
@@ -20,7 +21,8 @@ export async function resolveChatMediaUrl(
   registeredUploadsOnly = false,
   allowPending = false
 ) {
-  if (!client || !validChatStoragePath(path)) throw new Error('This chat image is unavailable.')
+  if (!client) throw new PublicRequestError('Chat image uploads are unavailable.', 503)
+  if (!validChatStoragePath(path)) throw new PublicRequestError('This chat image is unavailable.', 404)
   const [owner, folder] = path.split('/')
   const ownedNewUpload = ownerId === owner && folder === roomId
   let registeredPending = false
@@ -32,14 +34,14 @@ export async function resolveChatMediaUrl(
       .maybeSingle()
     if (error) throw error
     if (data) {
-      if (data.room_slug !== roomId || data.removed_at) throw new Error('This chat image is unavailable.')
+      if (data.room_slug !== roomId || data.removed_at) throw new PublicRequestError('This chat image is unavailable.')
       registeredPending =
         allowPending &&
         ownedNewUpload &&
         data.user_id === ownerId &&
         !data.message_id &&
         Date.parse(data.expires_at) > Date.now()
-      if (!data.message_id && !registeredPending) throw new Error('This uploaded image has not been sent.')
+      if (!data.message_id && !registeredPending) throw new PublicRequestError('This uploaded image has not been sent.')
     }
   }
   if ((registeredUploadsOnly && !registeredPending) || !ownedNewUpload) {
@@ -50,7 +52,7 @@ export async function resolveChatMediaUrl(
       .eq('storage_path', path)
       .limit(1)
     if (error) throw error
-    if (!data?.some((row) => !row.removed_at)) throw new Error('This chat image does not belong to this room.')
+    if (!data?.some((row) => !row.removed_at)) throw new PublicRequestError('This chat image does not belong to this room.')
   }
   const { data, error } = await client.storage.from('chat-media').createSignedUrl(path, CHAT_MEDIA_URL_TTL_SECONDS)
   if (error || !data?.signedUrl) throw error || new Error('This chat image is unavailable.')
@@ -78,23 +80,6 @@ export async function signChatHistoryMedia<
   )
 }
 
-const TYPES: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif'
-}
-function imageBytesMatch(bytes: Buffer, mime: string) {
-  if (mime === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-  if (mime === 'image/png')
-    return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-  if (mime === 'image/gif') return /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString('ascii'))
-  return (
-    mime === 'image/webp' &&
-    bytes.subarray(0, 4).toString('ascii') === 'RIFF' &&
-    bytes.subarray(8, 12).toString('ascii') === 'WEBP'
-  )
-}
 /** Uploads are admitted by the server, registered privately, then claimed by one message. */
 export async function uploadChatMedia(
   client: SupabaseClient | null,
@@ -102,26 +87,18 @@ export async function uploadChatMedia(
   userId: string,
   bytes: unknown,
   contentType: string,
-  check: () => Promise<unknown>
+  check: () => Promise<unknown>,
+  reserved?: UploadLease
 ) {
   const mime = contentType.split(';')[0].trim().toLowerCase()
-  if (!client) throw new Error('Chat image uploads are unavailable.')
-  if (
-    !Buffer.isBuffer(bytes) ||
-    !bytes.length ||
-    bytes.length > 6 * 1024 * 1024 ||
-    !TYPES[mime] ||
-    !imageBytesMatch(bytes, mime)
-  )
-    throw new Error('Choose a JPEG, PNG, WebP, or GIF image of 6 MB or less.')
-  const storagePath = `${userId}/${roomId}/${randomUUID()}.${TYPES[mime]}`
+  if (!client) throw new PublicRequestError('Chat image uploads are unavailable.', 503)
+  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 6 * 1024 * 1024) throw new PublicRequestError('Choose a valid image of 6 MB or less.')
   await check()
+  const lease = reserved || await reserveManagedUpload(client, userId, 'chat', bytes.length, mime, roomId)
+  if (lease.actor_id !== userId || lease.room_slug !== roomId || lease.purpose !== 'chat') throw new PublicRequestError('Chat image uploads are unavailable.', 503)
+  const storagePath = lease.storage_path
   try {
-    const { error } = await client.storage
-      .from('chat-media')
-      .upload(storagePath, bytes, { contentType: mime, upsert: false })
-    if (error) throw error
-    await check()
+    await uploadReservedImage(client, lease, bytes, mime, check)
     const { error: registrationError } = await client
       .from('soundspin_chat_uploads')
       .insert({
@@ -136,11 +113,9 @@ export async function uploadChatMedia(
     await check()
     return { storagePath, ...signed }
   } catch (error) {
-    await client.storage
-      .from('chat-media')
-      .remove([storagePath])
-      .catch(() => undefined)
-    await client.from('soundspin_chat_uploads').delete().eq('storage_path', storagePath)
+    // Persist the key even if Storage is unavailable or the process stops.
+    await queueManagedUpload(client, lease).catch(() => undefined)
+    await client.from('soundspin_chat_uploads').update({ removed_at: new Date().toISOString() }).eq('storage_path', storagePath).is('message_id', null)
     throw error
   }
 }
@@ -153,7 +128,7 @@ export async function cleanupChatUpload(
   storagePath: unknown
 ) {
   if (!client || !validChatStoragePath(storagePath) || !storagePath.startsWith(`${userId}/${roomId}/`))
-    throw new Error('This uploaded image is unavailable.')
+    throw new PublicRequestError('This uploaded image is unavailable.')
   const { data, error } = await client
     .from('soundspin_chat_uploads')
     .update({ removed_at: new Date().toISOString() })
@@ -164,43 +139,11 @@ export async function cleanupChatUpload(
     .select('storage_path')
   if (error) throw error
   if (!data?.length) return { ok: true }
-  const { error: storageError } = await client.storage.from('chat-media').remove([storagePath])
-  if (storageError) throw storageError
-  const { error: deleteError } = await client
-    .from('soundspin_chat_uploads')
-    .delete()
-    .eq('storage_path', storagePath)
-    .is('message_id', null)
-  if (deleteError) throw deleteError
+  await queueManagedUpload(client, { bucket_id: 'chat-media', storage_path: storagePath, actor_id: userId, room_slug: roomId }, CHAT_MEDIA_URL_TTL_SECONDS)
   return { ok: true }
 }
 
 /** Retires abandoned uploads and removed attachments after bearer URLs expire. */
 export async function cleanupExpiredChatMedia(client: SupabaseClient | null, now = Date.now()) {
-  if (!client) return 0
-  const { error: markError } = await client
-    .from('soundspin_chat_uploads')
-    .update({ removed_at: new Date(now).toISOString() })
-    .is('message_id', null)
-    .is('removed_at', null)
-    .lt('expires_at', new Date(now).toISOString())
-  if (markError) throw markError
-  const { data, error } = await client
-    .from('soundspin_chat_uploads')
-    .select('storage_path')
-    .not('removed_at', 'is', null)
-    .lt('removed_at', new Date(now - CHAT_MEDIA_URL_TTL_SECONDS * 1000).toISOString())
-    .limit(100)
-  if (error) throw error
-  const paths = (data || []).map((row) => row.storage_path).filter(validChatStoragePath)
-  if (!paths.length) return 0
-  const { error: storageError } = await client.storage.from('chat-media').remove(paths)
-  if (storageError) throw storageError
-  const { error: deleteError } = await client
-    .from('soundspin_chat_uploads')
-    .delete()
-    .in('storage_path', paths)
-    .not('removed_at', 'is', null)
-  if (deleteError) throw deleteError
-  return paths.length
+  return (await cleanupManagedUploads(client)).removed
 }

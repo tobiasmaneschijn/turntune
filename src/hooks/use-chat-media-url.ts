@@ -45,7 +45,12 @@ export function useChatMediaUrl(url: string | undefined, storagePath: string | u
       if (!intersecting || document.visibilityState !== 'visible' || surface?.dataset.chatVisible === 'false' || attemptedUrl.current === current) return
       timer = setTimeout(() => { void refresh() }, Math.max(0, expiry - Date.now() - 30_000))
     }
-    const observer = new IntersectionObserver(([entry]) => { intersecting = entry.isIntersecting; schedule() })
+    const observer = new IntersectionObserver((entries) => {
+      // Layout changes can batch several transitions for this row. The newest
+      // entry determines whether a refresh may run after the pane reopens.
+      for (const entry of entries) if (entry.target === element) intersecting = entry.isIntersecting
+      schedule()
+    })
     const visibility = new MutationObserver(schedule)
     observer.observe(element)
     if (surface) visibility.observe(surface, { attributes: true, attributeFilter: ['data-chat-visible'] })

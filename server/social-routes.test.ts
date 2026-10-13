@@ -14,6 +14,8 @@ async function fixture(run: (base: string, calls: unknown[][], advance: () => vo
     snapshot: async (actor: string) => { await record("snapshot", actor); return { people: [], invitations: [], shareActivity: false }; },
     searchPeople: async (actor: string, query: string) => { await record("search", actor, query); return []; },
     actOnFriend: async (actor: string, target: string, action: string) => { await record("friend", actor, target, action); if (action === "accept") throw new SocialError("Only the recipient can accept this request.", 403); return "outgoing"; },
+    setBlocked: async (actor: string, target: string, blocked: boolean) => { await record("block", actor, target, blocked); },
+    setReceiveRequests: async (actor: string, enabled: boolean) => { await record("receive", actor, enabled); },
     setShareActivity: async (actor: string, share: boolean) => { await record("settings", actor, share); },
     createInvitation: async (actor: string, recipient: string, room: string) => { await record("invite", actor, recipient, room); return invitation; },
     acceptInvitation: async (actor: string, id: string) => { await record("accept-invite", actor, id); return { roomSlug: "lounge", passwordRequired: true }; },
@@ -36,7 +38,7 @@ const status = (response: Response, expected: number) => { assert.equal(response
 
 test("all social routes require verified credentials and retain no-store on failures", async () => fixture(async (base, calls) => {
   for (const [path, init] of [["/api/social", request("GET")], ["/api/people?q=Bob", request("GET")], [`/api/friends/${bob}`, request("PUT", { action: "request" })],
-    ["/api/social/settings", request("PATCH", { shareActivity: true })], ["/api/room-invitations", request("POST", { userId: bob, roomSlug: "lounge" })],
+    ["/api/social/settings", request("PATCH", { shareActivity: true })], [`/api/social/blocks/${bob}`, request("PUT", { blocked: true })], ["/api/room-invitations", request("POST", { userId: bob, roomSlug: "lounge" })],
     [`/api/room-invitations/${invitation}/accept`, request("POST")]] as const) {
     status(await fetch(base + path, { ...init, headers: { ...headers, Authorization: "Bearer denied" } }), 401);
   }
@@ -67,4 +69,13 @@ test("invitation attempts are bounded per verified account and resume after the 
   assert.equal(limited.headers.get("retry-after"), "60"); assert.equal(calls.length, 10);
   advance(); status(await fetch(`${base}/api/room-invitations`, request("POST", { userId: bob, roomSlug: "lounge" })), 200);
   assert.equal(calls.length, 11);
+}));
+
+
+test("blocking and request preferences use only the verified actor and reject extra identity fields", async () => fixture(async(base,calls)=>{
+  status(await fetch(`${base}/api/social/blocks/${bob}`,request("PUT",{blocked:true,actor: bob})),400);
+  status(await fetch(`${base}/api/social/blocks/${bob}`,request("PUT",{blocked:true})),200);
+  status(await fetch(`${base}/api/social/settings`,request("PATCH",{receiveRequests:false})),200);
+  status(await fetch(`${base}/api/social/settings`,request("PATCH",{})),400);
+  assert.deepEqual(calls,[["block",alice,bob,true],["receive",alice,false]]);
 }));

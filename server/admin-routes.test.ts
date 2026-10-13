@@ -16,12 +16,13 @@ async function fixture(run: (base: string, state: { calls: Array<{ path: string;
     state.calls.push({ path: url.pathname, method: request.method, body: text ? JSON.parse(text) : undefined });
     if (state.fail) return Response.json({ message: "private database failure" }, { status: 500 });
     if (url.pathname.endsWith("soundspin_admin_activity")) return Response.json([{ day: today, users: 5, feedback: 4, messages: 1275 }]);
+    if (url.pathname.endsWith("soundspin_update_feedback_admin")) return Response.json({ id: "11111111-1111-4111-8111-111111111111", status: "reviewing", admin_note: "Verified", updated_at: `${today}T10:00:00Z` });
     if (request.method === "HEAD") return new Response(null, { headers: { "content-range": "0-0/1275" } });
     if (request.method === "PATCH") return Response.json({ id: "11111111-1111-4111-8111-111111111111", status: "reviewing", admin_note: "Verified", updated_at: `${today}T10:00:00Z` });
     return Response.json([]);
   } } }) as SupabaseClient;
   const app = express();
-  mountAdminRoutes(app, { client, getAdminUserId: async request => request.get("authorization") === "Bearer admin" ? { ok: true, userId: "admin" } :
+  mountAdminRoutes(app, { client, getAdminUserId: async request => request.get("authorization") === "Bearer admin" ? { ok: true, userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } :
     request.get("authorization") ? { ok: false, status: 403, error: "Administrator access required." } : { ok: false, status: 401, error: "Authentication required." }, listenerCount: () => 0 });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -61,7 +62,8 @@ test("feedback updates preserve validated administrative mutations", async () =>
   await fixture(async (base, state) => {
     const response = await fetch(`${base}/api/admin/feedback/11111111-1111-4111-8111-111111111111`, { method: "PATCH", headers: { ...authenticated.headers, "Content-Type": "application/json" }, body: JSON.stringify({ status: "reviewing", adminNote: "Verified", userId: "forged" }) });
     assert.equal(response.status, 200);
-    assert.deepEqual(state.calls.at(-1)!.body, { status: "reviewing", admin_note: "Verified", updated_at: (state.calls.at(-1)!.body as { updated_at: string }).updated_at });
+    assert.equal(state.calls.at(-1)!.path, "/rest/v1/rpc/soundspin_update_feedback_admin");
+    assert.deepEqual(state.calls.at(-1)!.body, { p_actor: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", p_id: "11111111-1111-4111-8111-111111111111", p_status: "reviewing", p_note: "Verified" });
     assert.equal((await fetch(`${base}/api/admin/feedback/invalid`, { method: "PATCH", headers: { ...authenticated.headers, "Content-Type": "application/json" }, body: JSON.stringify({ status: "reviewing" }) })).status, 400);
   });
 });

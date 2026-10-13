@@ -1,6 +1,7 @@
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { securityEvent } from "./security-events.js";
 
 export type AdminAuthorization = { ok: true; userId: string } | { ok: false; error: string; status: 401 | 403 };
 export interface AdminRouteOptions {
@@ -9,6 +10,7 @@ export interface AdminRouteOptions {
   listenerCount: (slug: string) => number;
 }
 const feedbackStatusSchema = z.object({ status: z.enum(["new", "reviewing", "planned", "resolved", "closed"]), adminNote: z.string().trim().max(2000).default("") });
+const inboxSchema = z.object({ page: z.coerce.number().int().min(0).max(10000).default(0), status: z.enum(["all", "new", "reviewing", "planned", "resolved", "closed"]).default("all") });
 
 export function mountAdminRoutes(app: express.Express, options: AdminRouteOptions) {
   const supabaseAdmin = options.client;
@@ -19,6 +21,13 @@ app.get("/api/admin/dashboard", async (request, response) => {
     const admin = await getApiAdminUserId(request);
     if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
     if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
+    const inbox = inboxSchema.safeParse(request.query);
+    if (!inbox.success) return response.status(400).json({ error: "Invalid inbox filter." });
+    const pageSize = 50;
+    let feedbackQuery = supabaseAdmin.from("soundspin_feedback")
+      .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, category, impact, diagnostics, status, admin_note, created_at, updated_at")
+      .order("created_at", { ascending: false }).order("id", { ascending: false });
+    if (inbox.data.status !== "all") feedbackQuery = feedbackQuery.eq("status", inbox.data.status);
 
     const activityStart = new Date();
     activityStart.setUTCHours(0, 0, 0, 0);
@@ -40,11 +49,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
       supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }),
       supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }).in("status", ["new", "reviewing", "planned"]),
       supabaseAdmin.from("soundspin_messages").select("*", { count: "exact", head: true }),
-      supabaseAdmin
-        .from("soundspin_feedback")
-        .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, category, impact, diagnostics, status, admin_note, created_at, updated_at")
-        .order("created_at", { ascending: false })
-        .limit(100),
+      feedbackQuery.range(inbox.data.page * pageSize, inbox.data.page * pageSize + pageSize - 1),
       supabaseAdmin
         .from("soundspin_rooms")
         .select("slug, name, owner_id, is_public, created_at, updated_at")
@@ -73,12 +78,15 @@ app.get("/api/admin/dashboard", async (request, response) => {
     if (profileResult.error) throw profileResult.error;
     const profiles = new Map((profileResult.data || []).map((item) => [item.user_id, item]));
 
-    const screenshotPaths = feedback.flatMap((item) => item.screenshot_paths || []);
-    const signedResult = screenshotPaths.length
-      ? await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrls(screenshotPaths, 15 * 60)
-      : { data: [], error: null };
-    if (signedResult.error) throw signedResult.error;
-    const signedUrls = new Map((signedResult.data || []).map((item) => [item.path, item.signedUrl]));
+    // A missing/corrupt object must not take down the entire support inbox.
+    const screenshotPaths = [...new Set(feedback.flatMap((item) => (item.screenshot_paths || []).slice(0, 5)
+      .filter((path: unknown): path is string => typeof path === "string" && path.length <= 200 && path.startsWith(`${item.user_id}/`) && !path.includes(".."))))];
+    const signedUrls = new Map<string, string>();
+    await Promise.all(screenshotPaths.map(async (path) => {
+      try { const { data, error } = await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrl(path, 15 * 60);
+        if (!error && data?.signedUrl) signedUrls.set(path, data.signedUrl);
+      } catch { /* Isolate individual missing previews. */ }
+    }));
 
     const activity = Array.from({ length: 14 }, (_, index) => {
       const date = new Date(activityStart);
@@ -96,6 +104,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
     }
 
     response.json({
+      pagination: { page: inbox.data.page, pageSize, hasMore: feedback.length === pageSize, status: inbox.data.status },
       metrics: {
         users: userCount.count || 0,
         rooms: roomCount.count || 0,
@@ -149,18 +158,12 @@ app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), asy
       return response.status(400).json({ error: update.success ? "Invalid feedback item." : update.error.issues[0]?.message });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("soundspin_feedback")
-      .update({
-        status: update.data.status,
-        admin_note: update.data.adminNote,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", feedbackId.data)
-      .select("id, status, admin_note, updated_at")
-      .maybeSingle();
+    const { data, error } = await supabaseAdmin.rpc("soundspin_update_feedback_admin", {
+      p_actor: admin.userId, p_id: feedbackId.data, p_status: update.data.status, p_note: update.data.adminNote
+    });
     if (error) throw error;
     if (!data) return response.status(404).json({ error: "Feedback item not found." });
+    securityEvent("admin_change", "success", { requestId: response.locals.requestId, actorId: admin.userId, targetId: feedbackId.data });
     response.json({
       feedback: {
         id: data.id,

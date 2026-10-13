@@ -397,7 +397,7 @@ for (const scenario of ["listener", "restricted"]) {
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeHidden();
       await page.getByRole("button", { name: / · Lineup$/ }).click();
       await expect(page.getByRole("button", { name: "DJ role required", exact: true })).toBeDisabled();
-      await expect(page.locator('.music-rail-minimal')).toContainText("Ask the owner or a moderator for a DJ role.");
+      await expect(page.locator('.music-rail-minimal')).toContainText("A DJ role is required.");
     }
   });
 }

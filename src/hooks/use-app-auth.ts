@@ -22,7 +22,8 @@ export function useAppAuth() {
     let active = true;
     let unsubscribe: (() => void) | undefined;
     // Capture the recovery marker before Supabase consumes the callback URL.
-    const recovery = new URLSearchParams(location.hash.slice(1)).get("type") === "recovery";
+    const authType = new URLSearchParams(location.hash.slice(1)).get("type");
+    const recovery = authType === "recovery" || authType === "invite" || location.pathname === "/update-password";
     let recoveryPending = recovery;
     setAuth((current) => ({ ...current, loading: true, error: "" }));
 

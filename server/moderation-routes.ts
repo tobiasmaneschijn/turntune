@@ -4,7 +4,7 @@ import type { ModerationService } from "./moderation-service.js";
 import { RoomCommandError } from "./socket-handler.js";
 
 export function mountModerationRoutes(app: express.Express, service: ModerationService, getUserId: (request: express.Request) => Promise<string | null>) {
-  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/), query = z.string().max(100), cursor = z.string().regex(/^\d{1,8}$/).optional();
+  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/), query = z.string().max(100), cursor = z.string().max(160).regex(/^(?:\d{1,8}|archive:(?:\d{1,16}:[a-zA-Z0-9_-]{1,100})?)$/).optional();
   const handle = (run: (request: express.Request, actor: string, roomId: string) => Promise<unknown>): express.RequestHandler => async (request, response) => {
     response.set("Cache-Control", "no-store");
     try {
@@ -19,7 +19,7 @@ export function mountModerationRoutes(app: express.Express, service: ModerationS
   app.get("/api/rooms/:slug/moderation", handle((request, actor, roomId) => service.view(roomId, actor, z.enum(["reports", "log", "restrictions", "warnings"]).parse(request.query.tab ?? "reports"), query.parse(request.query.q ?? ""), cursor.parse(request.query.cursor))));
   app.post("/api/rooms/:slug/moderation/actions", express.json({ limit: "8kb" }), handle((request, actor, roomId) => service.act(roomId, actor, request.body)));
   app.post("/api/rooms/:slug/reports", express.json({ limit: "4kb" }), handle((request, actor, roomId) => service.report(roomId, actor, request.body)));
-  app.get("/api/rooms/:slug/invitations", handle((_request, actor, roomId) => service.invitations(roomId, actor)));
+  app.get("/api/rooms/:slug/invitations", handle((request, actor, roomId) => service.invitations(roomId, actor, z.string().regex(/^\d{1,8}$/).optional().parse(request.query.cursor))));
   app.post("/api/rooms/:slug/invitations/actions", express.json({ limit: "4kb" }), handle((request, actor, roomId) => service.invitationAction(roomId, actor, request.body)));
   app.post("/api/rooms/:slug/invite-links/redeem", express.json({ limit: "4kb" }), handle((request, actor, roomId) => { const input = z.object({ token: z.string().length(43), requestId: z.string().uuid() }).strict().parse(request.body); return service.redeemLink(roomId, actor, input.token, input.requestId); }));
   app.post("/api/rooms/:slug/rules/accept", express.json({ limit: "2kb" }), handle((request, actor, roomId) => service.acceptRules(roomId, actor, z.object({ version: z.number().int().min(1) }).strict().parse(request.body).version)));

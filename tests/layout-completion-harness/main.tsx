@@ -36,13 +36,13 @@ const rooms: RoomDirectoryEntry[] = [
   { slug: "protected", name: "Protected Radio", ownerId: "host", isPublic: true, passwordProtected: true, isFavorite: false, role: null, listenerCount: 1, preview: { title: "SECRET PROTECTED TRACK", playing: true, observedAt: Date.now() }, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
   { slug: "private", name: "Private Studio", ownerId: "host", isPublic: false, passwordProtected: false, isFavorite: false, role: "member", listenerCount: 0, preview: { title: "SECRET PRIVATE TRACK", playing: true, observedAt: Date.now() }, createdAt: "2026-01-01", updatedAt: "2026-01-01" }
 ];
-const state = { mounts: 0, unmounts: 0, directoryRequests: 0, requests: [] as string[], failDirectory: scenario === "lobby-error", delayDirectory: false, excluded: [] as string[], favorite: false, patch: null as unknown, roomEntry: null as { slug: string; password?: string } | null, recordRoomVisit };
+const state = { mounts: 0, unmounts: 0, directoryRequests: 0, requests: [] as string[], failDirectory: scenario === "lobby-error", delayDirectory: false, releaseDirectory: () => {}, excluded: [] as string[], favorite: false, patch: null as unknown, roomEntry: null as { slug: string; password?: string } | null, recordRoomVisit };
 Object.assign(window, { layoutFixture: state });
 globalThis.fetch = async (input, init) => {
   const url = String(input); state.requests.push(url);
   if (url.endsWith("/api/rooms")) {
     state.directoryRequests += 1;
-    if (state.delayDirectory) await new Promise(resolve => setTimeout(resolve, 700));
+    if (state.delayDirectory) await new Promise<void>(resolve => { state.releaseDirectory = resolve; });
     return state.failDirectory ? Response.json({ error: "Directory is temporarily unavailable" }, { status: 503 }) : Response.json({ rooms: scenario === "empty-lobby" ? [] : rooms.filter(room => !state.excluded.includes(room.slug)).map(room => room.slug === "private" ? { ...room, isFavorite: state.favorite } : room) });
   }
   if (init?.method === "PATCH") { state.patch = JSON.parse(String(init.body)); return Response.json({ ok: true }); }
@@ -86,7 +86,7 @@ function RoomHarness() {
     />
     <output className="sr-only" aria-label="Fixture notice">{notice}</output>
     {settings && <Dialog open onOpenChange={setSettings}><DialogContent><DialogTitle>Settings</DialogTitle><Button onClick={() => setSettings(false)}>Done</Button></DialogContent></Dialog>}
-    {roomSettings && <RoomSettingsDialog snapshot={snapshot} currentUserId={user.id} accessToken="fixture-token" onClose={() => setRoomSettings(false)} onNotice={setNotice} />}
+    {roomSettings && <RoomSettingsDialog snapshot={snapshot} currentUserId={user.id} accessToken="fixture-token" connected onClose={() => setRoomSettings(false)} onNotice={setNotice} />}
   </main>;
 }
 function LobbyHarness() {

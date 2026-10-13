@@ -1,17 +1,38 @@
 services:
   soundspin:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_REVISION: ${SOUNDSPIN_REVISION:-unknown}
     restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
     environment:
+      NODE_ENV: production
       PORT: 3000
       DATA_DIR: /app/data
-      SUPABASE_URL: ${SUPABASE_URL:-}
-      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
-      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
-      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      APP_ORIGIN: ${APP_ORIGIN:?Set the public HTTPS origin}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      CSP_MODE: ${CSP_MODE:-enforce}
+      SUPABASE_URL: ${SUPABASE_URL:?Set the Supabase project HTTPS URL}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set the publishable key}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?Set the server-only secret key}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:?Set the Supabase JWKS URL}
       SIGNUP_INVITE_PASSWORD: ${SIGNUP_INVITE_PASSWORD:-}
       GIPHY_API_KEY: ${GIPHY_API_KEY:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      PROVIDER_REQUESTS_PER_MINUTE: ${PROVIDER_REQUESTS_PER_MINUTE:-300}
+      SPOTIFY_REQUESTS_PER_MINUTE: ${SPOTIFY_REQUESTS_PER_MINUTE:-1200}
+      PROVIDER_MAX_CONCURRENT: ${PROVIDER_MAX_CONCURRENT:-12}
+      PROVIDER_GLOBAL_MAX_CONCURRENT: ${PROVIDER_GLOBAL_MAX_CONCURRENT:-48}
       SOUNDCLOUD_CLIENT_ID: ${SOUNDCLOUD_CLIENT_ID:-}
       SOUNDCLOUD_CLIENT_SECRET: ${SOUNDCLOUD_CLIENT_SECRET:-}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
@@ -26,7 +47,7 @@ services:
     volumes:
       - soundspin-data:/app/data
     ports:
-      - "3000"
+      - "127.0.0.1:${SOUNDSPIN_PORT:-3000}:3000"
 
 volumes:
   soundspin-data:

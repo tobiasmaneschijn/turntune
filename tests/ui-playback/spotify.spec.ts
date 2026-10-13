@@ -6,10 +6,13 @@ declare global {
 }
 
 async function openPlayer(page: Page, query = "") {
-  await page.clock.install({ time: new Date("2026-10-06T12:00:00Z") });
+  const initialTime = new Date("2026-10-06T12:00:00Z");
+  await page.clock.install({ time: initialTime });
+  // Freeze before loading the app. A target only 100ms beyond an asynchronous
+  // page.evaluate result can already be in the past on a busy CI worker.
+  await page.clock.pauseAt(new Date(initialTime.getTime() + 60_000));
   await page.goto(`/tests/playback-harness/index.html${query}`);
   await expect.poll(() => page.evaluate(() => window.playbackHarness?.inspect().commands.some((command) => command.source === "api" && command.action === "play"))).toBe(true);
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
   await page.evaluate(() => window.playbackHarness.resetCommands());
 }
 
@@ -367,4 +370,32 @@ test("successful Spotify recovery clears the error reported to the parent", asyn
   await expect.poll(async () => (await snapshot(page)).errors.at(-1)).toBe("Temporary playback interruption");
   await page.evaluate(() => window.playbackHarness.sync());
   await expect.poll(async () => (await snapshot(page)).errors.at(-1)).toBe("");
+});
+
+
+test("Spotify user switch disconnects the old SDK and rejects late old SDK token callbacks",async({page})=>{
+  await openPlayer(page);
+  await page.evaluate(()=>{
+    window.playbackHarness.deferNextState(); window.playbackHarness.wake(["focus"]);
+  });
+  await expect.poll(async()=> (await snapshot(page)).pendingState).toBe(true);
+  await page.evaluate(()=>window.playbackHarness.switchAccount("listener-two","listener-two-token"));
+  await expect.poll(async()=> (await snapshot(page)).commands.some(command=>command.action==="token"&&command.authorization==="Bearer listener-two-token")).toBe(true);
+  expect((await snapshot(page)).commands.filter(command=>command.action==="disconnect")).toHaveLength(1);
+  await page.evaluate(()=>window.playbackHarness.resolvePendingState()); await settle(page);
+  const tokens=(await snapshot(page)).commands.filter(command=>command.action==="token").length;
+  await page.evaluate(()=>window.playbackHarness.requestOldSdkToken()); await settle(page);
+  expect((await snapshot(page)).commands.filter(command=>command.action==="token")).toHaveLength(tokens);
+  expect((await snapshot(page)).commands.some(command=>command.action==="stale-token")).toBe(false);
+});
+
+test("Spotify explicit unlink and logout disable old device commands and token callbacks",async({page})=>{
+  await openPlayer(page);
+  await page.evaluate(()=>window.playbackHarness.disconnectProvider());
+  const before=(await snapshot(page)).commands.length;
+  await page.evaluate(()=>{window.playbackHarness.requestOldSdkToken();window.playbackHarness.wake(["focus","online"]);window.playbackHarness.sync();});await settle(page);
+  expect((await snapshot(page)).commands).toHaveLength(before);
+  expect((await snapshot(page)).commands.filter(command=>command.action==="disconnect")).toHaveLength(1);
+  await page.evaluate(()=>window.playbackHarness.logout());await settle(page);
+  expect((await snapshot(page)).commands.filter(command=>command.action==="token")).toHaveLength(0);
 });

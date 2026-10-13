@@ -1,3 +1,4 @@
+import { SignupAttemptLimiter } from "./invite-signup.js";
 import crypto from "node:crypto";
 import type { Express, Request } from "express";
 import type { SpotifyAccounts } from "./spotify-accounts.js";
@@ -33,6 +34,7 @@ const digest = (value: string) => crypto.createHash("sha256").update(value).dige
 
 export interface SpotifyOAuthRouteOptions {
   getUserId: (request: Request) => Promise<string | null>;
+  isAccountActive?: (userId: string) => Promise<boolean>;
   accounts: Pick<SpotifyAccounts, "configured" | "connect">;
   authorizationUrl: (redirectUri: string, state: string) => string;
   redirectUri: (request: Request) => string;
@@ -42,6 +44,8 @@ export interface SpotifyOAuthRouteOptions {
 /** A valid state proves the flow; the HttpOnly nonce proves the initiating browser. */
 export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRouteOptions) {
   const now = options.now || Date.now;
+  const attempts = new SignupAttemptLimiter(10, FLOW_TTL_MS);
+  const ipAttempts = new SignupAttemptLimiter(30, FLOW_TTL_MS);
   const states = new Map<string, { userId: string; returnTo: string; redirectUri: string; nonceDigest: Buffer; expiresAt: number; secure: boolean }>();
   const prune = () => {
     for (const [state, flow] of states) if (flow.expiresAt <= now()) states.delete(state);
@@ -52,7 +56,8 @@ export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRoute
     if (!userId) return response.status(401).json({ error: "Authentication required." });
     if (!options.accounts.configured) return response.status(503).json({ error: "Spotify OAuth or provider-token encryption is not configured yet." });
     prune();
-    if (states.size >= 10_000) return response.status(429).json({ error: "Too many Spotify connection attempts. Try again shortly." });
+    if ([...states.values()].filter(flow => flow.userId === userId).length >= 3 ||
+      !attempts.consume(userId, now()) || !ipAttempts.consume(request.ip || request.socket.remoteAddress || "unknown", now()) || states.size >= 10_000) return response.status(429).json({ error: "Too many Spotify connection attempts. Try again shortly." });
     const state = crypto.randomBytes(24).toString("base64url");
     const nonce = crypto.randomBytes(32).toString("base64url");
     const redirectUri = options.redirectUri(request);
@@ -76,7 +81,11 @@ export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRoute
     const code = typeof request.query.code === "string" && request.query.code.length > 0 && request.query.code.length <= 4096 ? request.query.code : null;
     if (!code) return response.redirect(withOutcome(flow.returnTo, "denied"));
     try {
-      await options.accounts.connect(flow.userId, code, flow.redirectUri);
+      const authorize = async () => {
+        if (options.isAccountActive && !await options.isAccountActive(flow.userId)) throw new Error("Account access is unavailable.");
+      };
+      await authorize();
+      await options.accounts.connect(flow.userId, code, flow.redirectUri, authorize);
       return response.redirect(withOutcome(flow.returnTo, "connected"));
     } catch {
       return response.redirect(withOutcome(flow.returnTo, "error"));

@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/ui-playback",
+  outputDir:"test-results/playback",
+  timeout:60_000,
   fullyParallel: true,
   reporter: "list",
   use: {

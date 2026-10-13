@@ -13,6 +13,7 @@ import "../styles/playback-qol.css";
 import { SoundCloudPlayer } from "./SoundCloudPlayer";
 import { SpotifyPlayer } from "./SpotifyPlayer";
 import { AppleMusicPlayer } from "./AppleMusicPlayer";
+import { resetProviderSession, setProviderAccount } from "../provider-session";
 import { YouTubePlayer } from "./YouTubePlayer";
 import { MixcloudPlayer } from "./MixcloudPlayer";
 import { allowedRoomProviders, PROVIDER_LABELS, roomAllowsProvider } from "../../shared/providers";
@@ -254,6 +255,10 @@ export function NowPlaying({
     mixcloud: ComponentType<React.ComponentProps<typeof MixcloudPlayer>>;
   }>;
 }) {
+  useEffect(() => {
+    setProviderAccount(currentUserId); setSpotifyWebStarted(false);
+    setConnections({ loaded: false, spotifyConfigured: false, spotifyConnected: false, spotifyProfile: null, appleConfigured: false });
+  }, [currentUserId]);
   const playback = snapshot.room.playback;
   const track = playback.track;
   const volume = userSettings.playback.defaultVolume;
@@ -389,6 +394,7 @@ export function NowPlaying({
     void requestJson<{ url?: string }>(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
       accessToken, errorMessage: "Could not connect Spotify."
     }).then((payload) => {
+      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
       if (!payload.url) throw new Error("Could not connect Spotify.");
       location.assign(payload.url);
     }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
@@ -402,6 +408,10 @@ export function NowPlaying({
       headers: { Authorization: `Bearer ${accessToken}` }
     }).then((response) => {
       if (!response.ok) throw new Error("Could not disconnect Spotify.");
+      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
+      connectionRequestRef.current?.abort();
+      void resetProviderSession("spotify");
+      setSpotifyWebStarted(false);
       setConnections((current) => ({ ...current, spotifyConnected: false, spotifyProfile: null }));
     }).catch((error) => {
       setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
@@ -556,6 +566,7 @@ export function NowPlaying({
           isDj={isDj}
           volume={volume}
           accessToken={accessToken!}
+          userId={currentUserId}
           preferredDeviceId={userSettings.playback.spotifyDeviceId}
           resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
           onEnded={handleEnded}
@@ -594,6 +605,7 @@ export function NowPlaying({
                     isDj={isDj}
                     volume={volume}
                     accessToken={accessToken!}
+                    userId={currentUserId}
                     preferredDeviceId={userSettings.playback.spotifyDeviceId}
                     resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
                     onEnded={handleEnded}
@@ -616,6 +628,7 @@ export function NowPlaying({
                 isDj={isDj}
                 volume={volume}
                 accessToken={accessToken}
+                userId={currentUserId}
                 onEnded={handleEnded}
                 onStatus={handleStatus}
                 onError={handleError}

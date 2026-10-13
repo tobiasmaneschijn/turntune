@@ -55,11 +55,13 @@ export class SpotifyAccounts {
     return Boolean(await this.store.getMusicConnection(userId, "spotify"));
   }
 
-  async connect(userId: string, code: string, redirectUri: string) {
+  async connect(userId: string, code: string, redirectUri: string, authorizeCurrent?: () => Promise<void>) {
     if (!this.configured) throw new Error("Spotify accounts are not configured yet.");
     await this.changeConnection(userId, async () => {
+      await authorizeCurrent?.();
       const token = await this.spotify.exchangeAuthorizationCode(code, redirectUri);
       if (!token.refresh_token) throw new Error("Spotify did not issue a refresh token.");
+      await authorizeCurrent?.();
       await this.store.saveMusicConnection({
         userId,
         provider: "spotify",
@@ -67,6 +69,7 @@ export class SpotifyAccounts {
         scopes: token.scope?.split(" ").filter(Boolean) || [],
         metadata: {}
       });
+      await authorizeCurrent?.();
       this.accessTokens.set(userId, {
         value: token.access_token,
         expiresAt: Date.now() + token.expires_in * 1000

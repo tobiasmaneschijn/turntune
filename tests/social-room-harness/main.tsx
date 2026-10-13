@@ -16,12 +16,14 @@ const profile = { user_id: user.id, display_name: "Alice", bio: "", avatar_key: 
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
 const now = Date.now();
 const guest = new URLSearchParams(location.search).has("guest");
+const invite = new URLSearchParams(location.search).has("invite");
 const jwt = [btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })), btoa(JSON.stringify({ sub: user.id, exp: Math.floor(now / 1000) + 3600 })), "fixture"].join(".");
 const authSession = { access_token: jwt, refresh_token: "fixture", token_type: "bearer", expires_in: 3600,
-  expires_at: Math.floor(now / 1000) + 3600, user: { id: user.id, email: "alice@example.com", user_metadata: { display_name: "Alice" }, app_metadata: {}, aud: "authenticated", created_at: profile.created_at } };
+  expires_at: Math.floor(now / 1000) + 3600, user: { id: user.id, email: "alice@example.com", email_confirmed_at: profile.created_at,
+    user_metadata: { display_name: "Alice" }, app_metadata: {}, aud: "authenticated", created_at: profile.created_at } };
 if (guest) localStorage.removeItem("soundspin-auth");
 else localStorage.setItem("soundspin-auth", JSON.stringify(authSession));
-history.replaceState({}, "", "/room/lounge");
+history.replaceState({}, "", invite ? "/update-password#type=invite" : "/room/lounge");
 const snapshot: RoomSnapshot = { room: { id: "lounge", name: "Lounge", ownerUserId: user.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
   passwordProtected: false, settings: {}, djUserId: bob.id, djQueueUserIds: [bob.id], queue: [], history: [],
   playback: { track: { id: "track-one", provider: "youtube", providerId: "aaaaaaaaaaa", title: "Night song", addedBy: bob, addedAt: now, durationMs: 180000 }, playing: true, position: 12, updatedAt: now }, vibe: null, createdAt: now },
@@ -42,14 +44,16 @@ Object.assign(socket, {
   emit() { return socket; }
 });
 window.fetch = async (input, init) => {
-  const path = String(input);
+  const path = input instanceof Request ? input.url : String(input);
+  if (path === "/api/config") return Response.json({ supabase: { url: "https://social-room-fixture.supabase.co", anonKey: "sb_publishable_fixture" } });
+  if (path.includes("/auth/v1/user")) return Response.json(authSession.user);
   if (path.includes("/auth/v1/token")) return Response.json(authSession);
-  if (path === "/api/signup") return Response.json({ ok: true }, { status: 201 });
+  if (path === "/api/signup") return Response.json({ ok: true }, { status: 202 });
   if (path.includes("/api/profiles/")) {
     const other = path.endsWith(bob.id);
     return Response.json({ profile: { ...profile, user_id: other ? bob.id : user.id, display_name: other ? "Bob" : "Alice", handle: other ? "bob" : "alice" }, options: [] });
   }
-  if (path === "/api/social") return Response.json({ people: [{ user: bob, state: "friends" }], invitations: [], shareActivity: false });
+  if (path === "/api/social") return Response.json({ people: [{ user: bob, state: "friends" }], invitations: [], shareActivity: false, blockedPeople: [], receiveRequests: true });
   if (path === "/api/rooms/lounge" && init?.method === "PATCH") {
     const { themePrompt } = JSON.parse(String(init.body)); fixture.themes.push(themePrompt);
     snapshot.room.settings = themePrompt ? { themePrompt } : {};
@@ -57,6 +61,8 @@ window.fetch = async (input, init) => {
     return Response.json({ ok: true });
   }
   if (path.includes("/api/library")) return Response.json({ library: { picks: [], sets: [] } });
+  if (path.includes("/api/rooms/lounge/chat/")) return Response.json({ rows: [], replies: [], profiles: [], hasMore: false });
+  if (path.includes("/api/youtube/live")) return Response.json({ isLive: false });
   if (path.includes("/api/chat")) return Response.json({ messages: [], hasMore: false });
   if (path.includes("/api/spotify")) return Response.json({ connected: false });
   if (path.includes("/api/rooms")) return Response.json({ rooms: [] });

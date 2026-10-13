@@ -1,7 +1,7 @@
 import { RoomCommandError } from "./socket-handler.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createAdminClient } from "@supabase/server/core";
+import { createBoundedAdminClient } from "./supabase-client.js";
 import { profileUpdateSchema, type ProfileUpdate } from "./profile-fields.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { advanceRadio, normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
@@ -10,7 +10,7 @@ import { allowedProvidersSchema, roomSettingsPatchSchema, authorizeRoomSettingsP
 import { accessMode } from "../shared/room-policy.js";
 import { appendModerationLog, emptyModeration, ensureModeration, isRoomBanned, roleInRoom } from "./room-access.js";
 import { runtimeMetrics } from "./runtime-metrics.js";
-import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, type LibraryMutation, type PrivateLibrary } from "./private-library.js";
+import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, PrivateLibraryDataError, type LibraryMutation, type PrivateLibrary } from "./private-library.js";
 import type {
   DjAccess,
   Provider,
@@ -36,10 +36,14 @@ interface StoreOptions {
   dataDir?: string;
   /** Explicit null selects local storage, including in isolated tests. */
   supabase?: SupabaseClient | null;
+  maxCachedRooms?: number;
+  maxCachedRoomBytes?: number;
 }
 
 export interface RoomChange<T> {
   result: T;
+  /** Replays/no-op changes remain ordered but do not persist or broadcast. */
+  unchanged?: boolean;
   /** Authoritative metadata and membership are committed in the same SQL transaction. */
   metadata?: Record<string, unknown>;
   member?: { user_id: string; role: RoomRole };
@@ -63,17 +67,28 @@ export class Store {
   private readonly dataDir: string;
   private readonly dataFile: string;
   private readonly tempFile: string;
+  private readonly maxCachedRooms: number;
+  private readonly maxCachedRoomBytes: number;
+  private roomBytes = new Map<string,number>();
+  private roomPendingBytes = new Map<string,number>();
+  private roomTouches = new Map<string, number>();
+  private roomLoaded?: (roomId: string) => void;
+  private roomPinned: (roomId: string) => boolean = () => false;
+  private readyCheck: Promise<boolean> | null = null;
+  private readyResult?: { value: boolean; expiresAt: number };
 
   constructor(options: StoreOptions = {}) {
     this.dataDir = options.dataDir || process.env.DATA_DIR || path.join(process.cwd(), "data");
     this.dataFile = path.join(this.dataDir, "soundspin.json");
     this.tempFile = path.join(this.dataDir, "soundspin.tmp.json");
+    this.maxCachedRooms = options.maxCachedRooms ?? 500;
+    this.maxCachedRoomBytes = options.maxCachedRoomBytes ?? 32 * 1024 * 1024;
     const url = process.env.SUPABASE_URL;
     const secretKey = process.env.SUPABASE_SECRET_KEY;
     if (options.supabase !== undefined) {
       this.supabase = options.supabase;
     } else if (url && secretKey) {
-      this.supabase = createAdminClient();
+      this.supabase = createBoundedAdminClient();
     }
   }
 
@@ -82,6 +97,34 @@ export class Store {
   }
 
   get cachedRoomCount() { return Object.keys(this.data.rooms).length; }
+  get cachedRoomBytes() { return [...new Set([...this.roomBytes.keys(),...this.roomPendingBytes.keys()])].reduce((sum,id)=>sum+Math.max(this.roomBytes.get(id)??0,this.roomPendingBytes.get(id)??0),0); }
+  /** Snapshot includes offline sessions; live presence is not a cache inventory. */
+  getCachedRooms(): readonly Room[] { return Object.values(this.data.rooms); }
+
+  setRoomCacheHooks(loaded: (roomId: string) => void, pinned: (roomId: string) => boolean) {
+    this.roomLoaded = loaded; this.roomPinned = pinned;
+  }
+
+  private touchRoom(id: string) { this.roomTouches.set(id, Date.now()); this.roomLoaded?.(id); }
+  private reserveRoomCapacity(id: string) {
+    if (this.getRoom(id) || this.roomLoads.has(id)) return;
+    const reservedCount=()=>this.cachedRoomCount+[...new Set([...this.roomLoads.keys(),...this.roomPendingBytes.keys()])].filter(key=>!this.getRoom(key)).length;
+    if (reservedCount() < this.maxCachedRooms) return;
+    for (const [candidate] of [...this.roomTouches].sort((a,b)=>a[1]-b[1])) {
+      if (!this.roomPinned(candidate) && this.releaseRoom(candidate) && reservedCount() < this.maxCachedRooms) return;
+    }
+    throw new RoomCommandError("The room service is busy. Try again shortly.");
+  }
+  private reserveRoomBytes(id:string,room:Room) {
+    const size=Buffer.byteLength(JSON.stringify(room));
+    if(size>8*1024*1024)throw new RoomCommandError("This room has reached its state size limit. Remove unused queue entries.");
+    for(const [candidate] of [...this.roomTouches].sort((a,b)=>a[1]-b[1])) {
+      if(this.cachedRoomBytes-(this.roomBytes.get(id)??0)+size<=this.maxCachedRoomBytes)break;
+      if(candidate!==id&&!this.roomPinned(candidate))this.releaseRoom(candidate);
+    }
+    if(this.cachedRoomBytes-(this.roomBytes.get(id)??0)+size>this.maxCachedRoomBytes)throw new RoomCommandError("The room service is busy. Try again shortly.");
+    return size;
+  }
 
   async init() {
     if (this.supabase) return;
@@ -200,7 +243,8 @@ export class Store {
         if (this.getRoom(room.id) !== room) throw new Error("This room session changed. Join the room again.");
         const draft = structuredClone(room);
         change = await operation(draft);
-        await this.commitRoom(room, draft, change);
+        change.unchanged ??= !change.metadata && !change.member && !change.memberDeletes?.length && JSON.stringify(draft) === JSON.stringify(room);
+        if (!change.unchanged) await this.commitRoom(room, draft, change);
         // Persistence succeeded. A diagnostic/receipt hook cannot turn that into a failed command.
         try { change.committed?.(); } catch (error) { console.error("Room commit notification failed", error); }
         runtimeMetrics.observe("room_command", performance.now() - started);
@@ -216,6 +260,8 @@ export class Store {
   private async commitRoom(current: Room, draft: Room, change: RoomChange<unknown>) {
     const started = performance.now();
     try {
+      const size=this.reserveRoomBytes(draft.id,draft);
+      this.roomPendingBytes.set(draft.id,size);
       if (!this.supabase) {
         await this.enqueueWrite(async () => {
           const roomPasswords = { ...this.data.roomPasswords };
@@ -253,10 +299,13 @@ export class Store {
           Object.assign(current, draft);
         }, draft.id);
       }
+      this.roomBytes.set(draft.id,size);
       runtimeMetrics.observe("room_save", performance.now() - started);
     } catch (error) {
       runtimeMetrics.observe("room_save", performance.now() - started, true);
       throw error;
+    } finally {
+      this.roomPendingBytes.delete(draft.id);
     }
   }
 
@@ -264,20 +313,90 @@ export class Store {
   releaseRoom(id: string) {
     if (!this.supabase || this.roomChanges.has(id) || this.roomWrites.has(id)) return false;
     delete this.data.rooms[id];
+    this.roomTouches.delete(id);
+    this.roomBytes.delete(id);
     return true;
+  }
+
+  /** Approved account erasure shares each room's mutation queue and replaces
+   * its cached document before another command can persist stale identities. */
+  async eraseAccountRoomData(userId: string, onRoomErased?: (room: Room) => void): Promise<void> {
+    if (!this.supabase || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))
+      throw new Error("Account room cleanup requires configured secure storage.");
+    const started = Date.now();
+    let after: string | null = null;
+    const verifyComplete = async () => {
+      const remaining = await this.supabase!.rpc("soundspin_moderation_actor_rooms", { p_user: userId, p_after: null, p_limit: 1 }).abortSignal(AbortSignal.timeout(5_000));
+      if (remaining.error || !Array.isArray(remaining.data) || remaining.data.length)
+        throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+    };
+    for (let page = 0; page < 20; page++) {
+      if (Date.now() - started > 20_000) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+      const listing = await this.supabase.rpc("soundspin_moderation_actor_rooms", { p_user: userId, p_after: after, p_limit: 50 }).abortSignal(AbortSignal.timeout(5_000));
+      if (listing.error || !Array.isArray(listing.data) || listing.data.length > 50 || listing.data.some((id, index, ids) => typeof id !== "string" || !/^[a-z0-9-]{3,48}$/.test(id) || (index > 0 && id <= ids[index-1]) || (after !== null && id <= after)))
+        throw new Error("Account room cleanup could not be inventoried.");
+      const ids = listing.data as string[];
+      if (!ids.length) return verifyComplete();
+      for (const roomId of ids) {
+        if (Date.now() - started > 20_000) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+        // Coalesce an already-running load before erasure; it must not cache a
+        // document read before the SQL scrub after this operation finishes.
+        await this.loadRoom(roomId);
+        await this.withRoomOperation(roomId, async () => {
+          const current = this.getRoom(roomId);
+          const erased = await this.supabase!.rpc("soundspin_erase_live_moderation_account", { p_room: roomId, p_user: userId }).abortSignal(AbortSignal.timeout(5_000));
+          if (erased.error) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+          if (erased.data === null) { delete this.data.rooms[roomId]; this.roomTouches.delete(roomId); this.roomBytes.delete(roomId); return; }
+          const result = erased.data as { state?: unknown; moderation?: unknown };
+          if (!result.state || typeof result.state !== "object" || Array.isArray(result.state) || !result.moderation || typeof result.moderation !== "object" || Array.isArray(result.moderation)) {
+            delete this.data.rooms[roomId]; this.roomTouches.delete(roomId); this.roomBytes.delete(roomId);
+            throw new Error("Account room cleanup returned an invalid document.");
+          }
+          if (!current) return;
+          const state = result.state as Partial<Room>;
+          const next = { ...state, id: current.id, name: current.name, ownerUserId: current.ownerUserId,
+            moderatorUserIds: current.moderatorUserIds.filter(id => id !== userId), djRoleUserIds: current.djRoleUserIds.filter(id => id !== userId),
+            isPublic: current.isPublic, passwordProtected: current.passwordProtected, createdAt: current.createdAt,
+            policyRevision: current.policyRevision, settings: state.settings || current.settings,
+            moderation: { ...emptyModeration(), ...result.moderation as RoomModerationState } } as Room;
+          let size: number;
+          try { normalizeRadioState(next); size = this.reserveRoomBytes(roomId, next); }
+          catch (error) { delete this.data.rooms[roomId]; this.roomTouches.delete(roomId); this.roomBytes.delete(roomId); throw error; }
+          for (const key of Object.keys(current)) delete (current as unknown as Record<string, unknown>)[key];
+          Object.assign(current, next);
+          this.roomBytes.set(roomId, size);
+          this.touchRoom(roomId);
+          onRoomErased?.(current);
+        });
+      }
+      after = ids.at(-1)!;
+      if (ids.length < 50) return verifyComplete();
+    }
+    await verifyComplete();
   }
 
   async isReady() {
     if (!this.supabase) return true;
-    const { error } = await this.supabase.from("soundspin_rooms").select("slug").limit(0).abortSignal(AbortSignal.timeout(5_000));
-    return !error;
+    if (this.readyResult && this.readyResult.expiresAt > Date.now()) return this.readyResult.value;
+    if (this.readyCheck) return this.readyCheck;
+    const operation = (async () => {
+      const { error } = await this.supabase!.from("soundspin_rooms").select("slug").limit(0).abortSignal(AbortSignal.timeout(5_000));
+      const value = !error;
+      this.readyResult = { value, expiresAt: Date.now() + (value ? 5000 : 1000) };
+      return value;
+    })();
+    this.readyCheck = operation;
+    try { return await operation; } finally { if (this.readyCheck === operation) this.readyCheck = null; }
   }
 
   async getPrivateLibrary(userId: string): Promise<PrivateLibrary> {
     if (!this.supabase) return structuredClone(this.data.privateLibraries && Object.hasOwn(this.data.privateLibraries, userId) ? this.data.privateLibraries[userId] : emptyLibrary());
     const { data, error } = await this.supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
     if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
-    return data ? privateLibrarySchema.parse(data.data) : emptyLibrary();
+    if (!data) return emptyLibrary();
+    const parsed = privateLibrarySchema.safeParse(data.data);
+    if (!parsed.success || !Number.isSafeInteger(Number(data.revision)) || Number(data.revision) < 1) throw new PrivateLibraryDataError();
+    return parsed.data;
   }
 
   /** Per-owner ordering plus database revision checks prevent lost concurrent-tab edits. */
@@ -288,7 +407,7 @@ export class Store {
       if (!this.supabase) {
         this.data.privateLibraries ||= {};
         const before = this.data.privateLibraries[userId];
-        const next = changePrivateLibrary(before || emptyLibrary(), mutation);
+        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(before || emptyLibrary(), mutation);
         Object.defineProperty(this.data.privateLibraries, userId, { value: next, writable: true, enumerable: true, configurable: true });
         try { await this.persistFile(); }
         catch (error) { if (before) this.data.privateLibraries[userId] = before; else delete this.data.privateLibraries[userId]; throw error; }
@@ -298,14 +417,18 @@ export class Store {
       for (let attempt = 0; attempt < 5; attempt++) {
         const { data, error } = await supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
         if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
-        const next = changePrivateLibrary(data ? privateLibrarySchema.parse(data.data) : emptyLibrary(), mutation);
+        const parsed = data ? privateLibrarySchema.safeParse(data.data) : null;
+        const validRevision = !data || (Number.isSafeInteger(Number(data.revision)) && Number(data.revision) >= 1 && Number(data.revision) < Number.MAX_SAFE_INTEGER);
+        if (mutation.type !== "clear-library" && ((!parsed?.success && data) || !validRevision)) throw new PrivateLibraryDataError();
+        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(parsed?.success ? parsed.data : emptyLibrary(), mutation);
         if (!data) {
           const insert = await supabase.from("soundspin_private_libraries").insert({ user_id: userId, data: next, revision: 1 });
           if (!insert.error) return next;
           if (insert.error.code === "23505") continue;
           throw new Error(`Could not save private picks and sets: ${insert.error.message}`);
         }
-        const update = await supabase.from("soundspin_private_libraries").update({ data: next, revision: data.revision + 1, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("revision", data.revision).select("revision").maybeSingle();
+        const revision = validRevision ? Number(data.revision) + 1 : 1;
+        const update = await supabase.from("soundspin_private_libraries").update({ data: next, revision, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("revision", data.revision).select("revision").maybeSingle();
         if (update.error) throw new Error(`Could not save private picks and sets: ${update.error.message}`);
         if (update.data) return next;
       }
@@ -329,12 +452,14 @@ export class Store {
 
   async loadRoom(id: string) {
     const cached = this.getRoom(id);
-    if (cached || !this.supabase) return cached;
+    if (cached) { this.touchRoom(id); return cached; }
+    if (!this.supabase) return undefined;
 
     // All sockets must coordinate through the same live object. A second load
     // must not replace it while the first join is already mutating it.
     const pending = this.roomLoads.get(id);
     if (pending) return pending;
+    this.reserveRoomCapacity(id);
     const loading = this.loadRoomFromDatabase(id);
     this.roomLoads.set(id, loading);
     try {
@@ -391,7 +516,10 @@ export class Store {
     // A creator may have populated the cache while this read was in flight.
     const cached = this.getRoom(id);
     if (cached) return cached;
+    const size=this.reserveRoomBytes(id,room);
     this.data.rooms[id] = room;
+    this.roomBytes.set(id,size);
+    this.touchRoom(id);
     return room;
   }
 
@@ -401,7 +529,11 @@ export class Store {
     for (let offset = 0; ; offset += 100) {
       const { data, error } = await this.supabase.from("soundspin_rooms").select("slug").eq("session_active", true).order("slug").range(offset, offset + 99);
       if (error) throw new Error(`Could not load room sessions: ${error.message}`);
-      const batch = await Promise.all((data || []).map(row => this.loadRoom(row.slug)));
+      const batch: Array<Room|undefined>=new Array(data?.length??0);
+      let index=0;
+      await Promise.all(Array.from({length:Math.min(8,data?.length??0)},async()=>{
+        while(index<(data?.length??0)){const position=index++;batch[position]=await this.loadRoom(data![position].slug);}
+      }));
       rooms.push(...batch.filter((room): room is Room => Boolean(room)));
       if (!data || data.length < 100) return rooms;
     }
@@ -429,12 +561,13 @@ export class Store {
     const supabase = this.supabase;
     const allRows = async <T>(table: string, columns: string, filterColumn: string, filterValue: string, orderColumn: string) => {
       const rows: T[] = [];
-      for (let offset = 0; ; offset += 500) {
+      for (let offset = 0; offset<1000; offset += 500) {
         const { data, error } = await supabase.from(table).select(columns).eq(filterColumn, filterValue).order(orderColumn).range(offset, offset + 499);
         if (error) throw new Error(`Could not load your room directory: ${error.message}`);
         rows.push(...(data || []) as unknown as T[]);
         if (!data || data.length < 500) return rows;
       }
+      return rows;
     };
     const [favorites, memberships] = await Promise.all([
       allRows<{ room_slug: string }>("soundspin_room_favorites", "room_slug", "user_id", userId, "room_slug"),
@@ -463,7 +596,16 @@ export class Store {
     if (publicResult.error) throw new Error(`Could not load public rooms: ${publicResult.error.message}`);
     const rooms = [...new Map([...(publicResult.data || []) as DirectoryRow[], ...owned, ...saved].map((room) => [room.slug, room])).values()];
     const banned = new Set<string>();
+    const owners=new Set(rooms.map(room=>room.owner_id)),disabledOwners=new Set<string>();
+    for(const batchStart of Array.from({length:Math.ceil(owners.size/100)},(_,index)=>index*100)){
+      const {data,error}=await supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",[...owners].slice(batchStart,batchStart+100));
+      if(error)throw new Error("Could not verify room owners.");
+      for(const entry of data||[])if(entry.state!=="active")disabledOwners.add(entry.user_id);
+    }
     for (let offset = 0; offset < rooms.length; offset += 100) {
+      const restrictionResult=await supabase.from("soundspin_room_restrictions").select("room_slug,disabled").in("room_slug",rooms.slice(offset,offset+100).map(room=>room.slug));
+      if(restrictionResult.error)throw new Error("Could not verify platform room restrictions.");
+      for(const entry of restrictionResult.data||[])if(entry.disabled)banned.add(entry.room_slug);
       const { data, error } = await supabase.from("soundspin_room_moderation").select("room_slug,data").in("room_slug", rooms.slice(offset, offset + 100).map(room => room.slug));
       if (error) throw new Error(`Could not verify room restrictions: ${error.message}`);
       for (const entry of data || []) if ((entry.data as RoomModerationState)?.restrictions?.some(item => item.userId === userId && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now()))) banned.add(entry.room_slug);
@@ -471,7 +613,7 @@ export class Store {
 
     return rooms
       // A stale favorite is not permission to disclose a revoked private room.
-      .filter((room) => !banned.has(room.slug) && ((room.access_mode ?? (room.is_public ? "public" : "members")) === "public" || room.owner_id === userId || roles.has(room.slug) || (room.access_mode === "unlisted" && favoriteSlugs.has(room.slug))))
+      .filter((room) => !disabledOwners.has(room.owner_id)&&!banned.has(room.slug) && ((room.access_mode ?? (room.is_public ? "public" : "members")) === "public" || room.owner_id === userId || roles.has(room.slug) || (room.access_mode === "unlisted" && favoriteSlugs.has(room.slug))))
       .sort((first, second) => second.updated_at.localeCompare(first.updated_at))
       .map((room): RoomDirectoryEntry => ({
         slug: room.slug,
@@ -494,6 +636,7 @@ export class Store {
     if (!this.supabase) {
       await this.enqueueWrite(async () => {
         if (this.getRoom(room.id)) throw new Error("That room address is already in use.");
+        if (Object.values(this.data.rooms).filter(item=>item.ownerUserId===room.ownerUserId).length >= 10) throw new RoomCommandError("Your room limit is reached. Remove an unused room before creating another.");
         const roomPasswords = { ...this.data.roomPasswords, [room.id]: passwordHash };
         await writeFile(this.tempFile, JSON.stringify({ ...this.data, rooms: { ...this.data.rooms, [room.id]: room }, roomPasswords }, null, 2), "utf8");
         await rename(this.tempFile, this.dataFile);
@@ -502,7 +645,11 @@ export class Store {
       });
       return;
     }
-    const { error } = await this.supabase.from("soundspin_rooms").insert({
+    this.reserveRoomCapacity(room.id);
+    const size=this.reserveRoomBytes(room.id,room);
+    this.roomPendingBytes.set(room.id,size);
+    let error;
+    try { ({error}=await this.supabase.from("soundspin_rooms").insert({
       slug: room.id,
       name: room.name,
       owner_id: room.ownerUserId,
@@ -512,12 +659,47 @@ export class Store {
       settings: room.settings,
       access_mode: accessMode(room), policy_revision: room.policyRevision ?? 0,
       updated_at: new Date().toISOString()
-    });
+    })); } catch(cause){this.roomPendingBytes.delete(room.id);throw cause;}
+    this.roomPendingBytes.delete(room.id);
     if (error) {
       if (error.code === "23505") throw new Error("That room address is already in use.");
       throw new Error(`Could not create room: ${error.message}`);
     }
     this.data.rooms[room.id] = room;
+    this.roomBytes.set(room.id,size);
+    this.touchRoom(room.id);
+  }
+
+  /** Final grant and live registration share the same order as access revocation. */
+  async admitRoom(room: Room, user: User, expectedPasswordHash: string | null,
+    assertActive: () => void, register: () => void) {
+    return this.withRoomOperation(room.id, async () => {
+      assertActive();
+      if (this.getRoom(room.id) !== room) throw new RoomCommandError("This room session changed. Join again.");
+      const access = await this.getRoomAccess(room.id,user.id);
+      if (!access.exists || access.banned || (!access.isPublic && !access.role)) throw new RoomCommandError("You no longer have access to this room.");
+      if (access.passwordHash !== expectedPasswordHash) throw new RoomCommandError("The room password changed. Join again.");
+      let role: RoomRole = access.role ?? "member";
+      if (this.supabase) {
+        const {data,error} = await this.supabase.rpc("soundspin_admit_room", {
+          p_slug:room.id,p_user_id:user.id,p_password_hash:expectedPasswordHash
+        });
+        if (error || !data) throw new RoomCommandError("Room access changed. Join again.");
+        if (!data.role || !["owner","moderator","dj","member"].includes(data.role)) throw new Error("Invalid admission response.");
+        role=data.role;
+      } else {
+        const draft=structuredClone(room),state=ensureModeration(draft),member=state.members[user.id];
+        state.members[user.id]={user,role,joinedAt:member?.joinedAt??Date.now()};
+        await this.commitRoom(room,draft,{result:undefined});
+      }
+      // Cache membership for synchronous command guards, after the authoritative grant.
+      const state=ensureModeration(room),member=state.members[user.id];
+      state.members[user.id]={user,role,joinedAt:member?.joinedAt??Date.now()};
+      assertActive();
+      register(); // Synchronous: a subsequent removal must observe and revoke this admission.
+      this.touchRoom(room.id);
+      return role;
+    });
   }
 
   async getRoomAccess(roomSlug: string, userId: string) {
@@ -559,15 +741,26 @@ export class Store {
       return new Set(ids.filter(id => !isRoomBanned(room, id) && (accessMode(room) !== "members" || Boolean(roleInRoom(room, id)))));
     }
     // Deliberately bypass live-room cache: access can be revoked outside this process.
-    const [{ data: metadata, error }, { data: privateData, error: privateError }] = await Promise.all([
+    const [{ data: metadata, error }, { data: privateData, error: privateError },roomRestriction] = await Promise.all([
       this.supabase.from("soundspin_rooms").select("owner_id, is_public, access_mode").eq("slug", roomSlug).maybeSingle(),
-      this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle()
+      this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle(),
+      this.supabase.from("soundspin_room_restrictions").select("disabled").eq("room_slug",roomSlug).maybeSingle()
     ]);
     if (error) throw new Error(`Could not verify room readers: ${error.message}`);
     if (!metadata) return new Set();
     if (privateError) throw new Error(`Could not verify room restrictions: ${privateError.message}`);
+    if(roomRestriction.error)throw new Error("Could not verify platform room restrictions.");
+    if(roomRestriction.data?.disabled)return new Set();
+    const disabledAccounts=new Set<string>();
+    const accountIds=[...new Set([...ids,metadata.owner_id])];
+    for(let offset=0;offset<accountIds.length;offset+=100){
+      const accountResult=await this.supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",accountIds.slice(offset,offset+100));
+      if(accountResult.error)throw new Error("Could not verify account restrictions.");
+      for(const entry of accountResult.data||[])if(entry.state!=="active")disabledAccounts.add(entry.user_id);
+    }
+    if(disabledAccounts.has(metadata.owner_id))return new Set();
     const restrictions = (privateData?.data as RoomModerationState)?.restrictions || [];
-    const eligible = ids.filter(id => !restrictions.some(item => item.userId === id && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now())));
+    const eligible = ids.filter(id => !disabledAccounts.has(id)&&!restrictions.some(item => item.userId === id && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now())));
     if ((metadata.access_mode ?? (metadata.is_public ? "public" : "members")) !== "members") return new Set(eligible);
     const allowed = new Set(eligible.filter((id) => id === metadata.owner_id));
     const others = eligible.filter((id) => id !== metadata.owner_id);
@@ -645,7 +838,8 @@ export class Store {
   async updateRoomSettings(
     roomSlug: string,
     userId: string,
-    update: RoomSettingsPatch
+    update: RoomSettingsPatch,
+    authorize?:()=>void|Promise<void>
   ) {
     if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError("Room descriptions can contain at most 240 characters.");
     if (update.themePrompt !== undefined && update.themePrompt !== null && (typeof update.themePrompt !== "string" || update.themePrompt.trim().length > 160)) throw new RoomCommandError("Themes can contain at most 160 characters.");
@@ -654,7 +848,9 @@ export class Store {
     const room = await this.loadRoom(roomSlug);
     if (!room) throw new RoomCommandError("This room no longer exists.");
     await this.changeRoom(room, async draft => {
+      await authorize?.();
       const access = await this.getRoomAccess(roomSlug, userId);
+      await authorize?.();
       if (access.role !== "owner" && access.role !== "moderator") throw new RoomCommandError("Only the owner or a moderator can change room settings.");
       if (access.banned) throw new RoomCommandError("You are banned from this room.");
       const parsed = roomSettingsPatchSchema.parse(update);
@@ -699,15 +895,15 @@ export class Store {
     if (data.owner_id !== userId) throw new RoomCommandError("Only the room owner can manage room roles.");
   }
 
-  async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean, authorize?: () => void) {
+  async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean, authorize?: () => void | Promise<void>) {
     await this.verifyRoomOwner(roomSlug, ownerUserId);
     if (targetUserId === ownerUserId) throw new RoomCommandError("The owner already has full room access.");
     const room = await this.loadRoom(roomSlug);
     if (!room) throw new RoomCommandError("This room no longer exists.");
     await this.changeRoom(room, async draft => {
-      authorize?.();
+      await authorize?.();
       await this.verifyRoomOwner(roomSlug, ownerUserId);
-      authorize?.();
+      await authorize?.();
       draft.moderatorUserIds = moderator ? [...new Set([...draft.moderatorUserIds, targetUserId])] : draft.moderatorUserIds.filter(id => id !== targetUserId);
       if (moderator) draft.djRoleUserIds = draft.djRoleUserIds.filter(id => id !== targetUserId);
       pruneUnauthorizedDjs(draft);
@@ -718,7 +914,7 @@ export class Store {
     });
   }
 
-  async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean, authorize?: () => void) {
+  async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean, authorize?: () => void | Promise<void>) {
     await this.verifyRoomOwner(roomSlug, ownerUserId);
     if (targetUserId === ownerUserId) throw new RoomCommandError("The owner can always join the DJ queue.");
     const verifyTarget = async () => {
@@ -732,9 +928,9 @@ export class Store {
     const room = await this.loadRoom(roomSlug);
     if (!room) throw new RoomCommandError("This room no longer exists.");
     await this.changeRoom(room, async draft => {
-      authorize?.();
+      await authorize?.();
       await this.verifyRoomOwner(roomSlug, ownerUserId); await verifyTarget();
-      authorize?.();
+      await authorize?.();
       draft.djRoleUserIds = dj ? [...new Set([...draft.djRoleUserIds, targetUserId])] : draft.djRoleUserIds.filter(id => id !== targetUserId);
       pruneUnauthorizedDjs(draft);
       const state = ensureModeration(draft), member = state.members[targetUserId];

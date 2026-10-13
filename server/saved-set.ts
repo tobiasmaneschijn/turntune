@@ -1,3 +1,4 @@
+import { providerJson } from "./provider-http.js";
 import { libraryTrackSchema, type LibraryTrack } from "./private-library.js";
 import type { Room, Track } from "./types.js";
 import type { SpotifyApi } from "./spotify.js";
@@ -17,19 +18,18 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
     let verified = { ...track };
     if (track.provider === "youtube") {
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.providerId)}`;
-      const response = await fetchImpl(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, { signal });
+      const { response, payload: source } = await providerJson<{ title?: unknown; author_name?: unknown } | null>("youtube",fetchImpl,`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, { signal });
       if (!response.ok) throw new Error("This YouTube recording is unavailable or could not be verified.");
-      const source = await response.json() as { title?: unknown; author_name?: unknown } | null;
       const safe = libraryTrackSchema.safeParse({ ...verified, title: source?.title, artist: source?.author_name === undefined ? track.artist : source.author_name, permalinkUrl: url });
       if (!safe.success) throw new Error("This YouTube recording returned invalid or oversized metadata.");
       verified = safe.data;
     } else if (track.provider === "spotify") {
       if (!spotify.configured) throw new Error("Spotify catalog verification is unavailable. Try this recording later.");
-      const source = await spotify.getTrack(track.providerId);
+      const source = await spotify.getTrack(track.providerId,signal);
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else if (track.provider === "apple") {
       if (!appleMusic.configured) throw new Error("Apple Music catalog verification is unavailable. Try this recording later.");
-      const source = await appleMusic.getTrack(track.providerId);
+      const source = await appleMusic.getTrack(track.providerId,undefined,signal);
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else if (track.provider === "mixcloud") {
       const source = await mixcloudApi.resolveTrack(track.permalinkUrl || track.providerId, signal);
@@ -39,18 +39,18 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
       if (!soundCloud.configured || !track.permalinkUrl) throw new Error("SoundCloud verification needs a configured catalog and a saved source link.");
       const url = new URL(track.permalinkUrl);
       if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "soundcloud.com" || url.hostname.endsWith(".soundcloud.com"))) throw new Error("This saved SoundCloud source link is invalid.");
-      const source = await soundCloud.resolveTrack(url.href);
+      const source = await soundCloud.resolveTrack(url.href,signal);
       if (source.id !== track.providerId) throw new Error("This SoundCloud link now resolves to a different recording.");
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     }
     signal.throwIfAborted();
     const safeSource = libraryTrackSchema.safeParse(verified);
     if (!safeSource.success) throw new Error("This recording returned invalid or oversized source metadata.");
-    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic);
+    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal);
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
     if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata.");
-    const duration = track.provider === "youtube" ? await verifyTrackDuration(safeMapped.data,{youtubeApiKey,soundCloud,fetcher:fetchImpl}) : {durationMs:verified.durationMs,durationVerified:Boolean(verified.durationMs),isLive:false};
+    const duration = track.provider === "youtube" ? await verifyTrackDuration(safeMapped.data,{youtubeApiKey,soundCloud,fetcher:fetchImpl,signal}) : {durationMs:verified.durationMs,durationVerified:Boolean(verified.durationMs),isLive:false};
     return { ...mappings, ...safeMapped.data,...duration };
   };
 }

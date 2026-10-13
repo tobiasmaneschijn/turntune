@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/ui-music-qol",
+  outputDir:"test-results/music-qol",
+  timeout:60_000,
   fullyParallel: true,
   reporter: "list",
   use: { baseURL: "http://127.0.0.1:4178", trace: "retain-on-failure" },

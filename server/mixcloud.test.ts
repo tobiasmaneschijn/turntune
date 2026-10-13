@@ -6,7 +6,7 @@ import { trackSchema } from "../shared/room-protocol.js";
 import { libraryTrackSchema } from "./private-library.js";
 
 const show = { key: "/test-dj/show-one/", name: "Recorded set", audio_length: 3600,
-  pictures: { large: "https://thumbnail.test/large.jpg" }, user: { name: "Uploader" } };
+  pictures: { large: "https://thumbnailer.mixcloud.com/large.jpg" }, user: { name: "Uploader" } };
 
 test("Mixcloud search uses the public API with bounds and normalizes show metadata", async () => {
   const requests: string[] = [];
@@ -16,7 +16,7 @@ test("Mixcloud search uses the public API with bounds and normalizes show metada
     assert.equal(init?.redirect, "error");
     assert.equal(new Headers(init?.headers).get("authorization"), null);
     return Response.json({ data: [show, { ...show, key: "/test-dj/" }, { ...show, audio_length: 0 },
-      { ...show, key: "/test-dj/other/", name: "x".repeat(140), pictures: { large: "http://bad.test/image", medium: "https://thumbnail.test/medium.jpg" } }] });
+      { ...show, key: "/test-dj/other/", name: "x".repeat(140), pictures: { large: "http://bad.test/image", medium: "https://thumbnailer.mixcloud.com/medium.jpg" } }] });
   }) as typeof fetch);
   const results = await api.searchTracks("recorded sets", 100);
   assert.equal(new URL(requests[0]).hostname, "api.mixcloud.com");
@@ -24,11 +24,11 @@ test("Mixcloud search uses the public API with bounds and normalizes show metada
   assert.equal(new URL(requests[0]).searchParams.get("type"), "cloudcast");
   assert.equal(new URL(requests[0]).searchParams.get("limit"), "12");
   assert.deepEqual(results[0], { provider: "mixcloud", id: show.key, title: "Recorded set", artist: "Uploader",
-    thumbnail: "https://thumbnail.test/large.jpg", duration: "1:00:00", durationMs: 3_600_000,
+    thumbnail: "https://thumbnailer.mixcloud.com/large.jpg", duration: "1:00:00", durationMs: 3_600_000,
     permalinkUrl: "https://www.mixcloud.com/test-dj/show-one/" });
   assert.equal(results.length, 2);
   assert.equal(results[1].title.length, 120);
-  assert.equal(results[1].thumbnail, "https://thumbnail.test/medium.jpg");
+  assert.equal(results[1].thumbnail, "https://thumbnailer.mixcloud.com/medium.jpg");
 });
 
 test("Mixcloud resolution fixes the request hostname and checks canonical show identity", async () => {

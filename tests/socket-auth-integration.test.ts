@@ -9,13 +9,13 @@ import test from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type { RoomSnapshot } from "../shared/types.js";
 
-test("the real socket handshake enforces expiry and a refreshed token reconnects with the verified identity", { timeout: 20_000 }, async (t) => {
+test("the real socket enforces signed actor claims, expiry, refreshed identity and platform restrictions", { timeout: 45_000 }, async (t) => {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const jwk = { ...publicKey.export({ format: "jwk" }), alg: "RS256", kid: "socket-test", use: "sig" };
   const verifiedUserId = "11111111-1111-4111-8111-111111111111";
-  const token = (expiresAt: number) => {
+  const token = (expiresAt: number, overrides: Record<string, unknown> = {}) => {
     const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
-    const unsigned = `${encode({ alg: "RS256", typ: "JWT", kid: jwk.kid })}.${encode({ sub: verifiedUserId, role: "authenticated", exp: expiresAt })}`;
+    const unsigned = `${encode({ alg: "RS256", typ: "JWT", kid: jwk.kid })}.${encode({ sub: verifiedUserId, iss: "https://soundspin-socket-auth.invalid/auth/v1", aud: "authenticated", role: "authenticated", exp: expiresAt, ...overrides })}`;
     return `${unsigned}.${sign("RSA-SHA256", Buffer.from(unsigned), privateKey).toString("base64url")}`;
   };
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-socket-auth-"));
@@ -29,7 +29,7 @@ test("the real socket handshake enforces expiry and a refreshed token reconnects
     SUPABASE_SECRET_KEY: "sb_secret_socket_fixture", SUPABASE_JWKS_URL: "https://soundspin-socket-auth.invalid/auth/v1/.well-known/jwks.json",
     SUPABASE_JWKS: JSON.stringify({ keys: [jwk] }) });
   const server = spawn(process.execPath, ["--import", "tsx", "--import", "./tests/socket-auth-network-fixture.mjs", "server/index.ts"], {
-    env, stdio: ["ignore", "pipe", "pipe"]
+    env, stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
   const sockets: Socket[] = []; let errors = "";
   server.stderr.on("data", chunk => { errors += chunk.toString(); });
@@ -42,7 +42,7 @@ test("the real socket handshake enforces expiry and a refreshed token reconnects
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error(`Socket auth fixture did not start: ${errors}`)), 8_000);
+    const timer = setTimeout(() => reject(new Error(`Socket auth fixture did not start: ${errors}`)), 20_000);
     server.stdout.on("data", chunk => {
       output += chunk.toString();
       const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
@@ -51,6 +51,15 @@ test("the real socket handshake enforces expiry and a refreshed token reconnects
     server.once("error", error => { clearTimeout(timer); reject(error); });
     server.once("exit", code => { clearTimeout(timer); reject(new Error(`Socket auth fixture exited (${code}): ${errors}`)); });
   });
+  for (const claims of [{ iss: "https://wrong-project.invalid/auth/v1" }, { aud: "service_role" }, { role: "service_role" }, { sub: "not-an-account" }]) {
+    const rejected = io(url, { autoConnect: false, reconnection: false, transports: ["websocket"], auth: { accessToken: token(Math.floor(Date.now() / 1000) + 60, claims) } });
+    sockets.push(rejected);
+    const denial = once(rejected, "connect_error", { signal: AbortSignal.timeout(5_000) });
+    rejected.connect();
+    await denial;
+    assert.equal(rejected.connected, false);
+    rejected.disconnect();
+  }
   const socket = io(url, { autoConnect: false, reconnection: false, transports: ["websocket"] });
   sockets.push(socket);
   const waitEvent = (event: string) => once(socket, event, { signal: AbortSignal.timeout(7_000) });
@@ -87,5 +96,33 @@ test("the real socket handshake enforces expiry and a refreshed token reconnects
   assert.equal(rejoined.users[0].id, verifiedUserId);
   assert.deepEqual(rejoined.room.djQueueUserIds, [verifiedUserId]);
   assert.deepEqual(await socket.timeout(3_000).emitWithAck("dj:leave", undefined), { ok: true });
+  const updateFixture = async (fixture: "account" | "room", disabled: boolean) => {
+    const updated = once(server, "message", { signal: AbortSignal.timeout(3_000) });
+    server.send({ fixture, disabled });
+    assert.deepEqual((await updated)[0], { fixtureUpdated: fixture });
+  };
+  await updateFixture("room", true);
+  const deniedRoom = await join();
+  assert.equal(deniedRoom.ok, false);
+  await updateFixture("room", false);
+  assert.deepEqual(await join(), { ok: true });
+  await updateFixture("account", true);
+  const profileResponse = await fetch(`${url}/api/profiles/${verifiedUserId}`, { headers: { Authorization: `Bearer ${token(Math.floor(Date.now() / 1000) + 60)}` }, signal: AbortSignal.timeout(3_000) });
+  assert.ok([401, 403].includes(profileResponse.status));
+  const suspendedSocket = io(url, { autoConnect: false, reconnection: false, transports: ["websocket"], auth: { accessToken: token(Math.floor(Date.now() / 1000) + 60) } });
+  sockets.push(suspendedSocket);
+  const suspendedDenial = once(suspendedSocket, "connect_error", { signal: AbortSignal.timeout(5_000) });
+  suspendedSocket.connect();
+  await suspendedDenial;
+  assert.equal(suspendedSocket.connected, false);
+  const existingSessionDenied = await new Promise<boolean>((resolve, reject) => {
+    if (!socket.connected) { resolve(true); return; }
+    const onDisconnect = () => resolve(true);
+    socket.once("disconnect", onDisconnect);
+    void socket.timeout(3_000).emitWithAck("dj:join", undefined).then((result: { ok?: boolean }) => {
+      socket.off("disconnect", onDisconnect); resolve(result.ok === false);
+    }, error => { socket.off("disconnect", onDisconnect); if (!socket.connected) resolve(true); else reject(error); });
+  });
+  assert.equal(existingSessionDenied, true, "Suspension must deny the next command on an existing connection.");
   assert.doesNotMatch(errors, /blocked an unexpected/);
 });

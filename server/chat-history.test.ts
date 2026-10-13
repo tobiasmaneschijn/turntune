@@ -189,10 +189,10 @@ test('durable UUID retries preserve canonical text-media and duplicate-mention i
     const stored = await loadStoredChatMessage(db.client, original.id)
     assert.ok(stored)
     assert.equal(stored.message.mediaUrl, undefined); assert.equal(stored.message.storagePath, undefined)
-    assert.deepEqual(stored.message.mentions.map((mention) => mention.userName), ['Mira', 'Sam'])
+    assert.deepEqual(stored.message.mentions, []) // No visible handles or trusted room audience means no alerts.
     assert.equal((await fetch(endpoint, post(original))).status, 200)
     assert.equal((await fetch(endpoint, post({ ...original, mediaUrl: undefined, storagePath: undefined, mentions: stored.message.mentions }))).status, 200)
-    assert.equal((await fetch(endpoint, post({ ...original, mentions: [...original.mentions, { userId: 'mira', userName: 'Changed final name', handle: 'mira' }] }))).status, 409)
+    assert.equal((await fetch(endpoint, post({ ...original, content: 'Changed body' }))).status, 409)
     let emitted = 0
     const restartedRelay = createChatRelay({ getMembership: () => ({ room: { id: 'lounge' }, user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' } }),
       canWriteRoom: async () => true, loadReply: async () => null, loadMessageById: (messageId) => loadStoredChatMessage(db.client, messageId),

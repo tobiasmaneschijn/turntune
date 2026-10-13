@@ -68,6 +68,34 @@ Friends can see room activity only when sharing is enabled and they have room
 access. Invitations to private rooms grant membership only with current owner or
 moderator authority; password-protected rooms still require their password.
 
+## Public release security
+
+The release server requires the complete security migration chain and verifies
+the service-only `soundspin_release_ready()` marker before listening. Production
+uses `APP_ORIGIN` with the exact HTTPS origin and explicitly trusted proxy
+addresses; the example environment's provider callbacks are production values.
+For local development, use the separate HTTP callback/origin instructions in
+[`docs/production-hardening.md`](docs/production-hardening.md).
+
+[`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md) maps the audit findings
+to implemented changes, verification and remaining external release gates.
+[`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) preserves the original audit.
+Run [`security/release-preflight.sql`](security/release-preflight.sql) with a
+restricted operator connection in staging after applying all migrations; it is
+read-only and returns aggregate/schema checks without user content.
+
+Signup uses email invitations; configure hosted SMTP and disable direct public
+Auth signup if access is invite-only. Administrator endpoints require an active
+appadmin and MFA/AAL2. Review the upload and privacy/operator runbooks before
+approving deletion jobs:
+
+- [`docs/managed-upload-release.md`](docs/managed-upload-release.md)
+- [`docs/platform-security-and-privacy.md`](docs/platform-security-and-privacy.md)
+
+Exactly one active Node coordinator is supported. Deployment approval requires
+staging evidence for ingress/TLS, actual Auth/REST/Storage permissions, enabled
+providers, capacity, monitoring, backup/restore and the final CI gates.
+
 ## Architecture documentation
 
 - [`docs/rooms-and-radio.md`](docs/rooms-and-radio.md) explains room state, DJ
@@ -141,11 +169,15 @@ database.
 4. In **Authentication → URL Configuration**, set the site URL to your
    production Lydman URL.
 5. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
-6. Configure a custom SMTP provider for password-reset emails. Supabase's
+6. Allow the exact production `/update-password` activation/reset destination;
+   restrict development redirects to a separate development project where
+   practical. Configure a custom SMTP provider for invitations and password-reset emails. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
 7. Set the following environment variables:
 
 ```dotenv
+APP_ORIGIN=https://soundspin.example
+TRUSTED_PROXY_CIDRS=
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_SECRET_KEY=your-secret-key
@@ -157,7 +189,7 @@ SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
 SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:5173/api/spotify/callback
+SPOTIFY_REDIRECT_URI=https://soundspin.example/api/spotify/callback
 SPOTIFY_MARKET=US
 PROVIDER_TOKEN_ENCRYPTION_KEY=generate-a-long-random-secret
 APPLE_MUSIC_TEAM_ID=your-apple-developer-team-id
@@ -174,9 +206,11 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 generated value and share it only with people you want to invite. If it is not
 set, the signup endpoint fails closed and no accounts can be created through
 Lydman.
-Invite-created accounts are auto-confirmed because Supabase's admin create-user
-API does not send confirmation emails. The invite password is therefore the
-signup gate; email ownership is not separately verified during registration.
+The server uses Supabase's supported invitation-email API. Signup asks for name,
+email and the shared invite password; it does not accept an account password or
+auto-confirm email ownership. The invitation's activation link verifies the
+email and opens `/update-password`, where the user chooses a password. Pending
+or restricted accounts cannot use normal app or direct data/Storage paths.
 The `VITE_` variables configure the local Vite client. In production, the
 client can also receive the same public values from Lydman's runtime config
 endpoint, so Dokploy does not need to bake them into the frontend bundle.
@@ -209,8 +243,12 @@ public Lydman profile with a display name, bio, avatar, and theme. Available
 avatars and themes are validated server-side before a profile is updated.
 
 Application admins are marked on `soundspin_profiles` by the
-`is_app_admin` column. Assign or remove the marker only from the Supabase
-Dashboard SQL editor or another trusted server context:
+`is_app_admin` column. Before granting it, a trusted operator must verify the
+intended account's identity, enrollment and MFA factor. Record that verification
+and follow the recovery procedure in
+[`docs/platform-security-and-privacy.md`](docs/platform-security-and-privacy.md).
+Assign or remove the marker only from the Supabase Dashboard SQL editor or
+another trusted server context:
 
 ```sql
 update public.soundspin_profiles
@@ -224,8 +262,10 @@ where user_id = 'USER_UUID';
 ```
 
 Marked profiles show a `[DEV]` flair beside their display name. The marker is
-not editable through the profile API. It grants access to the application's
-administrative dashboard and feedback tools; room roles remain separate.
+not editable through the profile API. An active marked account must also verify
+MFA/AAL2 to access the administrative dashboard and feedback/platform tools;
+room roles remain separate. Enrollment and verification are available in
+account settings.
 
 Emoji support works without additional configuration. Uploaded chat images are
 stored in the private `chat-media` Supabase Storage bucket and are limited to
@@ -285,9 +325,15 @@ and aggregate complete UTC activity totals for the dashboard.
 1. Push this repository to a Git provider supported by Dokploy.
 2. Create a new **Compose** application in Dokploy.
 3. Select the repository and use `compose.yaml`.
-4. Add the four server-side Supabase environment variables from `.env.example`.
-5. Add your domain and point it to container port `3000`.
-6. Deploy.
+4. Configure all required production settings from `.env.example`, including
+   `APP_ORIGIN`, Supabase credentials and the exact trusted proxy addresses.
+   Keep server credentials outside browser build variables.
+5. Configure the matching HTTPS domain and proxy HTTP/Socket.IO to container
+   port `3000`; prevent direct public access to the backend port. Follow the
+   ingress requirements in [`docs/production-hardening.md`](docs/production-hardening.md).
+6. Deploy into isolated staging, apply all migrations and complete the
+   documented release gates in [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md).
+   Open public ingress only after their evidence has been reviewed and approved.
 
 When Supabase is configured, room state is stored in Postgres. The named
 `soundspin-data` volume remains as a local-development fallback. WebSockets

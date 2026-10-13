@@ -14,7 +14,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
-import { getScopedSupabaseClient, getSupabaseClient } from "../supabase";
 import { boundedOperation, CLEANUP_TIMEOUT_MS, UPLOAD_TIMEOUT_MS } from "../lib/bounded-operation";
 import { requestJson } from "../lib/authenticated-http";
 import { isProfileResponse, type ProfileResponse } from "../lib/profile-response";
@@ -27,11 +26,13 @@ const AVATAR_MIME_EXTENSIONS = new Map([
 ]);
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 type Relationship = "friends" | "incoming" | "outgoing";
-interface SocialResponse { people: Array<{ user: User; state: Relationship }>; shareActivity: boolean }
+interface SocialResponse { people: Array<{ user: User; state: Relationship }>; shareActivity: boolean; blockedPeople?: User[]; receiveRequests?: boolean }
 function isSocialResponse(value: unknown): value is SocialResponse {
   if (!value || typeof value !== "object") return false;
   const social = value as Partial<SocialResponse>;
-  return typeof social.shareActivity === "boolean" && Array.isArray(social.people) && social.people.every((person) =>
+  return (social.receiveRequests === undefined || typeof social.receiveRequests === "boolean") &&
+    (social.blockedPeople === undefined || (Array.isArray(social.blockedPeople) && social.blockedPeople.every(user => typeof user?.id === "string"))) &&
+    typeof social.shareActivity === "boolean" && Array.isArray(social.people) && social.people.every((person) =>
     person && typeof person === "object" && person.user && typeof person.user.id === "string" &&
     ["friends", "incoming", "outgoing"].includes(person.state));
 }
@@ -232,7 +233,6 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     const submittedFields = fieldsRef.current;
     const lifetime = lifetimeRef.current;
     const chosenAvatar = avatarDraft;
-    const oldPath = profile?.avatar_path;
     detailsSavingRef.current = true;
     setError(""); setSaved(false);
     try {
@@ -243,19 +243,16 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         if (!uploaded || uploaded.file !== chosenAvatar.file) {
           const controller = new AbortController();
           requestControllers.current.add(controller);
-          const path = `${currentUser.id}/${crypto.randomUUID()}.${AVATAR_MIME_EXTENSIONS.get(chosenAvatar.file.type)}`;
+          let path: string;
           try {
-            const { error: uploadError } = await boundedOperation(async (signal) => {
-              const client = await getSupabaseClient();
-              if (!client) throw new Error("Sign in to upload an avatar.");
-              const scoped = await getScopedSupabaseClient(client, currentUser.id, signal);
-              const result = await scoped.storage.from("profile-avatars").upload(path, chosenAvatar.file, {
-                cacheControl: "31536000", contentType: chosenAvatar.file.type, upsert: false
-              });
-              if (signal.aborted && !result.error) void deleteAvatarObject(path);
-              return result;
-            }, { signal: controller.signal, timeoutMs: UPLOAD_TIMEOUT_MS });
-            if (uploadError) throw new Error(uploadError.message);
+            const result = await boundedOperation((signal) => requestJson<{ storagePath: string }>("/api/uploads/avatar", {
+              method: "POST", accessToken: tokenRef.current, signal, body: chosenAvatar.file,
+              headers: { "Content-Type": chosenAvatar.file.type },
+              validate: (value): value is { storagePath: string } => Boolean(value && typeof value === "object" &&
+                "storagePath" in value && typeof value.storagePath === "string" && value.storagePath.startsWith(`${currentUser.id}/`)),
+              errorMessage: "Could not upload your avatar. Try again.", timeoutMs: UPLOAD_TIMEOUT_MS
+            }), { signal: controller.signal, timeoutMs: UPLOAD_TIMEOUT_MS });
+            path = result.storagePath;
           } finally { requestControllers.current.delete(controller); }
           uploaded = { path, file: chosenAvatar.file, submitted: false, rejected: false };
           if (!lifetime.active) { void discardUploadedAvatar(uploaded); return; }
@@ -269,7 +266,6 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         statusText: statusText.trim(), favoriteTracks, ...avatarUpdate }, submittedFields)) {
         uploadedAvatarRef.current = null;
         setAvatarDraft(null);
-        if (oldPath && chosenAvatar && oldPath !== avatarUpdate.customAvatarPath) void deleteAvatarObject(oldPath);
         // Fields may have changed while the request was in flight.
         if (draftVersionRef.current === draftVersion) { explicitDiscardRef.current = true; profileDrafts.delete(`${currentUser.id}:${profileId}`); setEditing(false); }
       }
@@ -299,6 +295,29 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     }
   };
 
+  const changeBlock = async (blocked: boolean) => {
+    if (socialBusy) return;
+    const lifetime = lifetimeRef.current, controller = new AbortController();
+    requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
+    try {
+      await requestJson(`/api/social/blocks/${encodeURIComponent(profileId)}`, { method: "PUT", accessToken: tokenRef.current,
+        signal: controller.signal, body: JSON.stringify({ blocked }), errorMessage: "Could not update this block. Try again." });
+      const loaded = await requestJson<SocialResponse>("/api/social", { accessToken: tokenRef.current, signal: controller.signal, validate: isSocialResponse });
+      if (lifetime.active) setSocial(loaded);
+    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not update this block. Try again."); }
+    finally { requestControllers.current.delete(controller); if (lifetime.active) setSocialBusy(false); }
+  };
+  const changeReceiveRequests = async (receiveRequests: boolean) => {
+    if (socialBusy) return;
+    const lifetime = lifetimeRef.current, controller = new AbortController();
+    requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
+    try {
+      await requestJson("/api/social/settings", { method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
+        body: JSON.stringify({ receiveRequests }), errorMessage: "Could not save this setting. Try again." });
+      if (lifetime.active) setSocial(current => current ? { ...current, receiveRequests } : current);
+    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not save this setting. Try again."); }
+    finally { requestControllers.current.delete(controller); if (lifetime.active) setSocialBusy(false); }
+  };
   const changeShareActivity = async (shareActivity: boolean) => {
     if (socialBusy) return;
     const lifetime = lifetimeRef.current;
@@ -337,12 +356,10 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const deleteAvatarObject = async (path: string) => {
     // Cleanup must not hide a successful save or a useful save error.
     try {
-      await boundedOperation(async (signal) => {
-        const client = await getSupabaseClient();
-        if (!client) return;
-        const scoped = await getScopedSupabaseClient(client, currentUser.id, signal);
-        await scoped.storage.from("profile-avatars").remove([path]);
-      }, { timeoutMs: CLEANUP_TIMEOUT_MS });
+      await boundedOperation((signal) => requestJson("/api/uploads/cleanup", {
+        method: "POST", accessToken: tokenRef.current, signal,
+        body: JSON.stringify({ storagePaths: [path] }), timeoutMs: CLEANUP_TIMEOUT_MS
+      }), { timeoutMs: CLEANUP_TIMEOUT_MS });
     } catch { /* Best-effort storage cleanup. */ }
   };
   const discardUploadedAvatar = async (uploaded: UploadedAvatar) => {
@@ -390,6 +407,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     : avatarDraft?.kind === "preset" ? { ...profileUser, avatarKey: avatarDraft.key, avatarUrl: undefined } : profileUser;
   const avatarOptions = options.filter((option) => option.kind === "avatar");
   const themeOptions = options.filter((option) => option.kind === "theme");
+  const blocked = Boolean(social?.blockedPeople?.some(user => user.id === profileId));
   const relationship = social?.people.find((person) => person.user.id === profileId)?.state;
   const songs = profile.favorite_tracks || [];
 
@@ -416,10 +434,11 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         <div className="profile-actions">
           {isOwnProfile && !editing && <Button variant="outline" size="sm" onClick={() => { explicitDiscardRef.current = false; setEditing(true); setSaved(false); }}><Pencil /> Edit profile</Button>}
           {!isOwnProfile && social && <>
-            {!relationship && <Button size="sm" disabled={socialBusy} aria-label={`Add friend ${profile.display_name}`} onClick={() => void changeFriend("request")}><UserPlus /> Add friend</Button>}
-            {relationship === "incoming" && <><Button size="sm" disabled={socialBusy} aria-label={`Accept ${profile.display_name}'s friend request`} onClick={() => void changeFriend("accept")}>Accept</Button><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Decline ${profile.display_name}'s friend request`} onClick={() => void changeFriend("decline")}>Decline</Button></>}
-            {relationship === "outgoing" && <><span className="profile-friend-state">Requested</span><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Cancel request to ${profile.display_name}`} onClick={() => void changeFriend("decline")}>Cancel request</Button></>}
-            {relationship === "friends" && <><span className="profile-friend-state"><Check /> Friends</span>{onInvite && <Button size="sm" aria-label={`Invite ${profile.display_name} to this room`} onClick={() => onInvite(profileId)}>Invite</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Remove friend ${profile.display_name}`} onClick={() => setConfirmRemoval(true)}>Remove friend</Button></>}
+            {!blocked && !relationship && <Button size="sm" disabled={socialBusy} aria-label={`Add friend ${profile.display_name}`} onClick={() => void changeFriend("request")}><UserPlus /> Add friend</Button>}
+            {!blocked && relationship === "incoming" && <><Button size="sm" disabled={socialBusy} aria-label={`Accept ${profile.display_name}'s friend request`} onClick={() => void changeFriend("accept")}>Accept</Button><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Decline ${profile.display_name}'s friend request`} onClick={() => void changeFriend("decline")}>Decline</Button></>}
+            {!blocked && relationship === "outgoing" && <><span className="profile-friend-state">Requested</span><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Cancel request to ${profile.display_name}`} onClick={() => void changeFriend("decline")}>Cancel request</Button></>}
+            {!blocked && relationship === "friends" && <><span className="profile-friend-state"><Check /> Friends</span>{onInvite && <Button size="sm" aria-label={`Invite ${profile.display_name} to this room`} onClick={() => onInvite(profileId)}>Invite</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Remove friend ${profile.display_name}`} onClick={() => setConfirmRemoval(true)}>Remove friend</Button></>}
+            <Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`${blocked ? "Unblock" : "Block"} ${profile.display_name}`} onClick={() => void changeBlock(!blocked)}>{blocked ? "Unblock" : "Block"}</Button>
           </>}
         </div>
       </div>
@@ -479,6 +498,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         </CardContent></Card>
       </div>}
 
+      {isOwnProfile && social && <div className="profile-privacy-setting"><Label htmlFor={`${formId}-requests`}>Receive friend requests</Label><Switch id={`${formId}-requests`} checked={social.receiveRequests !== false} disabled={socialBusy} onCheckedChange={checked => void changeReceiveRequests(checked)} /></div>}
       {isOwnProfile && social && <div className="profile-privacy-setting"><div><Label htmlFor={`${formId}-activity`}>Share activity with friends</Label><small>Friends can see rooms they can access.</small></div><Switch id={`${formId}-activity`} checked={social.shareActivity} disabled={socialBusy} onCheckedChange={(checked) => void changeShareActivity(checked)} /></div>}
     </section>
     <Dialog open={Boolean(discardAction)} onOpenChange={(open) => { if (!open) setDiscardAction(null); }}>

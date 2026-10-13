@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useAppAuth } from "./hooks/use-app-auth";
 import { clearUserChatDrafts } from "./chat/drafts";
+import { setProviderAccount } from "./provider-session";
 import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "./playback-settings";
 import { takeAuthDestination } from "./lib/auth-destination";
 import { PublicEntry, PasswordRecoveryScreen } from "./components/PublicEntry";
@@ -18,6 +19,7 @@ export function App() {
   const focusOnEntry = useRef(false);
   useEffect(() => {
     const nextOwner = auth.session?.user.id;
+    setProviderAccount(nextOwner || null);
     if (draftOwnerRef.current && draftOwnerRef.current !== nextOwner) clearUserChatDrafts(draftOwnerRef.current);
     if (draftOwnerRef.current !== nextOwner) window.dispatchEvent(new CustomEvent("soundspin:account-change", { detail: { userId: nextOwner || null } }));
     draftOwnerRef.current = nextOwner;

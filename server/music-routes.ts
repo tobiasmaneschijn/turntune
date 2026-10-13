@@ -1,3 +1,5 @@
+import { providerJson, providerSignal } from "./provider-http.js";
+import { SignupAttemptLimiter } from "./invite-signup.js";
 import express from "express";
 import { z } from "zod";
 import type { SoundCloudApi, SoundCloudSearchResult } from "./soundcloud.js";
@@ -135,7 +137,19 @@ function appleMusicTrack(value: string) {
 
 export function mountMusicRoutes(app: express.Express, options: MusicRouteOptions) {
   const { authEnabled, youtubeApiKey, soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi } = options;
-  const getApiUserId = options.getUserId;
+  const verifiedUsers = new WeakMap<express.Request, string | null>();
+  const signals = new WeakMap<express.Request, AbortSignal>();
+  const getApiUserId = async (request: express.Request) => {
+    if (verifiedUsers.has(request)) return verifiedUsers.get(request)!;
+    const userId = await options.getUserId(request);
+    verifiedUsers.set(request, userId);
+    return userId;
+  };
+  const requestSignal = (request: express.Request) => signals.get(request)!;
+  const accountBudget = new SignupAttemptLimiter(240, 60_000);
+  const ipBudget = new SignupAttemptLimiter(600, 60_000);
+  const endpointBudget = new SignupAttemptLimiter(60, 60_000);
+  const playbackBudget = new SignupAttemptLimiter(180, 60_000);
   const fetchImpl = options.fetchImpl || fetch;
   const mixcloudApi = options.mixcloudApi || new MixcloudApi(fetchImpl);
   const youtubeSearchCache = new BoundedCache<{ expiresAt: number; results: YouTubeSearchResult[] }>(500);
@@ -149,7 +163,25 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   const youtubeLiveLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
-  app.use(["/api/youtube", "/api/soundcloud", "/api/mixcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], (_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
+  app.use(["/api/youtube", "/api/soundcloud", "/api/mixcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], async (request, response, next) => {
+    response.set("Cache-Control", "no-store");
+    // OAuth connect/callback are mounted separately and have their own flow quotas.
+    if (request.path === "/connect" || request.path === "/callback") return next();
+    const userId = await getApiUserId(request);
+    if (authEnabled && !userId) return response.status(401).json({ error: "Authentication required." });
+    const ip = request.ip || request.socket.remoteAddress || "unknown";
+    const path = `${request.baseUrl}${request.path}`;
+    const endpoint = path === "/api/spotify/playback" ? playbackBudget : endpointBudget;
+    if (!ipBudget.consume(ip) || userId && !accountBudget.consume(userId) ||
+      !endpoint.consume(`ip:${ip}:${path}`) || userId && !endpoint.consume(`account:${userId}:${path}`)) {
+      return response.status(429).json({ error: "Too many music requests. Try again shortly." });
+    }
+    const controller = new AbortController();
+    request.once("aborted", () => controller.abort());
+    response.once("close", () => { if (!response.writableEnded) controller.abort(); });
+    signals.set(request, providerSignal(controller.signal));
+    next();
+  });
   const trackedProvider = async <T>(operation: () => Promise<T>): Promise<T> => {
     const started = Date.now();
     try { const result = await operation(); runtimeMetrics.observe("provider_request", Date.now() - started, result instanceof Response && !result.ok); return result; }
@@ -193,7 +225,7 @@ app.get("/api/youtube/live", async (request, response) => {
   const { id } = parsed.data;
   const now = Date.now();
   const cached = youtubeLiveCache.get(id);
-  if (cached) return response.json({ isLive: cached.isLive });
+  if (cached && cached.expiresAt > now) return response.json({ isLive: cached.isLive });
 
   let pending = youtubeLivePending.get(id);
   if (!pending) {
@@ -210,11 +242,10 @@ app.get("/api/youtube/live", async (request, response) => {
 
     const lookup = (async () => {
       const params = new URLSearchParams({ key: youtubeApiKey, part: "snippet,liveStreamingDetails", id });
-      const videoResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/videos?${params}`, { signal: AbortSignal.timeout(10_000) }));
-      const payload = await videoResponse.json() as {
+      const { response: videoResponse, payload } = await trackedProvider(() => providerJson<{
         error?: { message?: string };
         items?: Array<{ id: string; snippet?: { liveBroadcastContent?: string }; liveStreamingDetails?: { actualEndTime?: string } }>;
-      };
+      }>("youtube", fetchImpl, `https://www.googleapis.com/youtube/v3/videos?${params}`, { signal: requestSignal(request) }));
       if (!videoResponse.ok) throw new Error(payload.error?.message || "Could not check YouTube live status.");
       if (!Array.isArray(payload.items)) throw new Error("YouTube returned an invalid live status response.");
       const video = payload.items?.find((item) => item.id === id);
@@ -235,8 +266,8 @@ app.get("/api/youtube/live", async (request, response) => {
     if (isLive === null) return response.status(404).json({ error: "YouTube video is unavailable." });
     return response.json({ isLive });
   } catch (error) {
-    console.error("YouTube live status lookup failed", error);
-    return response.status(502).json({ error: error instanceof Error ? error.message : "Could not check YouTube live status." });
+    console.error("YouTube live status lookup failed");
+    return response.status(502).json({ error: "Could not check YouTube live status." });
   } finally {
     if (youtubeLivePending.get(id) === pending) youtubeLivePending.delete(id);
   }
@@ -283,26 +314,22 @@ app.get("/api/youtube/search", async (request, response) => {
       maxResults: "12",
       q: parsed.data.q
     });
-    const searchResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/search?${searchParams}`, { signal: AbortSignal.timeout(10_000) }));
-    const searchPayload = await searchResponse.json() as {
+    const { response: searchResponse, payload: searchPayload } = await trackedProvider(() => providerJson<{
       error?: { message?: string };
       items?: Array<{
         id: { videoId?: string };
         snippet: {
           title: string;
           channelTitle: string;
-          thumbnails: {
-            medium?: { url: string };
-            default?: { url: string };
-          };
+          thumbnails: { medium?: { url: string }; default?: { url: string } };
         };
       }>;
-    };
+    }>("youtube", fetchImpl, `https://www.googleapis.com/youtube/v3/search?${searchParams}`, { signal: requestSignal(request) }));
     if (!searchResponse.ok) {
       throw new Error(searchPayload.error?.message || "YouTube search failed.");
     }
 
-    const items = (searchPayload.items || []).filter((item) => item.id.videoId);
+    const items = (searchPayload.items || []).slice(0, 12).filter((item) => item.id.videoId);
     const ids = items.map((item) => item.id.videoId!).join(",");
     const durations = new Map<string, { label: string; milliseconds?: number }>();
     if (ids) {
@@ -311,11 +338,10 @@ app.get("/api/youtube/search", async (request, response) => {
         part: "contentDetails",
         id: ids
       });
-      const videoResponse = await trackedProvider(() => fetchImpl(`https://www.googleapis.com/youtube/v3/videos?${videoParams}`, { signal: AbortSignal.timeout(10_000) }));
+      const { response: videoResponse, payload: videoPayload } = await trackedProvider(() => providerJson<{
+        items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
+      }>("youtube", fetchImpl, `https://www.googleapis.com/youtube/v3/videos?${videoParams}`, { signal: requestSignal(request) }));
       if (videoResponse.ok) {
-        const videoPayload = await videoResponse.json() as {
-          items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
-        };
         for (const video of videoPayload.items || []) {
           const duration = formatYouTubeDuration(video.contentDetails?.duration);
           if (duration) durations.set(video.id, { label: duration, milliseconds: youtubeDurationMs(video.contentDetails?.duration) });
@@ -325,8 +351,8 @@ app.get("/api/youtube/search", async (request, response) => {
 
     const results: YouTubeSearchResult[] = items.map((item) => ({
       id: item.id.videoId!,
-      title: decodeYouTubeText(item.snippet.title),
-      channel: decodeYouTubeText(item.snippet.channelTitle),
+      title: decodeYouTubeText(item.snippet.title).slice(0, 120),
+      channel: decodeYouTubeText(item.snippet.channelTitle).slice(0, 120),
       thumbnail:
         item.snippet.thumbnails.medium?.url ||
         item.snippet.thumbnails.default?.url ||
@@ -340,9 +366,9 @@ app.get("/api/youtube/search", async (request, response) => {
     });
     response.json({ results });
   } catch (error) {
-    console.error("YouTube search failed", error);
+    console.error("YouTube search failed");
     response.status(502).json({
-      error: error instanceof Error ? error.message : "YouTube search failed."
+      error: "YouTube search failed."
     });
   }
 });
@@ -379,16 +405,16 @@ app.get("/api/soundcloud/search", async (request, response) => {
   }
 
   try {
-    const results = await trackedProvider(() => soundCloudApi.searchTracks(parsed.data.q));
+    const results = await trackedProvider(() => soundCloudApi.searchTracks(parsed.data.q, undefined, requestSignal(request)));
     soundCloudSearchCache.set(cacheKey, {
       expiresAt: now + 5 * 60 * 1000,
       results
     });
     response.json({ results });
   } catch (error) {
-    console.error("SoundCloud search failed", error);
+    console.error("SoundCloud search failed");
     response.status(502).json({
-      error: error instanceof Error ? error.message : "SoundCloud search failed."
+      error: "SoundCloud search failed."
     });
   }
 });
@@ -407,11 +433,11 @@ app.get("/api/soundcloud/resolve", async (request, response) => {
   }
 
   try {
-    response.json({ result: await trackedProvider(() => soundCloudApi.resolveTrack(parsed.data.url)) });
+    response.json({ result: await trackedProvider(() => soundCloudApi.resolveTrack(parsed.data.url, requestSignal(request))) });
   } catch (error) {
-    console.error("SoundCloud URL resolution failed", error);
+    console.error("SoundCloud URL resolution failed");
     response.status(400).json({
-      error: error instanceof Error ? error.message : "Could not resolve that SoundCloud URL."
+      error: "Could not resolve that SoundCloud URL."
     });
   }
 });
@@ -425,12 +451,12 @@ app.get("/api/mixcloud/search", async (request, response) => {
   const cached = mixcloudSearchCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
   try {
-    const results = await trackedProvider(() => mixcloudApi.searchTracks(parsed.data.q));
+    const results = await trackedProvider(() => mixcloudApi.searchTracks(parsed.data.q, undefined, requestSignal(request)));
     mixcloudSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Mixcloud search failed", error);
-    response.status(502).json({ error: error instanceof Error ? error.message : "Mixcloud search failed." });
+    console.error("Mixcloud search failed");
+    response.status(502).json({ error: "Mixcloud search failed." });
   }
 });
 
@@ -439,9 +465,9 @@ app.get("/api/mixcloud/resolve", async (request, response) => {
   const parsed = mixcloudResolveSchema.safeParse(request.query);
   if (!parsed.success) return response.status(400).json({ error: "Enter a valid Mixcloud show URL." });
   if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: "Too many requests. Please try again shortly." });
-  try { response.json({ result: await trackedProvider(() => mixcloudApi.resolveTrack(parsed.data.url)) }); }
+  try { response.json({ result: await trackedProvider(() => mixcloudApi.resolveTrack(parsed.data.url, requestSignal(request))) }); }
   catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Mixcloud URL." });
+    response.status(400).json({ error: "Could not resolve that Mixcloud URL." });
   }
 });
 
@@ -457,12 +483,12 @@ app.get("/api/spotify/search", async (request, response) => {
   const cached = spotifySearchCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
   try {
-    const results = await trackedProvider(() => spotifyApi.searchTracks(parsed.data.q));
+    const results = await trackedProvider(() => spotifyApi.searchTracks(parsed.data.q, undefined, requestSignal(request)));
     spotifySearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Spotify search failed", error);
-    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify search failed." });
+    console.error("Spotify search failed");
+    response.status(502).json({ error: "Spotify search failed." });
   }
 });
 
@@ -475,9 +501,9 @@ app.get("/api/spotify/resolve", async (request, response) => {
   const id = parsed.success ? spotifyTrackId(parsed.data.url) : null;
   if (!id) return response.status(400).json({ error: "Enter a valid Spotify track URL or URI." });
   try {
-    response.json({ result: await trackedProvider(() => spotifyApi.getTrack(id)) });
+    response.json({ result: await trackedProvider(() => spotifyApi.getTrack(id, requestSignal(request))) });
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Spotify URL." });
+    response.status(400).json({ error: "Could not resolve that Spotify URL." });
   }
 });
 
@@ -494,12 +520,12 @@ app.get("/api/apple/search", async (request, response) => {
   const cached = appleMusicSearchCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return response.json({ results: cached.results });
   try {
-    const results = await trackedProvider(() => appleMusicApi.searchTracks(parsed.data.q, 12, storefront));
+    const results = await trackedProvider(() => appleMusicApi.searchTracks(parsed.data.q, 12, storefront, requestSignal(request)));
     appleMusicSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Apple Music search failed", error);
-    response.status(502).json({ error: error instanceof Error ? error.message : "Apple Music search failed." });
+    console.error("Apple Music search failed");
+    response.status(502).json({ error: "Apple Music search failed." });
   }
 });
 
@@ -515,11 +541,12 @@ app.get("/api/apple/resolve", async (request, response) => {
     response.json({
       result: await trackedProvider(() => appleMusicApi.getTrack(
         resolved.id,
-        parsed.success ? parsed.data.storefront?.toLowerCase() || resolved.storefront || appleMusicApi.storefront : appleMusicApi.storefront
+        parsed.success ? parsed.data.storefront?.toLowerCase() || resolved.storefront || appleMusicApi.storefront : appleMusicApi.storefront,
+        requestSignal(request)
       ))
     });
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not resolve that Apple Music URL." });
+    response.status(400).json({ error: "Could not resolve that Apple Music URL." });
   }
 });
 
@@ -539,11 +566,11 @@ app.get("/api/giphy", async (request, response) => {
   }
 
   try {
-    response.json({ results: await trackedProvider(() => giphyApi.gifs(parsed.data.q)) });
+    response.json({ results: await trackedProvider(() => giphyApi.gifs(parsed.data.q, requestSignal(request))) });
   } catch (error) {
-    console.error("GIPHY request failed", error);
+    console.error("GIPHY request failed");
     response.status(502).json({
-      error: error instanceof Error ? error.message : "Could not load GIFs."
+      error: "Could not load GIFs."
     });
   }
 });
@@ -559,7 +586,7 @@ app.get("/api/music/connections", async (request, response) => {
         const profile = await spotifyForUser(userId, (token) => spotifyApi.request<{
           display_name?: string;
           product?: string;
-        }>(token, "/me"));
+        }>(token, "/me", { signal: requestSignal(request) }));
         spotifyProfile = { displayName: profile.display_name || "Spotify account", product: profile.product };
       } catch {
         // The saved connection remains useful even when profile metadata is temporarily unavailable.
@@ -574,7 +601,7 @@ app.get("/api/music/connections", async (request, response) => {
       apple: { configured: appleMusicApi.configured }
     });
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load music connections." });
+    response.status(500).json({ error: "Could not load music connections." });
   }
 });
 
@@ -585,7 +612,7 @@ app.delete("/api/spotify/connection", async (request, response) => {
     await spotifyAccounts.disconnect(userId);
     response.status(204).end();
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not disconnect Spotify." });
+    response.status(500).json({ error: "Could not disconnect Spotify." });
   }
 });
 
@@ -595,7 +622,7 @@ app.get("/api/spotify/token", async (request, response) => {
   try {
     response.json({ accessToken: await spotifyAccounts.getAccessToken(userId) });
   } catch (error) {
-    response.status(401).json({ error: error instanceof Error ? error.message : "Connect Spotify first." });
+    response.status(401).json({ error: "Connect Spotify first." });
   }
 });
 
@@ -603,9 +630,9 @@ app.get("/api/spotify/devices", async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   try {
-    response.json(await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player/devices")));
+    response.json(await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player/devices", { signal: requestSignal(request) })));
   } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Could not load Spotify devices." });
+    response.status(502).json({ error: "Could not load Spotify devices." });
   }
 });
 
@@ -613,14 +640,14 @@ app.get("/api/spotify/playback", async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   try {
-    const state = await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player"));
+    const state = await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player", { signal: requestSignal(request) }));
     response.json({ state });
   } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Could not read Spotify playback." });
+    response.status(502).json({ error: "Could not read Spotify playback." });
   }
 });
 
-app.post("/api/spotify/playback", express.json(), async (request, response) => {
+app.post("/api/spotify/playback", express.json({ limit: "4kb" }), async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   const parsed = spotifyPlaybackSchema.safeParse(request.body);
@@ -631,30 +658,30 @@ app.post("/api/spotify/playback", express.json(), async (request, response) => {
     await spotifyForUser(userId, async (token) => {
       if (action === "transfer") {
         return spotifyApi.request(token, "/me/player", {
-          method: "PUT",
+          method: "PUT", signal: requestSignal(request),
           body: JSON.stringify({ device_ids: [deviceId], play: false })
         });
       }
       if (action === "play") {
         return spotifyApi.request(token, `/me/player/play${device}`, {
-          method: "PUT",
+          method: "PUT", signal: requestSignal(request),
           body: JSON.stringify({ uris: [spotifyUri], position_ms: positionMs || 0 })
         });
       }
-      if (action === "pause") return spotifyApi.request(token, `/me/player/pause${device}`, { method: "PUT" });
-      if (action === "resume") return spotifyApi.request(token, `/me/player/play${device}`, { method: "PUT" });
+      if (action === "pause") return spotifyApi.request(token, `/me/player/pause${device}`, { method: "PUT", signal: requestSignal(request) });
+      if (action === "resume") return spotifyApi.request(token, `/me/player/play${device}`, { method: "PUT", signal: requestSignal(request) });
       if (action === "volume") {
         const params = new URLSearchParams({ volume_percent: String(volumePercent) });
         if (deviceId) params.set("device_id", deviceId);
-        return spotifyApi.request(token, `/me/player/volume?${params}`, { method: "PUT" });
+        return spotifyApi.request(token, `/me/player/volume?${params}`, { method: "PUT", signal: requestSignal(request) });
       }
       const params = new URLSearchParams({ position_ms: String(positionMs || 0) });
       if (deviceId) params.set("device_id", deviceId);
-      return spotifyApi.request(token, `/me/player/seek?${params}`, { method: "PUT" });
+      return spotifyApi.request(token, `/me/player/seek?${params}`, { method: "PUT", signal: requestSignal(request) });
     });
     response.status(204).end();
   } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : "Spotify playback failed." });
+    response.status(502).json({ error: "Spotify playback failed." });
   }
 });
 
@@ -666,7 +693,7 @@ app.get("/api/apple/token", async (request, response) => {
   try {
     response.json({ developerToken: appleMusicApi.getDeveloperToken(), storefront: appleMusicApi.storefront });
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not create an Apple Music token." });
+    response.status(500).json({ error: "Could not create an Apple Music token." });
   }
 });
 

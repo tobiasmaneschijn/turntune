@@ -488,6 +488,7 @@ function RoomChat({
   controlsRef?: RefObject<RealtimeChatHandle | null>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyHasOlder, setHistoryHasOlder] = useState(false);
   const historySource = useMemo(() => createChatHistorySource(accessToken, snapshot.room.id), [accessToken, snapshot.room.id]);
   // RoomChat is keyed by account and room. An original-UUID retry keeps that
   // identity while reading refreshed credentials from this same lifetime.
@@ -515,9 +516,10 @@ function RoomChat({
     setLoadingHistory(true);
     void (async () => {
       try {
-        const history = (await historySource.loadPage()).messages;
+        const history = await historySource.loadPage();
         if (!activeRef.current || request !== historyRequestRef.current) return;
-        setMessages(history);
+        setMessages(history.messages);
+        setHistoryHasOlder(history.hasMore);
         setError("");
       } catch {
         if (activeRef.current && request === historyRequestRef.current) {
@@ -584,6 +586,7 @@ function RoomChat({
           onOpenQueue={onOpenQueue}
           historyRoomSlug={snapshot.room.id}
           historySource={historySource}
+          historyHasOlder={historyHasOlder}
           onPersistReaction={historySource.saveReaction}
           onResolveMediaUrl={historySource.loadMediaUrl}
           historyLoading={loadingHistory}

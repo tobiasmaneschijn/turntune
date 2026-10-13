@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function SignUpForm({
-  client,
+  client: _client,
   onNavigate,
   className,
   ...props
@@ -24,8 +24,6 @@ export function SignUpForm({
 }) {
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [repeatPassword, setRepeatPassword] = useState('')
   const [invitePassword, setInvitePassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -39,27 +37,15 @@ export function SignUpForm({
       setError('Enter a display name.')
       return
     }
-    if (password !== repeatPassword) {
-      setError('Passwords do not match')
-      return
-    }
     setIsLoading(true)
 
     try {
       await requestJson('/api/signup', {
         method: 'POST',
-        body: JSON.stringify({ email, password, invitePassword, displayName: displayName.trim() }),
+        body: JSON.stringify({ email, invitePassword, displayName: displayName.trim() }),
         errorMessage: 'Could not create account. Try again.',
       })
       setSuccess(true)
-      if (client) {
-        try {
-          const { error: signInError } = await client.auth.signInWithPassword({ email, password })
-          if (signInError) throw signInError
-        } catch (signInError: unknown) {
-          setError(signInError instanceof Error ? signInError.message : 'Could not sign in. Try signing in below.')
-        }
-      }
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'Could not create account. Try again.')
     } finally {
@@ -72,9 +58,10 @@ export function SignUpForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Account created</CardTitle>
+            <CardTitle className="text-xl">Check your email</CardTitle>
           </CardHeader>
           <CardContent>
+            <p className="mb-4 text-sm">If this address can be invited, you will receive a link to verify your email and choose a password.</p>
             {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
             <Button type="button" className="w-full" disabled={isLoading} onClick={() => onNavigate('/login')}>
               Sign in
@@ -106,34 +93,6 @@ export function SignUpForm({
                   />
                 </div>
                 <div className="grid gap-2">
-                  <div className="flex items-center">
-                    <Label htmlFor="password">Password</Label>
-                  </div>
-                  <Input
-                    id="password"
-                    type="password"
-                    autoComplete="new-password"
-                    minLength={6}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <div className="flex items-center">
-                    <Label htmlFor="repeat-password">Confirm password</Label>
-                  </div>
-                  <Input
-                    id="repeat-password"
-                    type="password"
-                    autoComplete="new-password"
-                    minLength={6}
-                    required
-                    value={repeatPassword}
-                    onChange={(e) => setRepeatPassword(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
                   <Label htmlFor="invite-password">Invite password</Label>
                   <Input
                     id="invite-password"
@@ -149,7 +108,7 @@ export function SignUpForm({
                 </div>
                 {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Creating account…' : 'Create account'}
+                  {isLoading ? 'Sending invitation…' : 'Create account'}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">

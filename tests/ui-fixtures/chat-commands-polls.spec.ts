@@ -27,7 +27,10 @@ async function peerVote(page: Page, event: ChatPollVoteEvent, roomId = 'lounge')
   await page.evaluate(({ event, roomId }) => (window as unknown as HarnessWindow).chatCommandsTest.peerVote(event, roomId), { event, roomId })
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title === 'an old poll acknowledgement does not close or overwrite a newly opened poll draft in the same room') {
+    await page.clock.install({ time: new Date('2026-10-13T00:00:00Z') })
+  }
   const base: Row = { id: noteId, room_slug: 'lounge', content: 'needle track notes', message_type: 'text',
     media_url: null, storage_path: null, mentions: [], user_id: 'mira', user_name: 'Mira', avatar_seed: 'mira',
     created_at: '2026-10-08T10:00:00Z', reply_to_id: null, soundspin_message_reactions: [] }
@@ -210,6 +213,7 @@ test('an old poll acknowledgement does not close or overwrite a newly opened pol
   const form = page.getByRole('region', { name: 'New poll' })
   await form.getByRole('textbox', { name: 'Option 1', exact: true }).fill('Now')
   await form.getByRole('textbox', { name: 'Option 2', exact: true }).fill('Later')
+  await page.clock.pauseAt(new Date('2026-10-13T00:01:00Z'))
   await page.evaluate(() => { (window as unknown as HarnessWindow).chatCommandsTest.holdDelivery = true })
   await form.getByRole('button', { name: 'Post poll', exact: true }).click()
   await expect(form.getByRole('button', { name: 'Posting…', exact: true })).toBeDisabled()
@@ -227,4 +231,5 @@ test('an old poll acknowledgement does not close or overwrite a newly opened pol
   await expect(form).toBeVisible()
   await expect(form.getByRole('textbox', { name: 'Option 1', exact: true })).toHaveValue('A fresh option')
   expect(databases.get(page)!.messages[0]).toMatchObject({ content: 'Older poll?', poll: { options: ['Now', 'Later'] } })
+  await page.clock.resume()
 })

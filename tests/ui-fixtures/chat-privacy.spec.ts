@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 
 const id = (index: number) => `10000000-0000-4000-8000-${String(index).padStart(12, '0')}`
 const sensitiveText = 'Sensitive account number 12345'
-const mediaUrl = (type: string) => `https://privacy-media.example.test/${type}`
+const mediaUrl = (type: string) => `https://media.giphy.com/media/privacy-fixture/${type}`
 const rows = [
   { id: id(1), content: sensitiveText, message_type: 'text', reply_to_id: null, media_url: null },
   { id: id(2), content: 'A reply to the private message', message_type: 'text', reply_to_id: id(1), media_url: null },
@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
   const mutations: string[] = []
   writes.set(page, mutations)
   await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false } }))
-  await page.route('https://privacy-media.example.test/**', (route) => route.fulfill({ contentType: 'image/svg+xml',
+  await page.route('https://media.giphy.com/media/privacy-fixture/**', (route) => route.fulfill({ contentType: 'image/svg+xml',
     body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#667755"/></svg>' }))
   await page.route('**/api/rooms/*/chat/**', (route) => {
     const request = route.request()

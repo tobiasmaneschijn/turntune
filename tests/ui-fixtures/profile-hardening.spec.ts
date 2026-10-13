@@ -23,6 +23,7 @@ async function fixture(page: Page) {
     ? { ...profile, user_id: bobId, display_name: 'Bob', handle: 'bob', avatar_url: null, avatar_path: null } : profile, options } }))
   await page.route('**/api/social', route => route.fulfill({ json: { people: [], shareActivity: false } }))
   await page.route('**/api/library', route => route.fulfill({ json: { library: { picks: [song, secondSong].map((track, index) => ({ id: String(index), track, savedAt: index })), sets: [] } } }))
+  await page.route('**/api/uploads/cleanup', route => route.fulfill({ json: { ok: true } }))
   await page.route('**/storage/v1/object/public/**', route => route.fulfill({ contentType: 'image/png', body: image }))
 }
 async function edit(page: Page, query = 'embedded') {
@@ -34,7 +35,7 @@ async function selectImage(page: Page) {
   await expect(page.locator('.avatar-upload .avatar img')).toHaveAttribute('src', /^blob:/)
 }
 
-// These exercise production ProfilePage, RoomProfileDialog, FriendsPanel, and the real storage adapter.
+// These exercise production ProfilePage, RoomProfileDialog, FriendsPanel, and the trusted upload adapter.
 test('embedded profile protects dirty Escape and backdrop dismissal and allows pristine dismissal', async ({ page }) => {
   await fixture(page)
   await page.goto('/tests/frontend-session-harness/index.html?dialog')
@@ -86,7 +87,7 @@ test('avatar files and presets remain local until Save and Cancel preserves the 
   await fixture(page)
   const writes: string[] = []
   await page.route('**/api/profile', route => { writes.push('profile'); return route.fulfill({ json: { profile } }) })
-  await page.route('**/storage/v1/object/profile-avatars**', route => { writes.push(route.request().method()); return route.fulfill({ json: {} }) })
+  await page.route('**/api/uploads/avatar', route => { writes.push(route.request().method()); return route.fulfill({ json: {} }) })
   await edit(page)
   await selectImage(page)
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -99,14 +100,14 @@ test('avatar files and presets remain local until Save and Cancel preserves the 
   expect(writes).toEqual([])
 })
 
-test('avatar save commits the staged image before deleting the previous object', async ({ page }) => {
+test('avatar save commits the staged image without browser deletion of committed objects', async ({ page }) => {
   await fixture(page)
   let uploadedPath = '', pending: Route | undefined
   const removed: string[] = []
-  await page.route('**/storage/v1/object/profile-avatars**', route => {
-    if (route.request().method() === 'DELETE') { removed.push(...route.request().postDataJSON().prefixes); return route.fulfill({ json: [] }) }
-    uploadedPath = route.request().url().split('/profile-avatars/')[1]
-    return route.fulfill({ json: { Key: `profile-avatars/${uploadedPath}`, Id: 'image-one' } })
+  await page.route('**/api/uploads/cleanup', route => { removed.push(...route.request().postDataJSON().storagePaths); return route.fulfill({ json: { ok: true } }) })
+  await page.route('**/api/uploads/avatar', route => {
+    uploadedPath = `${aliceId}/${crypto.randomUUID()}.png`
+    return route.fulfill({ json: { storagePath: uploadedPath } })
   })
   await page.route('**/api/profile', route => { pending = route })
   await edit(page)
@@ -119,17 +120,17 @@ test('avatar save commits the staged image before deleting the previous object',
   await pending!.fulfill({ json: { profile: { ...profile, avatar_path: uploadedPath, avatar_url: newUrl } } })
   await expect(page.getByRole('button', { name: 'Edit profile', exact: true })).toBeVisible()
   await expect(page.locator('.profile-hero .avatar img')).toHaveAttribute('src', newUrl)
-  await expect.poll(() => removed).toEqual([oldPath])
+  expect(removed).toEqual([])
 })
 
 test('failed avatar save keeps the original, retries the same staged upload, and cleans discarded uncommitted uploads', async ({ page }) => {
   await fixture(page)
   let uploadedPath = '', uploads = 0, saves = 0
   const submittedPaths: string[] = [], removed: string[] = []
-  await page.route('**/storage/v1/object/profile-avatars**', route => {
-    if (route.request().method() === 'DELETE') { removed.push(...route.request().postDataJSON().prefixes); return route.fulfill({ json: [] }) }
-    uploads++; uploadedPath = route.request().url().split('/profile-avatars/')[1]
-    return route.fulfill({ json: { Key: `profile-avatars/${uploadedPath}`, Id: 'image-one' } })
+  await page.route('**/api/uploads/cleanup', route => { removed.push(...route.request().postDataJSON().storagePaths); return route.fulfill({ json: { ok: true } }) })
+  await page.route('**/api/uploads/avatar', route => {
+    uploads++; uploadedPath = `${aliceId}/${crypto.randomUUID()}.png`
+    return route.fulfill({ json: { storagePath: uploadedPath } })
   })
   await page.route('**/api/profile', route => {
     saves++; submittedPaths.push(route.request().postDataJSON().customAvatarPath)
@@ -155,7 +156,7 @@ test('account changes clear staged avatars and profile drafts without writing th
   await fixture(page)
   const writes: string[] = []
   await page.route('**/api/profile', route => { writes.push('profile'); return route.fulfill({ json: { profile } }) })
-  await page.route('**/storage/v1/object/profile-avatars**', route => { writes.push('storage'); return route.fulfill({ json: {} }) })
+  await page.route('**/api/uploads/avatar', route => { writes.push('storage'); return route.fulfill({ json: {} }) })
   await edit(page)
   await selectImage(page)
   await page.getByLabel('Bio', { exact: true }).fill('Private old-account draft')
@@ -205,7 +206,7 @@ test('friend removal names its target and needs an explicit confirmation before 
 test('edits made during a staged-avatar upload survive its delayed save response', async ({ page }) => {
   await fixture(page)
   let upload: Route | undefined, submitted: Record<string, unknown> | undefined
-  await page.route('**/storage/v1/object/profile-avatars/**', route => { upload = route })
+  await page.route('**/api/uploads/avatar', route => { upload = route })
   await page.route('**/api/profile', route => {
     submitted = route.request().postDataJSON()
     return route.fulfill({ json: { profile: { ...profile, bio: submitted!.bio, avatar_path: submitted!.customAvatarPath,
@@ -217,7 +218,7 @@ test('edits made during a staged-avatar upload survive its delayed save response
   await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect.poll(() => Boolean(upload)).toBe(true)
   await page.getByLabel('Bio', { exact: true }).fill('Newer draft while uploading')
-  await upload!.fulfill({ json: { Key: 'profile-avatars/uploaded', Id: 'image-one' } })
+  await upload!.fulfill({ json: { storagePath: `${aliceId}/00000000-0000-4000-8000-000000000098.png` } })
   await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
   await expect(page.getByLabel('Bio', { exact: true })).toHaveValue('Newer draft while uploading')
   expect(submitted!.bio).toBe('First submitted bio')
@@ -226,9 +227,9 @@ test('edits made during a staged-avatar upload survive its delayed save response
 test('uncertain avatar save failures never clean up a possibly committed image', async ({ page }) => {
   await fixture(page)
   let removed = 0
-  await page.route('**/storage/v1/object/profile-avatars**', route => {
-    if (route.request().method() === 'DELETE') removed++
-    return route.fulfill({ json: { Key: 'profile-avatars/uploaded', Id: 'image-one' } })
+  await page.route('**/api/uploads/cleanup', route => { removed++; return route.fulfill({ json: { ok: true } }) })
+  await page.route('**/api/uploads/avatar', route => {
+    return route.fulfill({ json: { storagePath: `${aliceId}/00000000-0000-4000-8000-000000000098.png` } })
   })
   await page.route('**/api/profile', route => route.fulfill({ status: 503, json: { error: 'Profile saving unavailable. Try again.' } }))
   await edit(page)
@@ -244,8 +245,8 @@ test('uncertain avatar save failures never clean up a possibly committed image',
 test('stalled avatar uploads time out, abort transport, and retain the staged image and text for retry', async ({ page }) => {
   await fixture(page)
   let upload: Route | undefined, patches = 0, uploadFailed = false
-  page.on('requestfailed', request => { if (request.url().includes('/storage/v1/object/profile-avatars/')) uploadFailed = true })
-  await page.route('**/storage/v1/object/profile-avatars/**', route => { upload = route })
+  page.on('requestfailed', request => { if (request.url().includes('/api/uploads/avatar')) uploadFailed = true })
+  await page.route('**/api/uploads/avatar', route => { upload = route })
   await page.route('**/api/profile', route => { patches++; return route.fulfill({ json: { profile } }) })
   await edit(page)
   await selectImage(page)
@@ -261,7 +262,7 @@ test('stalled avatar uploads time out, abort transport, and retain the staged im
   await expect(page.locator('.avatar-upload .avatar img')).toHaveAttribute('src', /^blob:/)
   await expect.poll(() => uploadFailed).toBe(true)
   expect(patches).toBe(0)
-  await upload!.fulfill({ json: { Key: 'profile-avatars/late-image', Id: 'late-image' } }).catch(() => {})
+  await upload!.fulfill({ json: { storagePath: `${aliceId}/00000000-0000-4000-8000-000000000097.png` } }).catch(() => {})
   await expect(page.getByLabel('Bio', { exact: true })).toHaveValue('Retained bio after timeout')
   expect(patches).toBe(0)
 })

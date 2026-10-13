@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { ChatCommandService, type ChatCommandServiceOptions } from './chat-command-service.js'
+import { CHAT_MAX_REACTIONS_PER_MESSAGE, CHAT_MAX_HISTORY_CHILDREN, CHAT_MAX_POLL_VOTERS } from './chat-validation.js'
 
 const alice = '11111111-1111-4111-8111-111111111111'
 const staff = '22222222-2222-4222-8222-222222222222'
@@ -135,4 +136,112 @@ test('failed durable write emits nothing and a new policy check can reject an op
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('supported reactions are canonical, concurrent choices obey cardinality, and accepted no-ops retain bounded retry identity without message writes or broadcast', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-chat-'))
+  let now = initialTime
+  const events: string[] = []
+  const options: ChatCommandServiceOptions = { client: null, dataDir: dir, now: () => now,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }), authorize: async () => {}, emit: async (_room, event) => { events.push(event) } }
+  try {
+    const service = new ChatCommandService(options), input = { ...message(now), poll: { options: ['One', 'Two'] } }
+    await service.message('lounge', alice, input)
+    const add = (emoji: string) => service.reaction('lounge', alice, { id: randomUUID(), messageId: input.id, action: 'add', emoji })
+    await assert.rejects(add('fabricated'), /supported emoji/)
+    const choices = await Promise.allSettled(['❤', '😂', '😮', '🔥'].map(add))
+    assert.equal(choices.filter(result => result.status === 'fulfilled').length, 3)
+    assert.equal(choices.filter(result => result.status === 'rejected').length, 1)
+    const accepted = (await service.loadMessage(input.id))!.message as { reactions?: Array<{ emoji: string }> }
+    assert.ok(accepted.reactions?.some(reaction => reaction.emoji === '❤️'))
+    const before = await readFile(path.join(dir, 'soundspin-chat.json'), 'utf8'), eventCount = events.length
+    for (let i = 0; i < 10; i++) await add('❤')
+    await service.reaction('lounge', alice, { id: randomUUID(), messageId: input.id, action: 'remove', emoji: '👍' })
+    const afterNoops = JSON.parse(await readFile(path.join(dir, 'soundspin-chat.json'), 'utf8'))
+    assert.deepEqual(afterNoops.messages, JSON.parse(before).messages)
+    assert.equal(Object.keys(afterNoops.receipts).length, Object.keys(JSON.parse(before).receipts).length + 11)
+    assert.equal(events.length, eventCount)
+    await service.pollVote('lounge', alice, input.id, 0)
+    const afterVote = JSON.parse(await readFile(path.join(dir, 'soundspin-chat.json'), 'utf8'))
+    assert.equal((await service.pollVote('lounge', alice, input.id, 0)).revision, 1)
+    assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'soundspin-chat.json'), 'utf8')).messages, afterVote.messages)
+    // The original immutable message remains safe after ephemeral receipts expire.
+    now += 25 * 3600000
+    const restarted = new ChatCommandService(options)
+    await restarted.message('lounge', alice, input)
+    await assert.rejects(restarted.message('lounge', alice, { ...input, content: 'Changed' }), /different content/)
+    assert.equal(Object.keys(JSON.parse(await readFile(path.join(dir, 'soundspin-chat.json'), 'utf8')).receipts).length, 0)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('accepted reaction and poll no-op retries cannot reverse a newer choice, including after restart', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-chat-'))
+  const options: ChatCommandServiceOptions = { client: null, dataDir: dir, now: () => initialTime,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }), authorize: async () => {}, emit: async () => {} }
+  try {
+    const service = new ChatCommandService(options), input = { ...message(initialTime), poll: { options: ['One','Two'] } }
+    await service.message('lounge', alice, input)
+    await service.reaction('lounge', alice, { id: randomUUID(), messageId: input.id, action: 'add', emoji: '❤️' })
+    const noop = { id: randomUUID(), messageId: input.id, action: 'add', emoji: '❤️' }
+    await service.reaction('lounge', alice, noop)
+    await service.reaction('lounge', alice, { id: randomUUID(), messageId: input.id, action: 'remove', emoji: '❤️' })
+    const restarted = new ChatCommandService(options)
+    await restarted.reaction('lounge', alice, noop)
+    assert.deepEqual(((await restarted.loadMessage(input.id))!.message as { reactions?: unknown[] }).reactions, [])
+    await restarted.pollVote('lounge', alice, input.id, 0)
+    const pollNoop = randomUUID()
+    assert.equal((await restarted.pollVote('lounge', alice, input.id, 0, pollNoop)).revision, 1)
+    await restarted.pollVote('lounge', alice, input.id, 1)
+    assert.equal((await new ChatCommandService(options).pollVote('lounge', alice, input.id, 0, pollNoop)).revision, 1)
+    assert.equal((await restarted.loadMessage(input.id))!.message.poll!.votes[0].optionIndex, 1)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('only visible canonical same-room mentions notify, and recipient budgets survive restart without blocking plain chat', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-chat-'))
+  let now = initialTime
+  const bob = { id: staff, name: 'Bob Smith', avatarSeed: staff }
+  const options: ChatCommandServiceOptions = { client: null, dataDir: dir, now: () => now,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }), getMentionAudience: async () => [bob], authorize: async () => {}, emit: async () => {} }
+  const claimed = [{ userId: bob.id, userName: 'Fabricated', handle: 'fake' }]
+  try {
+    let service = new ChatCommandService(options)
+    assert.deepEqual((await service.message('lounge', alice, { ...message(now), mentions: claimed })).mentions, [])
+    assert.deepEqual((await service.message('lounge', alice, { ...message(now, randomUUID(), 'Hi @fake'), mentions: claimed })).mentions, [])
+    assert.deepEqual((await service.message('lounge', alice, { ...message(now, randomUUID(), 'Hi @Bob_Smith'), mentions: [{ ...claimed[0], userId: randomUUID() }] })).mentions, [])
+    const valid = () => ({ ...message(now, randomUUID(), 'Hi @Bob_Smith'), mentions: claimed })
+    const first = valid()
+    assert.deepEqual((await service.message('lounge', alice, first)).mentions, [{ userId: bob.id, userName: bob.name, handle: 'Bob_Smith' }])
+    await service.message('lounge', alice, first) // Retry spends no notification budget.
+    for (let i=0;i<4;i++) await service.message('lounge', alice, valid())
+    service = new ChatCommandService(options)
+    await assert.rejects(service.message('lounge', alice, valid()), /Mention limit/)
+    await service.message('lounge', alice, message(now, randomUUID(), 'Plain chat still works'))
+    now += 60_000
+    assert.equal((await service.message('lounge', alice, valid())).mentions.length, 1)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('history bounds parent pages, corrupt legacy children, replies, and total fanout without skipping its cursor', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-chat-'))
+  try {
+    const records = Object.fromEntries(Array.from({ length: 60 }, (_, index) => {
+      const item = { ...message(initialTime + index, randomUUID()), user: { id: alice, name: 'Alice', avatarSeed: alice },
+        reactions: Array.from({ length: 400 }, (_, n) => ({ userId: `reactor-${n}`, emoji: '👍' })),
+        poll: { options: ['One', 'Two'], votes: Array.from({ length: 400 }, (_, n) => ({ userId: `voter-${n}`, optionIndex: 0, revision: 1 })) } }
+      return [item.id, { roomId: 'lounge', userId: alice, fingerprint: 'a'.repeat(64), message: item }]
+    }))
+    await writeFile(path.join(dir, 'soundspin-chat.json'), JSON.stringify({ messages: records, receipts: {}, cooldowns: {}, tombstones: {}, removals: [] }))
+    const service = new ChatCommandService({ client: null, dataDir: dir, getUser: async () => null, authorize: async () => {}, emit: async () => {} })
+    const page = await service.readPage('lounge', undefined, 'older', 200)
+    assert.equal(page.rows.length, 10)
+    assert.equal(page.hasMore, true)
+    assert.ok(page.rows.every(row => row.soundspin_message_reactions.length <= CHAT_MAX_REACTIONS_PER_MESSAGE && row.soundspin_poll_votes.length <= CHAT_MAX_POLL_VOTERS))
+    assert.equal(page.rows.reduce((sum, row) => sum + row.soundspin_message_reactions.length + row.soundspin_poll_votes.length, 0), CHAT_MAX_HISTORY_CHILDREN)
+    const payload = await service.readPayload('lounge', page.rows)
+    assert.ok(payload.rows.every(row => !Object.hasOwn(row, 'immutable_fingerprint')))
+    const next = await service.readPage('lounge', page.cursor, 'older', 200)
+    assert.ok(next.rows.every(row => !page.rows.some(previous => previous.id === row.id)))
+    assert.ok(next.rows.every(row => row.created_at < page.cursor!.createdAt))
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

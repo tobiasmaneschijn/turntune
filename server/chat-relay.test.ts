@@ -104,21 +104,22 @@ test('durable UUID lookup errors fail closed and remain retryable without emitti
 })
 
 test('a fresh relay accepts original retries after canonical text-media and duplicate-mention persistence without rebroadcast', async () => {
-  const original = chatMessageSchema.parse({ ...input(), mediaUrl: 'https://example.test/irrelevant.png', storagePath: 'alice/lounge/unused.png',
+  const audience = [{ id: 'mira', name: 'Mira', avatarSeed: 'mira' }, { id: 'sam', name: 'Sam', avatarSeed: 'sam' }]
+  const original = chatMessageSchema.parse({ ...input(), content: 'Hello @Mira and @Sam', mediaUrl: 'https://example.test/irrelevant.png', storagePath: 'alice/lounge/unused.png',
     mentions: [{ userId: 'mira', userName: 'Old name', handle: 'old' }, { userId: 'sam', userName: 'Sam', handle: 'sam' },
       { userId: 'mira', userName: 'Mira', handle: 'mira' }] })
-  const stored = { roomId: 'lounge', userId: 'alice', message: canonicalMessage(original, user) }
+  const stored = { roomId: 'lounge', userId: 'alice', message: canonicalMessage(original, user, undefined, audience) }
   assert.equal(stored.message.mediaUrl, undefined); assert.equal(stored.message.storagePath, undefined)
   assert.deepEqual(stored.message.mentions.map((mention) => mention.userName), ['Mira', 'Sam'])
   let emitted = 0
   const options = { getMembership: () => ({ room: { id: 'lounge' }, user }), canWriteRoom: async () => true,
-    loadReply: async () => null, loadMessageById: async () => stored, emitToRoom: async () => { emitted++ } }
+    loadReply: async () => null, loadMessageById: async () => stored, getMentionAudience: async () => audience, emitToRoom: async () => { emitted++ } }
   for (const retry of [original, { ...original, mediaUrl: undefined, storagePath: undefined, mentions: stored.message.mentions }]) {
     const restartedRelay = createChatRelay(options)
     assert.deepEqual(await restartedRelay.handle('socket', 'message', { roomId: 'lounge', message: retry }), { ok: true })
   }
   for (const conflict of [{ ...original, content: 'Changed body' },
-    { ...original, mentions: [...original.mentions, { userId: 'mira', userName: 'Changed final name', handle: 'mira' }] }]) {
+    { ...original, mentions: original.mentions.filter(mention => mention.userId !== 'mira') }]) {
     assert.equal((await createChatRelay(options).handle('socket', 'message', { roomId: 'lounge', message: conflict })).ok, false)
   }
   assert.equal(emitted, 0)

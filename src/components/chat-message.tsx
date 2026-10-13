@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images"
 import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Eye, EyeOff, MoreHorizontal, Reply, SmilePlus, X,Flag,Trash2 } from 'lucide-react'
@@ -146,7 +147,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   const reactionTooltipPrefix = useId()
   const reply = message.replyTo
   const media = useChatMediaUrl(isHidden||message.removedAt ? undefined : safeChatMediaUrl(message.mediaUrl), isHidden||message.removedAt ? undefined : message.storagePath, onResolveMediaUrl, rowRef)
-  const mediaUrl = media.url
+  const mediaUrl = approvedImageUrl(media.url)
   const isMentioned = (message.mentions || []).some((mention) => mention.userId === currentUserId)
   const reactionGroups = useMemo(
     () => groupReactions(message.reactions, currentUserId),
@@ -286,7 +287,8 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {mediaUrl && (
             <a href={mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
               <img
-                src={mediaUrl}
+                src={approvedImageUrl(mediaUrl)}
+                referrerPolicy="no-referrer"
                 alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
                 loading="lazy"
                 onError={media.onError}

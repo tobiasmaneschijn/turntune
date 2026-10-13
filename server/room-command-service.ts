@@ -5,8 +5,13 @@ import type { Room } from "./types.js";
 export class RoomCommandService {
   constructor(private readonly store: Store, private readonly broadcast: (room: Room) => void) {}
   async execute<T>(room: Room, change: (draft: Room) => RoomChange<T> | Promise<RoomChange<T>>) {
-    const result = await this.store.changeRoom(room, change);
-    this.broadcast(room);
+    let changed = false;
+    const result = await this.store.changeRoom(room, async draft => {
+      const outcome = await change(draft), committed = outcome.committed;
+      outcome.committed = () => { changed = !outcome.unchanged; committed?.(); };
+      return outcome;
+    });
+    if (changed) this.broadcast(room);
     return result;
   }
 }

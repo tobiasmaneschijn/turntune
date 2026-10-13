@@ -84,7 +84,9 @@ test('disconnecting during image upload preserves the attachment and draft befor
 })
 
 test('a full recovery outbox retains an uploaded image when delivery rejects it before queueing', async ({ page }) => {
-  test.setTimeout(90_000)
+  // Exercise all 100 real failed sends before checking the capacity boundary.
+  // Browser automation and development rendering are part of this workload.
+  test.setTimeout(180_000)
   await page.unroute('**/api/config')
   await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false, supabase: { url: 'https://storage.fixture.test', anonKey: 'fixture-public-key' } } }))
   await page.route('**/storage/v1/object/chat-media/**', (route) => route.fulfill({ json: { Id: 'object-id', Key: 'chat-media/object-path' } }))

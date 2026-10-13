@@ -4,7 +4,8 @@ import { BoundedCache } from "./bounded-cache.js";
 import { SocialError, type SocialStore } from "./social-store.js";
 
 const friendAction = z.object({ action: z.enum(["request", "accept", "decline", "remove"]) }).strict();
-const activitySettings = z.object({ shareActivity: z.boolean() }).strict();
+const activitySettings = z.object({ shareActivity: z.boolean().optional(), receiveRequests: z.boolean().optional() }).strict().refine(input => input.shareActivity !== undefined || input.receiveRequests !== undefined);
+const blockSettings = z.object({ blocked: z.boolean() }).strict();
 const roomInvitation = z.object({ userId: z.string().uuid(), roomSlug: z.string().regex(/^[a-z0-9-]{3,48}$/) }).strict();
 const id = z.string().uuid();
 
@@ -36,9 +37,15 @@ export function mountSocialRoutes(app: express.Express, store: SocialStore, getU
     const target = id.parse(request.params.userId), input = friendAction.parse(request.body);
     return { state: await store.actOnFriend(actor, target, input.action) };
   }));
+  app.put("/api/social/blocks/:userId", noStore, express.json({ limit: "4kb" }), handle("write", async (request, actor) => {
+    const target = id.parse(request.params.userId), input = blockSettings.parse(request.body);
+    await store.setBlocked(actor, target, input.blocked);
+    return input;
+  }));
   app.patch("/api/social/settings", noStore, express.json({ limit: "4kb" }), handle("write", async (request, actor) => {
     const input = activitySettings.parse(request.body);
-    await store.setShareActivity(actor, input.shareActivity);
+    if (input.shareActivity !== undefined) await store.setShareActivity(actor, input.shareActivity);
+    if (input.receiveRequests !== undefined) await store.setReceiveRequests(actor, input.receiveRequests);
     return input;
   }));
   app.post("/api/room-invitations", noStore, express.json({ limit: "4kb" }), handle("invite", async (request, actor) => {

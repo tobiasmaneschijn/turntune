@@ -1,9 +1,16 @@
 import { expect, test } from "@playwright/test";
-test.beforeEach(async ({ page }) => { await page.goto("/tests/player-qol-harness/index.html"); await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeVisible(); });
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title === "sync only confirms measured local playback and ignores prior-track samples") {
+    await page.clock.setFixedTime(new Date("2026-10-13T00:00:00Z"));
+  }
+  await page.goto("/tests/player-qol-harness/index.html");
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeVisible();
+});
 
 test("room service controls save the allowlist and protect unsaved changes", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Open room settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Room settings", exact: true });
+  await dialog.getByRole("tab", { name: "Music", exact: true }).click();
   for (const name of ["YouTube", "SoundCloud", "Spotify", "Apple Music", "Mixcloud"]) {
     await expect(dialog.getByRole("switch", { name, exact: true })).toHaveAttribute("aria-checked", "true");
   }
@@ -20,6 +27,7 @@ test("room service controls save the allowlist and protect unsaved changes", asy
   await expect(dialog).toHaveCount(0);
   expect(await page.evaluate(() => window.playerQolTest.savedRoomSettings?.allowedProviders)).toEqual(["youtube", "soundcloud", "apple", "mixcloud"]);
   await page.getByRole("button", { name: "Open room settings", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Music", exact: true }).click();
   await expect(dialog.getByRole("switch", { name: "Spotify", exact: true })).toHaveAttribute("aria-checked", "false");
   for (const name of ["YouTube", "SoundCloud", "Apple Music", "Mixcloud"]) await dialog.getByRole("switch", { name, exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();

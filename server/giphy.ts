@@ -1,3 +1,5 @@
+import { approvedRemoteImageUrl } from "../shared/remote-images.js";
+import { providerJson } from "./provider-http.js";
 export interface GiphyGif {
   id: string;
   title: string;
@@ -27,7 +29,7 @@ export class GiphyApi {
     return Boolean(this.apiKey);
   }
 
-  async gifs(query = ""): Promise<GiphyGif[]> {
+  async gifs(query = "", signal?: AbortSignal): Promise<GiphyGif[]> {
     if (!this.apiKey) throw new Error("GIPHY is not configured yet.");
 
     const normalizedQuery = query.trim();
@@ -40,20 +42,19 @@ export class GiphyApi {
     });
     if (normalizedQuery) params.set("q", normalizedQuery);
 
-    const response = await this.fetchImpl(`https://api.giphy.com/v1/gifs/${endpoint}?${params}`);
-    const payload = await response.json().catch(() => ({})) as GiphyResponse;
+    const { response, payload } = await providerJson<GiphyResponse>("giphy", this.fetchImpl, `https://api.giphy.com/v1/gifs/${endpoint}?${params}`, { signal });
     if (!response.ok) {
       throw new Error(payload.meta?.msg || `GIPHY request failed (${response.status}).`);
     }
 
-    return (payload.data || []).flatMap((gif) => {
-      const url = gif.images?.fixed_width?.url;
-      if (!gif.id || !url) return [];
+    return (payload.data || []).slice(0, 18).flatMap((gif) => {
+      const url = approvedRemoteImageUrl(gif.images?.fixed_width?.url);
+      if (!gif.id || gif.id.length > 200 || !url || url.length > 2048) return [];
       return [{
         id: gif.id,
-        title: gif.title || "GIPHY GIF",
+        title: (gif.title || "GIPHY GIF").slice(0, 120),
         url,
-        preview: gif.images?.fixed_width_small?.url || url
+        preview: approvedRemoteImageUrl(gif.images?.fixed_width_small?.url) || url
       }];
     });
   }

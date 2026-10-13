@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  accountPasswordSchema,
   invitePasswordMatches,
   inviteSignupSchema,
   SignupAttemptLimiter
@@ -9,7 +10,6 @@ import {
 test("invite signup validation accepts the expected payload", () => {
   const result = inviteSignupSchema.safeParse({
     email: " friend@example.com ",
-    password: "correct horse battery staple",
     invitePassword: "the listening room"
   });
 
@@ -17,7 +17,7 @@ test("invite signup validation accepts the expected payload", () => {
   if (result.success) assert.equal(result.data.email, "friend@example.com");
 });
 
-test("invite signup validation rejects extra fields and short passwords", () => {
+test("invite signup validation rejects extra fields", () => {
   assert.equal(inviteSignupSchema.safeParse({
     email: "friend@example.com",
     password: "short",
@@ -27,7 +27,7 @@ test("invite signup validation rejects extra fields and short passwords", () => 
 });
 
 test("signup can seed a display name without accepting privilege metadata", () => {
-  const payload = { email: "friend@example.com", password: "long-enough", invitePassword: "invite", displayName: "  Alice  " };
+  const payload = { email: "friend@example.com", invitePassword: "invite", displayName: "  Alice  " };
   assert.equal(inviteSignupSchema.parse(payload).displayName, "Alice");
   assert.equal(inviteSignupSchema.safeParse({ ...payload, displayName: " " }).success, false);
   assert.equal(inviteSignupSchema.safeParse({ ...payload, user_metadata: { is_app_admin: true } }).success, false);
@@ -47,4 +47,11 @@ test("signup attempt limiter blocks excess attempts until reset", () => {
   assert.equal(limiter.consume("listener", 2_001), true);
   limiter.reset("listener");
   assert.equal(limiter.consume("listener", 2_002), true);
+});
+
+
+test("new passwords require 12–128 characters", () => {
+  assert.equal(accountPasswordSchema.safeParse("shortpass11").success, false);
+  assert.equal(accountPasswordSchema.safeParse("correct horse battery staple").success, true);
+  assert.equal(accountPasswordSchema.safeParse("a".repeat(129)).success, false);
 });
