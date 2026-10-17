@@ -18,12 +18,16 @@ const rooms = [
   room("sunset", "Sunset Radio", { isFavorite: true, role: "owner" }),
   room("private", "Private Studio", { isPublic: false, isFavorite: true, role: "member", listenerCount: 0 }),
   room("favorite", "Favorite Radio", { isFavorite: true }),
-  room("public", "Public Radio"),
+  room("public", "Public Radio", {
+    description: "Soul and jazz for the evening.", tags: ["soul", "jazz"], language: "English",
+    preview: { title: "Evening Signal", artist: "Mira", playing: true, observedAt: Date.now() }
+  }),
   room("protected", "Protected Radio", { passwordProtected: true })
 ];
 const state = {
+  rooms,
   requests: [] as { path: string; method: string; body: unknown }[],
-  favoriteFailure: false, delayFavorite: false, delayCreation: false, connectionFailure: false, spotifyConnected: true,
+  favoriteFailure: false, delayFavorite: false, delayCreation: false, connectionFailure: false,
   navigations: [] as { slug: string; password?: string }[],
   finishFavorite: (_ok: boolean) => {}, finishCreation: (_ok: boolean) => {},
   hideLobby: () => {}, showLobby: () => {}
@@ -34,16 +38,14 @@ globalThis.fetch = async (input, init) => {
   const method = init?.method || "GET";
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
   state.requests.push({ path, method, body });
-  if (path === "/api/rooms" && method === "GET") return Response.json({ rooms });
+  if (path === "/api/rooms" && method === "GET") return Response.json({ rooms: state.rooms });
   if (path === "/api/social") return Response.json({ people: [], invitations: [], shareActivity: false });
   if (path === "/api/music/connections") return state.connectionFailure ? Response.json({ error: "Connection check failed." }, { status: 503 })
-    : Response.json({ spotify: { configured: true, connected: state.spotifyConnected }, apple: { configured: false } });
-  if (path === "/api/spotify/devices") return Response.json({ devices: [] });
-  if (path === "/api/spotify/connection" && method === "DELETE") { state.spotifyConnected = false; return new Response(null, { status: 204 }); }
+    : Response.json({ spotify: { configured: true, connected: true }, apple: { configured: false } });
   if (path.endsWith("/favorite") && method === "PUT") {
     const ok = state.delayFavorite ? await new Promise<boolean>(resolve => { state.finishFavorite = resolve; }) : !state.favoriteFailure;
     if (!ok) return Response.json({ error: "The favorite could not be saved." }, { status: 503 });
-    const selected = rooms.find(item => path === `/api/rooms/${item.slug}/favorite`);
+    const selected = state.rooms.find(item => path === `/api/rooms/${item.slug}/favorite`);
     if (selected) selected.isFavorite = body.favorite;
     return Response.json({ ok: true });
   }

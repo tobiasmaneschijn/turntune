@@ -36,6 +36,7 @@ export interface FriendsPanelProps {
   onOpenRoom: (slug: string) => void;
   onOpenPerson?: (id: string) => void;
   currentRoomSlug?: string;
+  compact?: boolean;
 }
 
 const isUser = (value: unknown): value is User => Boolean(value && typeof value === "object" &&
@@ -58,8 +59,9 @@ function isSocialPayload(value: unknown): value is SocialPayload {
       "slug" in invitation.room && typeof invitation.room.slug === "string" && "name" in invitation.room && typeof invitation.room.name === "string"));
 }
 
-export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerson, currentRoomSlug }: FriendsPanelProps) {
+export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerson, currentRoomSlug, compact = false }: FriendsPanelProps) {
   const panelId = useId();
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [people, setPeople] = useState<SocialPerson[]>([]);
   const [blockedPeople, setBlockedPeople] = useState<User[]>([]);
   const [receiveRequests, setReceiveRequests] = useState(true);
@@ -123,7 +125,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
   useEffect(() => {
     mountedRef.current = true;
     setPeople([]); setBlockedPeople([]); setReceiveRequests(true); setInvitations([]); setLoaded(false); setRemoveTarget(null); setLoadError(""); setActionError(""); setNotice("");
-    setQuery(""); setSearchResults([]); setSearched(false); setSearching(false); setSearchError(""); setInvited(new Set());
+    setQuery(""); setSearchResults([]); setSearched(false); setSearching(false); setSearchError(""); setInvited(new Set()); setDiscoveryOpen(false);
     pendingRef.current.clear(); setPending(new Set());
     void load();
     const timer = setInterval(() => { if (document.visibilityState === "visible" && visibleRef.current) void load(); }, 30_000);
@@ -257,8 +259,24 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
 
   const friends = people.filter(person => person.state === "friends");
   const requests = people.filter(person => person.state !== "friends");
-  return <section className="friends-panel" aria-labelledby={`${panelId}-title`} ref={sectionRef}>
-    <h2 id={`${panelId}-title`}>Friends</h2>
+  const friendSettings = <details className="friends-discovery friends-settings"><summary>Friend settings</summary>
+    <label className="friends-person"><span>Receive friend requests</span><input type="checkbox" checked={receiveRequests} disabled={!loaded || pending.has("settings")} onChange={event => changeRequestSetting(event.target.checked)} /></label>
+    {blockedPeople.length > 0 && <div className="friends-group"><h3>Blocked listeners</h3>{blockedPeople.map(user => personRow(user, undefined, true))}</div>}
+  </details>;
+  const discovery = <>
+    <form className="friends-search" onSubmit={search}><Input aria-label="Find people" aria-describedby={`${panelId}-search-requirement`} minLength={2} maxLength={48} placeholder="Name" value={query} onChange={event => {
+      setQuery(event.target.value); searchRequestRef.current += 1; searchControllerRef.current?.abort(); setSearching(false); setSearched(false); setSearchResults([]); setSearchError("");
+    }} /><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? "Searching…" : "Search"}</Button></form>
+    <p className="friends-search-hint" id={`${panelId}-search-requirement`}>Enter at least 2 characters.</p>
+    {searchError && <p className="friends-error" role="alert">{searchError}</p>}
+    {searchResults.map(user => personRow(user, people.find(person => person.user.id === user.id)))}
+    {searched && !searchResults.length && <p className="friends-state" role="status">No matches.</p>}
+  </>;
+  return <section className={`friends-panel${compact ? " friends-panel--compact" : ""}`} aria-labelledby={`${panelId}-title`} ref={sectionRef}>
+    {compact ? <div className="friends-panel-heading">
+      <h2 id={`${panelId}-title`}>Friends</h2>
+      <Button size="sm" variant="ghost" aria-expanded={discoveryOpen} aria-controls={`${panelId}-discovery`} onClick={() => setDiscoveryOpen(open => !open)}><UserPlus />Find people</Button>
+    </div> : <h2 id={`${panelId}-title`}>Friends</h2>}
     {!loaded && loading && <p className="friends-state" role="status">Loading friends…</p>}
     {loadError && <div className="friends-error" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>Retry</Button></div>}
     {actionError && <p className="friends-error" role="alert">{actionError}</p>}
@@ -267,19 +285,13 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
     {friends.map(person => personRow(person.user, person))}
     {loaded && !friends.length && !requests.length && !invitations.length && <p className="friends-state">No friends yet.</p>}
     {requests.length > 0 && <div className="friends-group"><h3>Requests</h3>{requests.map(person => personRow(person.user, person))}</div>}
-    <details className="friends-discovery"><summary>Friend settings</summary>
-      <label className="friends-person"><span>Receive friend requests</span><input type="checkbox" checked={receiveRequests} disabled={!loaded || pending.has("settings")} onChange={event => changeRequestSetting(event.target.checked)} /></label>
-      {blockedPeople.length > 0 && <div className="friends-group"><h3>Blocked listeners</h3>{blockedPeople.map(user => personRow(user, undefined, true))}</div>}
-    </details>
-    <details className="friends-discovery"><summary>Find people</summary>
-      <form className="friends-search" onSubmit={search}><Input aria-label="Find people" aria-describedby={`${panelId}-search-requirement`} minLength={2} maxLength={48} placeholder="Name" value={query} onChange={event => {
-        setQuery(event.target.value); searchRequestRef.current += 1; searchControllerRef.current?.abort(); setSearching(false); setSearched(false); setSearchResults([]); setSearchError("");
-      }} /><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? "Searching…" : "Search"}</Button></form>
-      <p className="friends-search-hint" id={`${panelId}-search-requirement`}>Enter at least 2 characters.</p>
-      {searchError && <p className="friends-error" role="alert">{searchError}</p>}
-      {searchResults.map(user => personRow(user, people.find(person => person.user.id === user.id)))}
-      {searched && !searchResults.length && <p className="friends-state" role="status">No matches.</p>}
-    </details>
+    {compact ? <div className="friends-panel-discovery" id={`${panelId}-discovery`} hidden={!discoveryOpen}>
+      {discovery}
+      {friendSettings}
+    </div> : <>
+      {friendSettings}
+      <details className="friends-discovery"><summary>Find people</summary>{discovery}</details>
+    </>}
     <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
       <DialogContent showCloseButton={false}>
         <DialogTitle>Remove {removeTarget?.name} from friends?</DialogTitle>

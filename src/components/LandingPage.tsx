@@ -4,8 +4,10 @@ import { ArrowRight, MessageCircle, Music2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { User } from "@/types";
 import { Avatar } from "@/components/Avatar";
+import { AppHeader } from "@/components/AppHeader";
 import { Brand } from "@/components/app-primitives";
 import { AppVersion } from "@/components/AppVersion";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -54,21 +56,14 @@ function navigateInsideApp(
 export function LandingPage({ onNavigate }: LandingPageProps) {
   return (
     <main className="landing-page">
-      <header className="landing-header">
-        <nav className="landing-nav" aria-label="Main navigation">
-          <a
-            className="landing-brand-link"
-            href="/"
-            aria-label="Lydman home"
-            onClick={(event) => navigateInsideApp(event, "/", onNavigate)}
-          >
-            <Brand />
-          </a>
-          <div className="landing-nav-links">
+      <AppHeader
+        onHome={() => onNavigate("/")}
+        navigation={<div className="landing-nav-links">
             <a href="#how-it-works">How it works</a>
             <a href="#music-services">Music services</a>
-          </div>
-          <div className="landing-nav-actions">
+          </div>}
+        publicActions={<>
+            <ThemeToggle compact />
             <a
               href="/login"
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "landing-nav-sign-in")}
@@ -76,11 +71,10 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             >
               Sign in
             </a>
-          </div>
-        </nav>
-      </header>
+          </>}
+      />
 
-      <section className="landing-hero" aria-labelledby="landing-title">
+      <section className="landing-hero" id="main-content" tabIndex={-1} aria-labelledby="landing-title">
         <div className="landing-hero-copy">
           <h1 id="landing-title">Listen together.</h1>
           <p>

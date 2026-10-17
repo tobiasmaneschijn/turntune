@@ -1,7 +1,7 @@
 import packageJson from "../package.json";
 
 export interface FeedbackDiagnosticContext {
-  surface: "room-directory" | "room" | "profile";
+  surface: "room-directory" | "room" | "profile" | "admin";
   roomRole?: "owner" | "moderator" | "dj" | "listener";
   socketConnected?: boolean;
   playbackProvider?: string | null;

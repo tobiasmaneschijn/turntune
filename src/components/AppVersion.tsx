@@ -1,4 +1,5 @@
 import { APP_VERSION, CHANGELOG } from "../changelog";
+import type { RefObject } from "react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -17,10 +18,15 @@ const releaseDate = new Intl.DateTimeFormat("en", {
   timeZone: "UTC"
 });
 
-export function AppVersion() {
+export function AppVersion({ open, onOpenChange, hideTrigger = false, finalFocus }: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  finalFocus?: RefObject<HTMLElement | null>;
+} = {}) {
   return (
-    <Dialog>
-      <DialogTrigger render={
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {!hideTrigger && <DialogTrigger render={
         <Button
           variant="ghost"
           size="xs"
@@ -31,8 +37,8 @@ export function AppVersion() {
         <span className="app-version-number">v{APP_VERSION}</span>
         <span aria-hidden="true">·</span>
         <span>Changelog</span>
-      </DialogTrigger>
-      <DialogContent className="changelog-dialog">
+      </DialogTrigger>}
+      <DialogContent className="changelog-dialog" finalFocus={finalFocus}>
         <DialogHeader>
           <DialogTitle>Changelog</DialogTitle>
           <DialogDescription className="sr-only">Current version: {APP_VERSION}.</DialogDescription>

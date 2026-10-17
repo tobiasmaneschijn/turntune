@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, Check, ImageUp, LayoutDashboard, Palette, Pencil, Plus, UserPlus } from "lucide-react";
+import { ArrowLeft, Check, ImageUp, Palette, Pencil, Plus, UserPlus } from "lucide-react";
 import { Avatar } from "./Avatar";
-import { AppVersion } from "./AppVersion";
+import { AppHeader } from "./AppHeader";
 import { DevFlair } from "./DevFlair";
-import { FeedbackButton } from "./FeedbackDialog";
-import { ThemeToggle } from "./ThemeToggle";
 import { ProfileMusicEditor, profileTrackKey } from "./ProfileMusicEditor";
 import { TrackArtwork } from "./TrackArtwork";
 import { Button } from "./ui/button";
@@ -19,6 +17,7 @@ import { requestJson } from "../lib/authenticated-http";
 import { isProfileResponse, type ProfileResponse } from "../lib/profile-response";
 import { libraryTrack, requestPrivateLibrary } from "../music-library";
 import { providerLabel, trackSourceUrl } from "../music-presentation";
+import type { SoundSpinUserSettings } from "../playback-settings";
 import type { ProfileTrack, SoundSpinProfile, SoundSpinProfileOption, User } from "../types";
 
 const AVATAR_MIME_EXTENSIONS = new Map([
@@ -57,11 +56,14 @@ interface ProfileUpdate {
 }
 
 export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwnProfileUpdated, onOpenAdmin,
-  embedded = false, spotifyEnabled = false, onInvite, onEditStateChange }: {
+  embedded = false, spotifyEnabled = false, onInvite, onEditStateChange, onHome, onOpenProfile, onSignOut,
+  userSettings, onSettingsChange }: {
   profileId: string; accessToken: string; currentUser: User; onBack: () => void;
   onOwnProfileUpdated: (profile: SoundSpinProfile) => void; onOpenAdmin?: () => void;
   embedded?: boolean; spotifyEnabled?: boolean; onInvite?: (userId: string) => void;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean; discard: () => void }) => void;
+  onHome?: () => void; onOpenProfile?: () => void; onSignOut?: () => void;
+  userSettings?: SoundSpinUserSettings; onSettingsChange?: (settings: SoundSpinUserSettings) => void;
 }) {
   const formId = useId();
   const [profile, setProfile] = useState<SoundSpinProfile | null>(null);
@@ -392,14 +394,18 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
 
   const Container = embedded ? "div" : "main";
   const Heading = embedded ? "h2" : "h1";
-  if (loading) return <Container className={`profile-page${embedded ? " profile-embedded" : ""}`}><div className="profile-loading" role="status">Loading profile…</div></Container>;
-  if (!profile) return <Container className={`profile-page${embedded ? " profile-embedded" : ""}`}>
+  const appHeader = !embedded && <AppHeader currentUser={currentUser} page="profile" onHome={onHome ?? onBack}
+    onProfile={onOpenProfile ?? onBack} onAdmin={onOpenAdmin} onSignOut={onSignOut} beforeNavigate={leaveProfile}
+    navigationDisabled={editBusy} skipTo="#profile-main" diagnosticContext={{ surface: "profile" }}
+    settings={userSettings && onSettingsChange ? { accessToken, userSettings, onSettingsChange } : undefined} />;
+  if (loading) return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page${embedded ? " profile-embedded" : ""}`}><div className="profile-loading" role="status">Loading profile…</div></Container></>;
+  if (!profile) return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page${embedded ? " profile-embedded" : ""}`}>
     <div className="profile-shell profile-state-shell">
       {!embedded && <Button variant="ghost" onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button>}
       <Card className="profile-error-card"><CardHeader><CardTitle>Profile unavailable</CardTitle><CardDescription>{error}</CardDescription></CardHeader>
         <CardContent><Button variant="outline" onClick={() => setLoadRevision((value) => value + 1)}>Retry</Button></CardContent></Card>
     </div>
-  </Container>;
+  </Container></>;
 
   const profileUser: User = { id: profile.user_id, name: profile.display_name, avatarSeed: profile.user_id,
     avatarKey: profile.avatar_key, avatarUrl: profile.avatar_url || undefined, isAppAdmin: profile.is_app_admin };
@@ -411,17 +417,9 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const relationship = social?.people.find((person) => person.user.id === profileId)?.state;
   const songs = (profile.favorite_tracks || []).filter(track => spotifyEnabled || track.provider !== "spotify");
 
-  return <Container className={`profile-page profile-theme-${profile.theme_key}${embedded ? " profile-embedded" : ""}`}>
-    {!embedded && <header className="profile-page-header"><div className="profile-header-inner">
-      <Button className="profile-header-back" variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button>
-      <div className="app-brand-stack"><div className="profile-wordmark" aria-label="Lydman"><span className="logo-mark"><i /><i /><i /></span>Lydman</div><AppVersion /></div>
-      <div className="profile-header-actions"><ThemeToggle compact />
-        {onOpenAdmin && <Button variant="ghost" size="icon" disabled={editBusy} onClick={() => leaveProfile(onOpenAdmin)} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button>}
-        <FeedbackButton userId={currentUser.id} diagnosticContext={{ surface: "profile" }} />
-      </div>
-    </div></header>}
-
+  return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page profile-theme-${profile.theme_key}${embedded ? " profile-embedded" : ""}`}>
     <section className="profile-shell profile-shell-simple" aria-label={`${profile.display_name}'s profile`}>
+      {!embedded && <nav className="profile-page-navigation" aria-label="Profile"><Button variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button></nav>}
       <div className="profile-hero">
         <div className="profile-avatar-wrap"><Avatar user={profileUser} size={embedded ? 72 : 96} /></div>
         <div className="profile-identity">
@@ -517,5 +515,5 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
           <Button variant="destructive" aria-label={`Remove friend ${profile.display_name}`} onClick={() => { setConfirmRemoval(false); void changeFriend("remove"); }}>Remove friend</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-  </Container>;
+  </Container></>;
 }

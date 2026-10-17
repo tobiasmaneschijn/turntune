@@ -20,10 +20,6 @@ export function PageShell({ className, children }: { className?: string; childre
   return <main className={cn("page-shell", className)}>{children}</main>;
 }
 
-export function AppHeader({ className, brand = <Brand />, children }: { className?: string; brand?: ReactNode; children?: ReactNode }) {
-  return <header className={cn("app-header", className)}>{brand}<div className="app-header-actions">{children}</div></header>;
-}
-
 export function SectionHeader({ kicker, title, description, action, level = 2 }: { kicker?: string; title: string; description?: string; action?: ReactNode; level?: 1 | 2 | 3 }) {
   const Heading = `h${level}` as "h1" | "h2" | "h3";
   return <div className="section-header"><div>{kicker && <p className="section-kicker">{kicker}</p>}<Heading>{title}</Heading>{description && <p>{description}</p>}</div>{action}</div>;

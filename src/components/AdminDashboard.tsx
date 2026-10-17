@@ -2,7 +2,6 @@ import { approvedImageUrl } from "../lib/remote-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestJson } from "../lib/authenticated-http";
 import {
-  ArrowLeft,
   Archive,
   BarChart3,
   CalendarClock,
@@ -26,8 +25,7 @@ import {
   Users
 } from "lucide-react";
 import { Avatar } from "./Avatar";
-import { AppVersion } from "./AppVersion";
-import { ThemeToggle } from "./ThemeToggle";
+import { AppHeader } from "./AppHeader";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -41,6 +39,7 @@ import { Textarea } from "./ui/textarea";
 import { cn } from "../lib/utils";
 import { buildFeedbackAgentPrompt, type FeedbackAgentPromptData } from "../feedback-agent-prompt";
 import type { User } from "../types";
+import type { SoundSpinUserSettings } from "../playback-settings";
 
 type AdminTab = "overview" | "feedback" | "rooms" | "platform";
 type FeedbackStatus = "new" | "reviewing" | "planned" | "resolved" | "closed";
@@ -131,12 +130,20 @@ export function AdminDashboard({
   accessToken,
   currentUser,
   onBack,
-  onOpenRoom
+  onOpenRoom,
+  onOpenProfile,
+  onSignOut,
+  userSettings,
+  onSettingsChange
 }: {
   accessToken: string;
   currentUser: User;
   onBack: () => void;
   onOpenRoom: (slug: string) => void;
+  onOpenProfile?: () => void;
+  onSignOut?: () => void;
+  userSettings?: SoundSpinUserSettings;
+  onSettingsChange?: (settings: SoundSpinUserSettings) => void;
 }) {
   const [tab, setTab] = useState<AdminTab>("overview");
   const [data, setData] = useState<AdminDashboardData | null>(null);
@@ -306,30 +313,27 @@ export function AdminDashboard({
   };
 
   return (
-    <main className="admin-page">
+    <div className="admin-shell">
+      <AppHeader currentUser={currentUser} page="admin" onHome={onBack} onProfile={onOpenProfile} onAdmin={() => setTab("overview")} onSignOut={onSignOut}
+        skipTo="#admin-main" diagnosticContext={{ surface: "admin" }}
+        settings={userSettings && onSettingsChange ? { accessToken, userSettings, onSettingsChange } : undefined} />
+      <div className="admin-page">
       <aside className="admin-sidebar">
-        <div className="admin-brand"><span className="logo-mark"><i /><i /><i /></span><strong>Lydman</strong></div>
-        <div className="admin-console-label">ADMIN CONSOLE</div>
+        <div className="admin-console-label">Admin</div>
         <nav className="admin-nav" aria-label="Admin dashboard">
           <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">Overview</span></button>
           <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">Feedback</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
           <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /><span className="admin-nav-label">Rooms</span></button>
           <button type="button" aria-current={tab === "platform" ? "page" : undefined} className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}><LockKeyhole /><span className="admin-nav-label">Platform controls</span></button>
         </nav>
-        <div className="admin-sidebar-footer">
-          <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
-          <Button variant="ghost" size="sm" onClick={onBack} aria-label="Back to Lydman room directory"><ArrowLeft /><span className="admin-back-full">Back to Lydman</span><span className="admin-back-short">Back</span></Button>
-        </div>
       </aside>
 
-      <section className="admin-main">
+      <main className="admin-main" id="admin-main" tabIndex={-1}>
         <header className="admin-topbar">
           <div>
             <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : tab === "platform" ? "Platform controls" : "Rooms"}</h1>
           </div>
           <div className="admin-topbar-actions">
-            <AppVersion />
-            <ThemeToggle compact />
             <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
           </div>
         </header>
@@ -511,8 +515,9 @@ export function AdminDashboard({
         ) : tab === "platform" ? <PlatformPanel accessToken={accessToken} /> : data && (
           <RoomsPanel data={data} onOpenRoom={onOpenRoom} />
         )}
-      </section>
-    </main>
+      </main>
+      </div>
+    </div>
   );
 }
 
