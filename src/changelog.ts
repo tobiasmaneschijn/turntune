@@ -17,6 +17,38 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.8",
+    date: "2026-10-17",
+    title: "Room controls and account privacy",
+    sections: [
+      {
+        title: "Added",
+        items: [
+          "Room rules, member permissions, reports, warnings, timeouts, and bans.",
+          "Block accounts and choose whether to receive friend requests.",
+          "Account data export and deletion requests in Settings.",
+          "Administrator controls to restrict accounts and rooms, review deletion requests, and record moderation actions.",
+        ],
+      },
+      {
+        title: "Improved",
+        items: [
+          "Room controls for DJ access, track limits, repeat windows, skip voting, and fallback music.",
+          "Stronger account verification, private-room access, and permission checks.",
+          "Stricter image upload validation and limits on chat, feedback, and room activity.",
+        ],
+      },
+      {
+        title: "Fixed",
+        items: [
+          "Loading older chat messages preserves your reading position.",
+          "Duplicate chat submissions and conflicting updates to saved picks and sets.",
+          "Spotify and Apple Music sessions reset when you sign out or switch app accounts.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.7",
     date: "2026-10-09",
     title: "Mixcloud and room music services",
