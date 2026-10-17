@@ -2,23 +2,16 @@
 body:has(.landing-page) { min-width: 0; }
 
 .landing-page { min-height: 100dvh; color: var(--foreground); background: var(--background); }
-.landing-nav,
 .landing-hero,
 .landing-section,
 .landing-footer { width: min(1100px, calc(100% - 48px)); margin-inline: auto; }
 
-.landing-nav { min-height: 72px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 24px; border-bottom: 1px solid var(--border); }
-.landing-brand-link,
-.auth-home-link { color: inherit; text-decoration: none; border-radius: var(--radius-lg); }
-.landing-brand-link:focus-visible,
-.auth-home-link:focus-visible,
 .landing-nav-links a:focus-visible { outline: 2px solid var(--ring); outline-offset: 5px; }
 .landing-nav-links { display: flex; justify-content: center; gap: 24px; }
 .landing-nav-links a { color: var(--muted-foreground); font-size: 14px; text-decoration: none; transition: color 150ms ease; }
 .landing-nav-links a:hover { color: var(--foreground); }
-.landing-nav-actions,
 .landing-hero-actions { display: flex; align-items: center; gap: 12px; }
-.landing-nav-actions > a,
+.landing-nav-sign-in,
 .landing-hero-actions > a { text-decoration: none; }
 
 .landing-hero { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); align-items: center; gap: 48px; padding-block: 64px; }
@@ -89,12 +82,9 @@ body:has(.landing-page) { min-width: 0; }
   .landing-preview-stage { width: min(600px, 100%); }
 }
 @media (max-width: 600px) {
-  .landing-nav,
   .landing-hero,
   .landing-section,
   .landing-footer { width: calc(100% - 32px); }
-  .landing-nav { grid-template-columns: 1fr auto; gap: 12px; min-height: 64px; }
-  .landing-nav-links { display: none; }
   .landing-hero { padding-block: 32px; }
   .landing-hero h1 { font-size: clamp(40px, 11vw, 56px); margin-bottom: 16px; }
   .landing-hero-copy > p { font-size: 16px; }
@@ -107,4 +97,7 @@ body:has(.landing-page) { min-width: 0; }
   .landing-section { grid-template-columns: 1fr; gap: 16px; padding-block: 24px; }
   .landing-footer { min-height: 80px; gap: 16px; }
   .landing-footer-meta { flex-direction: column; align-items: flex-end; gap: 4px; }
+}
+@media (max-width: 640px) {
+  .landing-nav-links { display: none; }
 }

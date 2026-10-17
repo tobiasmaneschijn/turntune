@@ -1,6 +1,6 @@
 /* Available space is shared by context, mounted panes, and local controls. */
-.app-shell .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 64px); display: flex !important; flex-direction: column; gap: 8px; }
-.app-shell.room-is-reconnecting .room-layout { height: calc(var(--room-viewport-height, 100dvh) - 120px); }
+.app-shell .room-layout { height: calc(var(--room-viewport-height, 100dvh) - var(--app-header-height, 64px) - var(--room-toolbar-height, 64px)); display: flex !important; flex-direction: column; gap: 8px; }
+.app-shell.room-is-reconnecting .room-layout { height: calc(var(--room-viewport-height, 100dvh) - var(--app-header-height, 64px) - var(--room-toolbar-height, 64px) - 56px); }
 .app-shell .room-panels { flex: 1; min-height: 0; height: auto !important; }
 .room-workspace-context { flex: 0 1 auto; min-width: 0; min-height: 0; max-height: min(120px, 25%); overflow-y: auto; }
 .room-workspace-context:empty { display: none; }
@@ -40,7 +40,6 @@
 .listening-checklist-steps strong { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .listening-checklist-steps strong svg { width: 14px; height: 14px; color: var(--primary); }
 .listening-checklist-steps p { margin: 6px 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
-.topbar .room-listener-count { justify-content: flex-start; padding: 0; max-width: 100%; height: 26px; min-height: 26px; gap: 5px; font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
 .room-people-positioner { z-index: 60; }
 .room-people-popover { position: relative; width: min(390px, calc(100vw - 24px)); display: grid; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 12px 40px #0003; max-height: var(--available-height, calc(100dvh - 96px)); }
 .room-people-popover [data-slot=dialog-title], .room-people-popover h2 { margin: 0; font-size: 16px; }
@@ -58,20 +57,6 @@
 .room-shortcut-preference { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 13px; }
 .room-description-help { margin: 0; font-size: 12px; color: var(--muted-foreground); }
 .settings-empty-devices { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
-.room-lobby .lobby-directory-tools { grid-template-columns: minmax(0, 1fr) 160px 160px auto; }
-.lobby-filter-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.lobby-filter-summary p { margin: 0; }
-.lobby-return-room { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
-.lobby-return-room h2 { margin: 0; font-size: 12px; color: var(--muted-foreground); }
-.lobby-return-room p { margin: 4px 0 0; overflow-wrap: anywhere; font-weight: 600; }
-.room-card-preview { display: grid; gap: 12px; padding: 0 16px 12px; min-width: 0; }
-.room-card-description { margin: 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.room-preview-track { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.room-preview-track .room-preview-art { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 6px; }
-.room-preview-track > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.room-preview-track small { color: var(--muted-foreground); font-size: 10px; }
-.room-preview-track strong, .room-preview-track span { overflow-wrap: anywhere; font-size: 12px; }
-.room-preview-track span { color: var(--muted-foreground); }
 @media (max-width: 640px) {
   .room-workspace-context { gap: 4px; }
   .room-notice-strip { flex-basis: 100%; column-gap: 8px; row-gap: 0; }
@@ -83,18 +68,12 @@
   .room-mini-player { gap: 5px; padding-inline: 6px; }
   .room-mini-player .room-mini-art { width: 28px; height: 28px; flex-basis: 28px; }
   .room-mini-player > button:last-child { padding-inline: 8px; font-size: 12px; }
-  .room-lobby .lobby-directory-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .room-lobby .lobby-directory-tools > input, .room-lobby .lobby-directory-tools > button:last-child { grid-column: 1 / -1; }
 }
 @media (max-width: 640px), (pointer: coarse) {
   .room-theme-banner summary { min-height: 44px; }
   .app-shell .room-notice-strip .room-announcement-banner [data-slot=button] { min-width: 44px; min-height: 44px; height: 44px; }
   .app-shell .room-notice-strip .room-announcement-banner [data-slot=button][aria-label="Dismiss room note"] { width: 44px; }
-  :is(.app-shell, .room-lobby, [data-slot=dialog-content], .room-people-popover) button, .topbar .room-listener-count { min-width: 44px; min-height: 44px; }
-  .topbar .app-brand-stack { flex-direction: row; align-items: center; gap: 4px; }
-  .topbar .app-brand-stack .header-home-logo { height: 44px; min-height: 44px; }
-  .topbar .changelog-trigger { width: 44px; height: 44px; padding: 2px; }
-  .topbar .changelog-trigger > span:not(.app-version-number) { display: none; }
+  :is(.app-shell, .room-lobby, [data-slot=dialog-content], .room-people-popover) button { min-width: 44px; min-height: 44px; }
   :is([data-slot=select-item], [data-slot=dropdown-menu-item], [data-slot=dropdown-menu-radio-item]) { min-height: 44px; }
   :is(.app-shell, .room-lobby, [data-slot=dialog-content]) :is([data-slot=select-trigger], [data-slot=select-item]) { min-height: 44px; }
   :is(.app-shell, .room-lobby, [data-slot=dialog-content]) input[data-slot=input] { min-height: 44px; font-size: 16px; }

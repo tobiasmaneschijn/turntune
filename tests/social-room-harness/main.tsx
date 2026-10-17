@@ -30,6 +30,7 @@ const snapshot: RoomSnapshot = { room: { id: "lounge", name: "Lounge", ownerUser
   users: [user, bob], djUsers: [bob], serverTime: now };
 const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
 const emitEvent = (event: string, ...args: unknown[]) => listeners.get(event)?.forEach(listener => listener(...args));
+Object.assign(fixture, { removeFromRoom: () => emitEvent("room:removed", { roomId: "lounge", error: "You no longer have access to this room." }) });
 Object.defineProperty(socket, "connected", { get: () => fixture.connected });
 Object.defineProperty(socket, "active", { get: () => true });
 Object.assign(socket, {

@@ -25,6 +25,13 @@ async function openReport(page: Page, index = 0) {
 
 test("suspend an abusive account only after recording a reason", async ({ page }) => {
   await setup(page);
+  const account = page.getByRole("button", { name: "Account menu", exact: true });
+  await account.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "Admin dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Settings", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(account).toBeFocused();
   const userId = "22222222-2222-4222-8222-222222222222";
   const actions: unknown[] = [];
   await page.route("**/api/admin/platform-action", route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { applied: true } }); });

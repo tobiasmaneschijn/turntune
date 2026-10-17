@@ -6,7 +6,7 @@ import { MusicRail, type MusicRailControls } from "./components/MusicRail";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
 import { PanelErrorBoundary } from "./components/AppErrorBoundary";
-import { Brand } from "./components/app-primitives";
+import { AppHeader } from "./components/AppHeader";
 import { AppVersion } from "./components/AppVersion";
 import { RoomHeader } from "./components/RoomHeader";
 import { ParticipantActions } from "./components/ParticipantActions";
@@ -196,6 +196,10 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
           currentUser={profile}
           onBack={goHome}
           onOpenRoom={openRoom}
+          onOpenProfile={() => openProfile(profile.id)}
+          onSignOut={() => void auth.client?.auth.signOut()}
+          userSettings={userSettings}
+          onSettingsChange={changeUserSettings}
         />
       </Suspense>
     );
@@ -203,15 +207,15 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
 
   if (adminPage && auth.session && !profile.isAppAdmin) {
     return (
-      <main className="room-access-screen">
+      <><AppHeader currentUser={profile} onHome={goHome} onProfile={() => openProfile(profile.id)} onSignOut={() => void auth.client?.auth.signOut()} settings={{ accessToken: auth.session.access_token, userSettings, onSettingsChange: changeUserSettings }} />
+      <main className="room-access-screen" id="main-content" tabIndex={-1}>
         <Card className="room-access-error">
           <CardHeader>
-            <Brand />
             <CardTitle role="heading" aria-level={1}>Admin access required</CardTitle>
           </CardHeader>
           <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
         </Card>
-      </main>
+      </main></>
     );
   }
 
@@ -224,6 +228,11 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
           accessToken={auth.session.access_token}
           currentUser={profile}
           onBack={backFromProfile}
+          onHome={goHome}
+          onOpenProfile={() => openProfile(profile.id)}
+          onSignOut={() => void auth.client?.auth.signOut()}
+          userSettings={userSettings}
+          onSettingsChange={changeUserSettings}
           onOwnProfileUpdated={updateOwnProfile}
           onOpenAdmin={profile.isAppAdmin ? openAdmin : undefined}
         />
@@ -253,7 +262,10 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
 
   if (roomPasswordRequired) {
     return (
-      <main className="room-access-screen">
+      <><AppHeader currentUser={auth.session ? profile : undefined} onHome={goHome} onProfile={() => openProfile(profile.id)}
+        onAdmin={profile.isAppAdmin ? openAdmin : undefined} onSignOut={auth.enabled ? () => void auth.client?.auth.signOut() : undefined}
+        settings={auth.session ? { accessToken: auth.session.access_token, userSettings, onSettingsChange: changeUserSettings } : undefined} publicActions={<ThemeToggle compact />} />
+      <main className="room-access-screen" id="main-content" tabIndex={-1}>
         <PasswordDialog
           roomName={roomId.replaceAll("-", " ")}
           error={roomJoinError}
@@ -264,22 +276,24 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
             setRoomPassword(password);
           }}
         />
-      </main>
+      </main></>
     );
   }
 
   if (roomJoinError) {
     return (
-      <main className="room-access-screen">
+      <><AppHeader currentUser={auth.session ? profile : undefined} onHome={goHome} onProfile={() => openProfile(profile.id)}
+        onAdmin={profile.isAppAdmin ? openAdmin : undefined} onSignOut={auth.enabled ? () => void auth.client?.auth.signOut() : undefined}
+        settings={auth.session ? { accessToken: auth.session.access_token, userSettings, onSettingsChange: changeUserSettings } : undefined} publicActions={<ThemeToggle compact />} />
+      <main className="room-access-screen" id="main-content" tabIndex={-1}>
         <Card className="room-access-error">
           <CardHeader>
-            <Brand />
             <CardTitle>Couldn’t join this room</CardTitle>
             <CardDescription>{roomJoinError}</CardDescription>
           </CardHeader>
           <CardContent><Button onClick={() => { setRoomJoinError(""); retryRoom(); }}>Try again</Button> <Button variant="ghost" onClick={goHome}>Back to rooms</Button></CardContent>
         </Card>
-      </main>
+      </main></>
     );
   }
 
@@ -427,8 +441,8 @@ function Welcome({
 
   return (
     <main className="welcome">
-      <nav><Brand /><div className="welcome-nav-actions"><ThemeToggle compact /></div></nav>
-      <section className="welcome-content">
+      <AppHeader publicActions={<ThemeToggle compact />} />
+      <section className="welcome-content" id="main-content" tabIndex={-1}>
         <div className="welcome-copy">
           <h1>Listen together.</h1>
         </div>

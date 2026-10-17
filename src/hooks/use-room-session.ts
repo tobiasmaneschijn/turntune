@@ -96,7 +96,10 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     setSnapshot(null); setRoomPassword(password || ""); setRoomPasswordRequired(false); setRoomJoinError("");
   };
   const goHome = () => { transport.disconnect(); navigate({ kind: "lobby" }, "/"); };
-  const openProfile = (profileId: string) => navigate({ kind: "profile", profileId, backgroundRoomId: roomId || undefined }, `/profile/${profileId}`, { from: location.pathname, backgroundRoomId: roomId || undefined });
+  const openProfile = (profileId: string) => {
+    const backgroundRoomId = snapshot?.room.id === roomId ? roomId || undefined : undefined;
+    navigate({ kind: "profile", profileId, backgroundRoomId }, `/profile/${profileId}`, { from: location.pathname, backgroundRoomId });
+  };
   const openAdmin = () => { transport.disconnect(); navigate({ kind: "admin" }, "/admin", { from: location.pathname }); };
   const backFromProfile = () => { if (history.state?.from) history.back(); else goHome(); };
   return { route, roomId, profilePageId: route.kind === "profile" ? route.profileId : null, adminPage: route.kind === "admin", navigationContext,

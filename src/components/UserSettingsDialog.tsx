@@ -231,7 +231,7 @@ export function UserSettingsDialog({
       <DialogContent className="user-settings-dialog max-w-3xl" finalFocus={() => {
         const previous = returnFocusRef.current;
         return previous?.isConnected && previous !== document.body ? previous
-          : document.querySelector<HTMLButtonElement>(".room-more-actions, .lobby-more-actions") ?? true;
+          : document.querySelector<HTMLButtonElement>(".shared-account-trigger, .room-more-actions") ?? true;
       }}>
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>

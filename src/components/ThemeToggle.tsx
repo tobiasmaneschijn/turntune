@@ -20,16 +20,9 @@ const modes = [
 ] as const;
 
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
-  const { theme = "dark", setTheme } = useTheme();
+  const { theme = "dark" } = useTheme();
   const active = modes.find((mode) => mode.value === theme) || modes[0];
   const ActiveIcon = active.icon;
-  const changeTheme = (value: string) => {
-    const nextTheme = value as ThemeMode;
-    setTheme(nextTheme);
-    const settings = readUserSettings();
-    saveUserSettings({ ...settings, appearance: { ...settings.appearance, theme: nextTheme } });
-    window.dispatchEvent(new CustomEvent("soundspin:theme-change", { detail: nextTheme }));
-  };
 
   return (
     <DropdownMenu>
@@ -46,18 +39,24 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
           <DropdownMenuLabel>Appearance</DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup value={theme} onValueChange={changeTheme}>
-          {modes.map((mode) => {
-            const Icon = mode.icon;
-            return (
-              <DropdownMenuRadioItem key={mode.value} value={mode.value}>
-                <Icon />
-                {mode.label}
-              </DropdownMenuRadioItem>
-            );
-          })}
-        </DropdownMenuRadioGroup>
+        <ThemeMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+export function ThemeMenuItems() {
+  const { theme = "dark", setTheme } = useTheme();
+  const changeTheme = (value: string) => {
+    if (!modes.some(mode => mode.value === value)) return;
+    const nextTheme = value as ThemeMode;
+    setTheme(nextTheme);
+    const settings = readUserSettings();
+    saveUserSettings({ ...settings, appearance: { ...settings.appearance, theme: nextTheme } });
+    window.dispatchEvent(new CustomEvent("soundspin:theme-change", { detail: nextTheme }));
+  };
+  return <DropdownMenuRadioGroup value={theme} onValueChange={changeTheme}>{modes.map(mode => {
+    const Icon = mode.icon;
+    return <DropdownMenuRadioItem key={mode.value} value={mode.value} closeOnClick><Icon />{mode.label}</DropdownMenuRadioItem>;
+  })}</DropdownMenuRadioGroup>;
 }

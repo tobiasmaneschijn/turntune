@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LandingPage } from "./LandingPage";
+import { AppHeader } from "./AppHeader";
 import { ThemeToggle } from "./ThemeToggle";
-import { Brand } from "./app-primitives";
 import { AppVersion } from "./AppVersion";
 import { ForgotPasswordForm } from "./forgot-password-form";
 import { LoginForm } from "./login-form";
@@ -60,20 +60,8 @@ function AuthScreen({
 
   return (
     <main className="welcome auth-welcome">
-      <nav>
-        <a
-          className="auth-home-link"
-          href="/"
-          onClick={(event) => {
-            event.preventDefault();
-            onNavigate("/");
-          }}
-        >
-          <Brand />
-        </a>
-        <div className="welcome-nav-actions"><ThemeToggle compact /></div>
-      </nav>
-      <section className="auth-content">
+      <AppHeader onHome={() => onNavigate("/")} publicActions={<ThemeToggle compact />} />
+      <section className="auth-content" id="main-content" tabIndex={-1}>
         <div className="auth-intro">
           <h1>{path === "/sign-up" ? "Create an account" : path === "/forgot-password" ? "Reset password" : "Sign in"}</h1>
         </div>
@@ -93,8 +81,8 @@ export function PasswordRecoveryScreen({
 }) {
   return (
     <main className="welcome auth-welcome">
-      <nav><Brand /><div className="welcome-nav-actions"><ThemeToggle compact /></div></nav>
-      <section className="auth-content">
+      <AppHeader publicActions={<ThemeToggle compact />} />
+      <section className="auth-content" id="main-content" tabIndex={-1}>
         <div className="auth-intro">
           <h1>Account recovery</h1>
         </div>

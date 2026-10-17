@@ -6,7 +6,7 @@ import { readUserSettings, saveUserSettings, type SoundSpinUserSettings } from "
 import { takeAuthDestination } from "./lib/auth-destination";
 import { PublicEntry, PasswordRecoveryScreen } from "./components/PublicEntry";
 import { LoadingScreen } from "./components/LoadingScreen";
-import { Brand } from "./components/app-primitives";
+import { AppHeader } from "./components/AppHeader";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 
@@ -38,10 +38,10 @@ export function App() {
     return () => window.removeEventListener("soundspin:theme-change", syncTheme);
   }, []);
 
-  if (auth.error) return <main className="room-access-screen"><Card className="room-access-error">
-    <CardHeader><Brand /><CardTitle>Could not connect</CardTitle><CardDescription>{auth.error}</CardDescription></CardHeader>
+  if (auth.error) return <><AppHeader publicActions={null} /><main className="room-access-screen" id="main-content" tabIndex={-1}><Card className="room-access-error">
+    <CardHeader><CardTitle>Could not connect</CardTitle><CardDescription>{auth.error}</CardDescription></CardHeader>
     <CardContent><Button onClick={retryAuth}>Try again</Button></CardContent>
-  </Card></main>;
+  </Card></main></>;
   if (auth.loading) return <LoadingScreen label="Restoring your session…" />;
   if (auth.enabled && !auth.session) {
     focusOnEntry.current = true;
