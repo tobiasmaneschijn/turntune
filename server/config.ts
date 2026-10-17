@@ -16,16 +16,17 @@ export function validateServerConfig(env: NodeJS.ProcessEnv): void {
   if (!configured.length && !explicitLocalMode) {
     throw new Error("Supabase authentication is required outside explicit development/test mode.");
   }
-  if (configured.length && env.NODE_ENV === "production") {
+  if (configured.length && env.NODE_ENV !== "test") {
     // The SDK gives inline keys precedence over SUPABASE_JWKS_URL. Reject
     // leftover fixture keys instead of silently replacing the project source.
     if (env.SUPABASE_JWKS?.trim()) {
-      throw new Error("Production requires the project JWKS URL; unset SUPABASE_JWKS inline keys.");
+      throw new Error("Use the project JWKS URL outside tests; unset SUPABASE_JWKS inline keys.");
     }
     const project = new URL(env.SUPABASE_URL!);
     const jwks = new URL(env.SUPABASE_JWKS_URL!);
-    if (project.protocol !== "https:" || project.username || project.password || project.pathname !== "/" || project.search || project.hash) {
-      throw new Error("SUPABASE_URL must be the HTTPS project origin.");
+    const localHttp = env.NODE_ENV === "development" && project.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(project.hostname);
+    if ((project.protocol !== "https:" && !localHttp) || project.username || project.password || project.pathname !== "/" || project.search || project.hash) {
+      throw new Error("SUPABASE_URL must be the HTTPS project origin, or HTTP loopback in development.");
     }
     if (jwks.origin !== project.origin || jwks.username || jwks.password || jwks.pathname !== "/auth/v1/.well-known/jwks.json" || jwks.search || jwks.hash) {
       throw new Error("SUPABASE_JWKS_URL must identify the configured project's Auth JWKS.");

@@ -35,6 +35,16 @@ test("production pins the project JWKS source without inline or credential overr
   assert.doesNotThrow(()=>validateServerConfig({...env,SUPABASE_JWKS:"  "}));
   assert.doesNotThrow(()=>validateServerConfig({...env,NODE_ENV:"test",SUPABASE_JWKS:JSON.stringify({keys:[]})}));
 });
+
+test("local sign-in rejects a mismatched project JWKS before serving authenticated requests", () => {
+  const env = { NODE_ENV: "development", SUPABASE_URL: "https://project.invalid", SUPABASE_PUBLISHABLE_KEY: "fixture-public",
+    SUPABASE_SECRET_KEY: "fixture-secret", SUPABASE_JWKS_URL: "https://other-project.invalid/auth/v1/.well-known/jwks.json" };
+  assert.throws(() => validateServerConfig(env), /configured project's Auth JWKS/);
+  assert.doesNotThrow(() => validateServerConfig({ ...env, SUPABASE_JWKS_URL: "https://project.invalid/auth/v1/.well-known/jwks.json" }));
+  const local = { ...env, SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_JWKS_URL: "http://127.0.0.1:54321/auth/v1/.well-known/jwks.json" };
+  assert.doesNotThrow(() => validateServerConfig(local));
+  assert.throws(() => validateServerConfig({ ...local, NODE_ENV: "production" }), /HTTPS project origin/);
+});
 test("aborted namespace handshakes release account slots even without disconnect",()=>{
   const budget=new SecurityBudget();
   const socket=()=>Object.assign(new EventEmitter(),{conn:Object.assign(new EventEmitter(),{readyState:"open"})});
