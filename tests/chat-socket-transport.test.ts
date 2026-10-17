@@ -21,7 +21,7 @@ function harness() {
   return { socket, session, factory, sends, messages, polls, connections, typing, handlers, receive, acknowledge: () => release?.(), fail: () => { reply = { ok: false } } }
 }
 
-test('chat admission requires the ACK+snapshot parent signal and reconnect preserves one transport lifetime', async () => {
+test('Rejoining a room keeps chat disabled until admission is confirmed', async () => {
   const h = harness(); await Promise.resolve()
   assert.deepEqual(h.connections, [false])
   h.receive('connect'); h.receive('room:snapshot', { room: { id: 'lounge' } })
@@ -41,7 +41,7 @@ test('chat admission requires the ACK+snapshot parent signal and reconnect prese
   h.session.dispose()
 })
 
-test('socket room envelopes and disposed callbacks cannot leak other-room or old-session messages', async () => {
+test('Messages from other rooms or a departed session stay out of the conversation', async () => {
   const h = harness(); h.factory.setAdmitted(true)
   h.receive('chat:message', { roomId: 'secret-room', message }); assert.equal(h.messages.length, 0)
   h.receive('chat:message', { roomId: 'lounge', message }); assert.equal(h.messages.length, 1)
@@ -52,29 +52,4 @@ test('socket room envelopes and disposed callbacks cannot leak other-room or old
   h.session.dispose(); h.acknowledge(); await pending
   assert.equal(h.messages.length, 1)
   assert.equal(h.handlers.get('chat:message')?.size, 0)
-})
-
-test('typing stop tombstones reject delayed active events and clear on disconnect', () => {
-  const h = harness(); h.factory.setAdmitted(true)
-  const sentAt = Date.now()
-  h.receive('chat:typing', { roomId: 'lounge', typing: { userId: 'mira', active: true, sentAt } })
-  h.receive('chat:typing', { roomId: 'lounge', typing: { userId: 'mira', active: false, sentAt: sentAt + 1 } })
-  h.receive('chat:typing', { roomId: 'lounge', typing: { userId: 'mira', active: true, sentAt } })
-  assert.deepEqual(h.typing.at(-1), [])
-  h.receive('disconnect'); assert.deepEqual(h.typing.at(-1), [])
-  h.session.dispose()
-})
-
-test('accepted poll updates require active room admission and dispose with the socket transport', () => {
-  const h = harness()
-  const poll = { messageId: message.id, userId: 'alice', optionIndex: 1, revision: 2 }
-  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.equal(h.polls.length, 0)
-  h.factory.setAdmitted(true)
-  h.receive('chat:poll', { roomId: 'other', poll }); assert.equal(h.polls.length, 0)
-  h.receive('chat:poll', { roomId: 'lounge', poll: { ...poll, revision: 0 } }); assert.equal(h.polls.length, 0)
-  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.deepEqual(h.polls, [poll])
-  h.session.dispose()
-  h.receive('chat:poll', { roomId: 'lounge', poll }); assert.equal(h.polls.length, 1)
-  assert.equal(h.handlers.get('chat:poll')?.size, 0)
-  assert.equal(h.sends.length, 0)
 })

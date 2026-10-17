@@ -8,6 +8,39 @@ Use Impeccable's `distill` command to simplify an existing interface.
 Preserve the project's design system, accessibility, and the copy rules below
 when applying these skills. Installation details are in `.agents/skills/README.md`.
 
+## Testing
+
+- Organize all frontend tests, including helpers, around user use cases. Name the
+  user action and expected outcome. Prefer a short workflow with its relevant
+  recovery path over separate cases for every event, callback, or state transition.
+- Keep the frontend suite small. A technical possibility alone does not justify
+  another test. Explain the distinct user failure an additional case protects.
+  Do not combine unrelated cases or hide exhaustive permutations in one large
+  test just to reduce the reported count.
+- Add or change tests to protect a concrete user-facing failure, a regression,
+  or a security/data-integrity requirement. Do not add tests automatically for
+  every component, UI edit, or implementation detail.
+- Prioritize authorized actions, account isolation, saved work, avoiding duplicate
+  operations, uninterrupted playback, and recovery. Check accessibility within the
+  relevant workflow.
+- Extend an existing use case before adding another scenario or harness. Use a
+  helper test only when an important outcome needs direct control that the browser
+  workflow cannot reasonably provide. Do not duplicate the same contract at every
+  layer or move removed browser permutations into helper tests.
+- Do not pin incidental copy, CSS classes, animation names or durations, exact
+  decorative dimensions, DOM structure, or layout arithmetic. Assert outcomes
+  such as correct state, reachable controls, no overflow, keyboard access, minimum
+  target sizes, and honored reduced-motion preferences where relevant.
+- Use actual production components in UI fixtures. Do not build replica interfaces
+  just to test or screenshot them. Do not add screenshot matrices for routine UI
+  changes; check usability within the relevant workflow.
+- Run viewport-independent behavior once. Add desktop/mobile or theme variants
+  only when they exercise a distinct layout, interaction, or rendering risk.
+- Consolidate overlapping coverage and remove obsolete fixtures and baselines.
+  Do not weaken meaningful assertions or skip failing tests to make checks pass.
+- Run the affected checks after changes. Broaden testing for shared behavior,
+  unresolved failures, or required release gates; report what actually ran.
+
 ## Deployment with Dokploy
 
 Use the `dokploy` API skill for deployment work. Read

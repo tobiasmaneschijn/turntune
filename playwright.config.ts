@@ -5,7 +5,6 @@ export default defineConfig({
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
-  expect: { toHaveScreenshot: { animations: "disabled", caret: "hide", maxDiffPixelRatio: 0.015 } },
   use: {
     baseURL: "http://127.0.0.1:4174",
     timezoneId: "UTC",
@@ -13,8 +12,7 @@ export default defineConfig({
     trace: "retain-on-failure"
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
-    { name: "mobile", use: { ...devices["iPhone 13"], browserName: "chromium" } }
+    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }
   ],
   webServer: {
     command: "npm run dev:web -- --mode test --port 4174 --strictPort",

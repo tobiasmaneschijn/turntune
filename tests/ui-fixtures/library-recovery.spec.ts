@@ -1,6 +1,6 @@
 import {expect,test} from '@playwright/test';
 
-test('a corrupt own library can be explicitly cleared without changing queued tracks',async({page})=>{
+test('recover an unreadable private library without deleting queued songs',async({page})=>{
   let reset=false,writes=0;
   await page.route('**/api/library',route=>{
     if(route.request().method()==='POST') {expect(route.request().postDataJSON()).toEqual({type:'clear-library'});expect(route.request().headers().authorization).toBe('Bearer fixture-access-token');reset=true;writes++;}

@@ -143,14 +143,14 @@ server with fake configuration and blocks external requests.
 
 GitHub Actions runs once per pull-request update and on pushes to `master` and
 `develop`, cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
-shares one Linux installation across the fixture, playback, music and player
-checks. `npm run test:ui:visual` keeps the authentication and surface screenshot
-baselines on Windows. Behavior checks use one worker; visual checks use two. The
-focused browser commands remain available for local debugging.
+shares one Linux installation across room, chat, playback and music use cases.
+`npm run test:ui` covers public entry and account recovery. Each workflow runs
+once; phone sizes and keyboard access are exercised within the workflows that
+need them. The focused browser commands remain available for local debugging.
 
-Tag fixture cases that set their own viewport with `@fixed-viewport` so they run
-once. The player suite covers phone sizes within its scenarios. Tag music
-responsive and touch cases with `@mobile` to include them in the phone project.
+Frontend helper tests cover consequential outcomes that need direct control,
+such as account isolation and uncertain delivery. Avoid duplicate checks across
+layers, implementation permutations, and cosmetic screenshot matrices.
 
 For focused checks use `test:radio`, `test:chat`, `test:playback`, or
 `test:integration`. Integration tests never load `.env` or contact the configured

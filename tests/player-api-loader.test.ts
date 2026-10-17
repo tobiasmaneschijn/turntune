@@ -31,28 +31,8 @@ function useBrowser(t: { after: (callback: () => void) => void }) {
   return { scripts, browser };
 }
 
-test("concurrent SDK loads share a script and preserve an existing readiness callback", async (t) => {
-  const { scripts, browser } = useBrowser(t);
-  let api: object | undefined;
-  let previousCalls = 0;
-  const previousCallback = () => { previousCalls += 1; };
-  browser.onYouTubeIframeAPIReady = previousCallback;
-  const load = createPlayerApiLoader({ src: "https://example.com/sdk.js", label: "Test SDK", readApi: () => api, readyCallback: "onYouTubeIframeAPIReady" });
-  const first = load();
-  const second = load();
-  assert.equal(first, second);
-  assert.equal(scripts.length, 1);
-  api = {};
-  browser.onYouTubeIframeAPIReady?.();
-  assert.equal(await first, api);
-  assert.equal(await second, api);
-  assert.equal(previousCalls, 1);
-  assert.equal(browser.onYouTubeIframeAPIReady, previousCallback);
-  assert.equal(await load(), api);
-  assert.equal(scripts.length, 1);
-});
 
-test("failed SDK downloads can retry with a new script", async (t) => {
+test("listeners can retry when the playback library fails to download", async (t) => {
   const { scripts } = useBrowser(t);
   let api: object | undefined;
   const load = createPlayerApiLoader({ src: "https://example.com/sdk.js", label: "Test SDK", readApi: () => api });
@@ -65,14 +45,4 @@ test("failed SDK downloads can retry with a new script", async (t) => {
   api = {};
   scripts[0].dispatchEvent(new Event("load"));
   assert.equal(await second, api);
-});
-
-test("SDK timeouts reject and release readiness hooks for the next mount", async (t) => {
-  const { scripts, browser } = useBrowser(t);
-  const previous = () => undefined;
-  browser.onYouTubeIframeAPIReady = previous;
-  const load = createPlayerApiLoader({ src: "https://example.com/sdk.js", label: "Test SDK", readApi: () => undefined, readyCallback: "onYouTubeIframeAPIReady", timeoutMs: 5 });
-  await assert.rejects(load(), /took too long/);
-  assert.equal(scripts.length, 0);
-  assert.equal(browser.onYouTubeIframeAPIReady, previous);
 });

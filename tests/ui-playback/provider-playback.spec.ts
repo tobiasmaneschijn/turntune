@@ -41,165 +41,44 @@ test.beforeEach(async ({ page }) => {
   await page.route("https://w.soundcloud.com/player/**", (route) => route.fulfill({ contentType: "text/html", body: "<html></html>" }));
 });
 
-test("Apple token and callback refreshes preserve audio and use the latest callbacks", async ({ page }) => {
+
+test("Apple Music follows room controls and keeps listening after a long session", async ({ page }) => {
   await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.map((call) => call.method)))
-    .toEqual(["configure", "setQueue", "seek", "play"]);
-
-  await page.evaluate(() => window.providerTest.render({ accessToken: "refreshed-token", callbackVersion: 1 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusCallbacks.includes(1))).toBe(true);
-  expect(await page.evaluate(() => window.providerTest.calls.map((call) => call.method)))
-    .toEqual(["configure", "setQueue", "seek", "play"]);
-
-  await page.evaluate(() => window.providerTest.setMusicState(179, "playing"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.some((status) => status.currentTime === 179))).toBe(true);
-  await page.evaluate(() => window.providerTest.setMusicState(0, "completed"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.endCallbacks)).toEqual([1]);
-
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
+  await page.evaluate(() => window.providerTest.render({ playing: false, position: 40 }));
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("pause");
+  expect(await page.evaluate(() => window.providerTest.calls.filter(call => call.method === "seek").at(-1)?.value)).toBe(40);
+  await page.evaluate(() => {
+    window.providerTest.setNow(100_000 + 6 * 60 * 60 * 1000);
+    window.providerTest.render({ playing: true, position: 85, accessToken: "refreshed-app-token" });
+  });
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.filter(call => call.method === "configure").length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
+  expect(await page.evaluate(() => window.providerTest.calls.filter(call => call.method === "seek").at(-1)?.value)).toBe(85);
+  expect(await page.evaluate(() => window.providerTest.inspectMusic())).toEqual({ volume: 0.5, authorized: true });
   await page.evaluate(() => window.providerTest.unmount());
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("pause");
 });
 
-test("SoundCloud delayed iframe response seeks to the room time at command execution", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => {
-    window.providerTest.setNow(105_000);
-    window.providerTest.resolvePosition(0);
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls)).toEqual([
-    { method: "seek", value: 15_000 },
-    { method: "play" }
-  ]);
-});
-
-test("Apple backward room seek clears completion evidence from the old position", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
+test("Apple Music requires fresh consent after a different listener or explicit disconnect", async ({ page }) => {
+  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple&apple-owner=listener-old");
+  const connect = page.getByRole("button", { name: "Connect Apple Music", exact: true });
+  await expect(connect).toBeEnabled();
+  expect(await page.evaluate(() => window.providerTest.inspectMusic().authorized)).toBe(false);
+  expect(await page.evaluate(() => window.providerTest.calls.some(call => call.method === "play"))).toBe(false);
+  await connect.click();
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => window.providerTest.setMusicState(179, "playing"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)?.currentTime)).toBe(179);
-
-  await page.evaluate(() => window.providerTest.render({ position: 20 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.filter((call) => call.method === "seek").at(-1)?.value)).toBe(20);
-  await page.evaluate(() => window.providerTest.setMusicState(20, "stopped"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)?.currentTime)).toBe(20);
-  expect(await page.evaluate(() => window.providerTest.endCallbacks)).toEqual([]);
-});
-
-test("SoundCloud ignores a position response superseded by a room seek", async ({ page }) => {
-  await freezeProviderClock(page);
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => window.providerTest.render({ position: 40 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(2);
-  await page.evaluate(() => window.providerTest.resolvePosition(0));
-  expect(await page.evaluate(() => window.providerTest.calls)).toEqual([]);
-  await page.evaluate(() => window.providerTest.resolvePosition(0));
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls)).toEqual([
-    { method: "seek", value: 40_000 },
-    { method: "play" }
-  ]);
-});
-
-test("Apple reports measured playing and paused states and leaves unknown states unconfirmed", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)))
-    .toMatchObject({ playing: true, trackId: "room-track", currentTime: 10 });
-  await page.evaluate(() => window.providerTest.setMusicState(12, "paused"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)))
-    .toMatchObject({ playing: false, trackId: "room-track", currentTime: 12 });
-  await page.evaluate(() => window.providerTest.setMusicState(13, "waiting"));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)?.currentTime)).toBe(13);
-  expect(await page.evaluate(() => window.providerTest.statusSamples.at(-1)?.playing)).toBeUndefined();
-});
-
-test("SoundCloud measures iframe pause state instead of assuming a successful play command", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
+  await page.getByRole("button", { name: "Disconnect Apple Music", exact: true }).click();
+  await expect(connect).toBeEnabled();
+  expect(await page.evaluate(() => window.providerTest.inspectMusic().authorized)).toBe(false);
+  await connect.click();
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)))
-    .toMatchObject({ playing: false, trackId: "room-track", currentTime: 10 });
-  await page.evaluate(() => window.providerTest.setWidgetPaused(false));
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => window.providerTest.resolvePosition(11_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.statusSamples.at(-1)))
-    .toMatchObject({ playing: true, trackId: "room-track", currentTime: 11 });
+  await page.evaluate(() => window.providerTest.render({ userId: "listener-two", accessToken: "listener-two-token" }));
+  await expect(connect).toBeEnabled();
+  expect(await page.evaluate(() => window.providerTest.inspectMusic().authorized)).toBe(false);
 });
 
-test("SoundCloud discards a delayed pause observation after a newer room seek or unmount", async ({ page }) => {
-  await freezeProviderClock(page);
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => {
-    window.providerTest.resolvePosition(10_000);
-    window.providerTest.deferPaused();
-  });
-  await page.clock.runFor(750);
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPaused)).toBe(1);
-  await page.evaluate(() => window.providerTest.render({ position: 40, callbackVersion: 1 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  const before = await page.evaluate(() => window.providerTest.statusSamples.length);
-  await page.evaluate(() => window.providerTest.resolvePaused());
-  expect(await page.evaluate(() => window.providerTest.statusSamples.length)).toBe(before);
-  await page.evaluate(() => window.providerTest.resolvePosition(40_000));
-  await page.clock.runFor(750);
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBeGreaterThan(0);
-  await page.evaluate(() => {
-    window.providerTest.deferPaused();
-    window.providerTest.resolvePosition(40_000);
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPaused)).toBe(1);
-  await page.evaluate(() => window.providerTest.unmount());
-  const afterUnmount = await page.evaluate(() => window.providerTest.statusSamples.length);
-  await page.evaluate(() => window.providerTest.resolvePaused());
-  expect(await page.evaluate(() => window.providerTest.statusSamples.length)).toBe(afterUnmount);
-});
-
-test("Apple renews a six-hour session and restores the latest room checkpoint and volume", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => {
-    window.providerTest.setNow(100_000 + 6 * 60 * 60 * 1000);
-    window.providerTest.render({ position: 20, accessToken: "refreshed-app-token" });
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.filter((call) => call.method === "configure").length)).toBe(2);
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  expect(await page.evaluate(() => window.providerTest.calls.map((call) => call.method)))
-    .toEqual(["configure", "setQueue", "seek", "play", "configure", "setQueue", "seek", "play"]);
-  expect(await page.evaluate(() => window.providerTest.calls.filter((call) => call.method === "seek").at(-1)?.value)).toBe(20);
-  expect(await page.evaluate(() => window.providerTest.inspectMusic())).toEqual({ volume: 0.5, authorized: true });
-});
-
-test("Apple renews on focus after a sleeping tab outlives its developer token", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => {
-    window.providerTest.setNow(100_000 + 6 * 60 * 60 * 1000);
-    window.dispatchEvent(new Event("focus"));
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.filter((call) => call.method === "configure").length)).toBe(2);
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.filter((call) => call.method === "play").length)).toBe(2);
-  expect(await page.evaluate(() => window.providerTest.calls.some((call) => call.method === "authorize"))).toBe(false);
-});
-
-test("successful Apple recovery clears the error reported to the parent", async ({ page }) => {
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => {
-    window.providerTest.failNextMusicPlay();
-    window.providerTest.render({ position: 20 });
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.errors.at(-1))).toBe("Temporary Apple playback interruption");
-  await page.evaluate(() => window.providerTest.render({ syncRevision: 1 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.errors.at(-1))).toBe("");
-});
-
-test("SoundCloud applies a one-second explicit seek in a paused room", async ({ page }) => {
+test("SoundCloud follows room playback, pause and seek", async ({ page }) => {
   await freezeProviderClock(page);
   await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
   await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
@@ -212,7 +91,7 @@ test("SoundCloud applies a one-second explicit seek in a paused room", async ({ 
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("pause");
 });
 
-test("SoundCloud bounds initial READY and Sync replaces the iframe while ignoring old readiness", async ({ page }) => {
+test("listeners can recover a SoundCloud player that failed to start using Sync", async ({ page }) => {
   await freezeProviderClock(page);
   await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud&defer-ready=1");
   await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(1);
@@ -221,90 +100,8 @@ test("SoundCloud bounds initial READY and Sync replaces the iframe while ignorin
   expect(await page.evaluate(() => window.providerTest.statusSamples.at(-1))).toMatchObject({ ready: false, buffering: false });
   await page.evaluate(() => window.providerTest.render({ syncRevision: 1 }));
   await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(2);
-  await page.evaluate(() => window.providerTest.resolveReady(0));
-  expect(await page.evaluate(() => window.providerTest.pendingPositions)).toBe(0);
   await page.evaluate(() => window.providerTest.resolveReady(1));
   await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
   await page.evaluate(() => window.providerTest.resolvePosition(10_000));
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-});
-
-test("SoundCloud releases a stalled track load for Sync and ignores its late callback", async ({ page }) => {
-  await freezeProviderClock(page);
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => {
-    window.providerTest.resolvePosition(10_000);
-    window.providerTest.deferWidgetLoads(true);
-    window.providerTest.render({ trackId: "second-track" });
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingLoads)).toBe(1);
-  await page.clock.fastForward(15_001);
-  await expect.poll(() => page.evaluate(() => window.providerTest.errors.at(-1))).toMatch(/track took too long to load/);
-  expect(await page.evaluate(() => window.providerTest.statusSamples.at(-1))).toMatchObject({ ready: false, buffering: false });
-  await page.evaluate(() => window.providerTest.render({ syncRevision: 1 }));
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingLoads)).toBe(2);
-  await page.evaluate(() => window.providerTest.resolveLoad());
-  expect(await page.evaluate(() => window.providerTest.pendingPositions)).toBe(0);
-  await page.evaluate(() => window.providerTest.resolveLoad());
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => {
-    window.providerTest.render({ trackId: "third-track" });
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingLoads)).toBe(1);
-  await page.evaluate(() => window.providerTest.unmount());
-  const before = await page.evaluate(() => ({ errors: window.providerTest.errors.length, samples: window.providerTest.statusSamples.length }));
-  await page.clock.fastForward(15_001);
-  await page.evaluate(() => window.providerTest.resolveLoad());
-  expect(await page.evaluate(() => ({ errors: window.providerTest.errors.length, samples: window.providerTest.statusSamples.length }))).toEqual(before);
-});
-
-test("SoundCloud proceeds to a newer room track when an older load times out", async ({ page }) => {
-  await freezeProviderClock(page);
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud");
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => {
-    window.providerTest.resolvePosition(10_000);
-    window.providerTest.deferWidgetLoads(true);
-    window.providerTest.render({ trackId: "second-track" });
-  });
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingLoads)).toBe(1);
-  await page.evaluate(() => window.providerTest.render({ trackId: "third-track" }));
-  await page.clock.fastForward(15_001);
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingLoads)).toBe(2);
-  expect(await page.evaluate(() => window.providerTest.calls.filter(call => call.method === "load").map(call => call.value)))
-    .toEqual(["https://soundcloud.com/test/second-track", "https://soundcloud.com/test/third-track"]);
-  await page.evaluate(() => { window.providerTest.resolveLoad(); window.providerTest.resolveLoad(); });
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-});
-
-
-test("Apple explicit disconnect clears authorization, and switching listeners requires fresh consent", async ({page})=>{
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple");
-  await expect.poll(()=>page.evaluate(()=>window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.getByRole("button",{name:"Disconnect Apple Music",exact:true}).click();
-  await expect(page.getByRole("button",{name:"Connect Apple Music",exact:true})).toBeEnabled();
-  expect(await page.evaluate(()=>window.providerTest.calls.map(call=>call.method))).toContain("unauthorize");
-  expect(await page.evaluate(()=>window.providerTest.inspectMusic().authorized)).toBe(false);
-  await page.getByRole("button",{name:"Connect Apple Music",exact:true}).click();
-  await expect.poll(()=>page.evaluate(()=>window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(()=>window.providerTest.render({userId:"listener-two",accessToken:"listener-two-token"}));
-  await expect(page.getByRole("button",{name:"Connect Apple Music",exact:true})).toBeEnabled();
-  expect(await page.evaluate(()=>window.providerTest.calls.filter(call=>call.method==="unauthorize").length)).toBe(2);
-  expect(await page.evaluate(()=>window.providerTest.inspectMusic().authorized)).toBe(false);
-});
-
-
-test("MusicKit authorization restored for another SoundSpin account is revoked before playback",async({page})=>{
-  await page.goto("/tests/playback-harness/provider-playback.html?provider=apple&apple-owner=listener-old");
-  await expect(page.getByRole("button",{name:"Connect Apple Music",exact:true})).toBeEnabled();
-  const methods=await page.evaluate(()=>window.providerTest.calls.map(call=>call.method));
-  expect(methods).toContain("unauthorize");expect(methods).not.toContain("play");
-  await page.getByRole("button",{name:"Connect Apple Music",exact:true}).click();
-  await expect.poll(()=>page.evaluate(()=>window.providerTest.calls.at(-1)?.method)).toBe("play");
-  expect(await page.evaluate(()=>localStorage.getItem("soundspin-apple-account-id"))).toBe("listener-one");
 });

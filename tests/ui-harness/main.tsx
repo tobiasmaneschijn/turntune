@@ -1,14 +1,12 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { Inbox, ListMusic, MessageSquare, Music2, Radio, Send, Settings, Volume2 } from "lucide-react";
 import "@fontsource-variable/geist";
 import "../../src/shadcn.css";
 import "../../src/styles.css";
 import "./harness.css";
 import { AdminDashboard } from "../../src/components/AdminDashboard";
 import { AppErrorBoundary } from "../../src/components/AppErrorBoundary";
-import { AsyncState, Brand, IconAction } from "../../src/components/app-primitives";
-import { ChatMessageItem } from "../../src/components/chat-message";
+import { AsyncState } from "../../src/components/app-primitives";
 import { FeedbackButton } from "../../src/components/FeedbackDialog";
 import { ProfilePage } from "../../src/components/ProfilePage";
 import { RoomLobby } from "../../src/components/RoomLobby";
@@ -21,22 +19,15 @@ import { Button } from "../../src/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../src/components/ui/card";
 import { Input } from "../../src/components/ui/input";
 import { LoginForm } from "../../src/components/login-form";
-import { Slider } from "../../src/components/ui/slider";
-import { Tabs, TabsList, TabsTrigger } from "../../src/components/ui/tabs";
 import { Toaster } from "../../src/components/ui/sonner";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { readUserSettings } from "../../src/playback-settings";
-import type { ChatMessage } from "../../src/chat/model";
 
-const scenario = new URLSearchParams(location.search).get("scenario") || "room-active";
+const scenario = new URLSearchParams(location.search).get("scenario") || "lobby";
 const user = { id: "qa-admin", name: "QA Admin", avatarSeed: "qa-admin", avatarKey: "pulse", isAppAdmin: true };
 const profile = { user_id: user.id, display_name: user.name, is_app_admin: true, bio: "Weekend DJ.", handle: "qa_admin", status_text: "One more song.",
   favorite_tracks: [{ provider: "youtube", providerId: "aaaaaaaaaaa", title: "Sunset Signal", artist: "Mira" }],
   avatar_key: "pulse", avatar_url: null, avatar_path: null, theme_key: "afterglow", created_at: "2026-01-15T12:00:00Z", updated_at: "2026-07-31T12:00:00Z" };
-const messages: ChatMessage[] = [
-  { id: "m1", user: { ...user, name: "Mira" }, content: "That transition was perfect.", type: "text", createdAt: "2026-07-31T18:30:00Z", reactions: [{ emoji: "Like", userId: user.id, userName: "QA Admin" }] },
-  { id: "m2", user, content: "Queued one more for the sunset set.", type: "text", createdAt: "2026-07-31T18:31:00Z", reactions: [], replyTo: { id: "m1", user: { ...user, name: "Mira" }, content: "That transition was perfect.", type: "text", createdAt: "2026-07-31T18:30:00Z", reactions: [] } }
-];
 const adminData = { metrics: { users: 1284, rooms: 42, feedback: 86, openFeedback: 12, messages: 18420 }, activity: [{ date: "2026-07-25", users: 84, feedback: 4, messages: 920 }, { date: "2026-07-31", users: 126, feedback: 7, messages: 1430 }], feedback: [{ id: "feedback-0001", userId: "listener-1", userName: "Mira", userAvatarUrl: null, message: "The compact player should remember its size on tablet.", roomSlug: "sunset-radio", pagePath: "/room/sunset-radio", viewport: { width: 1024, height: 768 }, category: "idea", impact: "minor", diagnostics: { browser: "Chromium", theme: "dark" }, status: "new", adminNote: "", createdAt: "2026-07-31T17:20:00Z", updatedAt: "2026-07-31T17:20:00Z", screenshots: [] }], rooms: [{ slug: "sunset-radio", name: "Sunset Radio", isPublic: true, listenerCount: 18, createdAt: "2026-06-01T10:00:00Z", updatedAt: "2026-07-31T18:20:00Z" }] };
 const feedbackFixtureMessages = [
   "The compact player should remember its size on tablet.",
@@ -89,14 +80,6 @@ globalThis.fetch = async (input) => {
   return Response.json({ profile, ...adminData });
 };
 
-function RoomFixture({ active = false, chat = false, queue = false }: { active?: boolean; chat?: boolean; queue?: boolean }) {
-  return <main className="fixture-room"><header className="fixture-room-header"><Brand /><strong>Sunset Radio <small>· 18 listeners</small></strong><div><IconAction label="Room settings"><Settings /></IconAction><Button>Invite</Button></div></header><section className="fixture-room-grid">
-    <aside className={`fixture-panel ${queue ? "fixture-active" : ""}`}><div className="fixture-panel-header"><Radio /><strong>Radio</strong></div><div className="fixture-panel-body"><div className="dj-lineup"><strong>DJ QUEUE</strong><p>Mira is on air · You are next</p></div><Tabs defaultValue={queue ? "search" : "queue"}><TabsList><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="search">Search</TabsTrigger><TabsTrigger value="queue">Queue</TabsTrigger></TabsList></Tabs>{queue ? <><Input className="mt-4" value="Midnight City" readOnly aria-label="Search music" /><div className="mt-4 flex flex-col gap-3"><Card size="sm"><CardContent>Midnight City · M83 <Button size="sm">Add</Button></CardContent></Card><Card size="sm"><CardContent>Sunset Lover · Petit Biscuit <Button size="sm">Add</Button></CardContent></Card></div></> : <AsyncState state="empty" title="Your queue is ready" description="Search for a song to add your next turn." />}</div></aside>
-    <section className={`fixture-panel ${!chat && !queue ? "fixture-active" : ""}`}><div className="fixture-panel-header"><Music2 /><strong>Now playing</strong></div><div className="fixture-track">{active ? <div className="fixture-player-stack"><div className="fixture-art"><Music2 /></div><h1 className="mt-6 text-2xl font-semibold">Midnight City</h1><p className="text-muted-foreground">M83 · Hurry Up, We’re Dreaming</p><Button size="lg">Pause</Button><div className="playback-progress"><span>1:48</span><Slider min={0} max={243} value={[108]} aria-label="Playback position" /><span>4:03</span></div><div className="player-footer"><span className="sync-status"><span />Synced with the room</span><label className="volume-control"><Volume2 size={14} /><Slider min={0} max={100} value={[72]} aria-label="Volume" /></label></div></div> : <AsyncState state="empty" title="The room is quiet" description="Add a track to start the radio." />}</div></section>
-    <aside className={`fixture-panel fixture-chat ${chat ? "fixture-active" : ""}`}><div className="fixture-panel-header"><MessageSquare /><strong>Room chat</strong></div><div className="fixture-chat-list">{messages.map((message, index) => <ChatMessageItem key={message.id} message={message} isOwnMessage={message.user.id === user.id} currentUserId={user.id} showHeader isAuthorAppAdmin={message.user.id === user.id} isReplyAuthorAppAdmin={false} onReply={() => {}} onReact={() => {}} onJumpToMessage={() => {}} />)}</div><div className="fixture-composer"><Input placeholder="Message #sunset-radio" /><Button size="icon" aria-label="Send"><Send /></Button></div></aside>
-  </section></main>;
-}
-
 function RecoverableFixture() {
   if (boundaryShouldThrow) {
     throw new Error("Deterministic fixture failure");
@@ -135,11 +118,8 @@ function Harness() {
   if (scenario === "settings") return <div className="fixture-page"><UserSettingsDialog settings={readUserSettings()} connections={{ loaded: true, spotifyConfigured: true, spotifyConnected: true, appleConfigured: true }} accessToken="fixture" onSettingsChange={() => {}} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => {}} /></div>;
   if (scenario === "feedback") return <div className="fixture-state"><Card><CardHeader><CardTitle>Feedback fixture</CardTitle><CardDescription>Open the production feedback dialog.</CardDescription></CardHeader><CardContent><FeedbackButton userId={user.id} /></CardContent></Card></div>;
   if (scenario === "login-error") return <div className="fixture-state"><LoginForm client={rejectedAuthClient as never} onNavigate={() => {}} /></div>;
-  if (scenario === "loading") return <div className="fixture-state"><AsyncState state="loading" title="Loading room" /></div>;
-  if (scenario === "failure") return <div className="fixture-state"><AsyncState state="error" title="Could not load this room" description="Check your connection and try again." action={<Button>Retry</Button>} /></div>;
   if (scenario === "boundary") return <AppErrorBoundary onRetry={() => { boundaryShouldThrow = false; }}><RecoverableFixture /></AppErrorBoundary>;
-  if (scenario === "access") return <div className="fixture-state"><Card><CardHeader><Inbox /><CardTitle>Admin access required</CardTitle><CardDescription>This dashboard is only available to administrators.</CardDescription></CardHeader><CardContent><Button>Back to rooms</Button></CardContent></Card></div>;
-  return <RoomFixture active={scenario === "room-active"} chat={scenario === "chat"} queue={scenario === "queue"} />;
+  throw new Error(`Unknown fixture scenario: ${scenario}`);
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><TooltipProvider><Harness /><Toaster /></TooltipProvider></ThemeProvider>);

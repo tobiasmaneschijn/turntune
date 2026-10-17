@@ -6,12 +6,11 @@ import { browserTestCommands, runBrowserTests } from "../scripts/run-browser-tes
 test("browser test groups keep fixed configurations and forward Playwright filters", () => {
   const commands = browserTestCommands("behavior", ["--workers=2", "--grep", "permission", "--list"]);
   assert.deepEqual(commands.map(command => command[2]), [
-    "--config=playwright.fixtures-behavior.config.ts", "--config=playwright.playback.config.ts",
+    "--config=playwright.fixtures.config.ts", "--config=playwright.playback.config.ts",
     "--config=playwright.music-qol.config.ts", "--config=playwright.player-qol.config.ts"
   ]);
   for (const command of commands) assert.deepEqual(command.slice(3), ["--workers=2", "--grep", "permission", "--list"]);
   assert.equal(browserTestCommands().length, 1);
-  assert.deepEqual(browserTestCommands("visual").map(command => command[2]), ["--config=playwright.config.ts", "--config=playwright.fixtures-visual.config.ts"]);
   assert.throws(() => browserTestCommands("live"), /Unknown browser test group/);
   for (const argument of ["--config", "--config=playwright.live.config.ts", "-c", "-c=playwright.live.config.ts"])
     assert.throws(() => browserTestCommands("fixtures", [argument]), /configuration is fixed/);
@@ -64,7 +63,7 @@ test("browser runner disables existing-server reuse when the caller has no CI se
 });
 
 test("every browser group spawns one worker by default and preserves explicit worker overrides", async () => {
-  const groups = ["ui", "fixtures", "playback", "music-qol", "player-qol", "behavior", "visual"];
+  const groups = ["ui", "fixtures", "playback", "music-qol", "player-qol", "behavior"];
   const overrides = [["--workers=3"], ["--workers", "2"], ["-j", "2"], ["-j3"], ["-j=2"], ["--workers=25%"]];
   for (const group of groups) {
     for (const forwarded of [[], ...overrides]) {
@@ -79,7 +78,7 @@ test("every browser group spawns one worker by default and preserves explicit wo
         }
       });
       assert.equal(code, 0);
-      assert.equal(calls.length, group === "behavior" ? 4 : group === "visual" ? 2 : 1);
+      assert.equal(calls.length, group === "behavior" ? 4 : 1);
       for (const args of calls) {
         assert.deepEqual(args.slice(3), forwarded.length ? [...forwarded, "--list"] : ["--workers=1", "--list"], group);
         assert.equal(args.filter(argument => argument === "--workers=1").length, forwarded.length ? 0 : 1, group);
