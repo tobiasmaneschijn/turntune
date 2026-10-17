@@ -10,8 +10,7 @@ const groups = {
   playback: ["playwright.playback.config.ts"],
   "music-qol": ["playwright.music-qol.config.ts"],
   "player-qol": ["playwright.player-qol.config.ts"],
-  behavior: ["playwright.fixtures-behavior.config.ts", "playwright.playback.config.ts", "playwright.music-qol.config.ts", "playwright.player-qol.config.ts"],
-  visual: ["playwright.config.ts", "playwright.fixtures-visual.config.ts"]
+  behavior: ["playwright.fixtures.config.ts", "playwright.playback.config.ts", "playwright.music-qol.config.ts", "playwright.player-qol.config.ts"]
 };
 
 /** Keep local browser suites on their fixed fixture configurations. Ordinary

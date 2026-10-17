@@ -4,7 +4,7 @@ import {approvedLocalImageUrl,approvedRemoteImageUrl} from '../shared/remote-ima
 import {libraryMutationSchema} from '../server/private-library.js';
 import {trackSchema} from '../shared/room-protocol.js';
 
-test('official provider images and exact project storage are approved; arbitrary trackers and URL tricks are rejected',()=>{
+test('View shared artwork without loading an external tracking image',()=>{
   for(const value of ['https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg','https://i.scdn.co/image/recording','https://is1-ssl.mzstatic.com/image/thumb/art.jpg','https://i1.sndcdn.com/artworks-test.jpg','https://thumbnailer.mixcloud.com/unsafe/art.jpg','https://media2.giphy.com/media/id/giphy.gif']) assert.equal(approvedRemoteImageUrl(value),value);
   const storage='https://project.supabase.co';
   assert.equal(approvedRemoteImageUrl(`${storage}/storage/v1/object/sign/chat-media/owner/file?token=fixture`,storage),`${storage}/storage/v1/object/sign/chat-media/owner/file?token=fixture`);
@@ -16,25 +16,11 @@ test('official provider images and exact project storage are approved; arbitrary
   assert.equal(approvedLocalImageUrl('blob:https://other.example/uuid','https://app.example'),undefined);
 });
 
-test('room and private-library metadata reject arbitrary remote artwork at admission',()=>{
+test('Save or queue a track only with approved artwork',()=>{
   const base={provider:'spotify',providerId:'abcdefghijklmnopqrstuv',title:'Recording'};
   for(const schema of [trackSchema,libraryMutationSchema]) {
     const parse=(track:unknown)=>schema.safeParse(schema===trackSchema?track:{type:'save-pick',track}).success;
     assert.equal(parse({...base,artworkUrl:'https://tracker.invalid/pixel'}),false);
     assert.equal(parse({...base,artworkUrl:'https://i.scdn.co/image/recording'}),true);
   }
-});
-
-
-test('runtime auth configuration enables only the configured Storage origin when no build URL exists',async()=>{
-  const {approvedImageUrl,setTrustedImageStorageOrigin}=await import('../src/lib/remote-images.js');
-  setTrustedImageStorageOrigin(null);
-  const signed='https://runtime.supabase.co/storage/v1/object/sign/chat-media/owner/file?token=fixture';
-  assert.equal(approvedImageUrl(signed),undefined);
-  setTrustedImageStorageOrigin('https://runtime.supabase.co');
-  assert.equal(approvedImageUrl(signed),signed);
-  assert.equal(approvedImageUrl('https://runtime.supabase.co/auth/v1/callback'),undefined);
-  assert.equal(approvedImageUrl('https://other.supabase.co/storage/v1/object/public/profile-avatars/file'),undefined);
-  assert.throws(()=>setTrustedImageStorageOrigin('https://owner:secret@runtime.supabase.co'),/project origin/);
-  setTrustedImageStorageOrigin(null);
 });

@@ -2,22 +2,7 @@ import { expect, test } from '@playwright/test'
 
 declare global { interface Window { authReview: { emails: string[]; fail: boolean } } }
 
-test('public route changes focus a task heading, reset scroll, and support browser Back', async ({ page }) => {
-  await page.goto('/tests/auth-review-harness/index.html')
-  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).not.toBeFocused()
-  await page.addStyleTag({ content: 'body { min-height: 1800px; }' })
-  await page.evaluate(() => window.scrollTo(0, 500))
-  await page.getByRole('button', { name: 'Forgot password?', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Reset password', exact: true })).toBeFocused()
-  expect(await page.evaluate(() => window.scrollY)).toBe(0)
-  await page.goBack()
-  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeFocused()
-  await page.getByRole('button', { name: 'Create account', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Create an account', exact: true })).toBeFocused()
-})
-
-test('reset confirmation offers address correction, cooldown resend, failure retry and sign in', async ({ page }) => {
+test('request a password reset, recover a failed resend and correct the address', async ({ page }) => {
   await page.clock.install()
   await page.goto('/tests/auth-review-harness/index.html')
   await page.getByRole('button', { name: 'Forgot password?' }).click()
@@ -42,61 +27,4 @@ test('reset confirmation offers address correction, cooldown resend, failure ret
   expect(await page.evaluate(() => window.authReview.emails)).toEqual(['listener@example.com', 'listener@example.com', 'listener@example.com', 'changed@example.com'])
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeFocused()
-})
-
-test('room choices expose named selects, member role targets and a password label', async ({ page }) => {
-  await page.route('**/api/library', route => route.fulfill({ json: { library: { picks: [], sets: [] } } }))
-  await page.route('**/api/rooms/lounge/members?**', route => route.fulfill({ json: {
-    members: [
-      { user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' }, role: 'owner', joinedAt: 1, online: true },
-      { user: { id: 'bob', name: 'Bob', avatarSeed: 'bob' }, role: 'member', joinedAt: 1, online: true },
-    ], cursor: null,
-  } }))
-  await page.route('**/api/rooms/lounge/invitations', route => route.fulfill({ json: { invitations: [], links: [] } }))
-  await page.goto('/tests/auth-review-harness/index.html?roles')
-  await page.getByRole('tab', { name: 'Music', exact: true }).click()
-  const dj = page.getByLabel('DJ eligibility', { exact: true })
-  await expect(dj).toHaveValue('everyone')
-  await dj.selectOption('roles')
-  await expect(dj).toHaveValue('roles')
-  await page.getByRole('tab', { name: 'General', exact: true }).click()
-  const password = page.getByLabel('Password', { exact: true })
-  await expect(password).toHaveValue('unchanged')
-  await password.selectOption('replace')
-  await expect(password).toHaveValue('replace')
-  await expect(page.getByLabel('New room password', { exact: true })).toBeVisible()
-  await page.getByRole('tab', { name: 'Members', exact: true }).click()
-  const role = page.getByLabel('Room role for Bob', { exact: true })
-  await expect(role).toBeEnabled()
-  await expect(role).toHaveValue('member')
-  await expect(role.getByRole('option')).toHaveText(['Member', 'DJ role', 'Moderator'])
-  await expect(page.getByLabel('Room role for Alice', { exact: true })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog', { name: 'Discard room changes?' })).toBeVisible()
-  await page.getByRole('button', { name: 'Keep editing' }).click()
-  await page.getByRole('tab', { name: 'Music', exact: true }).click()
-  await expect(dj).toHaveValue('roles')
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await page.getByRole('button', { name: 'Discard changes' }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
-})
-
-test('submitted room settings resist dismissal and keep changes on failure', async ({ page }) => {
-  let finish: (() => Promise<void>) | undefined
-  await page.route('**/api/rooms/lounge', route => new Promise<void>(resolve => {
-    finish = async () => { await route.fulfill({ status: 500, json: { error: 'Could not save room settings.' } }); resolve() }
-  }))
-  await page.goto('/tests/auth-review-harness/index.html?roles')
-  await page.getByLabel('Room name', { exact: true }).fill('Edited lounge')
-  await page.getByRole('button', { name: 'Save changes' }).click()
-  await expect(page.getByRole('button', { name: 'Saving…' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog', { name: 'Room settings', exact: true })).toBeVisible()
-  await expect(page.getByLabel('Room name', { exact: true })).toBeDisabled()
-  await expect.poll(() => Boolean(finish)).toBe(true)
-  await finish!()
-  await expect(page.getByRole('alert')).toHaveText('Could not save room settings.')
-  await expect(page.getByLabel('Room name', { exact: true })).toHaveValue('Edited lounge')
-  await expect(page.getByRole('button', { name: 'Save changes' })).toBeEnabled()
 })

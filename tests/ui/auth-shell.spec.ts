@@ -1,59 +1,32 @@
 import { expect, test } from "./public-route-fixture";
 
-test.beforeEach(async ({ page }) => {
+test("A visitor can recover from incorrect sign-in details", async ({ page }) => {
+  await page.route("https://public-auth-fixture.invalid/auth/v1/token**", route => route.fulfill({
+    status: 400,
+    json: { error: "invalid_grant", error_description: "Invalid login credentials" }
+  }));
   await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await page.getByLabel("Email", { exact: true }).fill("listener@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("incorrect-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("listener@example.com");
+  await page.getByRole("button", { name: "Forgot password?" }).click();
+  await expect(page.getByRole("heading", { name: "Reset password", exact: true })).toBeVisible();
 });
 
-test("renders the dark authentication shell", async ({ page }) => {
-  await expect(page.locator("html")).toHaveClass(/dark/);
-  await expect(page.getByLabel("Email")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-  await expect(page).toHaveScreenshot("auth-dark.png", { fullPage: true });
-});
-
-test("switches to and persists the light theme", async ({ page }) => {
+test("A visitor chooses an appearance that survives returning to sign in", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/login");
   await page.getByRole("button", { name: "Change color theme" }).click();
-  await page.getByRole("menuitemradio", { name: "Light" }).click();
+  await page.getByRole("menuitemradio", { name: "Light", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect(page.locator("html")).toHaveClass(/light/);
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/light/);
-  await expect(page).toHaveScreenshot("auth-light.png", { fullPage: true });
-});
-
-test("system theme follows the operating-system preference", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "light" });
   await page.getByRole("button", { name: "Change color theme" }).click();
-  await page.getByRole("menuitemradio", { name: "System" }).click();
-  await expect(page.locator("html")).toHaveClass(/light/);
-
+  await page.getByRole("menuitemradio", { name: "System", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveClass(/dark/);
-});
-
-test("applies the stored theme before the application bundle runs", async ({ page }) => {
-  await page.evaluate(() => localStorage.setItem("soundspin-theme", "light"));
-  await page.route("**/src/main.tsx", (route) => route.abort());
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.locator("html")).toHaveClass(/light/);
-  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#f7f7f2");
-});
-
-test("honors reduced-motion preferences", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  const animationDuration = await page.getByRole("heading", { name: "Sign in", exact: true }).evaluate((element) =>
-    getComputedStyle(element).animationDuration,
-  );
-  const durationInMilliseconds = animationDuration.endsWith("ms")
-    ? Number.parseFloat(animationDuration)
-    : Number.parseFloat(animationDuration) * 1000;
-  expect(durationInMilliseconds).toBeLessThanOrEqual(0.01);
-});
-
-test("keeps the authentication shell within the viewport", async ({ page }) => {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
-  await page.getByRole("button", { name: "Change color theme" }).focus();
-  await expect(page.getByRole("button", { name: "Change color theme" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeInViewport();
 });

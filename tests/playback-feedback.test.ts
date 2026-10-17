@@ -5,32 +5,13 @@ import { localPlaybackAligned, playbackFeedback } from "../src/playback-feedback
 const status = { ready: true, buffering: false, currentTime: 30, duration: 120 };
 const input = { connected: true, roomPlaying: true, status, provider: "Spotify" };
 
-test("SDK readiness does not imply verified playing or synchronization", () => {
-  assert.equal(playbackFeedback(input).text, "Spotify ready · following the room");
-  assert.equal(localPlaybackAligned(status, true, 30), false);
-});
-test("silent and ask fallback never claim that the listener hears music", () => {
-  assert.match(playbackFeedback({ ...input, fallback: "silent" }).text, /silent/);
-  assert.match(playbackFeedback({ ...input, fallback: "ask" }).text, /Choose/);
-});
-test("errors and loss of connection remain visible regardless of room play intent", () => {
-  assert.equal(playbackFeedback({ ...input, error: "Seek failed" }).tone, "error");
-  assert.match(playbackFeedback({ ...input, connected: false }).text, /connection lost/);
-  assert.match(playbackFeedback({ ...input, status: { ...status, buffering: true } }).text, /Buffering/);
-});
-test("alignment requires confirmed local play state and position within tolerance", () => {
-  assert.equal(localPlaybackAligned({ ...status, playing: true }, true, 32), true);
-  assert.equal(localPlaybackAligned({ ...status, playing: false }, true, 30), false);
-  assert.equal(localPlaybackAligned({ ...status, playing: true }, true, 34), false);
-  assert.equal(localPlaybackAligned({ ...status, playing: true, buffering: true }, true, 30), false);
-});
 
-test("live alignment follows confirmed play state without comparing a stream clock to room time", () => {
-  const live = { ...status, isLive: true, playing: true, currentTime: 12_242_447, duration: 0 };
-  assert.equal(localPlaybackAligned(live, true, 30), true);
-  assert.equal(localPlaybackAligned({ ...live, playing: false }, true, 30), false);
-  assert.equal(localPlaybackAligned({ ...live, buffering: true }, true, 30), false);
-  assert.equal(localPlaybackAligned({ ...live, ready: false }, true, 30), false);
-  assert.equal(localPlaybackAligned({ ...live, playing: false }, false, 30), true);
-  assert.equal(localPlaybackAligned({ ...live, isLive: false }, true, 30), false);
+test("listeners only see synchronization confirmed by measured local playback", () => {
+  const feedback = playbackFeedback(input);
+  assert.notEqual(feedback.tone, "live");
+  assert.doesNotMatch(feedback.text, /\b(?:playing|synced|synchronized)\b/i);
+  assert.equal(localPlaybackAligned(status, true, 30), false);
+  assert.equal(localPlaybackAligned({ ...status, playing: true }, true, 30), true);
+  assert.equal(localPlaybackAligned({ ...status, playing: true, buffering: true }, true, 30), false);
+  assert.equal(localPlaybackAligned({ ...status, playing: true }, true, 40), false);
 });

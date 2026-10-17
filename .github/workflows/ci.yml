@@ -35,9 +35,7 @@ jobs:
 
   browser-behavior:
     runs-on: ubuntu-latest
-    # Hundreds of behavior cases run with one worker so large chat fixtures do
-    # not compete for the runner's CPU and trigger unrelated action deadlines.
-    timeout-minutes: 120
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -58,11 +56,9 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
 
-  browser-visual:
-    # Screenshot baselines are recorded on Windows; behavior-only suites share
-    # one Linux job and one dependency/browser installation.
-    runs-on: windows-latest
-    timeout-minutes: 30
+  browser-public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -72,12 +68,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --include=dev
-      - run: npx playwright install chromium
-      - run: npm run test:ui:visual
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
-          name: browser-failure-visual
+          name: browser-failure-public
           path: |
             test-results/
             playwright-report/

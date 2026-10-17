@@ -391,7 +391,7 @@ explicit `--workers`/`-j` choices override that default. `CI` disables fixture
 server reuse but does not itself limit Playwright's CPU-based worker default.
 `test:ui:live` and user-seeding commands are separate
 manual operations requiring an explicitly authorized environment. The required
-CI behavior job has a 120-minute timeout for the complete one-worker suite;
+CI behavior job has a 20-minute timeout for the reduced one-worker use-case suite;
 failures still fail the gate.
 Fixture-suite failure diagnostics retain a final failure screenshot, test
 sources/API-call records, console output and the reporter's accessible error context. Its

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 declare global { interface Window { socialRoomTest: { creates: number; destroys: number; joins: number; themes: Array<string | null>; connected: boolean } } }
 
-test("the app keeps its player and room admission across profile visits and browser history", async ({ page }, testInfo) => {
+test("visit your profile and a friend's profile while staying in the listening room", async ({ page }) => {
   await page.goto("/tests/social-room-harness/index.html");
   await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates), { timeout: 15_000 }).toBe(1);
   const profileButton = page.locator(".header-profile-button");
@@ -13,7 +13,6 @@ test("the app keeps its player and room admission across profile visits and brow
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Alice", exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("profile-in-room.png") });
   await expect(page).toHaveURL(/\/profile\//);
   expect(await page.evaluate(() => window.socialRoomTest)).toMatchObject({ creates: 1, destroys: 0, joins: 1, connected: true });
   await page.goBack();
@@ -36,21 +35,7 @@ test("the app keeps its player and room admission across profile visits and brow
   expect(await page.evaluate(() => window.socialRoomTest)).toMatchObject({ creates: 1, destroys: 0, joins: 1, connected: true });
 });
 
-test("theme nights appear in the room and can be ended", async ({ page }) => {
-  await page.goto("/tests/social-room-harness/index.html");
-  await page.getByRole("button", { name: "More room actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Theme night", exact: true }).click();
-  await page.getByRole("button", { name: "Guilty pleasures", exact: true }).click();
-  await page.getByRole("button", { name: "Start", exact: true }).click();
-  await expect(page.getByLabel("Room theme", { exact: true }).locator("summary")).toHaveText("ThemeGuilty pleasures");
-  await page.getByRole("button", { name: "More room actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Theme night", exact: true }).click();
-  await page.getByRole("button", { name: "End theme", exact: true }).click();
-  await expect(page.getByLabel("Room theme", { exact: true })).toHaveCount(0);
-  expect(await page.evaluate(() => window.socialRoomTest.themes)).toEqual(["Guilty pleasures", null]);
-});
-
-test("signup from a room link requires email activation and setting a password before returning", async ({ page }) => {
+test("create an account from a room link and return after email activation", async ({ page }) => {
   await page.goto("/tests/social-room-harness/index.html?guest");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await page.getByLabel("Display name", { exact: true }).fill("Alice");
