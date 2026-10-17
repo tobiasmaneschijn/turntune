@@ -12,14 +12,13 @@ import { AppVersion } from "./components/AppVersion";
 import { RoomHeader } from "./components/RoomHeader";
 import { ParticipantActions } from "./components/ParticipantActions";
 import { RoomModerationDialog } from "./components/RoomModerationDialog";
-import { RoomRulesDialog, RoomSessionNotices } from "./components/RoomRulesDialog";
+import { RoomRulesDialog } from "./components/RoomRulesDialog";
 import { effectiveRoomPolicy, roomCapabilities } from "../shared/room-policy";
 import { roomManagementRequest, roomModerationAction } from "./room-management";
 import { RoomWorkspace } from "./components/RoomWorkspace";
 import { RoomMiniPlayer } from "./components/RoomMiniPlayer";
 import { ListeningChecklist } from "./components/ListeningChecklist";
-import { RoomAnnouncementBanner } from "./components/RoomAnnouncementBanner";
-import { RoomThemeBanner } from "./components/RoomThemeBanner";
+import { RoomNotices } from "./components/RoomNotices";
 import { RoomPeopleDialog } from "./components/RoomPeopleDialog";
 import { DeferredDialog } from "./components/DeferredDialog";
 import { RoomProfileDialog } from "./components/RoomProfileDialog";
@@ -340,8 +339,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
           onLayoutChanged={roomLayouts.onLayoutChanged}
           miniPlayer={<RoomMiniPlayer track={snapshot.room.playback.track} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} muted={localPlayback.muted} localVolumeSupported={localPlayback.localVolumeSupported} onToggleMute={() => playerControls.current?.toggleMute()} onOpenPlayer={() => setMobileRoomPane("player")} />}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { setMobileRoomPane("player"); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
-          roomNotice={<>{(snapshot.room.activeTheme ?? snapshot.room.settings.themePrompt) && <RoomThemeBanner prompt={(snapshot.room.activeTheme ?? snapshot.room.settings.themePrompt)!} />}
-            <RoomAnnouncementBanner key={`${snapshot.room.id}:${profile.id}`} roomId={snapshot.room.id} userId={profile.id} announcement={snapshot.room.announcement} serverTime={snapshot.serverTime} canEdit={capabilities.roomDetailsMusic} connected={connected} />{auth.session && <RoomSessionNotices key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onRules={() => setRulesOpen(true)} />}</>}
+          roomNotice={<RoomNotices snapshot={snapshot} userId={profile.id} canEdit={capabilities.roomDetailsMusic} connected={connected} accessToken={auth.session?.access_token} onRules={() => setRulesOpen(true)} />}
           radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
