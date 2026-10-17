@@ -60,7 +60,7 @@
     "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite": "0.5.9",
     "@playwright/test": "^1.62.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.13",
