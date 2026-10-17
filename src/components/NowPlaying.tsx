@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { AlertCircle, Heart, Info, ThumbsDown, Maximize2, Minimize2, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX } from "lucide-react";
+import { AlertCircle, CircleHelp, Heart, Info, ThumbsDown, Maximize2, Minimize2, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX } from "lucide-react";
 import { PauseIcon, PlayIcon, SkipIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { TrackArtwork, trackArtworkUrl } from "./TrackArtwork";
 import { TrackDetailsDialog } from "./TrackDetailsDialog";
 import { DeferredDialog } from "./DeferredDialog";
@@ -99,12 +100,10 @@ function BangOMeter({
   const sentiment = votes.length
     ? votes.reduce<number>((total, vote) => total + vote, 0) / votes.length
     : 0;
-  const participation = eligibleListenerCount
-    ? votes.length / eligibleListenerCount
-    : 0;
   const currentVote = vibe?.votes[currentUserId];
   currentVoteRef.current = currentVote || 0;
   const addedByCurrentUser = track?.addedBy.id === currentUserId;
+  const voteDisabled = addedByCurrentUser || !roomConnected || pending;
   const positiveVotes = votes.filter((vote) => vote === 1).length;
   const negativeVotes = votes.filter((vote) => vote === -1).length;
   const label =
@@ -115,10 +114,10 @@ function BangOMeter({
     sentiment <= -.6 ? "Not landing" :
     sentiment <= -.2 ? "Cooling off" :
     "Split room";
-  const pulseShape = [9, 13, 18, 25, 31, 25, 18, 13, 9];
-  const aggregate = useCoalescedDecoration(`${sentiment}:${participation}:${votes.length}`, decorationsEnabled);
-  const [decorativeSentiment, decorativeParticipation, decorativeVotes] = aggregate.split(":").map(Number);
-  const pulseTone = !decorativeVotes ? "idle" : decorativeSentiment >= .2 ? "positive" : decorativeSentiment <= -.2 ? "negative" : "mixed";
+  const aggregate = useCoalescedDecoration(JSON.stringify([track?.id, sentiment]), decorationsEnabled);
+  const [decorativeTrackId, decorativeSentiment] = JSON.parse(aggregate) as [string | null, number];
+  // A new track or an empty room must not inherit the previous needle position.
+  const needleSentiment = votes.length && decorativeTrackId === track?.id ? decorativeSentiment : sentiment;
   const confirmAccepted = () => {
     const intent = requestedVote.current;
     if (!intent?.acknowledged || intent.trackId !== trackRef.current || intent.value !== currentVoteRef.current) return;
@@ -133,13 +132,6 @@ function BangOMeter({
     const timer = window.setTimeout(() => setAcceptedAccent(0), 180);
     return () => window.clearTimeout(timer);
   }, [acceptedAccent, decorationsEnabled]);
-  const pulseHeights = pulseShape.map((height, index) => {
-    const direction = (index - 4) / 4;
-    const lean = 1 + decorativeSentiment * direction * .65;
-    const energy = .56 + decorativeParticipation * .44;
-    return Math.max(4, Math.round(height * lean * energy));
-  });
-
   const vote = (value: -1 | 1) => {
     if (addedByCurrentUser || !roomConnected || !track || pendingRef.current) return;
     const requestTrackId = track.id;
@@ -167,40 +159,66 @@ function BangOMeter({
         role="group"
         aria-label={addedByCurrentUser ? "Listener reactions" : "React to the current track"}
       >
-        <button
-          type="button"
-          className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""} ${acceptedAccent === -1 ? "is-accepted" : ""}`}
-          aria-pressed={currentVote === -1}
-          disabled={addedByCurrentUser || !roomConnected || pending}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(-1)}
+      <div className="bang-meter-face">
+        <div
+          key={track?.id}
+          className="bang-gauge"
+          data-empty={!votes.length}
+          role="img"
+          aria-label={`Room reactions: ${positiveVotes} Banger votes, ${negativeVotes} Lame votes.`}
         >
-          <ThumbsDown size={16} />
-          <span>Not it</span>
-          <strong>{negativeVotes}</strong>
-        </button>
-        <div className="bang-pulse-summary">
-          <div
-            className={`bang-pulse bang-pulse-${pulseTone}`}
-            style={{ opacity: decorativeVotes ? .58 + decorativeParticipation * .42 : .3 }}
-            aria-hidden="true"
-          >
-            {pulseHeights.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
-          </div>
-          <strong>{label}</strong>
+          <svg viewBox="0 0 320 112" aria-hidden="true">
+            <path className="bang-gauge-arc" d="M 72.99 63.43 A 96 96 0 0 1 247.01 63.43" />
+            {Array.from({ length: 11 }, (_, index) => {
+              const angle = (-65 + index * 13) * Math.PI / 180;
+              return <line
+                key={index}
+                className={`bang-gauge-tick ${index >= 7 ? "bang-gauge-tick-positive" : ""}`}
+                x1={160 + Math.sin(angle) * 89}
+                y1={104 - Math.cos(angle) * 89}
+                x2={160 + Math.sin(angle) * 96}
+                y2={104 - Math.cos(angle) * 96}
+              />;
+            })}
+            <g className="bang-gauge-needle" style={{ transform: `rotate(${needleSentiment * 65}deg)`, opacity: votes.length ? 1 : .3 }}>
+              <line x1="160" y1="104" x2="160" y2="28" />
+            </g>
+            <circle className="bang-gauge-pivot" cx="160" cy="104" r="4" />
+          </svg>
+          <div className="bang-gauge-scale" aria-hidden="true"><span>Lame</span><span>Banger</span></div>
         </div>
-        <button
-          type="button"
-          className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""} ${acceptedAccent === 1 ? "is-accepted" : ""}`}
-          aria-pressed={currentVote === 1}
-          disabled={addedByCurrentUser || !roomConnected || pending}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(1)}
-        >
-          <Heart size={16} />
-          <span>Love it</span>
-          <strong>{positiveVotes}</strong>
-        </button>
+        <strong className="bang-meter-verdict" aria-live="polite">{label}</strong>
+      </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={<button disabled={voteDisabled} />}
+            type="button"
+            className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""} ${acceptedAccent === -1 ? "is-accepted" : ""}`}
+            aria-label="Vote Lame"
+            aria-pressed={currentVote === -1}
+            disabled={voteDisabled}
+            title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
+            onClick={() => vote(-1)}
+          >
+            <ThumbsDown size={20} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Lame</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={<button disabled={voteDisabled} />}
+            type="button"
+            className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""} ${acceptedAccent === 1 ? "is-accepted" : ""}`}
+            aria-label="Vote Banger"
+            aria-pressed={currentVote === 1}
+            disabled={voteDisabled}
+            title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
+            onClick={() => vote(1)}
+          >
+            <Heart size={20} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Banger</TooltipContent>
+        </Tooltip>
       </div>
       {addedByCurrentUser && <small className="bang-owner-note sr-only">Only other listeners can react to your track.</small>}
       {pending && <small role="status">Saving your reaction…</small>}
@@ -695,18 +713,8 @@ export function NowPlaying({
                 ) : providerLabel(track.provider)}
               </p>
             </div>
-            <div className="player-controls">
-              <Button disabled={controlsUnavailable} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause room" : "Play room"} aria-describedby="playback-control-help" aria-busy={Boolean(pendingCommand)}>
-                {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-              </Button>
-              <Button variant="outline" className="round-button" size="icon" disabled={!roomConnected || syncFeedback === "Sync requested…"} onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room" aria-busy={syncFeedback === "Sync requested…"}>
-                <RefreshCw size={19} />
-              </Button>
-              <Button variant="outline" disabled={controlsUnavailable} className="round-button" size="icon" onClick={() => runCommand("Skipping track…", "queue:next", { trackId: track.id })} aria-label="Next track" aria-describedby="playback-control-help">
-                <SkipIcon size={20} />
-              </Button>
-            </div>
           </div>
+          <div className="player-transport">
           <div className="playback-progress">
             {isLive ? <span>Live</span> : (
               <>
@@ -726,8 +734,20 @@ export function NowPlaying({
               </>
             )}
           </div>
-          <div className="player-footer">
-            <div className="sync-status" data-status={feedback.tone} role="status">
+          <div className="player-controls" role="group" aria-label="Playback controls">
+            <Button variant="ghost" className="round-button" size="icon" disabled={!roomConnected || syncFeedback === "Sync requested…"} onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room" aria-busy={syncFeedback === "Sync requested…"}>
+              <RefreshCw size={19} />
+            </Button>
+            <Button disabled={controlsUnavailable} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause room" : "Play room"} aria-describedby="playback-control-help" aria-busy={Boolean(pendingCommand)}>
+              {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
+            </Button>
+            <Button variant="ghost" disabled={controlsUnavailable} className="round-button" size="icon" onClick={() => runCommand("Skipping track…", "queue:next", { trackId: track.id })} aria-label="Next track" aria-describedby="playback-control-help">
+              <SkipIcon size={20} />
+            </Button>
+          </div>
+          </div>
+          <div className="player-utilities">
+            <div className="sync-status" data-status={feedback.tone} data-expanded={feedback.tone === "error" || feedback.tone === "pending" || locallyMuted || !playback.playing} role="status" title={feedback.text}>
               <span />{feedback.text}
             </div>
             {providerFallback && <small className="provider-fallback">{preferredAllowed ? `No ${providerLabel(preferredProvider)} match` : `${providerLabel(preferredProvider)} is disabled in this room`} · {fallbackNeedsApproval ? "awaiting your choice" : fallbackSuppressed ? "local playback silent" : `using ${providerLabel(effectiveProvider!)}`}</small>}
@@ -744,13 +764,11 @@ export function NowPlaying({
               />
             </div>
             {!localVolumeSupported && <small className="playback-control-help">Use your device volume for Mixcloud.</small>}
-          </div>
-          <div className="player-secondary-actions">
             <details className="playback-options">
-              <summary>Controls help</summary>
+              <summary aria-label="Controls help" title="Controls help"><CircleHelp size={18} aria-hidden="true" /><span>Controls help</span></summary>
               <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : !localVolumeSupported ? canControlPlayback ? "Playback controls affect the room." : "The DJ controls playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
             </details>
-            {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={`Playback settings · Playback source: ${providerName}${playbackPreference === "spotify-desktop" ? " Desktop" : ""}`} onClick={onOpenSettings}><SettingsIcon size={14} /> Playback settings</Button>}
+            {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={`Playback settings · Playback source: ${providerName}${playbackPreference === "spotify-desktop" ? " Desktop" : ""}`} title="Playback settings" onClick={onOpenSettings}><SettingsIcon size={18} aria-hidden="true" /><span>Playback settings</span></Button>}
           </div>
           {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
           {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
@@ -758,8 +776,10 @@ export function NowPlaying({
           </div>
           </div>
           <BangOMeter snapshot={snapshot} currentUserId={currentUserId} roomConnected={roomConnected} requestAction={requestAction} />
+          <div className="player-session-actions">
           {snapshot.room.settings.skipVote?.enabled && track.addedBy.id!==currentUserId && <Button variant="outline" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.skipVote.voted??false} onClick={()=>runCommand("Saving skip vote…","playback:skip-vote",{trackId:track.id,vote:!snapshot.room.radio?.skipVote.voted})}>{snapshot.room.radio?.skipVote.voted?"Retract skip vote":"Vote to skip"} · {snapshot.room.radio?.skipVote.count??0}/{snapshot.room.radio?.skipVote.required??3}</Button>}
           {snapshot.room.capabilities?.djsPlayback && <Button variant="ghost" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.stopAfterTrackId===track.id} onClick={()=>runCommand("Updating stop after track…","playback:stop-after",{enabled:snapshot.room.radio?.stopAfterTrackId!==track.id})}>{snapshot.room.radio?.stopAfterTrackId===track.id?"Cancel stop after track":"Stop after this track"}</Button>}
+          </div>
         </>
       ) : (
         <div className="empty-player">

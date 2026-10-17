@@ -45,6 +45,25 @@ test("mute restores local volume without changing shared room playback", async (
 });
 
 test("listeners see disconnected room controls and can recover a rejected playback command", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  const details = page.getByRole("button", { name: "Track details", exact: true });
+  for (const control of [details,
+    page.getByRole("button", { name: "Pause room", exact: true }),
+    page.getByRole("button", { name: "Sync playback with room", exact: true }),
+    page.getByRole("button", { name: "Next track", exact: true }),
+    page.getByRole("button", { name: "Mute my audio", exact: true })]) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await details.focus();
+  await page.keyboard.press("Enter");
+  const trackDetails = page.getByRole("dialog", { name: "Track details", exact: true });
+  await expect(trackDetails.getByRole("heading", { name: "A very long recording title that remains readable in its full track details", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", { name: "Toggle room connection" }).click();
   await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Toggle room connection" }).click();
@@ -55,7 +74,10 @@ test("listeners see disconnected room controls and can recover a rejected playba
   await expect(page.getByRole("alert")).toContainText("DJ permission changed");
   await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).playerQolTest.calls)).toEqual(["playback:update"]);
-  await page.getByRole("button", { name: "Retry playback" }).click();
+  const retry = page.getByRole("button", { name: "Retry playback", exact: true });
+  await retry.scrollIntoViewIfNeeded();
+  await expect(retry).toBeInViewport();
+  await retry.click();
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("Sync requested…")).toBeVisible();
 });
