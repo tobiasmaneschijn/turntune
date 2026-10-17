@@ -20,8 +20,9 @@ project or guessing IDs.
 - Use `DOKPLOY_API_URL` and `DOKPLOY_API_KEY` from the environment. This workstation
   also has `DOKPLOY_API`; use it as the URL fallback when `DOKPLOY_API_URL` is unset.
   Normalize the URL so requests have exactly one `/api` prefix, and send the key
-  in the `x-api-key` header. Never print or commit credentials or full environment
-  responses. If the URL or key is missing, report which variable is missing;
+  in the `x-api-key` header. Never print or commit credentials, full environment
+  responses or unfiltered Docker inspect output (`Config.Env` contains secrets).
+  If the URL or key is missing, report which variable is missing;
   do not silently use the skill's localhost default.
 - Start with `GET /api/project.all` to locate Fun and inspect its SoundSpin services.
   Confirm the target environment, repository, branch and Compose file before
@@ -42,23 +43,43 @@ project or guessing IDs.
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
   deployment disabled; deploy manually only after that commit's migrations and
   CI checks succeed.
+- Staging currently uses `https://beta.soundspin.tobiasmaneschijn.com`. Verify
+  the configured domain and keep `APP_ORIGIN`, Supabase Auth's Site URL and the
+  exact `/update-password` redirect allowlist entry aligned with it.
 - Follow `README.md` (Dokploy deployment), `docs/production-hardening.md` and
   `SECURITY_RELEASE_STATUS.md` for configuration and release gates. Apply pending
   database migrations before deploying the server. Deploy to isolated staging
   and complete the required evidence review before opening public ingress.
-- Keep exactly **one active Node instance**, including during deploys and
-  rollbacks; avoid overlapping old and new processes. Route HTTPS and Socket.IO through
-  the proxy to container port `3000`, keep WebSockets enabled and prevent direct
-  public access to the backend port. Use `.env.example` for required settings;
-  keep server credentials out of browser build variables.
+- Keep exactly **one active Node instance per environment**, including during
+  deploys and rollbacks. Stop the target service and verify its process exited
+  before starting its replacement.
+- Keep the app's `PORT` and the Dokploy domain's container target at `3000`.
+  Staging uses `SOUNDSPIN_PORT=3001` for `127.0.0.1:3001:3000`; that variable
+  changes only the host's loopback port. Route HTTPS and Socket.IO through the
+  proxy, keep WebSockets enabled and prevent direct public backend access.
+  Use `.env.example` for required settings; keep server credentials out of
+  browser build variables.
+- Set `TRUSTED_PROXY_CIDRS` to the proxy's observed address on the shared Docker
+  network. If `docker.getContainers` omits the proxy, locate
+  `dokploy-traefik` with `swarm.getContainerStats`, then inspect its network with
+  `docker.getConfig`. Recheck after proxy recreation; do not reuse a remembered
+  IP address or trust an entire private subnet.
+- On the observed Dokploy v0.29.12, use a fresh `compose.deploy` from Git after
+  domain/routing changes. `compose.redeploy` reuses a generated Compose file and
+  can retain stale port labels. Verify the running container's Traefik target
+  port labels after deployment, even when the saved domain configuration is correct.
 - Deploy the intended pushed revision and set `SOUNDSPIN_REVISION` to its commit
   SHA so `compose.yaml` passes it as the `BUILD_REVISION` build argument. Record
   the resulting image digest and migration history with the release evidence.
-  Deployment is asynchronous: record the
-  deployment ID, check status and logs until completion, then verify
-  `/api/health` and `/api/ready` through the intended ingress. Report the revision,
-  environment and verification result; a successful trigger is not a completed
-  deployment.
+  Deployment is asynchronous: record the deployment ID, check status and logs
+  until completion, wait for container health
+  and proxy registration, then verify `/api/health` and `/api/ready` through the
+  intended ingress. Verify Socket.IO polling and a real WebSocket upgrade, hostile
+  Origin rejection and missing namespace-credential rejection. Traefik forwards
+  secure WebSocket upgrades as `wss`; preserve the app's trusted-peer, GET,
+  Upgrade/Connection, Host and Origin checks when changing protocol handling.
+  Report the revision, environment and verification result. A successful trigger
+  is not a completed deployment.
 
 ## Keep language restrained
 
