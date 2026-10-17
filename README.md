@@ -141,12 +141,12 @@ and server types before producing assets. SQL checks run the actual migrations
 against disposable PGlite databases. The production smoke launches the compiled
 server with fake configuration and blocks external requests.
 
-GitHub Actions runs once per pull-request update and on pushes to `master`,
-cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
+GitHub Actions runs once per pull-request update and on pushes to `master` and
+`develop`, cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
 shares one Linux installation across the fixture, playback, music and player
 checks. `npm run test:ui:visual` keeps the authentication and surface screenshot
-baselines on Windows. Both use two workers. The focused browser commands remain
-available for local debugging.
+baselines on Windows. Behavior checks use one worker; visual checks use two. The
+focused browser commands remain available for local debugging.
 
 Tag fixture cases that set their own viewport with `@fixed-viewport` so they run
 once. The player suite covers phone sizes within its scenarios. Tag music
@@ -221,12 +221,28 @@ restarts until they explicitly sign out or the session is revoked.
 
 ### GitHub database deployments
 
-The Supabase GitHub integration should use `.` as its working directory because
-the `supabase/` directory is at the repository root. With **Deploy to
-production** enabled, pushing or merging a new timestamped migration into the
-configured production branch applies it automatically. Keep all future schema
-changes as new files in `supabase/migrations`; do not edit an already-deployed
-migration.
+Connect both Supabase projects to this repository with these branch settings:
+
+| Git branch | Supabase project | Dokploy service |
+| --- | --- | --- |
+| `develop` | SoundSpin Staging | Fun → staging → soundspin-staging |
+| `master` | SoundSpin | Fun → production → soundspin |
+
+In each Supabase project's GitHub integration, use `.` as the working directory
+and select its branch from the table as the **Production branch**. Enable
+**Deploy to production** in each integration; this label refers to that Supabase
+project, so `develop` applies migrations only to SoundSpin Staging. Separate
+projects and this integration work without the Pro branching feature. See the
+[Supabase deployment guide](https://supabase.com/docs/guides/deployment).
+
+Both branches use the same append-only `supabase/migrations` directory. Add new
+timestamped migrations; do not edit an already-deployed migration. Merge feature
+branches into `develop`, verify staging, then merge `develop` into `master`.
+
+Keep Dokploy automatic deployment disabled. Before manually deploying either
+service, confirm its Supabase migration deployment and GitHub Actions checks
+succeeded for the intended commit. Production also requires the reviewed staging
+release evidence described in `SECURITY_RELEASE_STATUS.md`.
 
 Chat is delivered through authenticated, room-admitted Socket.IO. Message history is
 stored in `soundspin_messages` and was created by the
@@ -331,7 +347,7 @@ and aggregate complete UTC activity totals for the dashboard.
 5. Configure the matching HTTPS domain and proxy HTTP/Socket.IO to container
    port `3000`; prevent direct public access to the backend port. Follow the
    ingress requirements in [`docs/production-hardening.md`](docs/production-hardening.md).
-6. Deploy into isolated staging, apply all migrations and complete the
+6. Apply all migrations, deploy into isolated staging and complete the
    documented release gates in [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md).
    Open public ingress only after their evidence has been reviewed and approved.
 

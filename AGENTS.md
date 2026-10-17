@@ -12,8 +12,10 @@ when applying these skills. Installation details are in `.agents/skills/README.m
 
 Use the `dokploy` API skill for deployment work. Read
 `C:/Users/tfrom/.agents/skills/dokploy/SKILL.md` before using it.
-Target the existing **SoundSpin** project; discover its environment and service
-IDs from the API instead of creating a new project or guessing IDs.
+SoundSpin's existing services are in the **Fun** project: `production / soundspin`
+tracks `master`, and `staging / soundspin-staging` tracks `develop`. Discover and
+verify their environment and service IDs from the API instead of creating a new
+project or guessing IDs.
 
 - Use `DOKPLOY_API_URL` and `DOKPLOY_API_KEY` from the environment. This workstation
   also has `DOKPLOY_API`; use it as the URL fallback when `DOKPLOY_API_URL` is unset.
@@ -21,7 +23,7 @@ IDs from the API instead of creating a new project or guessing IDs.
   in the `x-api-key` header. Never print or commit credentials or full environment
   responses. If the URL or key is missing, report which variable is missing;
   do not silently use the skill's localhost default.
-- Start with `GET /api/project.all` to locate SoundSpin and inspect its services.
+- Start with `GET /api/project.all` to locate Fun and inspect its SoundSpin services.
   Confirm the target environment, repository, branch and Compose file before
   deploying. If the host is unreachable, report the failure and leave live IDs
   and deployment status unverified.
@@ -35,6 +37,11 @@ IDs from the API instead of creating a new project or guessing IDs.
   payloads work for Compose. Read back changed configuration before deploying.
 - Reuse the discovered SoundSpin Compose service. The README's instruction to
   create a Compose application describes initial setup, not routine releases.
+- Use the separate **SoundSpin Staging** Supabase project for `develop` and
+  **SoundSpin** for `master`. Both GitHub integrations use working directory `.`
+  and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
+  deployment disabled; deploy manually only after that commit's migrations and
+  CI checks succeed.
 - Follow `README.md` (Dokploy deployment), `docs/production-hardening.md` and
   `SECURITY_RELEASE_STATUS.md` for configuration and release gates. Apply pending
   database migrations before deploying the server. Deploy to isolated staging
