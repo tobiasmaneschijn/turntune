@@ -9,11 +9,19 @@ begin transaction read only;
 
 select public.soundspin_release_ready() as release_schema_ready;
 
+-- Configuration contains limits and plan names, never credentials. Account
+-- assignment output is aggregate only. Shared room caps are operator-global.
+select limits as global_resource_limits from public.soundspin_resource_config where singleton;
+select id as plan,limits as account_resource_limits from public.soundspin_resource_plans order by id;
+select plan_id as plan,count(*) as assigned_accounts from public.soundspin_account_plans group by plan_id order by plan_id;
+
 -- Existing oversized rows must be reduced before validating NOT VALID checks.
+-- Saved-work quota overages below can be intentional after a plan downgrade;
+-- review capacity and recovery rather than deleting that work automatically.
 select
  (select count(*) from public.soundspin_rooms where octet_length(state::text)>4194304) as oversized_room_states,
  (select count(*) from public.soundspin_room_moderation where octet_length(data::text)>4194304) as oversized_moderation_documents,
- (select count(*) from (select owner_id from public.soundspin_rooms group by owner_id having count(*)>10) owners) as owners_over_ten_rooms,
+ (select count(*) from (select owner_id from public.soundspin_rooms group by owner_id having count(*)>(public.soundspin_resource_policy(owner_id)#>>'{limits,ownedRooms}')::int) owners) as owners_over_room_budget,
  (select count(*) from public.soundspin_rooms where state?'djQueues' and jsonb_typeof(state->'djQueues')<>'object') as invalid_queue_documents,
  (select count(*) from pg_constraint where conname in ('soundspin_room_state_bytes','soundspin_moderation_state_bytes') and not convalidated) as pending_legacy_constraint_validations;
 
@@ -32,26 +40,50 @@ with entries as (
 select
  (select count(*) from entries where jsonb_typeof(value)<>'array' or key!~'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') as invalid_queue_entries,
  (select count(*) from valid v where not exists(select 1 from auth.users u where u.id=v.actor_id)) as queues_for_missing_accounts,
- (select count(*) from (select slug from valid group by slug having sum(tracks)>2000) rooms) as rooms_over_waiting_queue_budget,
- (select count(*) from (select actor_id from valid group by actor_id having sum(tracks)>2000) accounts) as accounts_over_waiting_queue_budget,
+ (select count(*) from valid where tracks>(public.soundspin_resource_policy(actor_id)#>>'{limits,queueTracksPerRoom}')::int) as account_room_queues_over_waiting_budget,
+ (select count(*) from (select slug from valid group by slug having sum(tracks)>(public.soundspin_resource_policy()#>>'{global,queueTracksPerRoom}')::int) rooms) as rooms_over_waiting_queue_budget,
+ (select count(*) from (select actor_id from valid group by actor_id having sum(tracks)>(public.soundspin_resource_policy(actor_id)#>>'{limits,queueTracksTotal}')::int) accounts) as accounts_over_waiting_queue_budget,
  (select count(*) from mismatch) as queue_ledger_mismatches;
 
 -- A purpose-specific ledger includes pending/deleting objects until confirmed
--- Storage removal. Limits below are the database-authoritative configuration.
-select purpose,total_objects,total_bytes,hourly_objects,hourly_bytes,pending_objects,pending_bytes,concurrent_uploads
- from public.soundspin_upload_limits order by purpose;
+-- Storage removal. Plan configuration replaces the legacy upload-limits table.
+select p.id as plan,u.key as purpose,u.value as upload_limits
+ from public.soundspin_resource_plans p cross join lateral jsonb_each(p.limits->'uploads') u order by p.id,u.key;
 with inventory as (
  select actor_id,purpose,count(*) as objects,sum(size_bytes) as bytes
  from public.soundspin_managed_uploads where state<>'deleted' group by actor_id,purpose
 ), over_budget as (
- select i.* from inventory i join public.soundspin_upload_limits l using(purpose)
- where i.objects>l.total_objects or i.bytes>l.total_bytes
+ select i.* from inventory i
+ where i.objects>(public.soundspin_resource_policy(i.actor_id)#>>array['limits','uploads',i.purpose,'storedObjects'])::int
+  or i.bytes>(public.soundspin_resource_policy(i.actor_id)#>>array['limits','uploads',i.purpose,'storedBytes'])::bigint
 )
 select
  (select count(*) from public.soundspin_managed_uploads where state='reserved') as uploading_reservations,
  (select count(*) from public.soundspin_managed_uploads where state in ('reserved','pending') and expires_at<now()) as expired_unassociated_uploads,
  (select count(*) from over_budget) as account_purposes_over_retained_budget,
- (select count(*) from (select room_slug from public.soundspin_managed_uploads where room_slug is not null and state<>'deleted' group by room_slug having count(*)>1000 or sum(size_bytes)>1073741824) rooms) as rooms_over_media_budget;
+ (select count(*) from (select room_slug from public.soundspin_managed_uploads where room_slug is not null and state<>'deleted' group by room_slug
+  having count(*)>(public.soundspin_resource_policy()#>>'{global,roomUploadObjects}')::int
+   or sum(size_bytes)>(public.soundspin_resource_policy()#>>'{global,roomUploadBytes}')::bigint) rooms) as rooms_over_media_budget;
+
+select
+ (select count(*) from public.soundspin_private_libraries l where
+  jsonb_array_length(l.data->'picks')>(public.soundspin_resource_policy(l.user_id)#>>'{limits,libraryPicks}')::int
+  or jsonb_array_length(l.data->'sets')>(public.soundspin_resource_policy(l.user_id)#>>'{limits,librarySets}')::int
+  or exists(select 1 from jsonb_array_elements(l.data->'sets') s where jsonb_array_length(s->'tracks')>(public.soundspin_resource_policy(l.user_id)#>>'{limits,librarySetTracks}')::int)) as accounts_over_library_budget,
+ (select count(*) from (select user_id from public.soundspin_room_favorites group by user_id having count(*)>(public.soundspin_resource_policy(user_id)#>>'{limits,favoriteRooms}')::int) accounts) as accounts_over_favorite_budget,
+ (select count(*) from (select user_id from public.soundspin_room_members where role<>'owner' group by user_id having count(*)>(public.soundspin_resource_policy(user_id)#>>'{limits,memberships}')::int) accounts) as accounts_over_membership_budget;
+
+-- Backlogs are observed, not removed by preflight. Parent and incoming-reply
+-- work drain in separate bounded batches; attachment deletion is asynchronous.
+select
+ (select count(*) from public.soundspin_messages where created_at<now()-make_interval(days=>(public.soundspin_resource_policy()#>>'{global,chatRetentionDays}')::int)) as messages_past_retention_age,
+ (select count(*) from (select room_slug from public.soundspin_messages group by room_slug having count(*)>(public.soundspin_resource_policy()#>>'{global,chatRetentionMessages}')::int) rooms) as rooms_over_retained_message_budget;
+select
+ count(*) filter(where settings->'spotifyEnabled'='true'::jsonb) as rooms_with_spotify_enabled,
+ count(*) filter(where coalesce(settings->'spotifyEnabled','false'::jsonb) is distinct from coalesce(state#>'{settings,spotifyEnabled}','false'::jsonb)) as rooms_with_inconsistent_spotify_policy,
+ count(*) filter(where jsonb_typeof(coalesce(settings->'spotifyEnabled','false'::jsonb))<>'boolean' or jsonb_typeof(coalesce(state#>'{settings,spotifyEnabled}','false'::jsonb))<>'boolean') as rooms_with_invalid_spotify_flags
+ from public.soundspin_rooms;
+
 select count(*) as queued_deletions,
  count(*) filter(where available_at<=now()) as due_deletions,
  count(*) filter(where attempts>0) as deletion_keys_with_retries,

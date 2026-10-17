@@ -43,7 +43,7 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
         items: [
           "Loading older chat messages preserves your reading position.",
           "Duplicate chat submissions and conflicting updates to saved picks and sets.",
-          "Spotify and Apple Music sessions reset when you sign out or switch app accounts.",
+          "Personal music sessions reset when you sign out or switch app accounts.",
         ],
       },
     ],
@@ -186,7 +186,7 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
           "App version and changelog.",
           "Shared radio rooms with synchronized playback, DJ turns, and private music queues.",
           "Room chat with replies, reactions, images, and GIF search when configured.",
-          "Music search and playback options for YouTube, SoundCloud, Spotify, and Apple Music.",
+          "Music search and playback options for YouTube, SoundCloud, and Apple Music.",
         ],
       },
       {

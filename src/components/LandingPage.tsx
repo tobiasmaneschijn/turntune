@@ -167,9 +167,9 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         <h2 id="landing-providers-title">Music services</h2>
         <div>
           <ul className="landing-provider-list" aria-label="Supported music services">
-            {["YouTube", "SoundCloud", "Spotify", "Apple Music (when available)"].map((provider) => <li key={provider}>{provider}</li>)}
+            {["YouTube", "SoundCloud", "Apple Music (when available)"].map((provider) => <li key={provider}>{provider}</li>)}
           </ul>
-          <p>Spotify playback requires Premium; Apple Music requires a subscription. Connect your account in Settings.</p>
+          <p>Apple Music requires a subscription. Connect your account in Settings.</p>
         </div>
       </section>
 

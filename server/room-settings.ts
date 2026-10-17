@@ -40,6 +40,7 @@ const CHAT_FIELDS = new Set(["chatMode", "slowModeSeconds", "mediaPermission", "
 const DJ_FIELDS = new Set(["djJoinLocked", "djCapacity", "manualPlayback", "songsPerTurn", "skipVote"]);
 export function authorizeRoomSettingsPatch(room: Room, actor: string, input: RoomSettingsPatch) {
   requireNotBanned(room, actor);
+  if (input.allowedProviders?.includes("spotify") && room.settings.spotifyEnabled !== true) throw new RoomCommandError("Only an app admin can enable Spotify for this room.");
   if (input.moderatorPermissions !== undefined && room.ownerUserId !== actor) throw new RoomCommandError("Only the owner can change moderator permissions.");
   for (const key of Object.keys(input)) {
     if (key === "policyRevision" || key === "moderatorPermissions") continue;

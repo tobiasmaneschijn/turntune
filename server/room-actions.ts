@@ -12,8 +12,10 @@ import { resolveSavedSet, type SetImportRegistry, type createSavedSetResolver } 
 import { RoomCommandError, type safeSocketHandler } from "./socket-handler.js";
 import type { Store, RoomChange } from "./store.js";
 import type { RoomCommandService } from "./room-command-service.js";
-import type { Room, User } from "./types.js";
+import type { Room, User, Track } from "./types.js";
+import type { LibraryTrack } from "./private-library.js";
 import type { resolveTrackMappings } from "./provider-mappings.js";
+import { defaultResourcePolicy, type ResolvedResourcePolicy } from "../shared/resource-policy.js";
 
 interface Membership { room: Room; user: User }
 interface RoomActionOptions {
@@ -31,12 +33,19 @@ interface RoomActionOptions {
   watchAnnouncement: (room: Room) => void;
   queueUndo: QueueUndoRegistry;
   setImports: SetImportRegistry;
-  resolveTrack: (input: z.infer<typeof trackSchema>) => ReturnType<typeof resolveTrackMappings>;
-  resolveSavedRecording: ReturnType<typeof createSavedSetResolver>;
+  resolveTrack: (input: z.infer<typeof trackSchema>, room: Room) => ReturnType<typeof resolveTrackMappings>;
+  resolveSavedRecording: (input: LibraryTrack, signal: AbortSignal, room: Room) => ReturnType<ReturnType<typeof createSavedSetResolver>>;
   onlineUserIds?: (roomId:string)=>string[];
+  getResourcePolicy?: (userId: string) => Promise<ResolvedResourcePolicy>;
+  runImport?: <T>(userId: string, operation: () => Promise<T>) => Promise<T>;
 }
 
 const fail = (message: string): never => { throw new RoomCommandError(message); };
+const permittedMappings = <T extends { mappings?: Track["mappings"] }>(room: Room, track: T): T => {
+  if (roomAllowsProvider(room.settings, "spotify") || !track.mappings?.spotify) return track;
+  const { spotify: _spotify, ...mappings } = track.mappings;
+  return { ...track, mappings };
+};
 const controlsPlayback = (room: Room, userId: string) => hasRoomCapability(room,userId,"djsPlayback") || (effectiveRoomPolicy(room).manualPlayback!=="staff"&&room.djUserId === userId);
 const queueReceipt = <T>(operation: () => T): T => {
   try { return operation(); }
@@ -60,6 +69,24 @@ export function mountRoomActions(options: RoomActionOptions) {
     // the same captured session immediately before touching the queued draft.
     assertCurrent(member);
   };
+  const policyFor = async (member: Membership) => {
+    const policy = await options.getResourcePolicy?.(member.user.id) ?? defaultResourcePolicy();
+    assertCurrent(member);
+    return policy;
+  };
+  const assertQueueCapacity = (room: Room, userId: string, policy: ResolvedResourcePolicy, additional = 0) => {
+    if ((room.djQueues[userId]?.length ?? 0) + additional > policy.limits.queueTracksPerRoom) fail("Your waiting queue is full. Remove a track before adding another.");
+    if (Object.values(room.djQueues).reduce((count, tracks) => count + tracks.length, 0) + additional > policy.global.queueTracksPerRoom) fail("This room's waiting queues are full. Remove tracks before adding more.");
+  };
+  const resolveSet = async (member: Membership, tracks: LibraryTrack[]) => {
+    const policy = await policyFor(member);
+    return resolveSavedSet(tracks, (track, signal) => {
+      assertCurrent(member);
+      if (!roomAllowsProvider(member.room.settings, track.provider)) fail(`${PROVIDER_LABELS[track.provider]} is disabled in this room`);
+      return options.resolveSavedRecording(track, signal, member.room);
+    }, 10_000, policy.limits.importTracks);
+  };
+  const runImport = <T>(member: Membership, operation: () => Promise<T>) => options.runImport ? options.runImport(member.user.id, operation) : operation();
   const action = <T>(event: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, change: (draft: Room, member: Membership, input: T) => RoomChange<Record<string, unknown>>) => {
     onAction(event, async (payload, reply) => {
       const input = schema.safeParse(payload);
@@ -111,16 +138,18 @@ export function mountRoomActions(options: RoomActionOptions) {
     if (!parsed.success) return reply?.({ ok: false, error: "Invalid track." });
     assertCurrent(member);
     if (!roomAllowsProvider(member.room.settings, parsed.data.provider)) fail(`${PROVIDER_LABELS[parsed.data.provider]} is disabled in this room.`);
-    const resolved = await options.resolveTrack(parsed.data);
+    assertQueueCapacity(member.room, member.user.id, await policyFor(member), 1);
+    if (!roomAllowsProvider(member.room.settings, parsed.data.provider)) fail(`${PROVIDER_LABELS[parsed.data.provider]} is disabled in this room.`);
+    const resolved = await options.resolveTrack(parsed.data, member.room);
     const result = await commands.execute(member.room, async draft => {
       await assertFreshCurrent(member);
-      const recording = { ...parsed.data, ...resolved };
+      const recording = permittedMappings(draft, { ...parsed.data, ...resolved });
       if (!roomAllowsProvider(draft.settings, recording.provider)) fail(`${PROVIDER_LABELS[recording.provider]} is disabled in this room.`);
       if (draft.playback.track && sameRecording(draft.playback.track, recording)) fail("That track is already playing.");
       const queue = privateQueue(draft, member.user.id);
       const duplicate = queue.findIndex(track => sameRecording(track, recording));
       if (duplicate >= 0) fail(`That track is already #${duplicate + 1} in the queue.`);
-      if (queue.length >= 1000) fail("Your waiting queue is full. Remove a track before adding another.");
+      assertQueueCapacity(draft, member.user.id, await policyFor(member), 1);
       const track = { id: crypto.randomUUID(), ...recording, addedBy: member.user, addedAt: Date.now() };
       queue.push(track);
       if (!draft.playback.track && draft.djQueueUserIds.includes(member.user.id)) advanceRadio(draft);
@@ -133,20 +162,19 @@ export function mountRoomActions(options: RoomActionOptions) {
     const input = roomCommandSchemas["queue:set-add"].safeParse(payload);
     const member = currentMember(); if (!input.success) return reply?.({ ok: false, error: "Invalid saved set." });
     assertCurrent(member);
-    const result = await options.setImports.run(member.room, member.user.id, input.data.requestId, input.data.setId, async markCommitted => {
+    const result = await options.setImports.run(member.room, member.user.id, input.data.requestId, input.data.setId, markCommitted => runImport(member, async () => {
       const library = await store.getPrivateLibrary(member.user.id);
       const set = library.sets.find(value => value.id === input.data.setId);
       if (!set) fail("This saved set is no longer in your private library.");
-      const resolved = await resolveSavedSet(set!.tracks, options.resolveSavedRecording);
+      const resolved = await resolveSet(member, set!.tracks);
       return commands.execute(member.room, async draft => {
         await assertFreshCurrent(member);
-        const enabledTracks = resolved.tracks.filter(track => roomAllowsProvider(draft.settings, track.provider));
-        if (privateQueue(draft, member.user.id).length + enabledTracks.length > 1000) fail("Your waiting queue is full. Remove tracks before adding this set.");
-        const appended = resolved.tracks.length ? appendQueueSet(draft, member.user, resolved.tracks) : { added: 0, skipped: [], started: false };
+        const appended = resolved.tracks.length ? appendQueueSet(draft, member.user, resolved.tracks.map(track => permittedMappings(draft, track))) : { added: 0, skipped: [], started: false };
+        assertQueueCapacity(draft, member.user.id, await policyFor(member));
         const outcome = { ...appended, skipped: [...resolved.skipped, ...appended.skipped] };
         return { result: outcome, committed: () => markCommitted(outcome) };
       });
-    });
+    }));
     reply?.({ ok: true, ...result });
   });
   action("queue:remove", queueTrackSchema, (draft, member, input) => {
@@ -218,12 +246,13 @@ export function mountRoomActions(options: RoomActionOptions) {
     const data=input.data!;
     if(!hasRoomCapability(member.room,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");
     let tracks:Awaited<ReturnType<typeof resolveSavedSet>>|undefined;
-    if(data.setId){const library=await store.getPrivateLibrary(member.user.id);const set=library.sets.find(s=>s.id===data.setId);if(!set)fail("Saved set not found.");tracks=await resolveSavedSet(set!.tracks,options.resolveSavedRecording);if(tracks.skipped.length)fail("Every fallback track must be available. Fix the saved set and try again.");}
-    await commands.execute(member.room,async draft=>{await assertFreshCurrent(member);if(!hasRoomCapability(draft,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");const state=radioState(draft);if(tracks){const copies=tracks.tracks.map(t=>({...t,id:crypto.randomUUID(),addedBy:member.user,addedAt:Date.now()}));if(copies.some(t=>!t.durationVerified||!t.durationMs||t.isLive))fail("Fallback requires verified finite recordings.");state.fallback.tracks=copies;state.fallback.cursor=0;}if(data.enabled&&!state.fallback.tracks.length)fail("Choose a saved set first.");state.fallback.enabled=data.enabled;appendModerationLog(draft,{actorId:member.user.id,action:"fallback-set",reason:"",details:{enabled:data.enabled,replaced:Boolean(tracks),count:state.fallback.tracks.length}});if(!draft.playback.track)advanceRadio(draft);return{result:{}};});reply?.({ok:true});
+    if(data.setId){const library=await store.getPrivateLibrary(member.user.id);const set=library.sets.find(s=>s.id===data.setId);if(!set)fail("Saved set not found.");tracks=await runImport(member,()=>resolveSet(member,set!.tracks));if(tracks.skipped.length)fail("Every fallback track must be available. Fix the saved set and try again.");}
+    await commands.execute(member.room,async draft=>{await assertFreshCurrent(member);if(!hasRoomCapability(draft,member.user.id,"roomDetailsMusic"))fail("Room music policy permission is required.");const state=radioState(draft);if(tracks){const copies=tracks.tracks.map(t=>({...permittedMappings(draft,t),id:crypto.randomUUID(),addedBy:member.user,addedAt:Date.now()}));if(copies.some(t=>!roomAllowsProvider(draft.settings,t.provider)))fail("A fallback service is disabled in this room.");if(copies.some(t=>!t.durationVerified||!t.durationMs||t.isLive))fail("Fallback requires verified finite recordings.");state.fallback.tracks=copies;state.fallback.cursor=0;}if(data.enabled&&!state.fallback.tracks.length)fail("Choose a saved set first.");state.fallback.enabled=data.enabled;appendModerationLog(draft,{actorId:member.user.id,action:"fallback-set",reason:"",details:{enabled:data.enabled,replaced:Boolean(tracks),count:state.fallback.tracks.length}});if(!draft.playback.track)advanceRadio(draft);return{result:{}};});reply?.({ok:true});
   });
   action("playback:update", playbackSchema, (draft, member, input) => {
     if (!controlsPlayback(draft, member.user.id)) fail("Only the current DJ or a room moderator controls playback.");
     if (draft.playback.track?.id !== input.trackId) fail("Invalid playback update.");
+    if (input.playing && draft.playback.track && !roomAllowsProvider(draft.settings, draft.playback.track.provider)) fail(`${PROVIDER_LABELS[draft.playback.track.provider]} is disabled in this room.`);
     draft.playback = { ...draft.playback, playing: input.playing, position: input.position, updatedAt: Date.now() };radioState(draft).fallback.autoPaused=false; return { result: {} };
   });
   action("room:announcement", announcementSchema, (draft, member, input) => {

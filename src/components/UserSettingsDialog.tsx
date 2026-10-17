@@ -62,6 +62,8 @@ export function UserSettingsDialog({
   settings,
   connections,
   accessToken,
+  spotifyEnabled = false,
+  roomSlug,
   onSettingsChange,
   onConnectSpotify,
   onDisconnectSpotify,
@@ -72,6 +74,8 @@ export function UserSettingsDialog({
   settings: SoundSpinUserSettings;
   connections: MusicConnections;
   accessToken?: string;
+  spotifyEnabled?: boolean;
+  roomSlug?: string;
   onSettingsChange: (settings: SoundSpinUserSettings) => void;
   onConnectSpotify: () => void;
   onDisconnectSpotify: () => void;
@@ -83,6 +87,7 @@ export function UserSettingsDialog({
   const isMobile = useMediaQuery("(max-width: 600px)");
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const { theme = settings.appearance.theme, setTheme } = useTheme();
+  const playbackPreference = !spotifyEnabled && settings.playback.preference.startsWith("spotify") ? "source" : settings.playback.preference;
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
@@ -181,24 +186,32 @@ export function UserSettingsDialog({
     updateAppearance({ theme: nextTheme });
   };
 
+  const deviceRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    deviceRequest.current?.abort(); deviceRequest.current = null;
+    setDevices([]); setDevicesLoaded(false); setLoadingDevices(false); setDeviceError("");
+    return () => { deviceRequest.current?.abort(); deviceRequest.current = null; };
+  }, [spotifyEnabled, roomSlug, accessToken]);
   const refreshDevices = useCallback(() => {
-    if (!accessToken || !connections.spotifyConnected) return;
+    if (!accessToken || !spotifyEnabled || !connections.spotifyConnected || deviceRequest.current) return;
+    const controller = new AbortController(); deviceRequest.current = controller;
     setLoadingDevices(true);
     setDeviceError("");
-    void fetch("/api/spotify/devices", { headers: { Authorization: `Bearer ${accessToken}` } })
+    void fetch("/api/spotify/devices", { headers: { Authorization: `Bearer ${accessToken}`, "x-soundspin-room": roomSlug ?? "" }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) })
       .then(async (response) => {
         const payload = await response.json() as { devices?: SpotifyDevice[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Could not load Spotify devices.");
+        if (controller.signal.aborted) return;
         setDevices((payload.devices || []).filter((device) => device.id && !device.is_restricted));
         setDevicesLoaded(true);
       })
-      .catch((error) => setDeviceError(error instanceof Error ? error.message : "Could not load Spotify devices."))
-      .finally(() => setLoadingDevices(false));
-  }, [accessToken, connections.spotifyConnected]);
+      .catch((error) => { if (!controller.signal.aborted) setDeviceError(error instanceof Error ? error.message : "Could not load Spotify devices."); })
+      .finally(() => { if (deviceRequest.current === controller) { deviceRequest.current = null; setLoadingDevices(false); } });
+  }, [accessToken, spotifyEnabled, roomSlug, connections.spotifyConnected]);
 
   useEffect(() => {
-    if ((tab === "playback" || tab === "connections") && connections.spotifyConnected && !devices.length) refreshDevices();
-  }, [tab, connections.spotifyConnected, devices.length, refreshDevices]);
+    if ((tab === "playback" || tab === "connections") && spotifyEnabled && connections.spotifyConnected && !devices.length) refreshDevices();
+  }, [tab, spotifyEnabled, connections.spotifyConnected, devices.length, refreshDevices]);
 
   useEffect(() => {
     const update = () => setAppleAuthorized(readAppleAuthorization());
@@ -268,12 +281,12 @@ export function UserSettingsDialog({
               <div className="settings-panel-stack">
                 <section>
                   <div className="settings-section-heading"><strong>Default playback</strong></div>
-                  <ToggleGroup className="playback-option-list" aria-label="Default playback provider" orientation="vertical" value={[settings.playback.preference]} onValueChange={(value) => {
+                  <ToggleGroup className="playback-option-list" aria-label="Default playback provider" orientation="vertical" value={[playbackPreference]} onValueChange={(value) => {
                     if (value[0]) updatePlayback({ preference: value[0] as PlaybackPreference });
                   }}>
-                    {playbackOptions.map((option) => {
+                    {playbackOptions.filter(option => spotifyEnabled || !option.value.startsWith("spotify")).map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
-                      const selected = settings.playback.preference === option.value;
+                      const selected = playbackPreference === option.value;
                       const Icon = option.icon;
                       return (
                         <ToggleGroupItem key={option.value} value={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable}>
@@ -284,8 +297,8 @@ export function UserSettingsDialog({
                       );
                     })}
                   </ToggleGroup>
-                  {settings.playback.preference !== "source" && <small>Requires a matching track.</small>}
-                  {settings.playback.preference.startsWith("spotify") && !connections.spotifyConnected && (
+                  {playbackPreference !== "source" && <small>Requires a matching track.</small>}
+                  {spotifyEnabled && playbackPreference.startsWith("spotify") && !connections.spotifyConnected && (
                     <div className="settings-inline-notice">
                       <span>Spotify connection required.</span>
                       <Button size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>Connect Spotify</Button>
@@ -298,7 +311,7 @@ export function UserSettingsDialog({
                   <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label="Default volume" getAriaValueText={(_formatted, value) => `${value} percent`} />
                 </section>
 
-                {settings.playback.preference === "spotify-desktop" && (
+                {spotifyEnabled && playbackPreference === "spotify-desktop" && (
                   <section className="settings-control-group">
                     <Label htmlFor="spotify-device">Spotify Connect device</Label>
                     <div className="settings-select-row">
@@ -312,11 +325,11 @@ export function UserSettingsDialog({
                       <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices" aria-label="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
                     </div>
                     {deviceError && <small className="settings-field-error">{deviceError}</small>}
-                    {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
+                    {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
                   </section>
                 )}
 
-                {settings.playback.preference !== "source" && <section className="settings-control-group">
+                {playbackPreference !== "source" && <section className="settings-control-group">
                   <Label htmlFor="fallback-behavior">When the preferred provider has no match</Label>
                   <Select value={settings.playback.fallback} onValueChange={(value) => updatePlayback({ fallback: value as SoundSpinUserSettings["playback"]["fallback"] })}>
                     <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue>{settings.playback.fallback === "ask" ? "Ask for each unavailable track" : settings.playback.fallback === "silent" ? "Keep local playback silent" : "Use the room source automatically"}</SelectValue></SelectTrigger>
@@ -328,14 +341,14 @@ export function UserSettingsDialog({
                   </Select>
                 </section>}
 
-                {settings.playback.preference === "spotify-web" && <SettingSwitch title="Resume when Spotify reconnects" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />}
+                {spotifyEnabled && playbackPreference === "spotify-web" && <SettingSwitch title="Resume when Spotify reconnects" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />}
               </div>
             </TabsContent>
 
             <TabsContent value="connections">
               <div className="connection-list">
                 {connectionError && <div className="settings-inline-notice" role="alert"><span>{connectionError}</span>{onRetryConnections && <Button size="sm" variant="outline" onClick={onRetryConnections}>Retry connection check</Button>}</div>}
-                <div className="connection-row connection-row-expanded">
+                {spotifyEnabled && <div className="connection-row connection-row-expanded">
                   <span className="connection-logo spotify">S</span>
                   <span><strong>{connections.spotifyProfile?.displayName || "Spotify"}</strong>{(connections.spotifyConnected || spotifyUnavailable) && <small>{connections.spotifyConnected ? [connections.spotifyProfile?.product === "premium" ? "Premium" : "Connected", selectedSpotifyDevice?.name].filter(Boolean).join(" · ") : "Not configured"}</small>}</span>
                   <span className="connection-actions">
@@ -343,15 +356,15 @@ export function UserSettingsDialog({
                     <Button variant="outline" size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>{connections.spotifyConnected ? "Reconnect" : "Connect"}</Button>
                     {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={onDisconnectSpotify}><Unplug /> Disconnect</Button>}
                   </span>
-                </div>
+                </div>}
                 <div className="connection-row">
                   <span className="connection-logo apple">A</span>
                   <span><strong>Apple Music</strong></span>
                   <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
                   {appleAuthorized && <Button variant="ghost" size="sm" aria-label="Disconnect Apple Music" onClick={() => void resetProviderSession("apple")}><Unplug /> Disconnect</Button>}
                 </div>
-                {deviceError && <div className="dialog-error">{deviceError}</div>}
-                {connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
+                {spotifyEnabled && deviceError && <div className="dialog-error">{deviceError}</div>}
+                {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
               </div>
             </TabsContent>
 

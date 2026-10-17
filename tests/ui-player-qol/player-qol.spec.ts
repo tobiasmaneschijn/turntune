@@ -59,3 +59,29 @@ test("listeners see disconnected room controls and can recover a rejected playba
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText("Sync requested…")).toBeVisible();
 });
+
+
+test("listeners return to the room source when an administrator disables Spotify", async ({ page }) => {
+  await page.evaluate(() => window.playerQolTest.useSpotify());
+  await expect.poll(() => page.evaluate(() => window.playerQolTest.spotifyActive)).toBe(true);
+  await page.getByRole("button", { name: /^Playback settings · Playback source:/ }).click();
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  let releaseConnect: (() => void) | undefined;
+  const requested = new Promise<void>(resolve => {
+    void page.route("**/api/spotify/connect?**", async route => {
+      expect(route.request().headers()["x-soundspin-room"]).toBe("player-room");
+      await new Promise<void>(release => { releaseConnect = release; resolve(); });
+      await route.fulfill({ json: { url: "https://accounts.spotify.com/authorize?fixture" } }).catch(() => {});
+    });
+  });
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await requested;
+  await page.evaluate(() => window.playerQolTest.setSpotifyEnabled(false));
+  releaseConnect?.();
+  await expect.poll(() => page.evaluate(() => window.playerQolTest.spotifyActive)).toBe(false);
+  await expect(page.getByText("Fixture provider · volume 80")).toBeVisible();
+  await expect(page).toHaveURL(/tests\/player-qol-harness\/index.html/);
+  await page.getByRole("tab", { name: "Playback", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Spotify/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Room source", exact: true })).toHaveAttribute("aria-pressed", "true");
+});

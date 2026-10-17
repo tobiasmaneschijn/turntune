@@ -5,6 +5,8 @@ import express from "express";
 import { mountPrivateLibraryRoutes } from "./library-routes.js";
 import type { LibraryMutation } from "./private-library.js";
 import type { Store } from "./store.js";
+import { ResourcePolicyStore } from "./resource-policy.js";
+import { DEFAULT_PLAN_LIMITS } from "../shared/resource-policy.js";
 
 interface Fixture {
   calls: Array<{ kind: "read" | "write"; userId: string; mutation?: LibraryMutation }>;
@@ -14,6 +16,7 @@ async function withRoutes(run: (base: string, fixture: Fixture) => Promise<void>
   const fixture: Fixture = { calls: [], failStore: false };
   const library = { picks: [], sets: [] };
   const store = {
+    resourcePolicies:new ResourcePolicyStore(null),
     async getPrivateLibrary(userId: string) {
       fixture.calls.push({ kind: "read", userId });
       if (fixture.failStore) throw new Error("Read failed");
@@ -65,7 +68,7 @@ test("private-library GET and POST use verified identity and strip body/query id
   await withRoutes(async (base, fixture) => {
     const read = await fetch(`${base}/api/library?userId=bob&ownerId=bob`, { headers: { Authorization: "Bearer alice" } });
     assertPrivate(read, 200);
-    assert.deepEqual(await read.json(), { library: { picks: [], sets: [] } });
+    assert.deepEqual(await read.json(), { library: { picks: [], sets: [] },limits:DEFAULT_PLAN_LIMITS });
     const write = await fetch(`${base}/api/library?userId=bob`, post({ type: "save-pick", userId: "bob", ownerId: "bob",
       track: { provider: "youtube", providerId: "abcdefghijk", title: "Owned pick", addedBy: { id: "bob" }, roomId: "private-room" } }));
     assertPrivate(write, 200);

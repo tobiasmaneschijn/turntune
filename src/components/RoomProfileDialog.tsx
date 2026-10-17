@@ -6,10 +6,11 @@ import "../styles/social-room.css";
 
 const ProfilePage = lazy(() => import("./ProfilePage").then(module => ({ default: module.ProfilePage })));
 
-export function RoomProfileDialog({ profileId, accessToken, currentUser, onClose, onUpdate, onInvite }: {
+export function RoomProfileDialog({ profileId, accessToken, currentUser, spotifyEnabled = false, onClose, onUpdate, onInvite }: {
   profileId: string | null;
   accessToken: string;
   currentUser: User;
+  spotifyEnabled?: boolean;
   onClose: () => void;
   onUpdate: (profile: SoundSpinProfile) => void;
   onInvite?: (userId: string) => void;
@@ -27,7 +28,7 @@ export function RoomProfileDialog({ profileId, accessToken, currentUser, onClose
     <DialogContent className="room-profile-dialog">
       <DialogTitle className="sr-only">Profile</DialogTitle>
       {profileId && <Suspense fallback={<p role="status">Loading…</p>}>
-        <ProfilePage key={profileId} profileId={profileId} accessToken={accessToken} currentUser={currentUser}
+        <ProfilePage spotifyEnabled={spotifyEnabled} key={profileId} profileId={profileId} accessToken={accessToken} currentUser={currentUser}
           onBack={requestClose} onOwnProfileUpdated={onUpdate} onInvite={onInvite} onEditStateChange={handleEditStateChange} embedded />
       </Suspense>}
       <Dialog open={confirmClose} onOpenChange={setConfirmClose}>

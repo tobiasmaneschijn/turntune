@@ -65,6 +65,10 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   const waitEvent = (event: string) => once(socket, event, { signal: AbortSignal.timeout(7_000) });
   const firstExpiry = Math.floor(Date.now() / 1000) + 5;
   const shortToken = token(firstExpiry);
+  const spotifySearch = (credential: string, roomSlug = "auth-room") => fetch(`${url}/api/spotify/search?q=fixture&roomSlug=${roomSlug}`, {
+    headers: { Authorization: `Bearer ${credential}` }, signal: AbortSignal.timeout(3_000)
+  });
+  assert.equal((await spotifySearch(shortToken)).status, 403, "Room read access alone must not permit Spotify without live admission.");
   socket.auth = { accessToken: shortToken };
   const connected = waitEvent("connect"); socket.connect(); await connected;
   const firstSocketId = socket.id;
@@ -76,11 +80,14 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   const [joined] = await snapshot as [RoomSnapshot];
   assert.equal(joined.users[0].id, verifiedUserId);
   assert.equal(joined.users[0].name, "Verified listener");
+  assert.equal((await spotifySearch(shortToken, "another-room")).status, 403);
+  assert.equal((await spotifySearch(shortToken)).status, 503, "An admitted account reaches the unconfigured test catalog without provider traffic.");
   assert.deepEqual(await socket.timeout(3_000).emitWithAck("dj:join", undefined), { ok: true });
   const [reason] = await waitEvent("disconnect");
   assert.equal(reason, "io server disconnect");
   assert.equal(socket.connected, false);
   assert.ok(Date.now() >= firstExpiry * 1000);
+  assert.equal((await spotifySearch(token(Math.floor(Date.now() / 1000) + 60))).status, 403, "A fresh HTTP token cannot reuse expired socket admission.");
 
   // Expired credentials must fail a new handshake as well as ending the old one.
   const denied = waitEvent("connect_error"); socket.connect();

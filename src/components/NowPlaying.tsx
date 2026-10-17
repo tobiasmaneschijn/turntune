@@ -263,7 +263,9 @@ export function NowPlaying({
   const track = playback.track;
   const volume = userSettings.playback.defaultVolume;
   const [roomNotificationsMuted] = useRoomNotificationMuted(currentUserId, snapshot.room.id);
-  const playbackPreference = userSettings.playback.preference;
+  const spotifyEnabled = snapshot.room.settings.spotifyEnabled === true;
+  const roomSlug = snapshot.room.id;
+  const playbackPreference = !spotifyEnabled && userSettings.playback.preference.startsWith("spotify") ? "source" : userSettings.playback.preference;
   const [spotifyWebStarted, setSpotifyWebStarted] = useState(false);
   const [fallbackApprovedTrackId, setFallbackApprovedTrackId] = useState("");
   const unavailableNotifiedTrackRef = useRef("");
@@ -300,6 +302,7 @@ export function NowPlaying({
   const statusIdentityRef = useRef("");
   const accessTokenRef = useRef(accessToken);
   const connectionRequestRef = useRef<AbortController | null>(null);
+  const spotifyOperationRef = useRef<AbortController | null>(null);
   accessTokenRef.current = accessToken;
   identityRef.current = identity;
   const Youtube = providerPlayers?.youtube || YouTubePlayer;
@@ -308,8 +311,15 @@ export function NowPlaying({
   const Apple = providerPlayers?.apple || AppleMusicPlayer;
   const Mixcloud = providerPlayers?.mixcloud || MixcloudPlayer;
 
+  useEffect(() => {
+    if (!spotifyEnabled) { void resetProviderSession("spotify"); setSpotifyWebStarted(false); }
+  }, [spotifyEnabled, roomSlug]);
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   useEffect(() => () => connectionRequestRef.current?.abort(), []);
+  useEffect(() => {
+    spotifyOperationRef.current?.abort(); spotifyOperationRef.current = null;
+    return () => { spotifyOperationRef.current?.abort(); spotifyOperationRef.current = null; };
+  }, [spotifyEnabled, roomSlug, accessToken]);
   useEffect(() => { if (volume > 0) lastAudibleVolumeRef.current = volume; }, [volume]);
   useEffect(() => {
     pendingCommandRef.current = "";
@@ -366,21 +376,21 @@ export function NowPlaying({
     void requestJson<{
       spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
       apple?: { configured?: boolean };
-    }>("/api/music/connections", { accessToken, signal: controller.signal, errorMessage: "Could not load music connections." })
+    }>("/api/music/connections", { accessToken, headers: { "x-soundspin-room": roomSlug }, signal: controller.signal, errorMessage: "Could not load music connections." })
       .then((payload) => {
-        if (!aliveRef.current || accessTokenRef.current !== requestToken) return;
+        if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== requestToken) return;
         setConnections({
           loaded: true,
-          spotifyConfigured: Boolean(payload.spotify?.configured),
-          spotifyConnected: Boolean(payload.spotify?.connected),
-          spotifyProfile: payload.spotify?.profile || null,
+          spotifyConfigured: spotifyEnabled && Boolean(payload.spotify?.configured),
+          spotifyConnected: spotifyEnabled && Boolean(payload.spotify?.connected),
+          spotifyProfile: spotifyEnabled ? payload.spotify?.profile || null : null,
           appleConfigured: Boolean(payload.apple?.configured)
         });
       })
       .catch(() => {
         if (!controller.signal.aborted && aliveRef.current && accessTokenRef.current === requestToken) setConnectionError("Could not check your music connections. Try again.");
       });
-  }, [accessToken]);
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   useEffect(loadConnections, [loadConnections]);
 
@@ -390,33 +400,36 @@ export function NowPlaying({
   }, [loadConnections]);
 
   const connectSpotify = useCallback(() => {
-    if (!accessToken) return;
-    void requestJson<{ url?: string }>(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
-      accessToken, errorMessage: "Could not connect Spotify."
+    if (!accessToken || !spotifyEnabled || spotifyOperationRef.current) return;
+    const controller = new AbortController(); spotifyOperationRef.current = controller;
+    void requestJson<{ url?: string }>(`/api/spotify/connect?roomSlug=${encodeURIComponent(roomSlug)}&returnTo=${encodeURIComponent(location.pathname)}`, {
+      accessToken, signal: controller.signal, headers: { "x-soundspin-room": roomSlug }, errorMessage: "Could not connect Spotify."
     }).then((payload) => {
-      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
+      if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== accessToken) return;
       if (!payload.url) throw new Error("Could not connect Spotify.");
       location.assign(payload.url);
-    }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
-  }, [accessToken]);
+    }).catch((error) => { if (!controller.signal.aborted) setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."); })
+      .finally(() => { if (spotifyOperationRef.current === controller) spotifyOperationRef.current = null; });
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   const disconnectSpotify = useCallback(() => {
-    if (!accessToken) return;
+    if (!accessToken || !spotifyEnabled || spotifyOperationRef.current) return;
+    const controller = new AbortController(); spotifyOperationRef.current = controller;
     void fetch("/api/spotify/connection", {
       method: "DELETE",
-      signal: AbortSignal.timeout(15_000),
-      headers: { Authorization: `Bearer ${accessToken}` }
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+      headers: { Authorization: `Bearer ${accessToken}`, "x-soundspin-room": roomSlug }
     }).then((response) => {
       if (!response.ok) throw new Error("Could not disconnect Spotify.");
-      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
+      if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== accessToken) return;
       connectionRequestRef.current?.abort();
       void resetProviderSession("spotify");
       setSpotifyWebStarted(false);
       setConnections((current) => ({ ...current, spotifyConnected: false, spotifyProfile: null }));
     }).catch((error) => {
-      setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
-    });
-  }, [accessToken]);
+      if (!controller.signal.aborted) setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
+    }).finally(() => { if (spotifyOperationRef.current === controller) spotifyOperationRef.current = null; });
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   const runCommand = (command: string, event: string, payload: unknown) => {
     if (!roomConnected || !canControlPlayback || pendingCommandRef.current || !track) return;
@@ -567,6 +580,7 @@ export function NowPlaying({
           volume={volume}
           accessToken={accessToken!}
           userId={currentUserId}
+          roomSlug={roomSlug}
           preferredDeviceId={userSettings.playback.spotifyDeviceId}
           resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
           onEnded={handleEnded}
@@ -606,6 +620,7 @@ export function NowPlaying({
                     volume={volume}
                     accessToken={accessToken!}
                     userId={currentUserId}
+                    roomSlug={roomSlug}
                     preferredDeviceId={userSettings.playback.spotifyDeviceId}
                     resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
                     onEnded={handleEnded}
@@ -756,7 +771,7 @@ export function NowPlaying({
       </section>
       <TrackDetailsDialog track={track} open={detailsOpen} onOpenChange={setDetailsOpen} durationMs={track?.durationMs || playerStatus.duration * 1000} isLive={isLive} returnFocusRef={detailsButtonRef} />
       {settingsOpen && (
-        <DeferredDialog title="Settings" load={loadUserSettings} componentProps={{ settings: userSettings, connections, connectionError, onRetryConnections: loadConnections, accessToken, onSettingsChange: onUserSettingsChange, onConnectSpotify: connectSpotify, onDisconnectSpotify: disconnectSpotify, onClose: onCloseSettings }} />
+        <DeferredDialog title="Settings" load={loadUserSettings} componentProps={{ settings: userSettings, spotifyEnabled, roomSlug, connections, connectionError, onRetryConnections: loadConnections, accessToken, onSettingsChange: onUserSettingsChange, onConnectSpotify: connectSpotify, onDisconnectSpotify: disconnectSpotify, onClose: onCloseSettings }} />
       )}
     </>
   );

@@ -6,6 +6,7 @@ import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
 import type { ChatCommandService } from './chat-command-service.js'
 import { mountDurableChatRoutes } from './chat-command-routes.js'
+import type { ResolvedResourcePolicy } from '../shared/resource-policy.js'
 
 interface Cursor { createdAt: string; id: string }
 interface HistoryRow {
@@ -17,6 +18,7 @@ interface HistoryRow {
   soundspin_poll_votes?: Array<{ user_id: string; option_index: number; revision: number }>
 }
 export interface ChatHistoryRouteOptions {
+  getResourcePolicy?: (actor:string)=>Promise<ResolvedResourcePolicy>
   client: SupabaseClient | null
   getUserId: (request: Request) => Promise<string | null | undefined>
   canReadRoom: (userId: string, roomSlug: string) => Promise<boolean>

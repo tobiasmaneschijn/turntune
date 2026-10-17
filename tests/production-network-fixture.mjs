@@ -1,8 +1,11 @@
 // Test-only transport for the packaged server. Explicit operations represent the
 // disposable staging schema; no real Supabase or provider network is permitted.
+import { defaultResourcePolicy } from '../dist-server/shared/resource-policy.js';
 const origin = "https://soundspin-production-smoke.invalid";
 const maintenance = new Map([
   ["soundspin_release_ready", true],
+  ["soundspin_resource_policy", defaultResourcePolicy()],
+  ["soundspin_prune_chat_history", {removed:0,updatedReplies:0,rooms:0}],
   ["soundspin_collect_expired_uploads", 0],
   ["soundspin_prune_security_retention", {}], ["soundspin_purge_security_archives", {}], ["soundspin_claim_account_deletion", null]
 ]);

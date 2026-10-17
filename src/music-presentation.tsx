@@ -79,7 +79,7 @@ export function parseMusicLink(value: string, selectedProvider: Provider): Music
   }
   if (/^[A-Za-z0-9]{22}$/.test(input) && selectedProvider === "spotify") return { provider: "spotify", url: input };
   const provider = detectMusicProvider(input);
-  if (!provider) return { error: "Use a YouTube, Spotify, SoundCloud, Apple Music, or Mixcloud link." };
+  if (!provider) return { error: "Use a link from an available music service." };
   const url = new URL(input);
   if (provider === "youtube") {
     const id = youtubeId(input);

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import type { NextFunction, Request, Response } from 'express'
 import { PublicRequestError, publicRequestFailure, trustedSqlRequestError } from './public-request-error.js'
+import { defaultResourcePolicy, type ResolvedResourcePolicy } from '../shared/resource-policy.js'
 
 export type UploadPurpose = 'avatar' | 'feedback' | 'chat'
 export interface UploadLease {
@@ -111,6 +112,7 @@ export function managedUploadAdmission(options: {
   client: SupabaseClient | null; getUserId: (request: Request) => Promise<string | null>;
   purpose: UploadPurpose; room?: (request: Request) => string;
   check?: (actor: string, room: string | null) => Promise<unknown>
+  getResourcePolicy?: (actor:string)=>Promise<ResolvedResourcePolicy>
 }) {
   return async (request: Request, response: Response, next: NextFunction) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -121,11 +123,12 @@ export function managedUploadAdmission(options: {
       if (!options.client) { response.status(503).json({ error: 'Image uploads are unavailable.' }); return }
       const room = options.room?.(request) || null
       await options.check?.(actor, room)
+      const policy=await options.getResourcePolicy?.(actor)??defaultResourcePolicy()
       const length = request.get('content-length')
       if (!length || !/^\d{1,8}$/.test(length)) { response.status(411).json({ error: 'Send the image with its file size.' }); return }
       const size = Number(length)
-      if (size < 1 || size > (options.purpose === 'chat' ? 6 : 5) * 1024 * 1024) { response.status(413).json({ error: 'This image is too large or empty.' }); return }
-      if (activeUploads >= 4 || (activeActors.get(actor) || 0) >= 2) { response.status(429).json({ error: 'Too many uploads in progress. Try again shortly.' }); return }
+      if (size < 1 || size > policy.limits.uploads[options.purpose].fileBytes) { response.status(413).json({ error: 'This image is too large or empty.' }); return }
+      if (activeUploads >= policy.global.uploadsInFlight || (activeActors.get(actor) || 0) >= policy.limits.uploadsInFlight) { response.status(429).json({ error: 'Too many uploads in progress. Try again shortly.' }); return }
       activeUploads++; activeActors.set(actor, (activeActors.get(actor) || 0) + 1); counted = true
       lease = await reserveManagedUpload(options.client, actor, options.purpose, size, request.get('content-type') || '', room)
       response.locals.uploadLease = lease

@@ -18,8 +18,12 @@ test("request account deletion only after confirming the impact on owned rooms",
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("choose local playback and retain fallback and reconnect preferences", async ({ page }) => {
+test("choose available local playback and retain fallback and reconnect preferences", async ({ page }) => {
   await page.goto(harness);
+  await expect(page.getByRole("button", { name: /Spotify/ })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  await expect(page.getByText("Spotify", { exact: true })).toHaveCount(0);
+  await page.goto(harness + "?spotify");
   const fallback = page.getByRole("combobox", { name: "When the preferred provider has no match", exact: true });
   const reconnect = page.getByRole("switch", { name: "Resume when Spotify reconnects", exact: true });
   await expect(page.getByRole("button", { name: "Room source", exact: true })).toHaveAttribute("aria-pressed", "true");

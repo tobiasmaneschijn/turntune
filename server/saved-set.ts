@@ -11,10 +11,11 @@ import { verifyTrackDuration } from "./track-metadata.js";
 export type ResolvedSetTrack = Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">;
 export interface SetImportOutcome { added: number; skipped: Array<{ title: string; reason: string }>; started: boolean }
 
-export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string }) {
+export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey, allowSpotify = false }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string; allowSpotify?: boolean }) {
   const mixcloudApi = mixcloud || new MixcloudApi(fetchImpl);
   return async (track: LibraryTrack, signal: AbortSignal): Promise<ResolvedSetTrack> => {
     signal.throwIfAborted();
+    if (track.provider === "spotify" && !allowSpotify) throw new Error("Spotify is disabled in this room.");
     let verified = { ...track };
     if (track.provider === "youtube") {
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.providerId)}`;
@@ -46,7 +47,7 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
     signal.throwIfAborted();
     const safeSource = libraryTrackSchema.safeParse(verified);
     if (!safeSource.success) throw new Error("This recording returned invalid or oversized source metadata.");
-    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal);
+    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal,{ allowSpotify });
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
     if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata.");
@@ -58,8 +59,9 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
 /** The supplied resolver must verify source availability before mapping counterparts.
  * Four workers retain original order; every failure/time-budget item is explained.
  * This budget leaves time for the normal 15-second socket acknowledgement. */
-export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: LibraryTrack, signal: AbortSignal) => Promise<ResolvedSetTrack>, budgetMs = 10_000) {
-  if (!tracks.length || tracks.length > 50) throw new Error("A saved set must contain 1–50 tracks.");
+export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: LibraryTrack, signal: AbortSignal) => Promise<ResolvedSetTrack>, budgetMs = 10_000, maxTracks = 50) {
+  if (!Number.isInteger(maxTracks) || maxTracks < 1 || maxTracks > 100) throw new Error("Invalid set import limit.");
+  if (!tracks.length || tracks.length > maxTracks) throw new Error(`A saved set must contain 1–${maxTracks} tracks.`);
   const deadline = Date.now() + budgetMs;
   const results: Array<{ track: ResolvedSetTrack } | { title: string; reason: string }> = [];
   let next = 0;

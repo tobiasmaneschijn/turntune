@@ -145,7 +145,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
   app.post(
     '/api/rooms/:roomSlug/chat/uploads',
     managedUploadAdmission({
-      client: options.client, getUserId: async request => (await options.getUserId(request)) || null, purpose: 'chat',
+      client: options.client, getUserId: async request => (await options.getUserId(request)) || null, purpose: 'chat',getResourcePolicy:options.getResourcePolicy,
       room: request => {
         const room = request.params.roomSlug
         if (typeof room !== 'string' || !/^[a-z0-9-]{3,48}$/.test(room)) throw new PublicRequestError('Invalid room.')

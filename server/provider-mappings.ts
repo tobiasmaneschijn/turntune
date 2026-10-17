@@ -40,10 +40,12 @@ export async function resolveTrackMappings(
   input: TrackInput,
   spotify: SpotifyApi,
   appleMusic: AppleMusicApi,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { allowSpotify?: boolean } = {}
 ): Promise<Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>> {
   signal = providerSignal(signal);
   signal.throwIfAborted();
+  if (input.provider === "spotify" && options.allowSpotify !== true) throw new Error("Spotify is disabled in this room.");
   const mappings: NonNullable<Track["mappings"]> = {
     [input.provider]: sourceMapping(input)
   };
@@ -89,7 +91,7 @@ export async function resolveTrackMappings(
   const query = [source.artist, source.title].filter(Boolean).join(" ");
   const jobs: Promise<void>[] = [];
 
-  if (!mappings.spotify && spotify.configured) {
+  if (options.allowSpotify === true && !mappings.spotify && spotify.configured) {
     jobs.push((async () => {
       try {
         const matchedByIsrc = Boolean(isrc);

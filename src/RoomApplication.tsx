@@ -300,7 +300,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
     <main className={`app-shell ${connected ? "" : "room-is-reconnecting"}`}>
       <RoomHeader roomName={snapshot.room.name} roomSlug={snapshot.room.id} listenerCount={snapshot.users.length}
         currentUser={profile} onHome={goHome} onSettings={() => setUserSettingsOpen(true)}
-        onRoomSettings={capabilities.staff ? () => setRoomSettingsOpen(true) : undefined}
+        onRoomSettings={capabilities.staff || profile.isAppAdmin ? () => setRoomSettingsOpen(true) : undefined}
         onModeration={capabilities.staff ? () => setModerationOpen(true) : undefined}
         moderationCount={snapshot.room.ownStatus?.openReports ?? 0}
         onRules={snapshot.room.settings.rulesText || snapshot.room.settings.requireRulesAcceptance ? () => setRulesOpen(true) : undefined}
@@ -388,11 +388,11 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
             /></PanelErrorBoundary>}
       />
       {roomSettingsOpen && auth.session && (
-        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
+        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, isAppAdmin: Boolean(profile.isAppAdmin), accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
       {moderationOpen && auth.session && <RoomModerationDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} currentUserId={profile.id} accessToken={auth.session.access_token} connected={connected} onClose={() => setModerationOpen(false)} onNotice={setNotice} onOpenProfile={id => { setModerationOpen(false); openProfile(id); }} />}
       {rulesOpen && auth.session && <RoomRulesDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onClose={() => setRulesOpen(false)} onNotice={setNotice} />}
-      {auth.session && <RoomProfileDialog profileId={profilePageId} accessToken={auth.session.access_token}
+      {auth.session && <RoomProfileDialog spotifyEnabled={snapshot.room.settings.spotifyEnabled === true} profileId={profilePageId} accessToken={auth.session.access_token}
         currentUser={profile} onClose={backFromProfile} onUpdate={updateOwnProfile} onInvite={userId => { void inviteFriend(userId); }} />}
       {friendsOpen && auth.session && <Dialog open onOpenChange={setFriendsOpen}>
         <DialogContent className="room-friends-dialog"><DialogTitle className="sr-only">Friends</DialogTitle>

@@ -112,7 +112,7 @@ test("queue a song as a listener and go on air by joining the DJ lineup", async 
   expect(await api(page, "return music.commands.map(x => x.event)")).toEqual(["queue:add", "dj:join"]);
 });
 
-async function mockLibrary(page: Page, failFirstSave = false) {
+async function mockLibrary(page: Page, failFirstSave = false, limits = { libraryPicks: 500, librarySets: 30, librarySetTracks: 50 }) {
   let library: any = { picks: [], sets: [] };
   await page.route("**/api/library", async (route) => {
     const action = route.request().postDataJSON();
@@ -126,7 +126,7 @@ async function mockLibrary(page: Page, failFirstSave = false) {
     if (action?.type === "delete-pick") library.picks = library.picks.filter((pick: any) => pick.id !== action.id);
     if (action?.type === "delete-set") library.sets = library.sets.filter((set: any) => set.id !== action.id);
     if (action?.type === "clear-library") library = { picks: [], sets: [] };
-    await route.fulfill({ json: { library } });
+    await route.fulfill({ json: { library, limits } });
   });
 }
 
@@ -166,10 +166,16 @@ test("save a played song to private picks and reuse it in another room", async (
 });
 
 test("save and reuse a queue as a named set, recovering a failed save", async ({ page }) => {
-  await mockLibrary(page, true);
+  const limits = { libraryPicks: 500, librarySets: 30, librarySetTracks: 2 };
+  await mockLibrary(page, true, limits);
   await open(page, "library");
   await expect(page.getByRole("textbox", { name: "Set name", exact: true })).toBeHidden();
   await startSaveQueue(page);
+  await expect(page.getByRole("button", { name: "Save set", exact: true })).toBeDisabled();
+  await expect(page.getByText("2-track limit. Shorten your queue first.")).toBeVisible();
+  limits.librarySetTracks = 3;
+  await page.getByRole("button", { name: "Refresh private picks and sets", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save set", exact: true })).toBeEnabled();
   await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Evening picks");
   await page.getByRole("button", { name: "Save set", exact: true }).click();
   await expect(page.locator(".music-library-content").getByRole("alert")).toContainText("Library storage is unavailable");

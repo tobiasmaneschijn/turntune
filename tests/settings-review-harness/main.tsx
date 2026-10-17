@@ -26,7 +26,7 @@ function Harness() {
   return <main>
     <Button onClick={() => setOpen(true)}>Open settings</Button>
     <output className="sr-only" aria-label="Current settings">{JSON.stringify(settings)}</output>
-    {open && <UserSettingsDialog settings={settings} connections={{ loaded: true, spotifyConfigured: true, spotifyConnected: true, appleConfigured: true }} accessToken="fixture"
+    {open && <UserSettingsDialog spotifyEnabled={parameters.has("spotify")} roomSlug="fixture-room" settings={settings} connections={{ loaded: true, spotifyConfigured: true, spotifyConnected: true, appleConfigured: true }} accessToken="fixture"
       onSettingsChange={(value) => { setSettings(value); saveUserSettings(value); }} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => setOpen(false)} />}
   </main>;
 }

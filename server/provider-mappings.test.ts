@@ -12,3 +12,16 @@ test("Mixcloud shows keep source playback without matching individual songs", as
   assert.equal(result.isrc, undefined);
   assert.deepEqual(result.mappings, { mixcloud: { providerId: "/dj/show/", permalinkUrl: undefined, artworkUrl: undefined, matchMethod: "source" } });
 });
+
+test("disabled Spotify cannot resolve source tracks or probe counterpart catalogs", async () => {
+  let spotifyCalls = 0;
+  const spotify = { configured: true, searchTracks: async () => { spotifyCalls++; return []; }, getTrack: async () => { spotifyCalls++; return {}; } } as unknown as SpotifyApi;
+  const apple = { configured: false } as AppleMusicApi;
+  const input = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Recording" };
+  const result = await resolveTrackMappings(input, spotify, apple);
+  assert.equal(result.mappings?.spotify, undefined);
+  await assert.rejects(resolveTrackMappings({ ...input, provider: "spotify", providerId: "a".repeat(22) }, spotify, apple), /Spotify is disabled/);
+  assert.equal(spotifyCalls, 0);
+  await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
+  assert.equal(spotifyCalls, 1);
+});
