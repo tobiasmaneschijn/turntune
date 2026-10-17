@@ -11,6 +11,7 @@ import { RoomSettingsDialog } from "../../src/components/RoomSettingsDialog";
 import { useRoomLayoutPresets } from "../../src/hooks/use-room-layout-presets";
 import { rememberNavigationFocus, useRouteFocus } from "../../src/hooks/use-route-focus";
 import { recordRoomVisit } from "../../src/lib/room-visits";
+import { readUserSettings } from "../../src/playback-settings";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { Dialog, DialogContent, DialogTitle } from "../../src/components/ui/dialog";
@@ -93,6 +94,6 @@ function RoomHarness() {
 }
 function LobbyHarness() {
   const [open, setOpen] = useState(true);
-  return open ? <RoomLobby accessToken="fixture-token" currentUser={user} onOpenRoom={(slug, password) => { state.roomEntry = { slug, password }; setOpen(false); }} onOpenProfile={() => {}} onSignOut={() => {}} feedbackButton={null} /> : <main><h1>Entered room</h1><Button onClick={() => setOpen(true)}>Return to directory</Button></main>;
+  return open ? <RoomLobby accessToken="fixture-token" currentUser={user} onOpenRoom={(slug, password) => { state.roomEntry = { slug, password }; setOpen(false); }} onOpenProfile={() => {}} onSignOut={() => {}} userSettings={readUserSettings()} onSettingsChange={() => {}} /> : <main><h1>Entered room</h1><Button onClick={() => setOpen(true)}>Return to directory</Button></main>;
 }
 createRoot(document.getElementById("root")!).render(<ThemeProvider><TooltipProvider>{scenario.includes("lobby") ? <LobbyHarness /> : <RoomHarness />}</TooltipProvider></ThemeProvider>);

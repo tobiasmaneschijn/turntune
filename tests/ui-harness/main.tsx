@@ -111,8 +111,9 @@ function WorkspaceControlsFixture() {
 }
 
 function Harness() {
+  const [settings, setSettings] = useState(readUserSettings);
   if (scenario === "workspace-controls") return <WorkspaceControlsFixture />;
-  if (scenario.startsWith("lobby")) return <RoomLobby accessToken="fixture" currentUser={user} onOpenRoom={() => {}} onOpenProfile={() => {}} onSignOut={() => {}} feedbackButton={<FeedbackButton userId={user.id} />} adminButton={<Button>Admin</Button>} />;
+  if (scenario.startsWith("lobby")) return <RoomLobby accessToken="fixture" currentUser={user} onOpenRoom={() => {}} onOpenProfile={() => {}} onSignOut={() => {}} userSettings={settings} onSettingsChange={setSettings} onAdmin={() => {}} />;
   if (scenario === "profile") return <ProfilePage profileId={user.id} accessToken="fixture" currentUser={user} onBack={() => {}} onOwnProfileUpdated={() => {}} onOpenAdmin={() => {}} />;
   if (scenario === "admin" || scenario === "admin-feedback") return <AdminDashboard accessToken="fixture" currentUser={user} onBack={() => {}} onOpenRoom={() => {}} />;
   if (scenario === "settings") return <div className="fixture-page"><UserSettingsDialog settings={readUserSettings()} connections={{ loaded: true, spotifyConfigured: true, spotifyConnected: true, appleConfigured: true }} accessToken="fixture" onSettingsChange={() => {}} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => {}} /></div>;

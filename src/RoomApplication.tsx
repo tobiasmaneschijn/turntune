@@ -2,7 +2,6 @@ import { NowPlaying, type NowPlayingControls, type NowPlayingLocalState } from "
 import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { toast } from "sonner";
-import { LayoutDashboard } from "lucide-react";
 import { MusicRail, type MusicRailControls } from "./components/MusicRail";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { PasswordDialog, RoomLobby } from "./components/RoomLobby";
@@ -52,7 +51,6 @@ import type { SoundSpinUserSettings } from "./playback-settings";
 import type { RoomSnapshot, SoundSpinProfile, User } from "./types";
 
 const AdminDashboard = lazy(() => import("./components/AdminDashboard").then((module) => ({ default: module.AdminDashboard })));
-const FeedbackButton = lazy(() => import("./components/FeedbackDialog").then((module) => ({ default: module.FeedbackButton })));
 const ProfilePage = lazy(() => import("./components/ProfilePage").then((module) => ({ default: module.ProfilePage })));
 const loadRoomSettings = () => import("./components/RoomSettingsDialog").then((module) => ({ default: module.RoomSettingsDialog }));
 function slugify(value: string) {
@@ -242,8 +240,9 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
         onOpenProfile={() => openProfile(profile.id)}
         onOpenPerson={openProfile}
         onSignOut={() => void auth.client?.auth.signOut()}
-        feedbackButton={<Suspense fallback={null}><FeedbackButton userId={profile.id} diagnosticContext={{ surface: "room-directory" }} /></Suspense>}
-        adminButton={profile.isAppAdmin ? <Button variant="ghost" size="icon" onClick={openAdmin} title="Admin dashboard" aria-label="Admin dashboard"><LayoutDashboard /></Button> : null}
+        userSettings={userSettings}
+        onSettingsChange={changeUserSettings}
+        onAdmin={profile.isAppAdmin ? openAdmin : undefined}
       />
     );
   }

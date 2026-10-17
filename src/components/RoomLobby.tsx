@@ -1,5 +1,5 @@
-import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, Heart, LockKeyhole, LogOut, MoreHorizontal, Plus, Radio, RefreshCw, Users, X } from "lucide-react";
+import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ArrowRight, Heart, LayoutDashboard, Lightbulb, LockKeyhole, LogOut, MoreHorizontal, Plus, Radio, RefreshCw, Settings, UserRound, Users, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { Brand } from "./app-primitives";
 import { AppVersion } from "./AppVersion";
@@ -20,7 +20,7 @@ import { Label } from "./ui/label";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Skeleton } from "./ui/skeleton";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import type { RoomDirectoryEntry, User } from "../types";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
@@ -29,6 +29,11 @@ import { FriendsPanel } from "./FriendsPanel";
 import { readRecentRoomVisits } from "../lib/room-visits";
 import "../styles/layout-completion.css";
 import { requestJson } from "../lib/authenticated-http";
+import type { SoundSpinUserSettings } from "../playback-settings";
+import { DeferredDialog } from "./DeferredDialog";
+
+const loadDirectorySettings = () => import("./DirectorySettingsDialog").then(module => ({ default: module.DirectorySettingsDialog }));
+const FeedbackButton = lazy(() => import("./FeedbackDialog").then(module => ({ default: module.FeedbackButton })));
 
 const directoryCache = new Map<string, RoomDirectoryEntry[]>();
 interface FavoriteFailure {
@@ -52,8 +57,9 @@ interface RoomLobbyProps {
   onOpenProfile: () => void;
   onOpenPerson?: (id: string) => void;
   onSignOut: () => void;
-  feedbackButton: ReactNode;
-  adminButton?: ReactNode;
+  userSettings: SoundSpinUserSettings;
+  onSettingsChange: (settings: SoundSpinUserSettings) => void;
+  onAdmin?: () => void;
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -67,9 +73,15 @@ export function RoomLobby({
   onOpenProfile,
   onOpenPerson,
   onSignOut,
-  feedbackButton,
-  adminButton
+  userSettings,
+  onSettingsChange,
+  onAdmin
 }: RoomLobbyProps) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackMounted, setFeedbackMounted] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { setSettingsOpen(false); setFeedbackOpen(false); setFeedbackMounted(false); }, [currentUser.id]);
   const [rooms, setRooms] = useState<RoomDirectoryEntry[]>(() => directoryCache.get(currentUser.id) || []);
   const [loading, setLoading] = useState(() => !directoryCache.has(currentUser.id));
   const [directoryLoaded, setDirectoryLoaded] = useState(() => directoryCache.has(currentUser.id));
@@ -204,25 +216,26 @@ export function RoomLobby({
       <header className="lobby-header">
         <div className="app-brand-stack"><Brand /><AppVersion /></div>
         <div className="lobby-header-actions">
-          {adminButton}
-          {feedbackButton}
           <ThemeToggle compact />
           <Button variant="ghost" className="lobby-profile h-10 px-2" data-navigation-focus="lobby-profile" onClick={onOpenProfile} aria-label="Open your profile">
             <Avatar user={currentUser} size={28} />
             <span><strong>{currentUser.name}</strong></span>
           </Button>
-          <Button variant="ghost" size="sm" onClick={onSignOut} className="lobby-sign-out text-muted-foreground">
-            <LogOut /> Sign out
-          </Button>
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="lobby-more-actions" aria-label="More account actions" />}><MoreHorizontal /></DropdownMenuTrigger>
+            <DropdownMenuTrigger render={<Button ref={moreRef} variant="ghost" size="icon" className="lobby-more-actions" data-navigation-focus="lobby-actions" aria-label="More account actions" />}><MoreHorizontal /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="room-actions-menu">
-              <DropdownMenuItem onClick={onOpenProfile}>Your profile</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSettingsOpen(true)}><Settings /> Settings</DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenProfile}><UserRound /> Your profile</DropdownMenuItem>
+              {onAdmin && <DropdownMenuItem onClick={onAdmin}><LayoutDashboard /> Admin dashboard</DropdownMenuItem>}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { setFeedbackMounted(true); setFeedbackOpen(true); }}><Lightbulb /> Send feedback</DropdownMenuItem>
               <DropdownMenuItem onClick={onSignOut}><LogOut /> Sign out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </header>
+      {settingsOpen && <DeferredDialog key={currentUser.id} title="Settings" load={loadDirectorySettings} componentProps={{ accessToken, settings: userSettings, onSettingsChange, onClose: () => setSettingsOpen(false) }} />}
+      {feedbackMounted && <Suspense fallback={null}><FeedbackButton key={currentUser.id} userId={currentUser.id} diagnosticContext={{ surface: "room-directory" }} open={feedbackOpen} onOpenChange={setFeedbackOpen} hideTrigger finalFocus={moreRef} /></Suspense>}
 
       <div className="lobby-shell">
         <section className="lobby-hero">

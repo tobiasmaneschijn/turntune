@@ -4,6 +4,7 @@ import { RoomLobby } from "../../src/components/RoomLobby";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { RoomDirectoryEntry } from "../../src/types";
+import { readUserSettings, USER_SETTINGS_STORAGE_KEY } from "../../src/playback-settings";
 import "@fontsource-variable/geist";
 import "../../src/shadcn.css";
 import "../../src/styles.css";
@@ -22,7 +23,7 @@ const rooms = [
 ];
 const state = {
   requests: [] as { path: string; method: string; body: unknown }[],
-  favoriteFailure: false, delayFavorite: false, delayCreation: false,
+  favoriteFailure: false, delayFavorite: false, delayCreation: false, connectionFailure: false, spotifyConnected: true,
   navigations: [] as { slug: string; password?: string }[],
   finishFavorite: (_ok: boolean) => {}, finishCreation: (_ok: boolean) => {},
   hideLobby: () => {}, showLobby: () => {}
@@ -35,6 +36,10 @@ globalThis.fetch = async (input, init) => {
   state.requests.push({ path, method, body });
   if (path === "/api/rooms" && method === "GET") return Response.json({ rooms });
   if (path === "/api/social") return Response.json({ people: [], invitations: [], shareActivity: false });
+  if (path === "/api/music/connections") return state.connectionFailure ? Response.json({ error: "Connection check failed." }, { status: 503 })
+    : Response.json({ spotify: { configured: true, connected: state.spotifyConnected }, apple: { configured: false } });
+  if (path === "/api/spotify/devices") return Response.json({ devices: [] });
+  if (path === "/api/spotify/connection" && method === "DELETE") { state.spotifyConnected = false; return new Response(null, { status: 204 }); }
   if (path.endsWith("/favorite") && method === "PUT") {
     const ok = state.delayFavorite ? await new Promise<boolean>(resolve => { state.finishFavorite = resolve; }) : !state.favoriteFailure;
     if (!ok) return Response.json({ error: "The favorite could not be saved." }, { status: 503 });
@@ -51,10 +56,13 @@ globalThis.fetch = async (input, init) => {
 };
 function Harness() {
   const [visible, setVisible] = useState(true);
+  const [settings, setSettings] = useState(readUserSettings);
   state.hideLobby = () => setVisible(false);
   state.showLobby = () => setVisible(true);
   return visible ? <RoomLobby accessToken="fixture-token" currentUser={user} onOpenRoom={(slug, password) => {
     state.navigations.push({ slug, password }); setVisible(false);
-  }} onOpenProfile={() => {}} onSignOut={() => setVisible(false)} feedbackButton={null} /> : <main><h1>Outside directory</h1></main>;
+  }} onOpenProfile={() => {}} onSignOut={() => setVisible(false)} userSettings={settings} onSettingsChange={next => {
+    setSettings(next); localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+  }} /> : <main><h1>Outside directory</h1></main>;
 }
 createRoot(document.getElementById("root")!).render(<ThemeProvider><TooltipProvider><Harness /></TooltipProvider></ThemeProvider>);
