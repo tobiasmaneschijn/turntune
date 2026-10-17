@@ -180,9 +180,13 @@ test("phone and coarse pointer targets have usable actual rectangles and names",
   expect((await sliderControl.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await context.close();
   await page.setViewportSize({ width: 320, height: 568 }); await page.goto(`${roomUrl}?scenario=room-settings`);
-  for (const target of [page.getByRole("switch", { name: "List in room directory — Public room" }), page.getByRole("button", { name: "Everyone", exact: true }), page.getByRole("button", { name: "Close", exact: true })]) {
+  for (const target of [page.getByRole("combobox", { name: "Room access", exact: true }), page.getByRole("button", { name: "Cancel", exact: true })]) {
     await target.scrollIntoViewIfNeeded(); const box = await target.boundingBox(); expect(box!.width).toBeGreaterThanOrEqual(44); expect(box!.height).toBeGreaterThanOrEqual(44);
   }
+  await page.getByRole("tab", { name: "Music", exact: true }).click();
+  const djEligibility = page.getByRole("combobox", { name: "DJ eligibility", exact: true });
+  await djEligibility.scrollIntoViewIfNeeded();
+  const djBox = await djEligibility.boundingBox(); expect(djBox!.width).toBeGreaterThanOrEqual(44); expect(djBox!.height).toBeGreaterThanOrEqual(44);
 });
 
 test("listener surface is anchored on desktop, a bottom sheet on phone and returns focus", { tag: "@fixed-viewport" }, async ({ page }) => {
@@ -258,6 +262,7 @@ test("directory previews are public, useful, stale-labelled, sortable and resili
   await publicRooms.getByRole("button", { name: "Join Zulu Radio" }).click(); await page.getByRole("button", { name: "Return to directory" }).click();
   await expect(publicRooms.getByRole("button", { name: "Join Zulu Radio" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh rooms" })).toBeDisabled();
+  await page.evaluate(() => { (window as any).layoutFixture.delayDirectory = false; (window as any).layoutFixture.releaseDirectory(); });
   await expect(page.getByRole("button", { name: "Refresh rooms" })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).layoutFixture.requests.filter((url: string) => url.includes("/api/rooms/")).length)).toBe(0);
 });
@@ -280,11 +285,13 @@ test("failed initial directory request does not imply that no rooms are accessib
 
 test("room description has the shared bound and is saved through the existing settings route", async ({ page }) => {
   await page.goto(`${roomUrl}?scenario=room-settings`);
-  const description = page.getByRole("textbox", { name: "Description Optional" });
+  const description = page.getByRole("textbox", { name: "Description (optional)", exact: true });
   await expect(description).toHaveAttribute("maxlength", "240");
   await description.fill("  A thoughtful description of this room.  ");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  expect(await page.evaluate(() => (window as any).layoutFixture.patch.description)).toBe("A thoughtful description of this room.");
+  // The HTTP route owns canonical trimming. This harness records the exact
+  // submitted draft so this UI check cannot pretend to test server validation.
+  await expect.poll(() => page.evaluate(() => (window as any).layoutFixture.patch?.description)).toBe("  A thoughtful description of this room.  ");
   await expect(page.getByLabel("Fixture notice")).toHaveText("Room settings saved");
 });
 

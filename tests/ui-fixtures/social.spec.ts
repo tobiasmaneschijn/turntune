@@ -112,20 +112,52 @@ test("activity polls at 30 seconds and pauses when the tab is hidden", async ({ 
   await page.clock.fastForward(30_000); await expect.poll(() => loads).toBe(3);
 });
 
-for (const signin of ["success", "fail", "none"]) test(`signup keeps the created account when auto-sign-in is ${signin}`, async ({ page }) => {
+for (const signin of ["success", "fail", "none"]) test(`signup waits for email verification when a sign-in client is ${signin}`, async ({ page }) => {
   let creations = 0, body: unknown;
   await page.route("**/api/signup", route => { creations++; body = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); });
   await page.goto(`/tests/social-harness/index.html?surface=signup&signin=${signin}`);
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Alex");
   await page.getByRole("textbox", { name: "Email", exact: true }).fill("alex@example.com");
-  await page.getByLabel("Password", { exact: true }).fill("abcdef");
-  await page.getByLabel("Confirm password", { exact: true }).fill("abcdef");
   await page.getByLabel("Invite password", { exact: true }).fill("invite");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
-  await expect(page.getByText("Account created", { exact: true })).toBeVisible();
+  await expect(page.getByText("Check your email", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
-  if (signin === "fail") await expect(page.getByRole("alert")).toHaveText("Email confirmation required.");
-  expect(body).toEqual({ displayName: "Alex", email: "alex@example.com", password: "abcdef", invitePassword: "invite" });
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(body).toEqual({ displayName: "Alex", email: "alex@example.com", invitePassword: "invite" });
   expect(creations).toBe(1);
-  expect(await page.evaluate(() => (window as Window & { socialSignupCalls: unknown[] }).socialSignupCalls)).toHaveLength(signin === "none" ? 0 : 1);
+  expect(await page.evaluate(() => (window as Window & { socialSignupCalls: unknown[] }).socialSignupCalls)).toHaveLength(0);
+});
+
+test("listeners can block, unblock and disable unsolicited friend requests", async ({ page }) => {
+  const social = { ...initial(), blockedPeople: [] as ReturnType<typeof user>[], receiveRequests: true };
+  const calls: Array<{ body: unknown; token: string }> = [];
+  await page.route("**/api/social", route => route.fulfill({ json: social }));
+  await page.route("**/api/social/blocks/*", route => {
+    const { blocked } = route.request().postDataJSON();
+    const id = route.request().url().split("/").pop();
+    calls.push({ body: { id, blocked }, token: route.request().headers().authorization });
+    if (blocked) { social.people = social.people.filter(person => person.user.id !== id); social.blockedPeople.push(mina); }
+    else social.blockedPeople = [];
+    return route.fulfill({ json: { blocked } });
+  });
+  await page.route("**/api/social/settings", route => {
+    calls.push({ body: route.request().postDataJSON(), token: route.request().headers().authorization });
+    social.receiveRequests = route.request().postDataJSON().receiveRequests;
+    return route.fulfill({ json: { receiveRequests: social.receiveRequests } });
+  });
+  await page.goto("/tests/social-harness/index.html");
+  await page.getByRole("button", { name: "Rotate token" }).click();
+  await page.getByRole("button", { name: "Block Mina", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Accept Mina's friend request", exact: true })).toHaveCount(0);
+  await page.getByText("Friend settings", { exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath("blocked-listeners.png") });
+  await page.getByRole("button", { name: "Unblock Mina", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Unblock Mina", exact: true })).toHaveCount(0);
+  await page.getByRole("checkbox", { name: "Receive friend requests", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "Receive friend requests", exact: true })).not.toBeChecked();
+  expect(calls).toEqual([
+    { body: { id: "mina", blocked: true }, token: "Bearer token-two" },
+    { body: { id: "mina", blocked: false }, token: "Bearer token-two" },
+    { body: { receiveRequests: false }, token: "Bearer token-two" },
+  ]);
 });

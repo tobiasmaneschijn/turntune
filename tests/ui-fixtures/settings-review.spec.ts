@@ -2,6 +2,23 @@ import { expect, test } from "@playwright/test";
 
 const harness = "/tests/settings-review-harness/index.html";
 
+test("account deletion request requires explicit owned-room impact and exact confirmation", async ({ page }, testInfo) => {
+  await page.goto(harness);
+  await page.getByRole("tab", { name: "Account", exact: true }).click();
+  const request = page.getByRole("button", { name: "Request account deletion", exact: true });
+  await expect(request).toBeDisabled();
+  await page.getByRole("textbox", { name: "Type DELETE to request deletion", exact: true }).fill("DELETE");
+  await expect(request).toBeDisabled();
+  await page.getByRole("switch", { name: "Delete all rooms I own", exact: true }).click();
+  await expect(request).toBeEnabled();
+  await request.click();
+  await expect(page.getByRole("status").filter({ hasText: "Deletion requested" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { settingsAccountTest: { requests: unknown[] } }).settingsAccountTest.requests)).toEqual([{ confirmation: "DELETE", deleteOwnedRooms: true }]);
+  await expect(request).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("account-settings.png") });
+});
+
 test("denied browser storage keeps settings usable in memory", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -135,7 +152,7 @@ for (const width of [320, 390]) {
     const list = page.getByRole("tablist", { name: "Setting categories", exact: true });
     const bounds = await list.boundingBox();
     expect(bounds).not.toBeNull();
-    for (const category of ["Playback", "Connections", "Notifications", "Appearance"]) {
+    for (const category of ["Playback", "Connections", "Notifications", "Appearance", "Account"]) {
       const tab = page.getByRole("tab", { name: category, exact: true });
       await expect(tab).toBeInViewport();
       const box = await tab.boundingBox();
@@ -144,7 +161,7 @@ for (const width of [320, 390]) {
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
     await page.getByRole("tab", { name: "Playback", exact: true }).focus();
-    for (const category of ["Connections", "Notifications", "Appearance"]) {
+    for (const category of ["Connections", "Notifications", "Appearance", "Account"]) {
       await page.keyboard.press("ArrowRight");
       await expect(page.getByRole("tab", { name: category, exact: true })).toBeFocused();
       await expect(page.getByRole("tabpanel", { name: category, exact: true })).toBeVisible();
@@ -152,7 +169,7 @@ for (const width of [320, 390]) {
     await page.keyboard.press("Home");
     await expect(page.getByRole("tab", { name: "Playback", exact: true })).toBeFocused();
     await page.keyboard.press("End");
-    await expect(page.getByRole("tab", { name: "Appearance", exact: true })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Account", exact: true })).toBeFocused();
     expect(await list.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
   });
 }

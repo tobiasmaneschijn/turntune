@@ -144,6 +144,8 @@ test('touch action menu provides reply and restores its valid context', async ({
   await expect(composer).toBeFocused()
   await composer.fill('reply draft')
   await actions.click()
+  // Observe the reopened popup before testing Escape, rather than its preceding closed state.
+  await expect(menu).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(actions).toBeFocused()

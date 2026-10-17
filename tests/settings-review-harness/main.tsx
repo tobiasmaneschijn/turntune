@@ -10,9 +10,15 @@ import { UserSettingsDialog } from "../../src/components/UserSettingsDialog";
 import { readUserSettings, saveUserSettings } from "../../src/playback-settings";
 
 const parameters = new URLSearchParams(location.search);
-globalThis.fetch = async () => parameters.has("deviceError")
-  ? Response.json({ error: "Could not load Spotify devices." }, { status: 503 })
-  : Response.json({ devices: [] });
+const accountRequests: unknown[] = [];
+Object.assign(window, { settingsAccountTest: { requests: accountRequests } });
+globalThis.fetch = async (input, init) => {
+  if (String(input).includes("/api/account/deletion-request")) {
+    accountRequests.push(JSON.parse(String(init?.body)));
+    return Response.json({ request: { id: "11111111-1111-4111-8111-111111111111" } }, { status: 202 });
+  }
+  return parameters.has("deviceError") ? Response.json({ error: "Could not load Spotify devices." }, { status: 503 }) : Response.json({ devices: [] });
+};
 
 function Harness() {
   const [settings, setSettings] = useState(readUserSettings);

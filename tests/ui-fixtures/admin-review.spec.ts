@@ -10,7 +10,7 @@ const makeData = () => ({
 
 async function setup(page: Page) {
   const data = makeData();
-  await page.route("**/api/admin/dashboard", (route) => route.fulfill({ json: data }));
+  await page.route("**/api/admin/dashboard?**", (route) => route.fulfill({ json: data }));
   await page.goto("/tests/admin-review-harness/index.html");
   await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
   await expect(page.getByText("Total listeners", { exact: true })).toBeVisible();
@@ -27,6 +27,37 @@ async function selectStatus(page: Page, name: string) {
   await page.getByRole("combobox", { name: "Status", exact: true }).click();
   await page.getByRole("option", { name, exact: true }).click();
 }
+
+test("platform controls require reasons and deletion approval requires identity and impact confirmation", async ({ page }, testInfo) => {
+  await setup(page);
+  const userId = "22222222-2222-4222-8222-222222222222", jobId = "33333333-3333-4333-8333-333333333333";
+  await page.route("**/api/admin/deletion-requests", route => route.fulfill({ json: { requests: [{ id: jobId, user_id: userId, state: "requested", owned_room_count: 2, requested_at: "2026-10-13T00:00:00Z", stage: "requested", last_error: null }] } }));
+  const actions: unknown[] = [], approvals: unknown[] = [];
+  await page.route("**/api/admin/platform-action", route => { actions.push(route.request().postDataJSON()); return route.fulfill({ json: { applied: true } }); });
+  await page.route(`**/api/admin/deletion-requests/${jobId}/approve`, route => { approvals.push(route.request().postDataJSON()); return route.fulfill({ json: { approved: true } }); });
+  await page.getByRole("button", { name: "Platform controls", exact: true }).click();
+  const apply = page.getByRole("button", { name: "Apply action", exact: true });
+  await expect(apply).toBeDisabled();
+  await page.getByRole("textbox", { name: "Account UUID", exact: true }).fill(userId);
+  await expect(apply).toBeDisabled();
+  await page.getByRole("textbox", { name: "Reason", exact: true }).fill("Confirmed abuse");
+  await apply.click();
+  await expect(page.getByRole("status")).toHaveText("Platform action applied.");
+  expect(actions).toEqual([{ action: "suspend-account", target: userId, reason: "Confirmed abuse" }]);
+  await page.getByRole("button", { name: "Review deletion", exact: true }).click();
+  const approve = page.getByRole("button", { name: "Approve deletion", exact: true });
+  await expect(approve).toBeDisabled();
+  await page.getByRole("checkbox", { name: /I verified the requester/ }).check();
+  await expect(approve).toBeDisabled();
+  await page.getByRole("textbox", { name: "Type DELETE ACCOUNT AND OWNED ROOMS", exact: true }).fill("DELETE ACCOUNT AND OWNED ROOMS");
+  await expect(approve).toBeDisabled();
+  await page.getByRole("textbox", { name: "Deletion reason", exact: true }).fill("Verified account-owner request");
+  await page.screenshot({ path: testInfo.outputPath("deletion-approval.png") });
+  await approve.click();
+  await expect(page.getByRole("status")).toHaveText("Deletion approved. Check the request state for cleanup completion.");
+  expect(approvals).toEqual([{ userId, ownedRoomCount: 2, identityVerified: true, confirmation: "DELETE ACCOUNT AND OWNED ROOMS", reason: "Verified account-owner request" }]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 
 test("admin delayed saves preserve later status and note edits for a second save", async ({ page }) => {
   await setup(page);
@@ -101,24 +132,28 @@ test("admin dirty dismissal preserves drafts per record and explicit discard res
 test("admin save completion cannot change a different record's draft", async ({ page }) => {
   await setup(page);
   let release!: () => void;
-  let started = false;
   const pending = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/admin/feedback/feedback-1", async (route) => {
-    started = true;
     const submitted = route.request().postDataJSON();
     await pending;
     await route.fulfill({ json: { feedback: { id: "feedback-1", ...submitted, updatedAt: "2026-08-01T12:00:00Z" } } });
   });
+  const firstSave = page.waitForRequest((request) => request.method() === "PATCH" && request.url().endsWith("/api/admin/feedback/feedback-1"));
   let dialog = await openReport(page);
   await dialog.getByRole("textbox", { name: "Private admin note" }).fill("Save first record");
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect.poll(() => started).toBe(true);
+  expect((await firstSave).postDataJSON()).toEqual({ status: "new", adminNote: "Save first record" });
+  await expect(dialog.getByRole("status")).toHaveText("Saving…");
   await page.keyboard.press("Escape");
   dialog = await openReport(page, 1);
   await dialog.getByRole("textbox", { name: "Private admin note" }).fill("Edit second record");
+  await expect(dialog.getByRole("status")).toHaveText("Unsaved changes");
+  const completed = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith("/api/admin/feedback/feedback-1") && response.status() === 200);
   release();
+  await completed;
   await expect(page.locator(".admin-feedback-card").filter({ hasText: "First report" })).toHaveCount(1);
   await expect(dialog.getByRole("textbox", { name: "Private admin note" })).toHaveValue("Edit second record");
+  await expect(dialog.getByRole("status")).toHaveText("Unsaved changes");
   await page.keyboard.press("Escape");
   dialog = await openReport(page);
   await expect(dialog.getByRole("status")).toHaveText("Saved");
@@ -197,7 +232,7 @@ test("admin counts and load/save errors meet text contrast in both themes", asyn
   for (const theme of ["light", "dark"]) {
     await page.addInitScript((value) => localStorage.setItem("soundspin-theme", value), theme);
     await setup(page);
-    await page.route("**/api/admin/dashboard", (route) => route.fulfill({ status: 503, json: { error: "Could not refresh. Try again." } }));
+    await page.route("**/api/admin/dashboard?**", (route) => route.fulfill({ status: 503, json: { error: "Could not refresh. Try again." } }));
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByRole("alert")).toHaveText("Could not refresh. Try again.");
     await page.route("**/api/admin/feedback/feedback-1", (route) => route.fulfill({ status: 503, json: { error: "Could not save changes. Try again." } }));

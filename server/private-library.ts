@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { isMixcloudShowKey, mixcloudShowKey } from "../shared/mixcloud.js";
 
+export class PrivateLibraryDataError extends Error {
+  constructor() { super("Your library could not be read. Clear your library to reset it."); }
+}
 export const LIBRARY_LIMITS = { picks: 500, sets: 30, setTracks: 50 } as const;
 export const libraryTrackSchema = z.object({
   provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
-  artworkUrl: z.string().url().startsWith("https://").max(2048).optional(),
+  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), "Artwork must use a supported image host.").optional(),
   permalinkUrl: z.string().url().startsWith("https://").max(2048).optional(),
   durationMs: z.number().int().positive().max(86_400_000).optional()
 }).superRefine((track, context) => {
@@ -34,8 +38,8 @@ export const libraryMutationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("clear-library") })
 ]);
 export const privateLibrarySchema = z.object({
-  picks: z.array(z.object({ id, track: libraryTrackSchema, savedAt: z.number().finite().nonnegative() })).max(LIBRARY_LIMITS.picks),
-  sets: z.array(z.object({ id, name: setName, tracks: trackList, savedAt: z.number().finite().nonnegative() })).max(LIBRARY_LIMITS.sets)
+  picks: z.array(z.object({ id, track: libraryTrackSchema, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(LIBRARY_LIMITS.picks),
+  sets: z.array(z.object({ id, name: setName, tracks: trackList, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(LIBRARY_LIMITS.sets)
 });
 export type LibraryTrack = z.infer<typeof libraryTrackSchema>;
 export type PrivateLibrary = z.infer<typeof privateLibrarySchema>;

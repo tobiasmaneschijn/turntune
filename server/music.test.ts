@@ -290,3 +290,21 @@ test("Apple Music counterpart mapping rejects a different remix and accepts exac
   assert.equal(resolved.mappings?.apple?.providerId, "exact-remix");
   assert.equal(resolved.mappings?.apple?.matchMethod, "exact-metadata");
 });
+
+test("an account suspended during Spotify code exchange never persists or caches the returned credentials", async () => {
+  const storage = accountStore();
+  let active = true;
+  let release!: () => void, started!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const exchangeStarted = new Promise<void>(resolve => { started = resolve; });
+  const spotify = new SpotifyApi("client", "secret", "US", async () => {
+    started(); await blocked;
+    return Response.json({ access_token: "late-access", refresh_token: "late-refresh", expires_in: 3600 });
+  });
+  const accounts = new SpotifyAccounts(storage.store, spotify, "encryption-key");
+  const connecting = accounts.connect("user", "code", "https://app.test/api/spotify/callback", async () => { if (!active) throw new Error("Account access is unavailable."); });
+  const rejected = assert.rejects(connecting, /Account access is unavailable/);
+  await exchangeStarted; active = false; release(); await rejected;
+  assert.equal(storage.connection, null);
+  await assert.rejects(accounts.getAccessToken("user"), /Connect Spotify first/);
+});

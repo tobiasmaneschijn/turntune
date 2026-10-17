@@ -87,6 +87,11 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
     </div>
     {loading && <p role="status">Loading picks and sets…</p>}
     {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Retry</Button></div>}
+    {!library && error.includes("Clear your library") && <div className="music-library-delete">{confirmClear ? <>
+      <p>Delete all saved picks and sets? Queued tracks will remain.</p>
+      <Button variant="destructive" disabled={busy || loading} onClick={async () => { if (await mutate({ type: "clear-library" })) setConfirmClear(false); }}>Delete all picks and sets</Button>
+      <Button variant="ghost" disabled={busy || loading} onClick={() => setConfirmClear(false)}>Cancel</Button>
+    </> : <Button variant="ghost" size="sm" disabled={busy || loading} onClick={() => setConfirmClear(true)}>Clear library…</Button>}</div>}
     {library && <>
       <h3>Picks {library.picks.length >= 450 && <small>{library.picks.length}/500</small>}</h3>
       {picks.map((pick, index) => {

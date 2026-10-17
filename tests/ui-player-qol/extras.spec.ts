@@ -36,9 +36,12 @@ test("host edit has pending/error/revision context and stays disabled offline", 
 });
 
 test("expiry removes a dismissed or visible note without requiring a new snapshot", async ({ page }) => {
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 60_000));
   await page.goto(url);
   await page.evaluate(() => window.qolExtras.setNote({ id: "00000000-0000-4000-8000-000000000003", text: "Brief session", authorId: "host", updatedAt: Date.now(), expiresAt: Date.now() + 250 }));
   await expect(page.getByRole("button", { name: /^Read full room note:/ })).toHaveText("Brief session");
+  await page.clock.fastForward(251);
   await expect(page.locator(".room-announcement-banner")).toHaveCount(0);
 });
 

@@ -62,3 +62,40 @@ test("database revision conflict merges a concurrent writer instead of overwriti
   assert.equal(updates, 2); assert.equal(row.revision, 3);
   assert.ok(requestedUsers.every((user) => user === "alice"));
 });
+
+test("explicit owner reset repairs corrupt metadata or unsafe legacy revisions without bypassing CAS", async () => {
+  for (const initial of [
+    { data: { picks: [{ unexpected: "legacy" }], sets: [] }, revision: 7 },
+    { data: emptyLibrary(), revision: "9007199254740993" },
+  ]) {
+    let row: { data: unknown; revision: number | string } = structuredClone(initial);
+    const filters: Array<[string, unknown]> = [];
+    let writes = 0;
+    const client = { from(table: string) {
+      assert.equal(table, "soundspin_private_libraries");
+      let update: typeof row | undefined;
+      let expectedRevision: unknown;
+      const query = {
+        select() { return query; },
+        eq(column: string, value: unknown) { filters.push([column, value]); if (column === "revision") expectedRevision = value; return query; },
+        update(value: typeof row) { update = value; return query; },
+        async maybeSingle() {
+          if (!update) return { data: structuredClone(row), error: null };
+          writes++;
+          assert.equal(expectedRevision, initial.revision);
+          row = update;
+          return { data: { revision: row.revision }, error: null };
+        },
+      };
+      return query;
+    } } as unknown as SupabaseClient;
+    const store = new Store({ supabase: client });
+    await assert.rejects(store.getPrivateLibrary("alice"), /Clear your library/);
+    await assert.rejects(store.updatePrivateLibrary("alice", { type: "save-pick", track }), /Clear your library/);
+    assert.equal(writes, 0);
+    assert.deepEqual(await store.updatePrivateLibrary("alice", { type: "clear-library" }), emptyLibrary());
+    assert.equal(writes, 1);
+    assert.equal(row.revision, initial.revision === 7 ? 8 : 1);
+    assert.ok(filters.filter(([column]) => column === "user_id").every(([, value]) => value === "alice"));
+  }
+});

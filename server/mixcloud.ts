@@ -1,3 +1,5 @@
+import { approvedRemoteImageUrl } from "../shared/remote-images.js";
+import { providerJson } from "./provider-http.js";
 import { formatDuration } from "./music.js";
 import { isMixcloudShowKey, mixcloudShowKey, mixcloudShowUrl } from "../shared/mixcloud.js";
 
@@ -20,14 +22,6 @@ type MixcloudShow = {
   user?: { name?: unknown; username?: unknown };
 };
 
-function httpsImage(value: unknown) {
-  if (typeof value !== "string" || value.length > 2048) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : undefined;
-  } catch { return undefined; }
-}
-
 function mapShow(value: unknown): MixcloudSearchResult | null {
   if (!value || typeof value !== "object") return null;
   const show = value as MixcloudShow;
@@ -44,34 +38,11 @@ function mapShow(value: unknown): MixcloudSearchResult | null {
     id: show.key,
     title: show.name.trim().slice(0, 120),
     artist: uploader.trim().slice(0, 120) || "Mixcloud creator",
-    thumbnail: httpsImage(show.pictures?.large) || httpsImage(show.pictures?.medium),
+    thumbnail: approvedRemoteImageUrl(show.pictures?.large) || approvedRemoteImageUrl(show.pictures?.medium),
     duration: formatDuration(durationMs),
     durationMs,
     permalinkUrl: mixcloudShowUrl(show.key)
   };
-}
-
-async function readPayload(response: Response): Promise<unknown> {
-  const maxBytes = 1_048_576;
-  if (Number(response.headers.get("content-length")) > maxBytes) throw new Error("Mixcloud returned an oversized response.");
-  if (!response.body) throw new Error("Mixcloud returned an empty response.");
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      bytes += next.value.byteLength;
-      if (bytes > maxBytes) { await reader.cancel(); throw new Error("Mixcloud returned an oversized response."); }
-      chunks.push(next.value);
-    }
-  } finally { reader.releaseLock(); }
-  const combined = new Uint8Array(bytes);
-  let offset = 0;
-  for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.byteLength; }
-  try { return JSON.parse(new TextDecoder().decode(combined)); }
-  catch { throw new Error("Mixcloud returned an invalid response."); }
 }
 
 /** Public read API; playback stays in the official Mixcloud widget. */
@@ -80,10 +51,10 @@ export class MixcloudApi {
   get configured() { return true; }
 
   private async request(path: string, signal?: AbortSignal) {
-    const response = await this.fetcher(`https://api.mixcloud.com${path}`, {
+    const { response, payload } = await providerJson<unknown>("mixcloud", this.fetcher, `https://api.mixcloud.com${path}`, {
       headers: { Accept: "application/json" },
       redirect: "error",
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000)
+      signal
     });
     if (!response.ok) {
       await response.body?.cancel();
@@ -91,13 +62,13 @@ export class MixcloudApi {
         ? "Mixcloud is unavailable or its request limit was reached. Try again later."
         : "Could not load this Mixcloud show.");
     }
-    return readPayload(response);
+    return payload;
   }
 
-  async searchTracks(query: string, limit = 12): Promise<MixcloudSearchResult[]> {
+  async searchTracks(query: string, limit = 12, signal?: AbortSignal): Promise<MixcloudSearchResult[]> {
     const boundedLimit = Number.isFinite(limit) ? Math.min(12, Math.max(1, Math.floor(limit))) : 12;
     const params = new URLSearchParams({ q: query.slice(0, 100), type: "cloudcast", limit: String(boundedLimit) });
-    const payload = await this.request(`/search/?${params}`) as { data?: unknown[] } | null;
+    const payload = await this.request(`/search/?${params}`, signal) as { data?: unknown[] } | null;
     const data = Array.isArray(payload?.data) ? payload.data : [];
     return data.slice(0, boundedLimit).map(mapShow).filter((show): show is MixcloudSearchResult => Boolean(show));
   }

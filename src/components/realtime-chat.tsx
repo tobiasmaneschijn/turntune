@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images";
 import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
@@ -19,6 +20,7 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -109,6 +111,7 @@ interface RealtimeChatProps {
   onConnected?: () => void
   historyRoomSlug?: string
   historySource?: ChatHistorySource
+  historyHasOlder?: boolean
   historyLoading?: boolean
   historyUnavailable?: boolean
   onHistoricalMessages?: (messages: ChatMessage[]) => void
@@ -277,6 +280,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   onConnected,
   historyRoomSlug,
   historySource,
+  historyHasOlder,
   historyLoading = false,
   historyUnavailable = false,
   onHistoricalMessages,
@@ -314,7 +318,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     isNearBottom,
     scrollRevision,
     preserveAnchor,
-  } = useChatScroll()
+    restoreAnchor,
+    cancelAnchor,
+    anchorRevision,
+  } = useChatScroll(`${user.id}:${roomName}`)
   const liveWindowRef = useRef<ChatMessage[]>([])
   const readingRef = useRef(false)
   readingRef.current = !isNearBottom
@@ -430,7 +437,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     attentionTracker.seed(messages)
     onHistoricalMessages?.(messages)
   }, [attentionTracker, onHistoricalMessages])
-  const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, readerWindow || liveWindow, seedHistoricalMessages, historySource)
+  const history = useChatHistory(client, historyRoomSlug, `${user.id}:${roomName}`, readerWindow || liveWindow, seedHistoricalMessages, historySource, historyHasOlder)
   useEffect(() => {
     if (showHistorySearch) historySearchInputRef.current?.focus({ preventScroll: true })
   }, [showHistorySearch])
@@ -574,6 +581,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     ? applyRemovalEvents(applyPollVoteEvents(applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId), pollVoteEvents),removalEvents)
     : allMessages, [history.context, roomUsers, reactionEvents, reactionNamesByUserId, pollVoteEvents, allMessages,removalEvents])
 
+  useLayoutEffect(() => {
+    if (!history.loadingOlder && !history.contextLoading) restoreAnchor()
+  }, [visibleMessages, history.loadingOlder, history.contextLoading, anchorRevision, restoreAnchor])
+
   useEffect(() => {
     const refresh = () => setPageAttended(!isAppInBackground())
     window.addEventListener('focus', refresh); window.addEventListener('blur', refresh)
@@ -589,6 +600,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       const lifetime = lifetimeRef.current
       const activate = () => {
         if (!lifetime.active) return
+        cancelAnchor()
         history.closeContext()
         setShowHistorySearch(false)
         onNotificationActivate?.()
@@ -610,7 +622,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         onInApp: () => toast.info(`${message.user.name} mentioned you`, { id: key, description: message.content,
           action: { label: 'View', onClick: activate } }) })
     }
-  }, [attentionTracker, attendingLive, hiddenIds, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
+  }, [attentionTracker, attendingLive, cancelAnchor, hiddenIds, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
   useEffect(() => {
     const original = document.title.replace(/^\(\d+\) /, '')
     let ownedTitle = document.title
@@ -902,12 +914,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     return true
   }, [reducedMotion])
   const jumpToMessage = useCallback((messageId: string) => {
+    cancelAnchor()
     if (markJumpTarget(messageId)) return
     if (!historyRoomSlug) { setComposerError('That message is not in the loaded history.'); return }
     liveScrollTopRef.current = containerRef.current?.scrollTop || 0
     pendingJumpRef.current = messageId
     void history.revealContext(messageId).then((found) => { if (!found) pendingJumpRef.current = null })
-  }, [containerRef, history.revealContext, historyRoomSlug, markJumpTarget])
+  }, [cancelAnchor, containerRef, history.revealContext, historyRoomSlug, markJumpTarget])
   useEffect(() => {
     const messageId = pendingJumpRef.current
     if (!messageId || !history.context) return
@@ -915,9 +928,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [history.context, markJumpTarget])
   useEffect(() => () => { if (jumpHighlightRef.current) clearTimeout(jumpHighlightRef.current) }, [])
   const returnToLive = useCallback(() => {
+    cancelAnchor()
     history.closeContext()
     requestAnimationFrame(() => { if (containerRef.current) containerRef.current.scrollTop = liveScrollTopRef.current; refreshPosition() })
-  }, [containerRef, history.closeContext, refreshPosition])
+  }, [cancelAnchor, containerRef, history.closeContext, refreshPosition])
 
   const toggleReaction = useCallback(async (message: ChatMessage, emoji: string) => {
     if (!isConnected||!canChat||message.removedAt) return
@@ -1354,7 +1368,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                             })
                           }}
                         >
-                          <img src={gif.preview} alt={gif.title} loading="lazy" />
+                          <img referrerPolicy="no-referrer" src={approvedImageUrl(gif.preview)} alt={gif.title} loading="lazy" />
                         </button>
                       ))}
                     </div>

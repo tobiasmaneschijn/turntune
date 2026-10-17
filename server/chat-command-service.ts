@@ -5,6 +5,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { User } from './types.js'
 import {
   canonicalMessage,
+  CHAT_MAX_REACTIONS_PER_USER, CHAT_MAX_REACTIONS_PER_MESSAGE, CHAT_MAX_POLL_VOTERS,
+  CHAT_MAX_HISTORY_MESSAGES, CHAT_MAX_HISTORY_CHILDREN,
   chatMessageSchema,
   chatReactionSchema,
   immutableMessageKey,
@@ -15,6 +17,7 @@ import {
 } from './chat-validation.js'
 import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
 import { resolveChatMediaUrl } from './chat-media.js'
+import { PublicRequestError, trustedSqlRequestError } from './public-request-error.js'
 
 export type ChatParticipationKind = 'message' | 'media' | 'links' | 'poll' | 'reaction' | 'typing' | 'remove'
 export interface ChatCommandAuthorization {
@@ -25,6 +28,8 @@ export interface ChatCommandServiceOptions {
   client: SupabaseClient | null
   dataDir?: string
   getUser: (userId: string, roomId: string) => Promise<User | null>
+  /** Current authorized room audience; missing resolver fails closed for mentions. */
+  getMentionAudience?: (roomId: string, senderId: string) => Promise<User[]>
   /** Must check fresh admission and current room policy. Removal checks staff capability. */
   authorize: (
     userId: string,
@@ -64,6 +69,7 @@ interface Receipt {
   userId: string
   fingerprint: string
   result: unknown
+  createdAt: number
 }
 interface LocalChatData {
   messages: Record<string, DurableChatRecord>
@@ -71,6 +77,7 @@ interface LocalChatData {
   cooldowns: Record<string, number>
   removals: ChatRemovalLog[]
   tombstones: Record<string, { roomId: string; removedAt: string }>
+  mentionBudgets: Record<string, { count: number; expiresAt: number }>
 }
 export interface ChatReadCursor {
   createdAt: string
@@ -91,11 +98,15 @@ export interface ChatReadRow {
   reply_to_id: string | null
   poll_options: string[] | null
   removed_at: string | null
+  immutable_fingerprint?: string | null
   soundspin_message_reactions: Array<{ user_id: string; emoji: string }>
   soundspin_poll_votes: Array<{ user_id: string; option_index: number; revision: number }>
 }
-const SELECT =
-  'id,room_slug,user_id,user_name,avatar_seed,content,message_type,created_at,media_url,storage_path,mentions,reply_to_id,poll_options,removed_at,soundspin_message_reactions(user_id,emoji),soundspin_poll_votes(user_id,option_index,revision)'
+const BASE_SELECT = 'id,room_slug,user_id,user_name,avatar_seed,content,message_type,created_at,media_url,storage_path,mentions,reply_to_id,poll_options,removed_at,immutable_fingerprint'
+const SELECT = `${BASE_SELECT},soundspin_message_reactions(user_id,emoji),soundspin_poll_votes(user_id,option_index,revision)`
+const RECEIPT_TTL_MS = 24 * 60 * 60_000
+const MAX_ROOM_RECEIPTS = 10_000
+const MAX_USER_RECEIPTS = 1_000
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const tombstone = (message: RelayMessage, removedAt: string): RelayMessage => ({
@@ -111,7 +122,7 @@ const tombstone = (message: RelayMessage, removedAt: string): RelayMessage => ({
 
 /** Both HTTP and socket commands commit the same immutable operation before delivery. */
 export class ChatCommandService {
-  private data: LocalChatData = { messages: {}, receipts: {}, cooldowns: {}, removals: [], tombstones: {} }
+  private data: LocalChatData = { messages: {}, receipts: {}, cooldowns: {}, removals: [], tombstones: {}, mentionBudgets: {} }
   private initialized?: Promise<void>
   private chain: Promise<unknown> = Promise.resolve()
   private readonly now: () => number
@@ -165,7 +176,10 @@ export class ChatCommandService {
       .then(async () => {
         await this.init()
         const draft = structuredClone(this.data)
+        for (const [id, receipt] of Object.entries(draft.receipts))
+          if (!Number.isFinite(receipt.createdAt) || receipt.createdAt + RECEIPT_TTL_MS <= this.now()) delete draft.receipts[id]
         const value = await change(draft)
+        if (JSON.stringify(draft) === JSON.stringify(this.data)) return value
         await mkdir(path.dirname(this.file), { recursive: true })
         const temp = `${this.file}.tmp`
         await writeFile(temp, JSON.stringify(draft), 'utf8')
@@ -179,8 +193,35 @@ export class ChatCommandService {
   private checkReceipt(data: LocalChatData, id: string, roomId: string, userId: string, fingerprint: string) {
     const receipt = data.receipts[id]
     if (receipt && (receipt.roomId !== roomId || receipt.userId !== userId || receipt.fingerprint !== fingerprint))
-      throw new Error('This operation ID belongs to different content, account, or room.')
+      throw new PublicRequestError('This operation ID belongs to different content, account, or room.', 409)
     return receipt
+  }
+  private commitReceipt(data: LocalChatData, id: string, receipt: Omit<Receipt, 'createdAt'>) {
+    const entries = Object.values(data.receipts)
+    const removal = id.startsWith('remove:')
+    if (entries.filter(item => item.roomId === receipt.roomId).length >= MAX_ROOM_RECEIPTS + (removal ? 1000 : 0) ||
+        entries.filter(item => item.userId === receipt.userId).length >= MAX_USER_RECEIPTS + (removal ? 1000 : 0))
+      throw new PublicRequestError('Chat operation limit reached. Try again later.', 429)
+    data.receipts[id] = { ...receipt, createdAt: this.now() }
+  }
+  private boundRow(row: ChatReadRow): ChatReadRow {
+    return { ...row, soundspin_message_reactions: (row.soundspin_message_reactions || []).slice(0, CHAT_MAX_REACTIONS_PER_MESSAGE),
+      soundspin_poll_votes: (row.soundspin_poll_votes || []).slice(0, CHAT_MAX_POLL_VOTERS) }
+  }
+  private reserveMentions(data: LocalChatData, userId: string, targets: ChatMessageInput['mentions']) {
+    if (!targets.length) return
+    const keys = [[`sender:${userId}`, targets.length, 20] as const,
+      ...targets.map(target => [`recipient:${target.userId}`, 1, 5] as const)]
+    for (const [key, cost, max] of keys) {
+      const entry = data.mentionBudgets[key]
+      if (entry && entry.expiresAt > this.now() && entry.count + cost > max) throw new PublicRequestError('Mention limit reached. Send a message without mentions.', 429)
+    }
+    for (const [key, cost] of keys) {
+      const current = data.mentionBudgets[key]
+      data.mentionBudgets[key] = { count: (current && current.expiresAt > this.now() ? current.count : 0) + cost, expiresAt: current && current.expiresAt > this.now() ? current.expiresAt : this.now() + 60_000 }
+    }
+    for (const [key, entry] of Object.entries(data.mentionBudgets)) if (entry.expiresAt <= this.now()) delete data.mentionBudgets[key]
+    if (Object.keys(data.mentionBudgets).length > 20_000) throw new PublicRequestError('Mentions are temporarily unavailable.', 503)
   }
   private async rpc(
     kind: string,
@@ -200,7 +241,22 @@ export class ChatCommandService {
       p_payload: payload,
       p_slow_seconds: authorization?.bypassSlowMode ? 0 : authorization?.slowModeSeconds || 0
     })
-    if (error) throw new Error(error.message)
+    if (error) throw trustedSqlRequestError(error, {
+      'Invalid chat command.': 400,
+      'This operation ID belongs to different content, account, or room.': 409,
+      'This message ID belongs to different content, account, or room.': 409,
+      'This message ID is unavailable.': 409,
+      'Slow mode is active. Wait before sending another message.': 429,
+      'This uploaded image is unavailable.': 400,
+      'This message is unavailable.': 404,
+      'This message was removed.': 409,
+      'Choose a supported emoji.': 400,
+      'This message has reached its reaction limit.': 429,
+      'This poll is unavailable.': 400,
+      'This poll has reached its voter limit.': 429,
+      'Mention limit reached. Send a message without mentions.': 429,
+      'Chat operation limit reached. Try again later.': 429
+    }, 'Chat could not be saved. Try again.')
     return data as { fresh: boolean; result: unknown }
   }
   private async saveMessage(roomId: string, userId: string, value: unknown): Promise<RelayMessage> {
@@ -212,14 +268,15 @@ export class ChatCommandService {
     if (/https?:\/\/|www\./i.test(input.content)) await this.options.authorize(userId, roomId, 'links')
     if (input.poll) await this.options.authorize(userId, roomId, 'poll')
     const user = await this.options.getUser(userId, roomId)
-    if (!user || user.id !== userId) throw new Error('This room session has ended.')
+    if (!user || user.id !== userId) throw new PublicRequestError('This room session has ended.', 403)
     const reply = input.replyTo ? await this.loadReply(roomId, input.replyTo.id) : undefined
-    if (input.replyTo && !reply) throw new Error('The replied-to message is unavailable.')
-    let message = canonicalMessage(input, user, reply || undefined)
+    if (input.replyTo && !reply) throw new PublicRequestError('The replied-to message is unavailable.', 400)
+    const audience = input.mentions.length ? await this.options.getMentionAudience?.(roomId, userId) || [] : []
+    let message = canonicalMessage(input, user, reply || undefined, audience)
     const existing = await this.loadMessage(input.id)
     const removed = existing?.removedAt || (await this.loadTombstone(input.id))?.removedAt
     if (existing && (existing.roomId !== roomId || existing.userId !== userId || existing.fingerprint !== fingerprint))
-      throw new Error('This message ID belongs to different content, account, or room.')
+      throw new PublicRequestError('This message ID belongs to different content, account, or room.', 409)
     this.policy.message(roomId, userId, input, Boolean(existing))
     if (message.storagePath && !removed)
       message.mediaUrl = (
@@ -238,13 +295,15 @@ export class ChatCommandService {
           original &&
           (original.roomId !== roomId || original.userId !== userId || original.fingerprint !== fingerprint)
         )
-          throw new Error('This message ID belongs to different content, account, or room.')
+          throw new PublicRequestError('This message ID belongs to different content, account, or room.', 409)
+        if (original) return false
         const removal = draft.tombstones[input.id]
-        if (removal && removal.roomId !== roomId) throw new Error('This message ID is unavailable.')
+        if (removal && removal.roomId !== roomId) throw new PublicRequestError('This message ID is unavailable.', 409)
+        if (!removal) this.reserveMentions(draft, userId, message.mentions)
         const cooldownKey = `${roomId}:${userId}`
         const cooldown = authorization?.bypassSlowMode ? 0 : authorization?.slowModeSeconds || 0
         if (!removal && cooldown && (draft.cooldowns[cooldownKey] || 0) + cooldown * 1000 > this.now())
-          throw new Error('Slow mode is active. Wait before sending another message.')
+          throw new PublicRequestError('Slow mode is active. Wait before sending another message.', 429)
         draft.messages[input.id] = {
           roomId,
           userId,
@@ -253,11 +312,11 @@ export class ChatCommandService {
           removedAt: removal?.removedAt
         }
         if (!removal) draft.cooldowns[cooldownKey] = this.now()
-        draft.receipts[id] = { roomId, userId, fingerprint, result: { id: input.id } }
+        this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: { id: input.id } })
         return !removal
       })
     const record = await this.loadMessage(input.id)
-    if (!record) throw new Error('The saved message is unavailable.')
+    if (!record) throw new PublicRequestError('The saved message is unavailable.', 503)
     message = record.message
     if (record.removedAt)
       await this.options.emit(
@@ -277,7 +336,7 @@ export class ChatCommandService {
     const authorization = await this.options.authorize(userId, roomId, 'reaction')
     this.policy.reaction(roomId, userId, { ...input, id: operationId })
     const target = await this.loadMessage(input.messageId)
-    if (!target || target.roomId !== roomId || target.removedAt) throw new Error('This message is unavailable.')
+    if (!target || target.roomId !== roomId || target.removedAt) throw new PublicRequestError('This message is unavailable.', 404)
     const event = { ...input, id: operationId, userId }
     let fresh: boolean
     if (this.options.client) {
@@ -288,14 +347,21 @@ export class ChatCommandService {
         await this.options.authorize(userId, roomId, 'reaction')
         if (this.checkReceipt(draft, id, roomId, userId, fingerprint)) return false
         const record = draft.messages[input.messageId]
-        if (!record || record.removedAt || record.roomId !== roomId) throw new Error('This message is unavailable.')
+        if (!record || record.removedAt || record.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
         const reactions = ((
           record.message as RelayMessage & { reactions?: Array<{ userId: string; emoji: string }> }
         ).reactions ||= [])
         const index = reactions.findIndex((r) => r.userId === userId && r.emoji === input.emoji)
-        if (input.action === 'add' && index < 0) reactions.push({ userId, emoji: input.emoji })
-        else if (input.action === 'remove' && index >= 0) reactions.splice(index, 1)
-        draft.receipts[id] = { roomId, userId, fingerprint, result: event }
+        if (input.action === 'add' && index < 0) {
+          if (reactions.filter(item => item.userId === userId).length >= CHAT_MAX_REACTIONS_PER_USER || reactions.length >= CHAT_MAX_REACTIONS_PER_MESSAGE)
+            throw new PublicRequestError('This message has reached its reaction limit.', 429)
+          reactions.push({ userId, emoji: input.emoji })
+        } else if (input.action === 'remove' && index >= 0) reactions.splice(index, 1)
+        else {
+          this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
+          return false
+        }
+        this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
         return true
       })
     if (fresh) await this.options.emit(roomId, 'chat:reaction', { roomId, reaction: event }, userId)
@@ -315,7 +381,7 @@ export class ChatCommandService {
       optionIndex < 0 ||
       optionIndex > 3
     )
-      throw new Error('Choose a poll option.')
+      throw new PublicRequestError('Choose a poll option.', 400)
     const authorization = await this.options.authorize(userId, roomId, 'reaction')
     this.policy.pollVote(roomId, userId)
     const id = `poll:${operationId}`,
@@ -337,12 +403,18 @@ export class ChatCommandService {
           !target.message.poll ||
           optionIndex >= target.message.poll.options.length
         )
-          throw new Error('This poll is unavailable.')
+          throw new PublicRequestError('This poll is unavailable.', 400)
         const previous = target.message.poll.votes.find((v) => v.userId === userId)
+        if (previous?.optionIndex === optionIndex) {
+          const event = { messageId, ...previous }
+          this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
+          return { fresh: false, result: event }
+        }
+        if (!previous && target.message.poll.votes.length >= CHAT_MAX_POLL_VOTERS) throw new PublicRequestError('This poll has reached its voter limit.', 429)
         const event = { messageId, userId, optionIndex, revision: (previous?.revision || 0) + 1 }
         target.message.poll.votes = target.message.poll.votes.filter((v) => v.userId !== userId)
         target.message.poll.votes.push(event)
-        draft.receipts[id] = { roomId, userId, fingerprint, result: event }
+        this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
         return { fresh: true, result: event }
       })
     const event = result.result as ChatPollVoteEvent
@@ -357,9 +429,9 @@ export class ChatCommandService {
     reason = ''
   ) {
     if (!uuid.test(messageId) || !uuid.test(operationId) || reason.length > 500)
-      throw new Error('Invalid message removal.')
+      throw new PublicRequestError('Invalid message removal.', 400)
     const target = await this.loadMessage(messageId)
-    if (target && target.roomId !== roomId) throw new Error('This message is unavailable.')
+    if (target && target.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
     const authorization = await this.options.authorize(actorId, roomId, 'remove', target?.userId)
     const id = `remove:${operationId}`,
       fingerprint = hash(JSON.stringify([messageId, reason]))
@@ -373,11 +445,12 @@ export class ChatCommandService {
     } else
       fresh = await this.local(async (draft) => {
         const current = draft.messages[messageId]
-        if (current && current.roomId !== roomId) throw new Error('This message is unavailable.')
+        if (current && current.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
         await this.options.authorize(actorId, roomId, 'remove', current?.userId)
         if (this.checkReceipt(draft, id, roomId, actorId, fingerprint)) return false
         if (draft.tombstones[messageId] && draft.tombstones[messageId].roomId !== roomId)
-          throw new Error('This message ID is unavailable.')
+          throw new PublicRequestError('This message ID is unavailable.', 409)
+        if (draft.tombstones[messageId]) return false
         draft.tombstones[messageId] ||= { roomId, removedAt }
         const record = draft.messages[messageId]
         if (record) {
@@ -394,12 +467,12 @@ export class ChatCommandService {
           createdAt: this.now(),
           requestId: operationId
         })
-        draft.receipts[id] = {
+        this.commitReceipt(draft, id, {
           roomId,
           userId: actorId,
           fingerprint,
           result: { messageId, removedAt: draft.tombstones[messageId].removedAt }
-        }
+        })
         return true
       })
     const marker = await this.loadTombstone(messageId)
@@ -440,6 +513,11 @@ export class ChatCommandService {
     if (!this.options.client) {
       await this.init()
       const record = this.data.messages[id] ? structuredClone(this.data.messages[id]) : null
+      if (record) {
+        const message = record.message as RelayMessage & { reactions?: Array<{ userId: string; emoji: string }> }
+        if (message.reactions) message.reactions = message.reactions.slice(0, CHAT_MAX_REACTIONS_PER_MESSAGE)
+        if (message.poll) message.poll.votes = message.poll.votes.slice(0, CHAT_MAX_POLL_VOTERS)
+      }
       if (record?.message.replyTo) {
         const source = this.data.messages[record.message.replyTo.id]
         if (source?.roomId === record.roomId) {
@@ -475,7 +553,7 @@ export class ChatCommandService {
     if (row.reply_to_id) {
       const { data: reply, error: replyError } = await this.options.client
         .from('soundspin_messages')
-        .select(SELECT)
+        .select(BASE_SELECT)
         .eq('room_slug', row.room_slug)
         .eq('id', row.reply_to_id)
         .maybeSingle()
@@ -497,7 +575,7 @@ export class ChatCommandService {
       roomId: row.room_slug,
       userId: row.user_id,
       message,
-      fingerprint: receipt?.fingerprint || hash(immutableMessageKey(message)),
+      fingerprint: row.immutable_fingerprint || receipt?.fingerprint || hash(immutableMessageKey(message)),
       removedAt: row.removed_at || undefined
     }
   }
@@ -530,7 +608,7 @@ export class ChatCommandService {
       poll: row.poll_options
         ? {
             options: row.poll_options,
-            votes: (row.soundspin_poll_votes || []).map((v) => ({
+            votes: (row.soundspin_poll_votes || []).slice(0, CHAT_MAX_POLL_VOTERS).map((v) => ({
               userId: v.user_id,
               optionIndex: v.option_index,
               revision: v.revision
@@ -538,7 +616,7 @@ export class ChatCommandService {
           }
         : undefined,
       removedAt: row.removed_at || undefined,
-      ...{ reactions: (row.soundspin_message_reactions || []).map((r) => ({ userId: r.user_id, emoji: r.emoji })) }
+      ...{ reactions: (row.soundspin_message_reactions || []).slice(0, CHAT_MAX_REACTIONS_PER_MESSAGE).map((r) => ({ userId: r.user_id, emoji: r.emoji })) }
     }
   }
   async loadReply(roomId: string, id: string): Promise<ChatReply | null> {
@@ -572,6 +650,7 @@ export class ChatCommandService {
       reply_to_id: m.replyTo?.id || null,
       poll_options: m.poll?.options || null,
       removed_at: record.removedAt || null,
+      immutable_fingerprint: record.fingerprint,
       soundspin_message_reactions: (
         (m as RelayMessage & { reactions?: Array<{ userId: string; emoji: string }> }).reactions || []
       ).map((r) => ({ user_id: r.userId, emoji: r.emoji })),
@@ -589,6 +668,7 @@ export class ChatCommandService {
     limit = 200,
     search?: string
   ) {
+    limit = Math.min(CHAT_MAX_HISTORY_MESSAGES, Math.max(1, Number.isFinite(limit) ? Math.floor(limit) : CHAT_MAX_HISTORY_MESSAGES))
     let rows: ChatReadRow[]
     if (this.options.client) {
       let query = this.options.client.from('soundspin_messages').select(SELECT).eq('room_slug', roomId)
@@ -621,20 +701,32 @@ export class ChatCommandService {
         )
       if (direction === 'older') rows.reverse()
     }
-    const hasMore = rows.length > limit
-    rows = rows.slice(0, limit)
+    let hasMore = rows.length > limit
+    rows = rows.slice(0, limit).map(row => this.boundRow(row))
+    let children = 0, count = 0
+    for (const row of rows) {
+      const next = row.soundspin_message_reactions.length + row.soundspin_poll_votes.length
+      if (count && children + next > CHAT_MAX_HISTORY_CHILDREN) break
+      children += next; count++
+    }
+    if (count < rows.length) { hasMore = true; rows = rows.slice(0, count) }
     const last = rows.at(-1)
     if (direction === 'older') rows.reverse()
     return { rows, cursor: last ? { createdAt: last.created_at, id: last.id } : undefined, hasMore }
   }
   async readPayload(roomId: string, rows: ChatReadRow[]) {
+    if (rows.length > CHAT_MAX_HISTORY_MESSAGES) throw new PublicRequestError('Chat history page is too large.', 400)
+    rows = rows.map(row => this.boundRow(row))
+    // A context page combines two bounded 6,000-child pages and one 600-child target.
+    if (rows.reduce((count, row) => count + row.soundspin_message_reactions.length + row.soundspin_poll_votes.length, 0) > CHAT_MAX_HISTORY_CHILDREN * 2 + CHAT_MAX_REACTIONS_PER_MESSAGE + CHAT_MAX_POLL_VOTERS)
+      throw new PublicRequestError('Chat history children exceed the page limit.', 400)
     const replies: ChatReadRow[] = [],
       replyIds = [...new Set(rows.flatMap((row) => (row.reply_to_id ? [row.reply_to_id] : [])))]
     if (this.options.client) {
       for (let i = 0; i < replyIds.length; i += 100) {
         const { data, error } = await this.options.client
           .from('soundspin_messages')
-          .select(SELECT)
+          .select(BASE_SELECT)
           .eq('room_slug', roomId)
           .in('id', replyIds.slice(i, i + 100))
         if (!error) replies.push(...((data || []) as ChatReadRow[]))
@@ -642,23 +734,28 @@ export class ChatCommandService {
     } else {
       for (const id of replyIds) {
         const record = await this.loadMessage(id)
-        if (record?.roomId === roomId) replies.push(this.toRow(record))
+        if (record?.roomId === roomId) replies.push({ ...this.toRow(record), soundspin_message_reactions: [], soundspin_poll_votes: [] })
       }
     }
-    const sign = async (items: ChatReadRow[]) =>
-      Promise.all(
-        items.map(async (row) => {
-          if (!row.storage_path || row.removed_at) return row
+    const sign = async (items: ChatReadRow[]) => {
+      const result = [...items]
+      let next = 0
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+        while (next < items.length) {
+          const index = next++, row = items[index]
+          if (!row.storage_path || row.removed_at) continue
           try {
-            return {
+            result[index] = {
               ...row,
               media_url: (await resolveChatMediaUrl(this.options.client, roomId, row.storage_path, undefined, true)).url
             }
           } catch {
-            return { ...row, media_url: null }
+            result[index] = { ...row, media_url: null }
           }
-        })
-      )
+        }
+      }))
+      return result
+    }
     const [signedRows, signedReplies] = await Promise.all([sign(rows), sign(replies)])
     const profiles: unknown[] = [],
       markers = new Map<string, string>(),
@@ -687,7 +784,7 @@ export class ChatCommandService {
         if (marker?.roomId === roomId) markers.set(id, marker.removedAt)
       }
     const redact = (items: ChatReadRow[]) =>
-      items.map((row) => {
+      items.map(({ immutable_fingerprint: _internalFingerprint, ...row }) => {
         const removedAt = row.removed_at || markers.get(row.id)
         return removedAt
           ? {

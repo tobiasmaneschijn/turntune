@@ -4,11 +4,12 @@ import test from "node:test";
 import express from "express";
 import { mountSpotifyOAuthRoutes, spotifyReturnPath } from "./spotify-oauth-routes.js";
 
-async function fixture(run: (base: string, context: { connected: string[]; now: number; fail: boolean }) => Promise<void>) {
+async function fixture(run: (base: string, context: { connected: string[]; now: number; fail: boolean; active: boolean }) => Promise<void>) {
   const app = express();
-  const context = { connected: [] as string[], now: 1_000, fail: false };
+  const context = { connected: [] as string[], now: 1_000, fail: false, active: true };
   mountSpotifyOAuthRoutes(app, { getUserId: async request => request.get("authorization") === "Bearer alice" ? "alice" : null,
-    accounts: { configured: true, connect: async userId => { if (context.fail) throw new Error("Provider unavailable"); context.connected.push(userId); } },
+    isAccountActive: async () => context.active,
+    accounts: { configured: true, connect: async (userId, _code, _redirect, authorize) => { await authorize?.(); if (context.fail) throw new Error("Provider unavailable"); context.connected.push(userId); } },
     redirectUri: () => "https://app.test/api/spotify/callback", authorizationUrl: (_uri, state) => `https://spotify.test/authorize?state=${state}`, now: () => context.now });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -62,5 +63,27 @@ test("OAuth return paths are normalized and cannot redirect to another origin", 
   await fixture(async (base) => {
     const flow = await begin(base, "/\\evil.test/");
     assert.equal((await callback(base, flow.state, flow.cookie)).headers.get("location"), "/?spotify=connected");
+  });
+});
+
+
+test("one account cannot accumulate more than three pending OAuth browser flows", async () => {
+  await fixture(async (base, context) => {
+    for (let index = 0; index < 3; index++) await begin(base);
+    assert.equal((await fetch(`${base}/api/spotify/connect`, { headers: { Authorization: "Bearer alice" } })).status, 429);
+    assert.equal(context.connected.length, 0);
+  });
+});
+
+
+test("a valid browser OAuth flow cannot link an account suspended after it started", async () => {
+  await fixture(async (base, context) => {
+    const flow = await begin(base);
+    context.active = false;
+    const denied = await callback(base, flow.state, flow.cookie);
+    assert.equal(denied.status, 302);
+    assert.equal(denied.headers.get("location"), "/?spotify=error");
+    assert.deepEqual(context.connected, []);
+    assert.equal((await callback(base, flow.state, flow.cookie)).status, 400);
   });
 });

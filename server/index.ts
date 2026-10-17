@@ -15,8 +15,9 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { createServer } from "node:http";
-import { createAdminClient, verifyCredentials } from "@supabase/server/core";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { verifyCredentials } from "@supabase/server/core";
+import { createBoundedAdminClient } from "./supabase-client.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
@@ -24,7 +25,7 @@ import { Store } from "./store.js";
 import { profileUpdateSchema } from "./profile-fields.js";
 import { roomSettingsPatchSchema } from "./room-settings.js";
 import { accessMode, chatParticipationError, effectiveRoomPolicy, isRoomStaff } from "../shared/room-policy.js";
-import { canInviteRoom, isRoomBanned, requireNotBanned, requireProtectedTarget, requireRoomCapability } from "./room-access.js";
+import { canInviteRoom, isRoomBanned, roleInRoom, requireNotBanned, requireProtectedTarget, requireRoomCapability } from "./room-access.js";
 import { ChatCommandService } from "./chat-command-service.js";
 import { verifyTrackDuration } from "./track-metadata.js";
 import { RoomSessionScheduler } from "./room-session-scheduler.js";
@@ -36,10 +37,22 @@ import { mountSocialRoutes } from "./social-routes.js";
 import { SocialStore } from "./social-store.js";
 import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./chat-history.js";
 import { createChatRelay } from "./chat-relay.js";
-import { cleanupExpiredChatMedia, resolveChatMediaUrl } from "./chat-media.js";
+import { resolveChatMediaUrl } from "./chat-media.js";
 import { withPublicRoomPreview } from "./directory-preview.js";
 import { createSavedSetResolver, SetImportRegistry } from "./saved-set.js";
 import { validateServerConfig } from "./config.js";
+import { configureHttpSecurity, trustedClientIp, trustedSocketPeer } from "./security-http.js";
+import { SecurityBudget, SecurityLimitError, peerRequestBudget, claimSocketAccount } from "./security-budget.js";
+import { validUserClaims } from "./security-identity.js";
+import { PlatformSecurity } from "./platform-security.js";
+import { cleanupRestrictedAccount } from "./account-restriction-cleanup.js";
+import { AccountDeletionService } from "./account-deletion.js";
+import { mountPlatformRoutes } from "./platform-routes.js";
+import { mountManagedUploadRoutes } from "./upload-routes.js";
+import { mountFeedbackRoutes } from "./feedback-routes.js";
+import { cleanupManagedUploads } from "./managed-uploads.js";
+import { mountSignupRoutes } from "./signup-routes.js";
+import { securityEvent, securityEventSnapshot, securityRequestContext } from "./security-events.js";
 import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
 import { roomPresence, uniqueUsers } from "./presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./announcements.js";
@@ -50,11 +63,6 @@ import { SpotifyAccounts } from "./spotify-accounts.js";
 import { SpotifyApi } from "./spotify.js";
 import { GiphyApi } from "./giphy.js";
 import {
-  invitePasswordMatches,
-  inviteSignupSchema,
-  SignupAttemptLimiter
-} from "./invite-signup.js";
-import {
   advanceRadio,
   GracePeriodRegistry,
   QueueUndoRegistry,
@@ -62,14 +70,31 @@ import {
   removeDj,
   roomForListener
 } from "./radio.js";
-import type { Room, RoomSnapshot, User } from "./types.js";
+import type { Room, RoomMemberRecord, RoomSnapshot, User } from "./types.js";
 
 validateServerConfig(process.env);
 
 const port = Number(process.env.PORT || 3000);
 const app = express();
+app.use(securityRequestContext);
+app.use("/api",(_request,response,next)=>{response.set("Cache-Control","no-store");response.vary("Authorization");next();});
+const httpSecurity = configureHttpSecurity(app,process.env);
+const securityBudget = new SecurityBudget();
+app.use("/api",peerRequestBudget(securityBudget,trustedClientIp));
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: true } });
+httpServer.requestTimeout = 30_000;
+httpServer.headersTimeout = 15_000;
+httpServer.keepAliveTimeout = 5_000;
+const io: Server = new Server(httpServer, {
+  cors: { origin: httpSecurity.origin, credentials: false }, maxHttpBufferSize: 64 * 1024,
+  allowRequest: (request,done) => httpSecurity.allowRequest(request,(error,allowed) => {
+    if (!allowed) return done(error,false);
+    const peer=trustedClientIp(request);
+    if (io.engine.clientsCount >= 1000 || !securityBudget.consume([{key:`socket-open:${peer}`,maximum:120,windowMs:60_000}])) return done("Too many connections.",false);
+    done(null,true);
+  })
+});
+io.engine.use((request:IncomingMessage,_response:ServerResponse,next:(error?:Error)=>void)=>httpSecurity.allowRequest(request,(error,allowed)=>allowed?next():next(new Error(error||"Request not allowed."))));
 const store = new Store();
 const roomCommands = new RoomCommandService(store, broadcast);
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -93,8 +118,12 @@ const authEnabled = Boolean(
   supabaseJwksUrl &&
   store.usesSupabase
 );
-const supabaseAdmin: SupabaseClient | null = authEnabled ? createAdminClient() : null;
+const supabaseAdmin: SupabaseClient | null = authEnabled ? createBoundedAdminClient() : null;
 const signupAdmin = supabaseAdmin && signupInvitePassword ? supabaseAdmin : null;
+const platform = new PlatformSecurity(supabaseAdmin,!authEnabled && ["test","development"].includes(process.env.NODE_ENV || ""));
+const requestIdentities = new WeakMap<express.Request,Promise<{userId:string;aal:unknown}|null>>();
+const activeRequests = new WeakMap<express.Request,Promise<string|null>>();
+const blockedRooms = new Set<string>();
 
 // Live coordination is process-local. `roomUsers` is socket presence, while
 // `roomDjUsers` also keeps a disconnected DJ's display data during the grace
@@ -117,11 +146,10 @@ const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
     return { result: undefined };
   });
 });
-const signupAttemptLimiter = new SignupAttemptLimiter(10, 15 * 60 * 1000);
 const idleRooms = new IdleRoomRegistry(roomId => {
   if (roomUsers.get(roomId)?.size) return true;
   const room = store.getRoom(roomId);
-  if(room&&(room.settings.themeSchedules?.some(s=>s.endsAt>Date.now())||radioState(room).fallback.enabled))return false;
+  if(room&&!blockedRooms.has(roomId)&&(room.settings.themeSchedules?.some(s=>s.endsAt>Date.now())||radioState(room).fallback.enabled))return false;
   if (room?.djQueueUserIds.some(id => hasPendingDjEviction(roomId, id))) return false;
   if (!store.releaseRoom(roomId)) return false;
   announcementExpiries.cancel(roomId);
@@ -129,9 +157,14 @@ const idleRooms = new IdleRoomRegistry(roomId => {
   setImports.releaseRoom(roomId);
   roomDjUsers.delete(roomId);
   sessionScheduler.release(roomId);
+  blockedRooms.delete(roomId);
   return true;
 });
 function watchIdleRoom(roomId: string) { if (store.usesSupabase && !roomUsers.get(roomId)?.size) idleRooms.schedule(roomId); }
+store.setRoomCacheHooks(watchIdleRoom,roomId=>!blockedRooms.has(roomId)&&(Boolean(roomUsers.get(roomId)?.size) ||
+  Boolean(store.getRoom(roomId)?.djQueueUserIds.some(id=>hasPendingDjEviction(roomId,id))) ||
+  Boolean(store.getRoom(roomId)?.settings.themeSchedules?.some(item=>item.endsAt>Date.now())) ||
+  Boolean(store.getRoom(roomId)?.radioState?.fallback.enabled)));
 const roomCreateSchema = z.object({
   name: z.string().trim().min(1).max(48),
   isPublic: z.boolean().default(true),
@@ -171,16 +204,30 @@ function spotifyRedirectUri(request: express.Request) {
   return `${request.protocol}://${spotifySafeHost}/api/spotify/callback`;
 }
 
-async function getApiUserId(request: express.Request) {
+async function getRequestIdentity(request: express.Request) {
   if (!authEnabled) return null;
+  const cached=requestIdentities.get(request); if(cached)return cached;
+  const pending=(async()=>{
   const authorization = request.get("authorization");
   const token = authorization?.match(/^Bearer (.+)$/i)?.[1];
-  if (!token) return null;
+  if (!token || token.length>16_384) return null;
   const { data, error } = await verifyCredentials(
     { token, apikey: null },
     { auth: "user" }
   );
-  return error ? null : data.userClaims?.id || null;
+  if(error || !data.userClaims || !validUserClaims(data.jwtClaims,supabaseUrl))return null;
+  return {userId:data.userClaims.id,aal:data.jwtClaims?.aal};
+  })();
+  requestIdentities.set(request,pending);return pending;
+}
+async function getApiUserId(request: express.Request) {
+  const cached=activeRequests.get(request);if(cached)return cached;
+  const pending=(async()=>{const identity=await getRequestIdentity(request);return identity&&await platform.activeAccount(identity.userId)?identity.userId:null;})();
+  activeRequests.set(request,pending);return pending;
+}
+async function getSelfServiceUserId(request: express.Request) {
+  const identity=await getRequestIdentity(request);
+  return identity && await platform.verifiedAccount(identity.userId) ? identity.userId : null;
 }
 
 async function getApiAdminUserId(request: express.Request): Promise<
@@ -191,8 +238,32 @@ async function getApiAdminUserId(request: express.Request): Promise<
   if (!userId) return { ok: false, error: "Authentication required.", status: 401 };
   const profile = await store.getProfile(userId);
   if (!profile?.is_app_admin) return { ok: false, error: "Administrator access required.", status: 403 };
+  if ((await getRequestIdentity(request))?.aal !== "aal2") return {ok:false,error:"Verify a second factor before using administrator tools.",status:403};
   return { ok: true, userId };
 }
+
+// Verify private requests before accepting/parsing uploads or other request bodies.
+app.use("/api",async(request,response,next)=>{
+  try {
+    const publicPath=["/health","/ready","/config","/signup","/spotify/callback"].includes(request.path);
+    if(publicPath)return next();
+    const selfService=request.path==="/account/deletion-request" || request.path.startsWith("/account/export/");
+    const actor=await(selfService?getSelfServiceUserId(request):getApiUserId(request));
+    if(!actor)return void response.status(401).json({error:"Authentication required."});
+    const roomSlug=request.path.match(/^\/rooms\/([a-z0-9-]{3,48})(?:\/|$)/)?.[1];
+    if(roomSlug&&!await platform.activeRoom(roomSlug))return void response.status(404).json({error:"Room not found."});
+    if(roomSlug)blockedRooms.delete(roomSlug);
+    if(!securityBudget.consume([{key:`http-user:${actor}`,maximum:300,windowMs:60_000}]))return void response.set("Retry-After","60").status(429).json({error:"Too many requests. Wait a minute before trying again."});
+    const release=securityBudget.acquire(`http-user-flight:${actor}`,12);
+    if(!release)return void response.set("Retry-After","60").status(429).json({error:"Too many concurrent requests."});
+    response.once("finish",release);response.once("close",release);next();
+  }catch{response.status(503).json({error:"Account access could not be verified. Try again."});}
+});
+
+mountSignupRoutes(app,{admin:signupAdmin?.auth.admin??null,invitePassword:signupInvitePassword,
+  appOrigin:process.env.APP_ORIGIN || "http://127.0.0.1:5173"});
+mountManagedUploadRoutes(app,{client:supabaseAdmin,getUserId:getApiUserId});
+mountFeedbackRoutes(app,{client:supabaseAdmin,getUserId:getApiUserId});
 
 mountPrivateLibraryRoutes(app, store, getApiUserId);
 const socialStore = new SocialStore({
@@ -203,6 +274,7 @@ const socialStore = new SocialStore({
     return { ...access, canInvite:Boolean(room&&canInviteRoom(room,userId,Date.now(),access.role)), passwordProtected: Boolean(access.passwordHash) };
   },
   getProfile: userId => store.getProfile(userId),
+  isProfileVisible:userId=>platform.activeAccount(userId),
   getRoom: async slug => { const room = await store.loadRoom(slug); return room ? { name: room.name } : null; },
   getActivity: userId => {
     for (const [roomSlug, users] of roomUsers) {
@@ -213,6 +285,7 @@ const socialStore = new SocialStore({
 });
 mountSocialRoutes(app, socialStore, getApiUserId);
 async function canWriteRoomChat(userId: string, roomSlug: string) {
+  if (!await platform.activeAccount(userId) || !await platform.activeRoom(roomSlug)) return false;
   const room=await store.loadRoom(roomSlug);
   if(!room||isRoomBanned(room,userId))return false;
   const access = await store.getRoomAccess(roomSlug, userId);
@@ -233,7 +306,7 @@ async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:re
     ? sender?.room.id === roomId && sender.user.id === origin.userId
     : [...(roomUsers.get(roomId)?.values() || [])].some(user => user.id === origin.userId);
   if (!canWrite || !allowed.has(origin.userId) || !senderAdmitted) {
-    throw new Error("This room session has ended. Join again before sending chat.");
+    throw new RoomCommandError("This room session has ended. Join again before sending chat.");
   }
   for (const [socketId, user] of recipients) {
     const current = getMembership(socketId);
@@ -242,12 +315,17 @@ async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:re
 }
 const chatCommands=new ChatCommandService({client:supabaseAdmin,
   withRoomOperation:(roomId,run)=>store.withRoomOperation(roomId,run),
+  getMentionAudience:async(roomId)=>{
+    const users=uniqueUsers(roomUsers.get(roomId)?.values()??[]);
+    const allowed=await store.allowedRoomReaders(roomId,users.map(user=>user.id));
+    return users.filter(user=>allowed.has(user.id));
+  },
   getUser:async(userId,roomId)=>[...(roomUsers.get(roomId)?.values()??[])].find(u=>u.id===userId)??null,
   authorize:async(userId,roomId,kind,targetUserId)=>{
-    if(!await canWriteRoomChat(userId,roomId))throw new Error("Join this room before participating.");
-    const room=await store.loadRoom(roomId);if(!room)throw new Error("Room not found.");requireNotBanned(room,userId);
+    if(!await canWriteRoomChat(userId,roomId))throw new RoomCommandError("Join this room before participating.");
+    const room=await store.loadRoom(roomId);if(!room)throw new RoomCommandError("Room not found.");requireNotBanned(room,userId);
     if(kind==="remove"){requireRoomCapability(room,userId,"chatParticipants");if(targetUserId&&room.ownerUserId!==userId)requireProtectedTarget(room,userId,targetUserId);return;}
-    const error=chatParticipationError(room,userId,kind);if(error)throw new Error(error);
+    const error=chatParticipationError(room,userId,kind);if(error)throw new RoomCommandError(error);
     return{slowModeSeconds:effectiveRoomPolicy(room).slowModeSeconds??0,bypassSlowMode:isRoomStaff(room,userId)};
   },emit:(roomId,event,payload,userId)=>emitAdmittedChat(roomId,event,payload,{userId})});
 const chatRelay = createChatRelay({
@@ -270,6 +348,7 @@ mountChatHistoryRoutes(app, {
   onPollVote: (roomId, event, userId) => emitAdmittedChat(roomId, 'chat:poll', { roomId, poll: event }, { userId }),
   getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
   canReadRoom: async (userId, roomSlug) => {
+    if (!await platform.activeAccount(userId) || !await platform.activeRoom(roomSlug)) return false;
     const room=await store.loadRoom(roomSlug);if(!room||isRoomBanned(room,userId))return false;
     const access = await store.getRoomAccess(roomSlug, userId);
     if (!access.exists || access.banned || (!access.isPublic && !access.role)) return false;
@@ -279,6 +358,7 @@ mountChatHistoryRoutes(app, {
   }
 });
 const moderation=new ModerationService(store,{
+  authorizeActor:async(roomId,userId)=>{if(!await platform.activeAccount(userId)||!await platform.activeRoom(roomId))throw new RoomCommandError("Room access is unavailable.");},
   broadcast,isAdmitted:(roomId,userId)=>[...(roomUsers.get(roomId)?.values()??[])].some(u=>u.id===userId),
   onlineUsers:roomId=>uniqueUsers(roomUsers.get(roomId)?.values()??[]),cancelDjEviction,forgetDj:forgetDjUser,
   revokeAdmission:async(roomId,userId,reason)=>{
@@ -289,48 +369,74 @@ const moderation=new ModerationService(store,{
   },
   removeMessage:(roomId,actorId,messageId,requestId,reason)=>chatCommands.removeMessage(roomId,actorId,messageId,requestId,reason),
   externalLog:roomId=>chatCommands.listRemovalLog(roomId),
+  readArchive:async(roomId,tab,query,cursor)=>{
+    if(!supabaseAdmin)return{items:[],cursor:null};
+    const {data,error}=await supabaseAdmin.rpc("soundspin_read_moderation_archive",{p_room:roomId,p_kind:tab,p_query:query,p_cursor:cursor??null,p_limit:50});
+    if(error)throw new Error("Archived room evidence is unavailable.");
+    return data as {items:Array<Record<string,unknown>>;cursor:string|null};
+  },
+  memberPage:supabaseAdmin ? async(roomId,query,cursor)=>{
+    const {data,error}=await supabaseAdmin.rpc("soundspin_room_member_page",{p_room:roomId,p_query:query,p_cursor:cursor??null,p_limit:50});
+    if(error)throw new Error("Room members are unavailable.");
+    return data as {members:RoomMemberRecord[];cursor:string|null};
+  }:undefined,
   validateMessage:async(roomId,messageId)=>{const message=await chatCommands.loadMessage(messageId);return message?.roomId===roomId?{userId:message.userId}:null;}
 });
 mountModerationRoutes(app,moderation,getApiUserId);
+const accountDeletion=supabaseAdmin ? new AccountDeletionService(supabaseAdmin,{
+  disconnectProviders:userId=>spotifyAccounts.disconnect(userId),
+  eraseAccountData:userId=>store.eraseAccountRoomData(userId,room=>{cancelDjEviction(room.id,userId);forgetDjUser(room.id,userId);broadcast(room);}),
+  onAccountRestricted:restrictAccount,onRoomRestricted:restrictRoom
+}) : null;
+mountPlatformRoutes(app,{client:supabaseAdmin,getAdminUserId:getApiAdminUserId,getUserId:getSelfServiceUserId,
+  deletion:accountDeletion,onAccountRestricted:restrictAccount,onRoomRestricted:restrictRoom});
 
-app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
-  response.set("Cache-Control", "no-store");
-  if (!signupAdmin || !signupInvitePassword) {
-    return response.status(503).json({ error: "Invite-only signup is not configured." });
+async function restrictRoom(roomId:string) {
+  if(store.getRoom(roomId))blockedRooms.add(roomId);
+  sessionScheduler.release(roomId);
+  announcementExpiries.cancel(roomId);
+  for(const userId of new Set([...(store.getRoom(roomId)?.djQueueUserIds??[]),...(roomDjUsers.get(roomId)?.keys()??[])])){
+    cancelDjEviction(roomId,userId);forgetDjUser(roomId,userId);
   }
-
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
-  if (!signupAttemptLimiter.consume(rateKey)) {
-    return response.status(429).json({ error: "Too many signup attempts. Try again later." });
+  for(const [socketId,user] of [...(roomUsers.get(roomId)??[])]) {
+    const socket=io.sockets.sockets.get(socketId);
+    cancelDjEviction(roomId,user.id); forgetDjUser(roomId,user.id);
+    socketRooms.delete(socketId); roomUsers.get(roomId)?.delete(socketId);
+    await socket?.leave(roomId); socket?.emit("room:removed",{roomId,error:"This room is unavailable."});
   }
-
-  const parsed = inviteSignupSchema.safeParse(request.body);
-  if (!parsed.success) {
-    return response.status(400).json({ error: "Enter a valid email, password, and invite password." });
-  }
-  if (!invitePasswordMatches(parsed.data.invitePassword, signupInvitePassword)) {
-    return response.status(403).json({ error: "The invite password is incorrect." });
-  }
-
-  try {
-    const { error } = await signupAdmin.auth.admin.createUser({
-      email: parsed.data.email,
-      password: parsed.data.password,
-      ...(parsed.data.displayName ? { user_metadata: { display_name: parsed.data.displayName } } : {}),
-      email_confirm: true
-    });
-    if (error) {
-      return response.status(400).json({
-        error: "Could not create the account. Try signing in if this email is already registered."
+  roomUsers.delete(roomId);watchIdleRoom(roomId);
+}
+async function restrictAccount(userId:string) {
+  await cleanupRestrictedAccount(userId,{
+    cachedRooms:()=>store.getCachedRooms(),
+    blockAccount:actorId=>{
+      platform.invalidate(actorId);
+      for(const socket of io.sockets.sockets.values())if(socket.data.authUserId===actorId)socket.data.platformAllowed=false;
+    },
+    restrictOwnedRoom:restrictRoom,
+    removeDjFromRoom:async(room,actorId)=>{
+      cancelDjEviction(room.id,actorId);
+      const current=store.getRoom(room.id);
+      if(!current){forgetDjUser(room.id,actorId);return;}
+      await roomCommands.execute(current,async draft=>{
+        if(blockedRooms.has(draft.id))return{result:undefined};
+        if(!await platform.activeRoom(draft.id)){await restrictRoom(draft.id);return{result:undefined};}
+        const wasCurrentDj=draft.djUserId===actorId;
+        removeDj(draft,actorId);
+        if(wasCurrentDj)advanceRadio(draft);
+        return{result:undefined};
       });
+      // Keep remembered offline actors on failure so the bounded maintenance
+      // pass can retry durable cleanup even after their final socket is gone.
+      forgetDjUser(room.id,actorId);
+      watchIdleRoom(room.id);
+    },
+    disconnectAccount:actorId=>{
+      for(const socket of io.sockets.sockets.values())if(socket.data.authUserId===actorId)socket.disconnect(true);
     }
-  } catch {
-    return response.status(502).json({ error: "The account service is unavailable. Try again later." });
-  }
+  });
+}
 
-  signupAttemptLimiter.reset(rateKey);
-  return response.status(201).json({ ok: true });
-});
 
 function createRoom(id: string, ownerUserId: string, name?: string): Room {
   return {
@@ -369,20 +475,23 @@ function snapshot(room: Room, userId: string): RoomSnapshot {
 function broadcastPresence(room: Room) {
   // Presence is identical for every recipient and does not carry private queues.
   // Keep it separate from room snapshots so a join/leave cannot seek every player.
-  io.to(room.id).emit("room:presence", roomPresence(
+  const presence=roomPresence(
     room,
     roomUsers.get(room.id)?.values() || [],
     roomDjUsers.get(room.id)?.values() || []
-  ));
+  );
   const onlineIds=uniqueUsers(roomUsers.get(room.id)?.values()??[]).map(u=>u.id);
-  for(const [socketId,user] of roomUsers.get(room.id)??[])io.to(socketId).emit("room:radio",{roomId:room.id,radio:roomForListener(room,user.id,onlineIds).radio});
+  for(const [socketId,user] of roomUsers.get(room.id)??[])if(getMembership(socketId)){
+    io.to(socketId).emit("room:presence",presence);
+    io.to(socketId).emit("room:radio",{roomId:room.id,radio:roomForListener(room,user.id,onlineIds).radio});
+  }
 }
 
 function broadcast(room: Room) {
   // Do not replace this with io.to(room.id).emit(...). Queue privacy requires a
   // separate snapshot for every recipient.
   for (const [socketId, user] of roomUsers.get(room.id) || []) {
-    io.to(socketId).emit("room:snapshot", snapshot(room, user.id));
+    if(getMembership(socketId))io.to(socketId).emit("room:snapshot", snapshot(room, user.id));
   }
 }
 
@@ -429,9 +538,10 @@ function scheduleDjEviction(room: Room, user: User) {
       // this guard also protects against races between socket events.
       const reconnected = [...(roomUsers.get(room.id)?.values() || [])]
         .some((roomUser) => roomUser.id === user.id);
-      if (!currentRoom || reconnected) return;
+      if (!currentRoom || reconnected || blockedRooms.has(room.id)) return;
 
       await roomCommands.execute(currentRoom, draft => {
+        if(blockedRooms.has(room.id))return{result:undefined};
         if ([...(roomUsers.get(room.id)?.values() || [])].some(roomUser => roomUser.id === user.id)) return { result: undefined };
         const wasCurrentDj = draft.djUserId === user.id;
         removeDj(draft, user.id);
@@ -446,13 +556,16 @@ function scheduleDjEviction(room: Room, user: User) {
 }
 
 function getMembership(socketId: string) {
-  const lease = io.sockets.sockets.get(socketId)?.data.credentialLease as SocketCredentialLease | undefined;
+  const socket=io.sockets.sockets.get(socketId);
+  if(socket?.data.platformAllowed===false)return null;
+  const lease = socket?.data.credentialLease as SocketCredentialLease | undefined;
   if (lease && Date.now() >= lease.expiresAt) return null;
   const roomId = socketRooms.get(socketId);
   if (!roomId) return null;
   const room = store.getRoom(roomId);
   const user = roomUsers.get(roomId)?.get(socketId);
-  return room && user && !isRoomBanned(room,user.id) ? { room, user } : null;
+  return room && user && !blockedRooms.has(roomId) && !isRoomBanned(room,user.id) &&
+    (accessMode(room)!=="members" || Boolean(roleInRoom(room,user.id))) ? { room, user } : null;
 }
 
 async function leaveCurrentRoom(socketId: string) {
@@ -471,42 +584,66 @@ async function leaveCurrentRoom(socketId: string) {
     scheduleDjEviction(room, leavingUser);
   }
   if (users?.size === 0) roomUsers.delete(roomId);
+  const socket=io.sockets.sockets.get(socketId);await socket?.leave(roomId);
   await sessionScheduler.reconcilePresence(room);
   broadcastPresence(room);
   watchIdleRoom(roomId);
 }
 
 io.use(async (socket, next) => {
+  try {
   if (!authEnabled) return next();
-  const accessToken = z.string().min(1).safeParse(socket.handshake.auth?.accessToken);
+  const accessToken = z.string().min(1).max(16_384).safeParse(socket.handshake.auth?.accessToken);
   if (!accessToken.success) return next(new Error("Authentication required."));
 
   const { data, error } = await verifyCredentials(
     { token: accessToken.data, apikey: null },
     { auth: "user" }
   );
-  if (error || !data.userClaims) return next(new Error("Your session has expired."));
+  if (error || !data.userClaims || !validUserClaims(data.jwtClaims,supabaseUrl)) return next(new Error("Your session has expired."));
+  if(!await platform.activeAccount(data.userClaims.id))return next(new Error("Account access is unavailable."));
+  const release=claimSocketAccount(securityBudget,socket,data.userClaims.id);
   try {
     socket.data.credentialLease = createSocketCredentialLease(data.userClaims.id, data.jwtClaims?.exp);
-  } catch { return next(new Error("Your session has expired.")); }
+  } catch { release();return next(new Error("Your session has expired.")); }
   socket.data.authUserId = data.userClaims.id;
+  socket.data.platformAllowed=true;
   next();
+  }catch{next(new Error("Account access could not be verified. Try again."));}
 });
 
 io.on("connection", (socket) => {
   const lease = socket.data.credentialLease as SocketCredentialLease | undefined;
   const assertAuthorized = () => {
+    if(socket.data.platformAllowed===false)throw new RoomCommandError("Account access is unavailable.");
     try { lease?.assertActive(); }
     catch (error) { throw new RoomCommandError((error as Error).message); }
   };
   const cancelCredentialExpiry = lease?.scheduleExpiry(() => socket.disconnect(true));
   socket.once("disconnect", () => cancelCredentialExpiry?.());
   const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => {
-    const safe = safeSocketHandler(async (payload, reply) => { assertAuthorized(); await handler(payload, reply); });
+    const safe = safeSocketHandler(async (payload, reply) => {
+      assertAuthorized();
+      if(authEnabled&&!await platform.activeAccount(socket.data.authUserId)){await restrictAccount(socket.data.authUserId);throw new RoomCommandError("Account access is unavailable.");}
+      const member=getMembership(socket.id);
+      if(member&&!await platform.activeRoom(member.room.id)){await restrictRoom(member.room.id);throw new RoomCommandError("This room is unavailable.");}
+      await handler(payload, reply);
+    },()=>securityEvent("request_failed","failed"));
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
     socket.on(event, (payload: unknown, reply?: unknown) => {
       if (shuttingDown) return;
-      const operation = run(payload, reply);
+      const userId=socket.data.authUserId||socket.id;
+      const peer=trustedSocketPeer(socket);
+      const rules=[{key:`socket-actions-user:${userId}`,maximum:240,windowMs:60_000},{key:`socket-actions-peer:${peer}`,maximum:1500,windowMs:60_000}];
+      if(["queue:add","queue:import-set","fallback:set"].includes(event))rules.push({key:`socket-provider:${userId}`,maximum:120,windowMs:60_000});
+      const userRelease=securityBudget.acquire(`socket-action-flight:${userId}`,event==="room:join"?2:8);
+      const globalRelease=securityBudget.acquire("socket-action-global",256);
+      if(!userRelease||!globalRelease||!securityBudget.consume(rules)){
+        userRelease?.();globalRelease?.();
+        if(typeof reply==="function")reply({ok:false,error:"Too many requests. Wait a minute before trying again.",retryAfter:60});
+        securityEvent("rate_limited","denied");return;
+      }
+      const operation = run(payload, reply).finally(()=>{userRelease();globalRelease();});
       activeSocketActions.add(operation);
       void operation.finally(() => activeSocketActions.delete(operation));
     });
@@ -521,8 +658,8 @@ io.on("connection", (socket) => {
       id: authEnabled ? socket.data.authUserId : parsed.data.user.id
     };
     const previousRoomId = socketRooms.get(socket.id);
-    const previousUser = previousRoomId ? roomUsers.get(previousRoomId)?.get(socket.id) : undefined;
-    if (!roomEntryLimiter.join(user.id, socket.handshake.address)) return reply?.({ ok: false, error: "Too many room entries. Wait a minute before trying again." });
+    if (!roomEntryLimiter.join(user.id, trustedSocketPeer(socket))) return reply?.({ ok: false, error: "Too many room entries. Wait a minute before trying again." });
+    let registration:string|undefined;
 
     // Auth refreshes and profile updates can cause the browser to re-emit join
     // on an already connected socket. Do not turn that harmless refresh into a
@@ -532,6 +669,8 @@ io.on("connection", (socket) => {
     if (previousRoomId === roomId) cancelDjEviction(roomId, user.id);
 
     try {
+      if(!await platform.activeRoom(roomId))return reply?.({ok:false,error:"Room not found."});
+      blockedRooms.delete(roomId);
       if (authEnabled) {
         const soundspinProfile = await store.loadOrCreateProfile(user.id, user.name);
         if (soundspinProfile) {
@@ -554,7 +693,7 @@ io.on("connection", (socket) => {
         return reply?.({ ok: false, error: "You no longer have access to this private room." });
       }
       if (access.passwordHash && !roomEntryLimiter.password(user.id, roomId)) return reply?.({ ok: false, error: "Too many room password attempts. Wait five minutes before trying again.", requiresPassword: true });
-      if (access.passwordHash && !await passwordMatches(password, access.passwordHash)) {
+      if (access.passwordHash && !await securityBudget.run("room-crypto",4,()=>passwordMatches(password, access.passwordHash!))) {
         return reply?.({
           ok: false,
           error: password ? "That room password is incorrect." : "This room needs a password.",
@@ -564,25 +703,27 @@ io.on("connection", (socket) => {
 
       const room = await store.loadRoom(roomId) ||
         store.getOrCreateLocalRoom(roomId, () => createRoom(roomId, user.id, roomName));
-      await store.recordRoomMember(roomId, user.id,user);
-      if (!socket.connected) return;
-
-      // Switch rooms only after the destination has been authorized and loaded.
-      // A same-room join is an idempotent presence/profile refresh.
-      if (previousRoomId && previousRoomId !== roomId) {
-        await leaveCurrentRoom(socket.id);
-      }
+      let departure:Promise<void>|undefined;
+      await store.admitRoom(room,user,access.passwordHash,()=>{
+        assertAuthorized();if(!socket.connected)throw new RoomCommandError("This room session has ended.");
+      },()=>{
+        // Departure starts synchronously but is awaited outside the destination queue,
+        // avoiding a cross-room deadlock when two listeners switch in opposite directions.
+        if(previousRoomId&&previousRoomId!==roomId)departure=leaveCurrentRoom(socket.id);
+        idleRooms.cancel(roomId);
+        if(!roomUsers.has(roomId))roomUsers.set(roomId,new Map());
+        roomUsers.get(roomId)!.set(socket.id,user);
+        cancelDjEviction(roomId,user.id);socketRooms.set(socket.id,roomId);
+        registration=crypto.randomUUID();socket.data.admissionToken=registration;
+      });
+      if(departure)await departure;
       for (const joinedRoom of socket.rooms) {
         if (joinedRoom !== socket.id && joinedRoom !== roomId) await socket.leave(joinedRoom);
       }
 
       if (!socket.connected) return;
-      idleRooms.cancel(roomId);
-      if (!roomUsers.has(roomId)) roomUsers.set(roomId, new Map());
-      roomUsers.get(roomId)!.set(socket.id, user);
-      cancelDjEviction(roomId, user.id);
-      socketRooms.set(socket.id, roomId);
       await socket.join(roomId);
+      if(!getMembership(socket.id)||socket.data.admissionToken!==registration)throw new RoomCommandError("Room access changed. Join again.");
       const changed = await store.changeRoom(room, draft => {
         assertAuthorized();
         if (!socket.connected || socketRooms.get(socket.id) !== roomId) throw new RoomCommandError("This room session has ended.");
@@ -600,6 +741,8 @@ io.on("connection", (socket) => {
       });
       if (!socket.connected) return;
       await sessionScheduler.reconcilePresence(room);
+      const allowed=await store.allowedRoomReaders(roomId,[user.id]);
+      if(!allowed.has(user.id)||!getMembership(socket.id)||socket.data.admissionToken!==registration||!await platform.activeRoom(roomId))throw new RoomCommandError("Room access changed. Join again.");
       if (changed) {
         // Legacy normalization or stale-lineup cleanup changed shared radio state.
         broadcast(room);
@@ -611,28 +754,28 @@ io.on("connection", (socket) => {
       }
       reply?.({ ok: true });
     } catch (error) {
-      console.error(error);
-      if (socketRooms.get(socket.id) === roomId) {
-        if (previousRoomId === roomId && previousUser && socket.connected) {
-          roomUsers.get(roomId)?.set(socket.id, previousUser);
-        } else {
+      if(!(error instanceof RoomCommandError))securityEvent("request_failed","failed");
+      if (registration&&socket.data.admissionToken===registration&&socketRooms.get(socket.id) === roomId) {
           await leaveCurrentRoom(socket.id);
           await socket.leave(roomId);
-        }
       }
       watchIdleRoom(roomId);
-      const message = error instanceof Error ? error.message : "Could not load this room.";
       reply?.({
         ok: false,
-        error: message.startsWith("Lydman database is not initialized")
-          ? message
-          : "Could not load this room."
+        error: error instanceof RoomCommandError?error.message:"Could not load this room."
       });
     }
   });
 
   mountRoomActions({
     socket, onAction, store, commands: roomCommands, getMembership, assertAuthorized,
+    authorizeCurrent:async(roomId,userId)=>{
+      assertAuthorized();
+      if(!await platform.activeAccount(userId)||!await platform.activeRoom(roomId)||(authEnabled&&!(await store.allowedRoomReaders(roomId,[userId])).has(userId)))throw new RoomCommandError("Room access changed. Join again.");
+      assertAuthorized();
+      const current=getMembership(socket.id);
+      if(current?.room.id!==roomId||current.user.id!==userId)throw new RoomCommandError("This room session has ended.");
+    },
     broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
     watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
     resolveTrack: async track => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi);return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};}, resolveSavedRecording,
@@ -641,7 +784,7 @@ io.on("connection", (socket) => {
   for (const kind of ["message", "reaction", "typing"] as const) {
     onAction(`chat:${kind}`, async (payload, reply) => { reply?.(await chatRelay.handle(socket.id, kind, payload)); });
   }
-  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(console.error); });
+  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(()=>securityEvent("request_failed","failed")); });
 });
 
 app.get("/api/health", (_request, response) => {
@@ -658,8 +801,8 @@ app.get("/api/admin/runtime", async (request, response) => {
   response.set("Cache-Control", "no-store");
   const access = await getApiAdminUserId(request);
   if (!access.ok) return response.status(access.status).json({ error: access.error });
-  response.json({ coordination: "single-instance", cachedRooms: store.cachedRoomCount, activeRooms: roomUsers.size,
-    connectedSockets: io.engine.clientsCount, ...runtimeMetrics.snapshot() });
+  response.json({ coordination: "single-instance", cachedRooms: store.cachedRoomCount, cachedRoomBytes:store.cachedRoomBytes, activeRooms: roomUsers.size,
+    connectedSockets: io.engine.clientsCount, storageCleanup:storageCleanupStatus, security:securityEventSnapshot(), ...runtimeMetrics.snapshot() });
 });
 
 mountAdminRoutes(app, { client: supabaseAdmin, getAdminUserId: getApiAdminUserId,
@@ -671,6 +814,7 @@ app.get("/api/profiles/:userId", async (request, response) => {
   const userId = z.string().uuid().safeParse(request.params.userId);
   if (!userId.success) return response.status(400).json({ error: "Invalid profile." });
   try {
+    if(!await platform.activeAccount(userId.data))return response.status(404).json({error:"Profile not found."});
     const [profile, options] = await Promise.all([
       store.getProfile(userId.data),
       store.getProfileOptions()
@@ -679,7 +823,7 @@ app.get("/api/profiles/:userId", async (request, response) => {
     response.json({ profile, options });
   } catch (error) {
     response.status(500).json({
-      error: error instanceof Error ? error.message : "Could not load profile."
+      error: "Could not load profile."
     });
   }
 });
@@ -695,7 +839,7 @@ app.get("/api/rooms", async (request, response) => {
     const q=typeof request.query.q==="string"?request.query.q.trim().toLowerCase().slice(0,100):"",tag=typeof request.query.tag==="string"?request.query.tag.trim().toLowerCase():"",language=typeof request.query.language==="string"?request.query.language.trim().toLowerCase():"";
     response.json({ rooms: rooms.filter(room=>(!q||`${room.name} ${room.description??""} ${(room.tags??[]).join(" ")}`.toLowerCase().includes(q))&&(!tag||room.tags?.some(t=>t.toLowerCase()===tag))&&(!language||room.language?.toLowerCase()===language)).map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : "Could not load rooms." });
+    response.status(500).json({ error: "Could not load rooms." });
   }
 });
 
@@ -707,16 +851,17 @@ app.post("/api/rooms", express.json(), async (request, response) => {
     return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid room." });
   }
   try {
+    if(!securityBudget.consume([{key:`room-create:${userId}`,maximum:3,windowMs:3600_000},{key:`room-create-peer:${trustedClientIp(request)}`,maximum:20,windowMs:3600_000}]))return response.set("Retry-After","3600").status(429).json({error:"Too many room creation attempts. Try again later."});
     const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
     room.settings.accessMode=parsed.data.accessMode??(parsed.data.isPublic?"public":"members");
     room.isPublic = room.settings.accessMode!=="members";
     room.passwordProtected = Boolean(parsed.data.password?.trim());
-    await store.createRoom(room, await hashRoomPassword(parsed.data.password));
+    await store.createRoom(room, await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)));
     watchIdleRoom(room.id);
     await store.setFavorite(room.id, userId, true);
     response.status(201).json({ room: { slug: room.id, name: room.name } });
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not create room." });
+    response.status(error instanceof SecurityLimitError?429:error instanceof RoomCommandError?400:503).json({ error: error instanceof RoomCommandError ? error.message : "Could not create room. Your room limit may have been reached." });
   }
 });
 
@@ -734,7 +879,7 @@ app.put("/api/rooms/:slug/favorite", express.json(), async (request, response) =
     await store.setFavorite(slug.data, userId, parsed.data.favorite);
     response.json({ favorite: parsed.data.favorite });
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "Could not update favorite." });
+    response.status(400).json({ error: "Could not update favorite." });
   }
 });
 
@@ -748,11 +893,13 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
   }
   try {
     const previousDjs = [...(store.getRoom(slug.data)?.djQueueUserIds || [])];
+    const access=await store.getRoomAccess(slug.data,userId);
+    if(access.banned||(access.role!=="owner"&&access.role!=="moderator"))throw new RoomCommandError("Only the owner or a moderator can change room settings.");
     const {password,...settings}=parsed.data;
     const room = await store.updateRoomSettings(slug.data, userId, {
       ...settings,
-      passwordHash: parsed.data.password === undefined ? undefined : await hashRoomPassword(parsed.data.password),
-    });
+      passwordHash: parsed.data.password === undefined ? undefined : await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)),
+    },async()=>{if(!await platform.activeAccount(userId)||!await platform.activeRoom(slug.data))throw new RoomCommandError("Room access is unavailable.");});
     if (room) {
       for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {
         cancelDjEviction(room.id, id); forgetDjUser(room.id, id);
@@ -761,7 +908,7 @@ app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
     }
     response.json({ room: room ? { id: room.id, name: room.name } : null });
   } catch (error) {
-    response.status(403).json({ error: error instanceof Error ? error.message : "Could not update room." });
+    response.status(error instanceof SecurityLimitError?429:error instanceof RoomCommandError?403:503).json({ error: error instanceof RoomCommandError ? error.message : "Could not update room." });
   } finally {
     watchIdleRoom(slug.data);
   }
@@ -779,7 +926,7 @@ app.patch("/api/profile", express.json(), async (request, response) => {
     response.json({ profile });
   } catch (error) {
     response.status(400).json({
-      error: error instanceof Error ? error.message : "Could not update profile."
+      error: error instanceof RoomCommandError ? error.message : "Could not update profile."
     });
   }
 });
@@ -787,6 +934,7 @@ app.patch("/api/profile", express.json(), async (request, response) => {
 mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,
   soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
 mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,
+  isAccountActive:userId=>platform.activeAccount(userId),
   authorizationUrl: (redirectUri, state) => spotifyApi.authorizationUrl(redirectUri, state), redirectUri: spotifyRedirectUri });
 app.get("/api/config", (_request, response) => {
   response.json({
@@ -811,7 +959,7 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   if (status === 400 || status === 413) {
     return response.status(status).json({ error: status === 413 ? "The request is too large." : "The request body is invalid." });
   }
-  console.error(error);
+  securityEvent("request_failed","failed");
   response.status(500).json({ error: "The server could not complete this request. Please try again." });
 });
 
@@ -823,18 +971,59 @@ if (process.env.NODE_ENV === "production") {
 }
 
 await store.init();
-for(const room of await store.listSessionRooms())await sessionScheduler.recover(room);
+if(supabaseAdmin){
+  const {data,error}=await supabaseAdmin.rpc("soundspin_release_ready");
+  if(error||data!==true)throw new Error("Release security migrations and grants must be applied before starting the server.");
+}
+for(const room of await store.listSessionRooms()){
+  if(await platform.activeRoom(room.id))await sessionScheduler.recover(room);
+  else {blockedRooms.add(room.id);watchIdleRoom(room.id);}
+}
 let mediaCleanup: Promise<void> | null = null;
-function cleanChatMedia() {
+let storageCleanupStatus={removed:0,remaining:0,oldestAt:null as string|null,failed:0,lastRunAt:null as string|null};
+let deletionWork:Promise<void>|null=null,retentionWork:Promise<void>|null=null,connectionChecks:Promise<void>|null=null;
+function cleanManagedMedia() {
   if (!supabaseAdmin || mediaCleanup || shuttingDown) return;
-  mediaCleanup = cleanupExpiredChatMedia(supabaseAdmin)
-    .then(() => undefined)
-    .catch(error => { console.error("Could not clean up expired chat uploads.", error); })
+  mediaCleanup = cleanupManagedUploads(supabaseAdmin,{maxBatches:20,batchSize:100,maxMs:20_000})
+    .then(status=>{storageCleanupStatus={...status,lastRunAt:new Date().toISOString()};if(status.failed)securityEvent("storage_cleanup","failed",{count:status.failed});else if(status.removed)securityEvent("storage_cleanup","success",{count:status.removed});})
+    .catch(()=>{storageCleanupStatus.failed++;securityEvent("storage_cleanup","failed");})
     .finally(() => { mediaCleanup = null; });
 }
-cleanChatMedia();
-const mediaCleanupTimer = setInterval(cleanChatMedia, 15 * 60 * 1000);
+function processDeletion(){
+  if(!accountDeletion||deletionWork||shuttingDown)return;
+  deletionWork=accountDeletion.runNext().then(()=>undefined).catch(()=>securityEvent("account_deletion","failed")).finally(()=>{deletionWork=null;});
+}
+function pruneRetention(){
+  if(!supabaseAdmin||retentionWork||shuttingDown)return;
+  retentionWork=(async()=>{
+    const deadline=Date.now()+20_000;
+    for(let batch=0;batch<20&&Date.now()<deadline;batch++){
+      const [records,archives]=await Promise.all([supabaseAdmin.rpc("soundspin_prune_security_retention"),supabaseAdmin.rpc("soundspin_purge_security_archives",{p_limit:1000})]);
+      if(records.error||archives.error)throw new Error("Retention maintenance failed.");
+      const counts=[...Object.values(records.data||{}),...Object.values(archives.data||{})];
+      if(counts.every(value=>Number(value)===0))break;
+    }
+  })().catch(()=>securityEvent("storage_cleanup","failed")).finally(()=>{retentionWork=null;});
+}
+function recheckConnections(){
+  if(!authEnabled||connectionChecks||shuttingDown)return;
+  connectionChecks=(async()=>{
+    const accounts=[...new Set([
+      ...[...io.sockets.sockets.values()].map(socket=>socket.data.authUserId as string).filter(Boolean),
+      ...[...roomDjUsers.values()].flatMap(users=>[...users.keys()])
+    ])];
+    const rooms=store.getCachedRooms().map(room=>room.id);
+    const tasks=[...accounts.map(userId=>async()=>{if(!await platform.activeAccount(userId))await restrictAccount(userId);}),
+      ...rooms.map(roomId=>async()=>{if(!await platform.activeRoom(roomId))await restrictRoom(roomId);})];
+    let index=0;
+    await Promise.all(Array.from({length:Math.min(8,tasks.length)},async()=>{while(index<tasks.length&&!shuttingDown){const task=tasks[index++];try{await task();}catch{securityEvent("upstream_failure","failed");}}}));
+  })().finally(()=>{connectionChecks=null;});
+}
+cleanManagedMedia();processDeletion();pruneRetention();
+const mediaCleanupTimer = setInterval(cleanManagedMedia,60_000);
+const deletionTimer=setInterval(processDeletion,60_000),retentionTimer=setInterval(pruneRetention,3600_000),connectionTimer=setInterval(recheckConnections,20_000);
 mediaCleanupTimer.unref();
+deletionTimer.unref();retentionTimer.unref();connectionTimer.unref();
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
   const address = httpServer.address();
   console.log(`Lydman listening on http://${process.env.HOST || "0.0.0.0"}:${typeof address === "object" && address ? address.port : port}`);
@@ -847,17 +1036,18 @@ async function shutdown() {
   announcementExpiries.clear();
   sessionScheduler.clear();
   clearInterval(mediaCleanupTimer);
+  clearInterval(deletionTimer);clearInterval(retentionTimer);clearInterval(connectionTimer);
   idleRooms.clear();
-  const deadline = setTimeout(() => process.exit(1), 10_000);
+  const deadline = setTimeout(() => process.exit(1), 25_000);
   deadline.unref();
   try {
     await new Promise<void>((resolve) => io.close(() => resolve()));
     await Promise.allSettled([...activeSocketActions]);
-    if (mediaCleanup) await mediaCleanup;
+    await Promise.allSettled([mediaCleanup,deletionWork,retentionWork,connectionChecks].filter((work):work is Promise<void>=>Boolean(work)));
     await store.flush();
     clearTimeout(deadline);
   } catch (error) {
-    console.error("Could not finish pending saves during shutdown.", error);
+    securityEvent("request_failed","failed");
     process.exitCode = 1;
   }
 }

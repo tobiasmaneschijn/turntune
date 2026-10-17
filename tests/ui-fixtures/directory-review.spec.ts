@@ -1,9 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const fixtureUrl = "/tests/directory-review-harness/index.html";
+async function openDirectory(page: Page) {
+  await page.goto(fixtureUrl);
+  await expect(page.getByRole("button", { name: "New room", exact: true })).toBeVisible();
+}
 test("directory gives each room one full card across recent, member, favorite, and public sections", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("soundspin:room-visits:v1:directory-review-user", JSON.stringify([{ slug: "sunset", visitedAt: 10 }, { slug: "unavailable", visitedAt: 9 }])));
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await expect(page.locator(".room-card")).toHaveCount(5);
   for (const name of ["Sunset Radio", "Private Studio", "Favorite Radio", "Public Radio", "Protected Radio"]) {
     await expect(page.getByRole("button", { name: `Join ${name}`, exact: true })).toHaveCount(1);
@@ -23,7 +27,7 @@ test("directory gives each room one full card across recent, member, favorite, a
 });
 
 test("favorite recovery repeats the original PUT and remains visible until it succeeds", async ({ page }) => {
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await page.evaluate(() => { (window as any).directoryReviewFixture.favoriteFailure = true; });
   await page.getByRole("button", { name: "Add Public Radio to favorites", exact: true }).click();
   const alert = page.getByRole("alert").filter({ hasText: "Couldn't add Public Radio to favorites" });
@@ -47,7 +51,7 @@ test("favorite recovery repeats the original PUT and remains visible until it su
 });
 
 test("failed removal retries removal rather than toggling or refreshing", async ({ page }) => {
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await page.evaluate(() => { (window as any).directoryReviewFixture.favoriteFailure = true; });
   await page.getByRole("button", { name: "Remove Private Studio from favorites", exact: true }).click();
   const alert = page.getByRole("alert").filter({ hasText: "Couldn't remove Private Studio from favorites" });
@@ -62,7 +66,7 @@ test("failed removal retries removal rather than toggling or refreshing", async 
 });
 
 test("submitted room creation holds its dialog until the delayed commit finishes", async ({ page }) => {
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await page.evaluate(() => { (window as any).directoryReviewFixture.delayCreation = true; });
   await page.getByRole("button", { name: "New room", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create a room", exact: true });
@@ -77,7 +81,7 @@ test("submitted room creation holds its dialog until the delayed commit finishes
   await expect(dialog).toBeVisible();
   expect(await page.evaluate(() => (window as any).directoryReviewFixture.navigations)).toEqual([]);
   expect(await page.evaluate(() => (window as any).directoryReviewFixture.requests.filter((request: any) => request.method === "POST"))).toEqual([
-    { path: "/api/rooms", method: "POST", body: { name: "New radio", isPublic: true, password: "submitted-password" } }
+    { path: "/api/rooms", method: "POST", body: { name: "New radio", isPublic: true, accessMode: "public", password: "submitted-password" } }
   ]);
   await page.evaluate(() => (window as any).directoryReviewFixture.finishCreation(true));
   await expect(dialog).toHaveCount(0);
@@ -86,7 +90,7 @@ test("submitted room creation holds its dialog until the delayed commit finishes
 });
 
 test("failed creation restores dismissal and preserves inputs without navigating", async ({ page }) => {
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await page.evaluate(() => { (window as any).directoryReviewFixture.delayCreation = true; });
   await page.getByRole("button", { name: "New room", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Create a room", exact: true });
@@ -102,7 +106,7 @@ test("failed creation restores dismissal and preserves inputs without navigating
 });
 
 test("creation completed after leaving the directory does not trigger late navigation", async ({ page }) => {
-  await page.goto(fixtureUrl);
+  await openDirectory(page);
   await page.evaluate(() => { (window as any).directoryReviewFixture.delayCreation = true; });
   await page.getByRole("button", { name: "New room", exact: true }).click();
   await page.getByRole("textbox", { name: "Room name", exact: true }).fill("Detached room");

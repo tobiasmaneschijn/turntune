@@ -4,9 +4,10 @@ import { z } from "zod";
 export const inviteSignupSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
   email: z.string().trim().email().max(320),
-  password: z.string().min(6).max(128),
   invitePassword: z.string().min(1).max(256)
 }).strict();
+
+export const accountPasswordSchema = z.string().min(12).max(128);
 
 export function invitePasswordMatches(provided: string, expected: string) {
   const providedDigest = crypto.createHash("sha256").update(provided, "utf8").digest();
@@ -23,13 +24,15 @@ export class SignupAttemptLimiter {
   ) {}
 
   consume(key: string, now = Date.now()) {
-    if (this.attempts.size > 1_000) {
+    if (this.attempts.size >= 10_000) {
       for (const [attemptKey, attempt] of this.attempts) {
         if (attempt.resetAt <= now) this.attempts.delete(attemptKey);
       }
     }
 
     const current = this.attempts.get(key);
+    // Do not evict live entries: changing source addresses must not reset quotas.
+    if (!current && this.attempts.size >= 10_000) return false;
     const attempt = !current || current.resetAt <= now
       ? { count: 0, resetAt: now + this.windowMs }
       : current;

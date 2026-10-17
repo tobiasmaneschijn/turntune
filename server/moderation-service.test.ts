@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Store } from "./store.js";
-import { ModerationService } from "./moderation-service.js";
+import { ModerationService, MODERATION_MAX_RECEIPTS, MODERATION_RECEIPT_TTL_MS } from "./moderation-service.js";
 import { emptyModeration, isRoomBanned } from "./room-access.js";
 import { roomForListener } from "./radio.js";
 import type { Room } from "./types.js";
+import { RoomCommandError } from "./socket-handler.js";
 
 async function fixture(t: { after: (run: () => Promise<void>) => void }) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-moderation-"));
@@ -78,12 +79,95 @@ test("warnings are private and acknowledged; report targets, limits and permissi
   await service.act(room.id, "listener", { requestId: randomUUID(), action: "warning-read", warningId });
   assert.equal(service.ownStatus(room, "listener").warnings.length, 0);
   await assert.rejects(service.report(room.id, "listener", { requestId: randomUUID(), messageId, targetUserId: "peer", reason: "Report" }), /does not match/);
-  for (let i = 0; i < 5; i++) await service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: `person-${i}`, reason: "Review this participant." });
-  await service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: "person-0", reason: "Same open report." });
+  const firstReport = { requestId: randomUUID(), targetUserId: "person-0", reason: "Review this participant." };
+  await service.report(room.id, "listener", firstReport);
+  for (let i = 1; i < 5; i++) await service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: `person-${i}`, reason: "Review this participant." });
+  await service.report(room.id, "listener", firstReport);
+  await assert.rejects(service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: "person-0", reason: "Same open report." }), /Report limit/);
   assert.equal(service.ownStatus(room, "owner").openReports, 5);
   assert.equal(service.ownStatus(room, "listener").openReports, undefined);
   await assert.rejects(service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: "sixth", reason: "Report" }), /Report limit/);
   await store.updateRoomSettings(room.id, "owner", { moderatorPermissions: { chatParticipants: false, djsPlayback: true, roomDetailsMusic: true, accessInvites: true } });
   assert.equal((await service.view(room.id, "mod", "reports")).items.length, 0);
   await assert.rejects(service.act(room.id, "mod", { requestId: randomUUID(), action: "timeout", userId: "listener" }), /permission/);
+});
+
+test("fresh-UUID duplicate reports consume the submission budget without persistent receipts, writes or broadcasts", async t => {
+  const { store, room, directory } = await fixture(t); let now = Date.now(), broadcasts = 0;
+  const service = new ModerationService(store, { now: () => now, isAdmitted: () => true, broadcast: () => { broadcasts++; } });
+  const input = { requestId: randomUUID(), targetUserId: "listener", reason: "Review this participant." };
+  const first = await service.report(room.id, "listener", input);
+  const before = await readFile(path.join(directory, "soundspin.json"), "utf8");
+  await service.report(room.id, "listener", input);
+  for (let i=0;i<4;i++) {
+    const duplicate = await service.report(room.id, "listener", { ...input, requestId: randomUUID() });
+    assert.equal((duplicate.report as { id: string }).id, (first.report as { id: string }).id);
+  }
+  assert.equal(room.moderation!.reports.length, 1); assert.equal(Object.keys(room.moderation!.receipts).length, 1);
+  assert.equal(broadcasts, 1); assert.equal(await readFile(path.join(directory, "soundspin.json"), "utf8"), before);
+  await assert.rejects(service.report(room.id, "listener", { ...input, requestId: randomUUID() }), /Report limit/);
+  await assert.rejects(service.report(room.id, "listener", { ...input, reason: "Conflicting ID" }), /another action/);
+  await assert.rejects(service.report(room.id, "listener", { ...input, requestId: randomUUID(), category: "track-exception" }), /reserved/);
+  now += 3600000;
+  await service.report(room.id, "listener", { ...input, requestId: randomUUID(), targetUserId: "peer" });
+  assert.equal(room.moderation!.reports.length, 2);
+});
+
+test("bounded moderation replay receipts reject new work at capacity, expire, and preserve genuine restrictions and evidence", async t => {
+  const { store, room } = await fixture(t); let now = Date.now();
+  const service = new ModerationService(store, { now: () => now });
+  const ban = await service.act(room.id, "owner", { requestId: randomUUID(), action: "ban", userId: "listener", durationMinutes: null });
+  const restrictionId = (ban.restriction as { id: string }).id;
+  for (let i=Object.keys(room.moderation!.receipts).length;i<MODERATION_MAX_RECEIPTS;i++) room.moderation!.receipts[`owner:${randomUUID()}`] = { hash: "old", result: { ok: true }, createdAt: now };
+  const logCount = room.moderation!.log.length;
+  await assert.rejects(service.act(room.id, "owner", { requestId: randomUUID(), action: "warn", userId: "peer", reason: "Please review the rules." }), /action limit/);
+  assert.equal(room.moderation!.warnings.length, 0); assert.equal(room.moderation!.log.length, logCount);
+  now += MODERATION_RECEIPT_TTL_MS;
+  await service.act(room.id, "owner", { requestId: randomUUID(), action: "warn", userId: "peer", reason: "Please review the rules." });
+  assert.equal(Object.keys(room.moderation!.receipts).length, 1);
+  assert.ok(isRoomBanned(room, "listener", now)); assert.ok(room.moderation!.restrictions.some(item => item.id === restrictionId));
+  assert.equal(room.moderation!.log.length, logCount + 1);
+});
+
+test("archived moderation reads retain current staff capabilities and pagination", async t => {
+  const { store, room } = await fixture(t); let reads = 0;
+  const service = new ModerationService(store, { readArchive: async (_room, _tab, _query, cursor) => { reads++; return { items: [{ id: "archived" }], cursor: cursor ? null : "1:archived" }; } });
+  await assert.rejects(service.view(room.id, "listener", "log", "", "archive:"), /staff/);
+  assert.equal(reads, 0);
+  assert.equal((await service.view(room.id, "owner", "log", "", "archive:")).cursor, "archive:1:archived");
+  await store.updateRoomSettings(room.id, "owner", { moderatorPermissions: { chatParticipants: false, djsPlayback: true, roomDetailsMusic: true, accessInvites: true } });
+  await assert.rejects(service.view(room.id, "mod", "reports", "", "archive:"), /permission/);
+  assert.equal(reads, 1);
+});
+
+test("ordinary submissions cannot consume the receipt reserve needed for staff intervention", async t => {
+  const { store, room } = await fixture(t); const now = Date.now();
+  for (let i=0;i<MODERATION_MAX_RECEIPTS-200;i++) room.moderation!.receipts[`listener:${randomUUID()}`] = { hash: "old", result: { ok: true }, createdAt: now };
+  const service = new ModerationService(store, { now: () => now, isAdmitted: () => true });
+  await assert.rejects(service.report(room.id, "listener", { requestId: randomUUID(), targetUserId: "peer", reason: "Report" }), /action limit/);
+  await service.act(room.id, "owner", { requestId: randomUUID(), action: "ban", userId: "listener", durationMinutes: null });
+  assert.ok(isRoomBanned(room, "listener", now));
+  assert.equal(Object.keys(room.moderation!.receipts).length, MODERATION_MAX_RECEIPTS-199);
+});
+
+test("platform suspension while HTTP moderation waits in the room queue prevents writes, receipts and delivery", async t => {
+  const { store, room } = await fixture(t); let active = true, broadcasts = 0, release!: () => void, started!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { started = resolve; });
+  const service = new ModerationService(store, { authorizeActor: async () => { if (!active) throw new RoomCommandError("This account is restricted."); }, broadcast: () => { broadcasts++; } });
+  const holding = store.withRoomOperation(room.id, async () => { started(); await waiting; });
+  await entered;
+  const pending = service.act(room.id, "owner", { requestId: randomUUID(), action: "warn", userId: "listener", reason: "Warning" });
+  await Promise.resolve(); active = false; release(); await holding;
+  await assert.rejects(pending, /account is restricted/);
+  assert.deepEqual(room.moderation!.warnings, []); assert.deepEqual(room.moderation!.log, []); assert.equal(Object.keys(room.moderation!.receipts).length, 0); assert.equal(broadcasts, 0);
+});
+
+test("platform decisions are rechecked after privileged member awaits and before report message lookup", async t => {
+  const { store, room } = await fixture(t); let active = true, messageReads = 0;
+  const service = new ModerationService(store, { authorizeActor: async () => { if (!active) throw new RoomCommandError("This room is unavailable."); },
+    memberPage: async () => { active = false; return { members: [], cursor: null }; },
+    validateMessage: async () => { messageReads++; return { userId: "listener" }; }, isAdmitted: () => true });
+  await assert.rejects(service.members(room.id, "owner"), /room is unavailable/);
+  await assert.rejects(service.report(room.id, "listener", { requestId: randomUUID(), messageId: randomUUID(), reason: "Report" }), /room is unavailable/);
+  assert.equal(messageReads, 0);
 });

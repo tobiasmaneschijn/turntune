@@ -1,23 +1,33 @@
-// Test-only preload: the built server gets fake auth configuration and cannot
-// contact a provider or a real Supabase project during the production smoke.
+// Test-only transport for the packaged server. Explicit operations represent the
+// disposable staging schema; no real Supabase or provider network is permitted.
+const origin = "https://soundspin-production-smoke.invalid";
+const maintenance = new Map([
+  ["soundspin_release_ready", true],
+  ["soundspin_collect_expired_uploads", 0],
+  ["soundspin_prune_security_retention", {}], ["soundspin_purge_security_archives", {}], ["soundspin_claim_account_deletion", null]
+]);
+const emptyTables = new Set([
+  "soundspin_rooms", "soundspin_room_moderation", "soundspin_account_restrictions",
+  "soundspin_room_restrictions", "soundspin_storage_deletion_outbox"
+]);
+
 globalThis.fetch = async (input, init) => {
-  const url = new URL(input instanceof Request ? input.url : String(input));
-  const method = init?.method || (input instanceof Request ? input.method : "GET");
-  if (url.origin === "https://soundspin-production-smoke.invalid" &&
-      url.pathname === "/rest/v1/soundspin_rooms" && ["GET", "HEAD"].includes(method)) {
-    return new Response(method === "HEAD" ? null : "[]", {
-      status: 200,
-      headers: { "Content-Type": "application/json", "Content-Range": "*/0" }
+  const request = input instanceof Request ? input : null;
+  const url = new URL(request ? request.url : String(input));
+  const method = init?.method || request?.method || "GET";
+  if (url.origin !== origin) throw new Error("The production smoke blocked an unexpected outbound request.");
+  const name = url.pathname.split("/").at(-1);
+  if (url.pathname.startsWith("/rest/v1/rpc/") && method === "POST" && maintenance.has(name)) {
+    return Response.json(maintenance.get(name));
+  }
+  if (url.pathname.startsWith("/rest/v1/") && emptyTables.has(name) && ["GET", "HEAD"].includes(method)) {
+    const headers = new Headers(init?.headers || request?.headers);
+    const single = headers.get("accept")?.includes("vnd.pgrst.object");
+    return new Response(method === "HEAD" ? null : JSON.stringify(single ? null : []), {
+      status: 200, headers: { "Content-Type": "application/json", "Content-Range": "*/0" }
     });
   }
-  // Startup retires abandoned uploads before checking removed attachments.
-  if (url.origin === "https://soundspin-production-smoke.invalid" &&
-      url.pathname === "/rest/v1/soundspin_chat_uploads" &&
-      ((method === "PATCH" && url.searchParams.get("message_id") === "is.null" &&
-        url.searchParams.get("removed_at") === "is.null" && url.searchParams.get("expires_at")?.startsWith("lt.")) ||
-       (method === "GET" && url.searchParams.get("select") === "storage_path" &&
-        url.searchParams.get("removed_at")?.startsWith("lt.") && url.searchParams.get("limit") === "100"))) {
-    return new Response("[]", {status:200,headers:{"Content-Type":"application/json"}});
-  }
-  throw new Error("The production smoke blocked an unexpected outbound request.");
+  if (name === "soundspin_managed_uploads" && method === "DELETE" &&
+    url.searchParams.get("state") === "eq.deleted" && url.searchParams.get("created_at")?.startsWith("lt.")) return Response.json([]);
+  throw new Error(`The production smoke blocked an unexpected database operation: ${method} ${url.pathname}.`);
 };

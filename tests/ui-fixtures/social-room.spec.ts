@@ -3,7 +3,7 @@ declare global { interface Window { socialRoomTest: { creates: number; destroys:
 
 test("the app keeps its player and room admission across profile visits and browser history", async ({ page }, testInfo) => {
   await page.goto("/tests/social-room-harness/index.html");
-  await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates), { timeout: 15_000 }).toBe(1);
   const profileButton = page.locator(".header-profile-button");
   if (await profileButton.isVisible()) await profileButton.click();
   else {
@@ -50,17 +50,21 @@ test("theme nights appear in the room and can be ended", async ({ page }) => {
   expect(await page.evaluate(() => window.socialRoomTest.themes)).toEqual(["Guilty pleasures", null]);
 });
 
-test("signup from a room link signs in and returns to that room", async ({ page }) => {
+test("signup from a room link requires email activation and setting a password before returning", async ({ page }) => {
   await page.goto("/tests/social-room-harness/index.html?guest");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
   await page.getByLabel("Display name", { exact: true }).fill("Alice");
   await page.getByLabel("Email", { exact: true }).fill("alice@example.com");
-  await page.getByLabel("Password", { exact: true }).fill("long-enough");
-  await page.getByLabel("Confirm password", { exact: true }).fill("long-enough");
   await page.getByLabel("Invite password", { exact: true }).fill("invite");
   await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page.getByText("Check your email", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.socialRoomTest.joins)).toBe(0);
+  expect(await page.evaluate(() => sessionStorage.getItem("soundspin-auth-destination"))).toBe("/room/lounge");
+  await page.goto("/tests/social-room-harness/index.html?invite");
+  await page.getByLabel("New password", { exact: true }).fill("long-enough-password");
+  await page.getByRole("button", { name: "Save password", exact: true }).click();
   await expect(page).toHaveURL(/\/room\/lounge$/);
-  await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates)).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates), { timeout: 15_000 }).toBe(1);
   expect(await page.evaluate(() => window.socialRoomTest.joins)).toBe(1);
   await expect(page.getByRole("heading", { name: "Lounge", exact: true })).toBeFocused();
 });

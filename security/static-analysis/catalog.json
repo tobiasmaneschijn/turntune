@@ -1,0 +1,16 @@
+{
+  "description": "Enforced rule catalog; changes require review and updated canaries.",
+  "upstream_rule_scopes": {
+    "node_ssrf": {
+      "include": ["**/server/**", "**/shared/**", "**/scripts/**", "*.config.ts"],
+      "reason": "This legacy CJS Express-request SSRF model applies to server/shared/build code, not browser React components. Native-fetch taint remains selected across all application JS/TS. A server-scoped upstream SSRF canary is required."
+    }
+  },
+  "excluded_upstream_rules": {
+    "regex_dos": "Audit prompt matching almost any regular expression use; does not identify a catastrophic regex. Keep specific regex_injection_dos enforced and review actual regex complexity manually.",
+    "node_timing_attack": "Generic string comparison audit prompt. The initial hit compares nonsecret action-request receipt fingerprints for replay consistency (moderation-service), not authentication secrets. Secret comparisons remain subject to code review and authentication tests.",
+    "node_insecure_random_generator": "Treats every Math.random call as a security finding. Current use is a nonsecret UI room-slug suffix; the server authorizes room creation independently. Dedicated pseudoRandomBytes prohibition is supplied locally; security token randomness requires manual review.",
+    "node_username": "Matches ordinary string constants containing user in their variable name, including a browser settings storage key. Not evidence of embedded credentials. Gitleaks and upstream hardcoded password/key/secret rules remain enforced.",
+    "express_xss": "Legacy broad metavariable pattern times out on large React components. Replaced by request-to-HTML taint, DOM-XSS and React unsafe-HTML rules; engine timeouts on every selected rule still fail the gate."
+  }
+}

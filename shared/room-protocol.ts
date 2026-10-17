@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { approvedRemoteImageUrl } from './remote-images.js';
 import { isMixcloudShowKey, mixcloudShowKey } from './mixcloud.js';
 
 export const userSchema = z.object({
@@ -19,7 +20,7 @@ export const trackSchema = z.object({
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
-  artworkUrl: z.string().url().max(2048).optional(),
+  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), "Artwork must use a supported image host.").optional(),
   permalinkUrl: z.string().url().max(2048).optional(),
   durationMs: z.number().int().positive().max(60 * 60 * 24 * 1000).optional()
 }).superRefine((track, context) => {

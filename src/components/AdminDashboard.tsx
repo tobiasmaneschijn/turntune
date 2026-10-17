@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestJson } from "../lib/authenticated-http";
 import {
@@ -41,7 +42,7 @@ import { cn } from "../lib/utils";
 import { buildFeedbackAgentPrompt, type FeedbackAgentPromptData } from "../feedback-agent-prompt";
 import type { User } from "../types";
 
-type AdminTab = "overview" | "feedback" | "rooms";
+type AdminTab = "overview" | "feedback" | "rooms" | "platform";
 type FeedbackStatus = "new" | "reviewing" | "planned" | "resolved" | "closed";
 
 interface AdminFeedback extends FeedbackAgentPromptData {}
@@ -61,6 +62,7 @@ function feedbackDraft(item: AdminFeedback): FeedbackDraft {
 }
 
 interface AdminDashboardData {
+  pagination?: { page: number; pageSize: number; hasMore: boolean; status: string };
   metrics: {
     users: number;
     rooms: number;
@@ -142,6 +144,7 @@ export function AdminDashboard({
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | "all">("all");
+  const [feedbackPage, setFeedbackPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, FeedbackDraft>>({});
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
@@ -154,18 +157,19 @@ export function AdminDashboard({
   const copyTimerRef = useRef<number | undefined>(undefined);
   const activeRef = useRef(true);
 
-  const loadDashboard = async () => {
+  const loadDashboard = async (page = feedbackPage, status = statusFilter) => {
     const accountScope = accountScopeRef.current;
     loadControllerRef.current?.abort();
     const controller = new AbortController(); loadControllerRef.current = controller;
     setLoading(true);
     setError("");
     try {
-      const payload = await requestJson<AdminDashboardData>("/api/admin/dashboard", { accessToken: tokenRef.current, signal: controller.signal,
+      const payload = await requestJson<AdminDashboardData>(`/api/admin/dashboard?page=${page}&status=${status}`, { accessToken: tokenRef.current, signal: controller.signal,
         validate: (value): value is AdminDashboardData => Boolean(value && typeof value === "object" && "metrics" in value && value.metrics &&
           "feedback" in value && Array.isArray(value.feedback) && "rooms" in value && Array.isArray(value.rooms) && "activity" in value && Array.isArray(value.activity)) });
       if (!activeRef.current || accountScope !== accountScopeRef.current || controller !== loadControllerRef.current) return;
       setData(payload);
+      setFeedbackPage(payload.pagination?.page || 0);
       setSelectedId((current) => current && payload.feedback.some((item) => item.id === current) ? current : null);
     } catch (loadError) {
       if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
@@ -310,6 +314,7 @@ export function AdminDashboard({
           <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">Overview</span></button>
           <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">Feedback</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
           <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /><span className="admin-nav-label">Rooms</span></button>
+          <button type="button" aria-current={tab === "platform" ? "page" : undefined} className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}><LockKeyhole /><span className="admin-nav-label">Platform controls</span></button>
         </nav>
         <div className="admin-sidebar-footer">
           <div><Avatar user={currentUser} size={30} /><span><strong>{currentUser.name}</strong><small>Administrator</small></span></div>
@@ -320,7 +325,7 @@ export function AdminDashboard({
       <section className="admin-main">
         <header className="admin-topbar">
           <div>
-            <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : "Rooms"}</h1>
+            <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : tab === "platform" ? "Platform controls" : "Rooms"}</h1>
           </div>
           <div className="admin-topbar-actions">
             <AppVersion />
@@ -340,7 +345,7 @@ export function AdminDashboard({
             <section className="admin-feedback-workspace" aria-label="Feedback workflow board">
               <div className="admin-feedback-tools">
                 <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback…" aria-label="Search feedback" /></div>
-                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as FeedbackStatus | "all")}>
+                <Select value={statusFilter} onValueChange={(value) => { const status = value as FeedbackStatus | "all"; setStatusFilter(status); void loadDashboard(0, status); }}>
                   <SelectTrigger aria-label="Filter feedback lanes"><SelectValue>{statusFilter === "all" ? "All lanes" : statusLabels[statusFilter]}</SelectValue></SelectTrigger>
                   <SelectContent><SelectGroup>
                     <SelectItem value="all">All lanes</SelectItem>
@@ -348,6 +353,9 @@ export function AdminDashboard({
                   </SelectGroup></SelectContent>
                 </Select>
                 <Badge variant="secondary">{filteredFeedback.length} shown</Badge>
+                <Button variant="outline" size="sm" disabled={loading || feedbackPage === 0} onClick={() => void loadDashboard(feedbackPage - 1)}>Previous</Button>
+                <span>Page {feedbackPage + 1}</span>
+                <Button variant="outline" size="sm" disabled={loading || !data.pagination?.hasMore} onClick={() => void loadDashboard(feedbackPage + 1)}>Next</Button>
               </div>
 
               {filteredFeedback.length ? (
@@ -447,13 +455,14 @@ export function AdminDashboard({
                         <div className="admin-screenshot-grid">
                           {selectedFeedback.screenshots.map((screenshot, index) => screenshot.url ? (
                             <a href={screenshot.url} target="_blank" rel="noreferrer" key={screenshot.path} title="Open full screenshot">
-                              <img src={screenshot.url} alt={`Feedback screenshot ${index + 1}`} />
+                              <img referrerPolicy="no-referrer" src={approvedImageUrl(screenshot.url)} alt={`Feedback screenshot ${index + 1}`} />
                               <span><ExternalLink /> Open</span>
                             </a>
                           ) : <div className="admin-screenshot-missing" key={screenshot.path}>Preview unavailable</div>)}
                         </div>
                       )}
                       <div className="admin-feedback-context">
+                        <span><strong>Account ID</strong><code className="break-all">{selectedFeedback.userId}</code></span>
                         <span><strong>Page</strong>{selectedFeedback.pagePath}</span>
                         <span><strong>Viewport</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : "Unknown"}</span>
                         <span><strong>Submitted</strong>{new Date(selectedFeedback.createdAt).toLocaleString()}</span>
@@ -499,12 +508,80 @@ export function AdminDashboard({
               </SheetContent>
             </Sheet>
           </>
-        ) : data && (
+        ) : tab === "platform" ? <PlatformPanel accessToken={accessToken} /> : data && (
           <RoomsPanel data={data} onOpenRoom={onOpenRoom} />
         )}
       </section>
     </main>
   );
+}
+
+function PlatformPanel({ accessToken }: { accessToken: string }) {
+  const actionLabels: Record<string, string> = { "suspend-account": "Suspend account", "restore-account": "Restore account", "disable-room": "Disable room", "restore-room": "Restore room", "clear-avatar": "Remove profile avatar", "clear-profile": "Remove public profile content" };
+  type Request = { id: string; user_id: string; state: string; owned_room_count: number; requested_at: string; stage: string; last_error: string | null };
+  const [action, setAction] = useState("suspend-account");
+  const [target, setTarget] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [requests, setRequests] = useState<Request[]>([]);
+  const [selected, setSelected] = useState<Request | null>(null);
+  const [identityVerified, setIdentityVerified] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [approvalReason, setApprovalReason] = useState("");
+  const active = useRef(true);
+  const token = useRef(accessToken); token.current = accessToken;
+  const loadRequests = async () => {
+    try {
+      const payload = await requestJson<{ requests: Request[] }>("/api/admin/deletion-requests", { accessToken: token.current });
+      if (active.current) setRequests(payload.requests);
+    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : "Could not load account requests."); }
+  };
+  useEffect(() => { active.current = true; void loadRequests(); return () => { active.current = false; }; }, []);
+  const perform = async (url: string, body: unknown, result: string) => {
+    setBusy(true); setError(""); setStatus("");
+    try {
+      await requestJson(url, { accessToken: token.current, method: "POST", body: JSON.stringify(body), timeoutMs: 30_000 });
+      if (active.current) { setStatus(result); setSelected(null); setDeleteConfirmation(""); setApprovalReason(""); setIdentityVerified(false); await loadRequests(); }
+    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : "Action failed. Try again."); }
+    finally { if (active.current) setBusy(false); }
+  };
+  return <div className="admin-overview">
+    <section className="settings-panel-stack max-w-2xl">
+      <FieldGroup>
+        <Field><FieldLabel htmlFor="platform-action">Action</FieldLabel><Select value={action} onValueChange={(value) => setAction(value || "suspend-account")}>
+          <SelectTrigger id="platform-action"><SelectValue>{actionLabels[action]}</SelectValue></SelectTrigger><SelectContent><SelectGroup>
+            <SelectItem value="suspend-account">Suspend account</SelectItem><SelectItem value="restore-account">Restore account</SelectItem>
+            <SelectItem value="disable-room">Disable room</SelectItem><SelectItem value="restore-room">Restore room</SelectItem><SelectItem value="clear-avatar">Remove profile avatar</SelectItem><SelectItem value="clear-profile">Remove public profile content</SelectItem>
+          </SelectGroup></SelectContent></Select></Field>
+        <Field><FieldLabel htmlFor="platform-target">{action.includes("room") ? "Room slug" : "Account UUID"}</FieldLabel><Input id="platform-target" value={target} onChange={(event) => setTarget(event.target.value)} maxLength={100} /></Field>
+        <Field><FieldLabel htmlFor="platform-reason">Reason</FieldLabel><Textarea id="platform-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /></Field>
+      </FieldGroup>
+      <p>Suspension stops the account and its owned rooms. Profile removal clears text, handle, tracks, and image; suspend the account first to prevent republishing. Removed content cannot be restored here. Every action records your identity and reason.</p>
+      <Button disabled={busy || !target.trim() || !reason.trim()} onClick={() => void perform("/api/admin/platform-action", { action, target: target.trim(), reason: reason.trim() }, "Platform action applied.")}>Apply action</Button>
+    </section>
+    <section className="settings-panel-stack max-w-2xl">
+      <h2>Account deletion requests</h2>
+      <Button variant="outline" disabled={busy} onClick={() => void loadRequests()}>Refresh requests</Button>
+      {!requests.length && <p>No pending requests.</p>}
+      {requests.map((request) => <div key={request.id}>
+        <p><code className="break-all">{request.user_id}</code> · {request.state} · {request.owned_room_count} owned rooms</p>
+        {request.last_error && <p>{request.last_error}</p>}
+        <Button variant="outline" disabled={busy} onClick={() => { setSelected(request); setIdentityVerified(false); setDeleteConfirmation(""); setApprovalReason(""); }}>Review deletion</Button>
+      </div>)}
+      {selected && <FieldGroup>
+        <p>Delete account <code className="break-all">{selected.user_id}</code>, its uploads, and {selected.owned_room_count} owned rooms. This cannot be undone.</p>
+        <label className="flex min-h-11 items-center gap-2"><input className="size-4 accent-primary" type="checkbox" checked={identityVerified} onChange={(event) => setIdentityVerified(event.target.checked)} /> I verified the requester’s identity using the privacy runbook.</label>
+        <Field><FieldLabel htmlFor="deletion-approval-reason">Deletion reason</FieldLabel><Textarea id="deletion-approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} maxLength={500} /></Field>
+        <Field><FieldLabel htmlFor="deletion-approval-confirmation">Type DELETE ACCOUNT AND OWNED ROOMS</FieldLabel><Input id="deletion-approval-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} maxLength={30} /></Field>
+        <Button variant="destructive" disabled={busy || !identityVerified || !approvalReason.trim() || deleteConfirmation !== "DELETE ACCOUNT AND OWNED ROOMS"} onClick={() => void perform(`/api/admin/deletion-requests/${selected.id}/approve`, {
+          userId: selected.user_id, ownedRoomCount: selected.owned_room_count, identityVerified, confirmation: deleteConfirmation, reason: approvalReason.trim()
+        }, "Deletion approved. Check the request state for cleanup completion.")}>Approve deletion</Button>
+      </FieldGroup>}
+    </section>
+    {error && <p role="alert" className="admin-error">{error}</p>}{status && <p role="status">{status}</p>}
+  </div>;
 }
 
 function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onOpenFeedback: (id: string) => void }) {

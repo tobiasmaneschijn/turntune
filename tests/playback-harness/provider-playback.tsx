@@ -26,6 +26,8 @@ let now = 100_000;
 Date.now = () => now;
 let callbackVersion = 0;
 let accessToken = "initial-token";
+let userId = "listener-one";
+localStorage.setItem("soundspin-apple-account-id", new URLSearchParams(location.search).get("apple-owner") || userId);
 let syncRevision = 0;
 let configurations = 0;
 let failNextPlay = false;
@@ -45,14 +47,16 @@ let playback: Playback = {
   updatedAt: now
 };
 
+let musicAuthorized = true;
 const playbackStates = { playing: 2, paused: 3, stopped: 4, ended: 5, completed: 10 };
 function createMusic() { return {
-  isAuthorized: true,
+  isAuthorized: musicAuthorized,
   currentPlaybackTime: 10,
   currentPlaybackDuration: 180,
   playbackState: playbackStates.playing as number | string,
   volume: 1,
-  authorize: async () => { calls.push({ method: "authorize" }); return "music-user-token"; },
+  authorize: async () => { musicAuthorized = true; music.isAuthorized = true; calls.push({ method: "authorize" }); return "music-user-token"; },
+  unauthorize: async () => { musicAuthorized = false; music.isAuthorized = false; calls.push({ method: "unauthorize" }); },
   setQueue: async (value: unknown) => { calls.push({ method: "setQueue", value }); },
   async seekToTime(value: number) { calls.push({ method: "seek", value }); this.currentPlaybackTime = value; },
   play: async () => {
@@ -117,7 +121,7 @@ function render() {
     }
   };
   root.render(provider === "apple"
-    ? createElement(AppleMusicPlayer, { ...common, accessToken, mapping: { providerId: "provider-track" } })
+    ? createElement(AppleMusicPlayer, { ...common, accessToken, userId, mapping: { providerId: "provider-track" } })
     : createElement(SoundCloudPlayer, common));
 }
 
@@ -150,7 +154,8 @@ Object.assign(window, {
       music.currentPlaybackTime = progress;
       music.playbackState = playbackStates[state as keyof typeof playbackStates] ?? state;
     },
-    render(options: { accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string }) {
+    render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string }) {
+      userId = options.userId ?? userId;
       accessToken = options.accessToken ?? accessToken;
       callbackVersion = options.callbackVersion ?? callbackVersion;
       syncRevision = options.syncRevision ?? syncRevision;

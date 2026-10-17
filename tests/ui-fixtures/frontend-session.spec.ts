@@ -1,9 +1,15 @@
 import { expect, test } from '@playwright/test'
 
 declare global { interface Window { frontendSessionTest: { requests: Array<{ event: string; payload: unknown; timeout: number }>; replies: Array<(error: Error | null, result?: { ok: boolean }) => void>; connected: boolean };
+  moderationTimeoutTest: { requests: Array<{ body: Record<string, unknown>; authorization: string | null; timeout: number }>; expire: () => void; finish: () => void };
   roomSessionTest: { joins: Array<{ password?: string }>; transport: { connected: boolean; auth: { accessToken?: string } } } } }
 const profile = { user_id: '00000000-0000-4000-8000-000000000001', display_name: 'Alice', bio: 'Saved bio', avatar_key: 'pulse', avatar_url: null,
   avatar_path: null, theme_key: 'afterglow', is_app_admin: false, created_at: '2026-01-15T12:00:00Z', updated_at: '2026-07-31T12:00:00Z' }
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/config', route => route.fulfill({ json: { supabase: { url: 'https://example.supabase.co', anonKey: 'fixture-publishable-key' } } }))
+  await page.route('https://example.supabase.co/**', route => route.abort())
+})
 
 test('credential rotation preserves edited profile fields and the next save uses the fresh token', async ({ page }) => {
   let loads = 0, saveToken = ''
@@ -28,23 +34,67 @@ test('credential rotation preserves edited profile fields and the next save uses
   expect(saveToken).toBe('Bearer token-two')
 })
 
-test('room roles reject offline commands, disable duplicates while pending and release after timeout', async ({ page }) => {
+test('room roles reject offline commands, disable duplicate changes while pending and recover after HTTP timeout', async ({ page }) => {
+  let role = 'member'
+  await page.route('**/api/rooms/lounge/members?*', route => route.fulfill({ json: {
+    members: [{ user: { id: '00000000-0000-4000-8000-000000000002', name: 'Bob', avatarSeed: 'bob' }, role, online: true, restrictions: [] }], cursor: null
+  } }))
+  await page.route('**/api/rooms/lounge/invitations', route => route.fulfill({ json: { invitations: [], links: [] } }))
+  await page.addInitScript(() => {
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal)
+    let deadline: { controller: AbortController; milliseconds: number } | null = null
+    // Drive the real HTTP deadline path without waiting fifteen wall-clock seconds.
+    AbortSignal.timeout = milliseconds => {
+      if (milliseconds !== 15_000) return originalTimeout(milliseconds)
+      const controller = new AbortController()
+      deadline = { controller, milliseconds }
+      return controller.signal
+    }
+    const originalFetch = window.fetch.bind(window)
+    const state = { requests: [] as Array<{ body: Record<string, unknown>; authorization: string | null; timeout: number }>, expire: () => {}, finish: () => {} }
+    window.moderationTimeoutTest = state
+    window.fetch = (input, init) => {
+      if (String(input) !== '/api/rooms/lounge/moderation/actions') return originalFetch(input, init)
+      const currentDeadline = deadline!
+      state.requests.push({ body: JSON.parse(String(init?.body)), authorization: new Headers(init?.headers).get('Authorization'), timeout: currentDeadline.milliseconds })
+      state.expire = () => currentDeadline.controller.abort(new DOMException('Timed out', 'TimeoutError'))
+      return new Promise<Response>((resolve, reject) => {
+        const signal = init!.signal!
+        const cancel = () => reject(signal.reason)
+        signal.addEventListener('abort', cancel, { once: true })
+        state.finish = () => { signal.removeEventListener('abort', cancel); resolve(Response.json({ ok: true })) }
+      })
+    }
+  })
   await page.goto('/tests/frontend-session-harness/index.html?surface=roles')
-  const moderator = page.getByRole('button', { name: 'Moderator — Bob', exact: true })
+  await page.getByRole('tab', { name: 'Members', exact: true }).click()
+  const moderator = page.getByRole('combobox', { name: 'Room role for Bob', exact: true })
   await expect(moderator).toBeDisabled()
-  expect(await page.evaluate(() => window.frontendSessionTest.requests)).toHaveLength(0)
+  expect(await page.evaluate(() => window.moderationTimeoutTest.requests)).toHaveLength(0)
   // The open dialog owns focus; change the simulated connection via its backing control.
   await page.getByRole('button', { name: 'Toggle connection', includeHidden: true }).evaluate((button) => (button as HTMLButtonElement).click())
-  await moderator.click()
+  await moderator.selectOption('moderator')
   await expect(moderator).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeDisabled()
-  const requests = await page.evaluate(() => window.frontendSessionTest.requests)
+  // The controller also rejects duplicate events while the control is disabled.
+  await moderator.dispatchEvent('change')
+  const requests = await page.evaluate(() => window.moderationTimeoutTest.requests)
   expect(requests).toHaveLength(1)
-  expect(requests[0]).toEqual({ event: 'room:moderator:set', payload: { roomId: 'lounge', userId: '00000000-0000-4000-8000-000000000002', moderator: true }, timeout: 15000 })
-  await page.evaluate(() => window.frontendSessionTest.replies.shift()!(new Error('Timed out')))
+  expect(requests[0]).toMatchObject({ body: { action: 'role', userId: '00000000-0000-4000-8000-000000000002', role: 'moderator' }, authorization: 'Bearer token-one', timeout: 15000 })
+  expect(requests[0].body.requestId).toMatch(/^[0-9a-f-]{36}$/)
+  await page.evaluate(() => window.moderationTimeoutTest.expire())
   await expect(page.getByRole('alert')).toContainText('request timed out')
   await expect(moderator).toBeEnabled()
-  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
+  await expect(moderator).toHaveValue('member')
+  await moderator.selectOption('moderator')
+  await expect(moderator).toBeDisabled()
+  const retried = await page.evaluate(() => window.moderationTimeoutTest.requests)
+  expect(retried).toHaveLength(2)
+  expect(retried[1]).toEqual(retried[0])
+  role = 'moderator'
+  await page.evaluate(() => window.moderationTimeoutTest.finish())
+  await expect(moderator).toBeEnabled()
+  await expect(moderator).toHaveValue('moderator')
+  await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
 test('room navigation preserves the underlying profile visit and reauthenticates on token rotation', async ({ page }) => {

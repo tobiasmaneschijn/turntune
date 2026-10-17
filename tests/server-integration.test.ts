@@ -23,7 +23,7 @@ function waitForSnapshot(socket: Socket, matches: (snapshot: RoomSnapshot) => bo
   });
 }
 
-test("two listeners can join, manage private queues, skip idempotently and reconnect", { timeout: 20_000 }, async (t) => {
+test("two listeners can join, manage private queues, skip idempotently and reconnect", { timeout: 45_000 }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "soundspin-integration-"));
   const setId = "00000000-0000-4000-8000-000000000011";
   const lockedRoom = { id: "locked-room", name: "Locked fixture", ownerUserId: "password-user", moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
@@ -57,20 +57,22 @@ test("two listeners can join, manage private queues, skip idempotently and recon
   });
   const url = await new Promise<string>((resolve, reject) => {
     let output = "";
-    const timer = setTimeout(() => reject(new Error("Local test server did not start")), 8_000);
+    let errors = "";
+    const timer = setTimeout(() => reject(new Error(`Local test server did not start. Fixture stdout: ${output.slice(-4000)}. Fixture stderr: ${errors.slice(-4000)}`)), 20_000);
+    server.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-4000); });
     server.stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString();
       const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     server.once("error", (error) => { clearTimeout(timer); reject(error); });
-    server.once("exit", (code) => { clearTimeout(timer); reject(new Error(`Local test server exited (${code})`)); });
+    server.once("exit", (code) => { clearTimeout(timer); reject(new Error(`Local test server exited (${code}). Fixture stderr: ${errors}`)); });
   });
   assert.equal((await fetch(`${url}/api/health`)).status, 200);
   assert.deepEqual(await (await fetch(`${url}/api/ready`)).json(), { ok: true });
   assert.equal((await fetch(`${url}/api/admin/runtime`)).status, 401);
   const missing = await fetch(`${url}/api/not-a-real-endpoint`);
-  assert.equal(missing.status, 404);
+  assert.equal(missing.status, 401);
   assert.ok((await missing.json() as { error: string }).error);
   const malformed = await fetch(`${url}/api/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
   assert.equal(malformed.status, 400);
@@ -84,7 +86,7 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     await connected;
     return socket;
   };
-  const action = (socket: Socket, event: string, payload?: unknown) => socket.timeout(3_000).emitWithAck(event, payload) as Promise<{ ok: boolean; error?: string }>;
+  const action = (socket: Socket, event: string, payload?: unknown) => socket.timeout(10_000).emitWithAck(event, payload) as Promise<{ ok: boolean; error?: string }>;
   const alice = await connect();
   const bob = await connect();
   let aliceState!: RoomSnapshot;

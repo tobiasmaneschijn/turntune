@@ -1,3 +1,4 @@
+import { approvedImageUrl } from "../lib/remote-images"
 import { useEffect, useRef, useState } from 'react'
 import type { Track } from '@/types'
 import { useEffectiveMotion } from '@/hooks/use-effective-motion'
@@ -44,7 +45,7 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
   className?: string
   alt?: string
 }) {
-  const artwork = src !== undefined ? src || undefined : trackArtworkUrl(track)
+  const artwork = approvedImageUrl(src !== undefined ? src : trackArtworkUrl(track))
   const source = compact && track.provider === 'youtube' && src === undefined
     ? artwork?.replace('hqdefault', 'default') : artwork
   const reducedMotion = useEffectiveMotion()
@@ -80,6 +81,7 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
     setState('loading')
     const replacement = new Image()
     replacement.decoding = 'async'
+    replacement.referrerPolicy = 'no-referrer'
     replacement.onload = () => {
       void replacement.decode().catch(() => {}).then(() => {
         if (!active || settled) return
@@ -114,8 +116,8 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
   return <span ref={elementRef} className={`track-artwork ${className}`} data-artwork-state={source && !loadAllowed && images.current?.source !== source ? 'deferred' : state} data-current-source={images.current?.source || ''}
     role={alt ? 'img' : undefined} aria-label={alt || undefined} aria-hidden={alt ? undefined : true}>
     <span className={`track-artwork-fallback provider-artwork ${track.provider}`} aria-hidden="true">{track.provider === 'soundcloud' ? 'SC' : '♪'}</span>
-    {images.previous && !reducedMotion && <img className="track-artwork-previous" src={images.previous.source} alt="" aria-hidden="true" />}
-    {images.current && <img key={images.current.source} className="track-artwork-current" src={images.current.source} alt="" aria-hidden="true"
+    {images.previous && !reducedMotion && <img referrerPolicy="no-referrer" className="track-artwork-previous" src={images.previous.source} alt="" aria-hidden="true" />}
+    {images.current && <img referrerPolicy="no-referrer" key={images.current.source} className="track-artwork-current" src={images.current.source} alt="" aria-hidden="true"
       data-motion={reducedMotion ? 'off' : 'on'} onAnimationEnd={() => setImages((current) => current.current?.source === images.current?.source ? { ...current, previous: null } : current)}
       onError={() => { if (images.current?.source === source) { setImages({ current: null, previous: null }); setState('fallback') } }} />}
   </span>

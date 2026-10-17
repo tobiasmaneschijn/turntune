@@ -1,0 +1,280 @@
+{
+  "repository": "https://github.com/ajinabraham/njsscan",
+  "commit": "4137df39e743e07e912a31ca7dab19633f40324a",
+  "license": "LGPL-3.0-or-later (upstream README); preserved LICENSE is LGPL-3.0",
+  "archive_sha256": "464380b9c0d859d6889980db1b5851e804bdb80286ff62b3b821a25813230341",
+  "files": [
+    {
+      "path": "licenses/njsscan-LGPL-3.0.txt",
+      "upstream_path": "LICENSE",
+      "sha256": "a5681bf9b05db14d86776930017c647ad9e6e56ff6bbcfdf21e5848288dfaf1b"
+    },
+    {
+      "path": "rules/njsscan/crypto/crypto_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/crypto/crypto_node.yaml",
+      "sha256": "1092c7f3bf5c6995eef97210037091d11bf76282f5ba44d0500c9afe29092a06"
+    },
+    {
+      "path": "rules/njsscan/crypto/timing_attack_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/crypto/timing_attack_node.yaml",
+      "sha256": "01ac69870e952ab3103082d55c5855898e550aed1e30de0766b416478efeabe7"
+    },
+    {
+      "path": "rules/njsscan/crypto/tls_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/crypto/tls_node.yaml",
+      "sha256": "5373c4ce4273c4201ceedc6aed60913c10bea17cc31e5231b271e63f776143f0"
+    },
+    {
+      "path": "rules/njsscan/database/nosql_find_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/database/nosql_find_injection.yaml",
+      "sha256": "9b41c6411694765123dc7d983ca98365f0cc50f073c06b381f1ecb557f3aa344"
+    },
+    {
+      "path": "rules/njsscan/database/nosql_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/database/nosql_injection.yaml",
+      "sha256": "5cd75702e3b26c5780358da859ec1fe01771d5a9c593ab3778f0b386280cd8bd"
+    },
+    {
+      "path": "rules/njsscan/database/sql_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/database/sql_injection.yaml",
+      "sha256": "be833403c0771139842f3737c6098f32ff0664340b49b5b0b5ee6f9f77ea91c2"
+    },
+    {
+      "path": "rules/njsscan/database/sql_injection_knex.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/database/sql_injection_knex.yaml",
+      "sha256": "2cbe2954e82b23eef2a2f36cefcd25f4584a9c83d4583001a93190aef1503d4f"
+    },
+    {
+      "path": "rules/njsscan/dos/express_bodyparser_dos.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/dos/express_bodyparser_dos.yaml",
+      "sha256": "3402ee80113d2e15a1c6c550681692f141c1358e6c4f76e729c8dc0e3466d298"
+    },
+    {
+      "path": "rules/njsscan/dos/layer7_object_dos.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/dos/layer7_object_dos.yaml",
+      "sha256": "7271e9315dc124497efc2d1205cdfa776662447125769cb558ecb3e2e4232544"
+    },
+    {
+      "path": "rules/njsscan/dos/regex_dos.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/dos/regex_dos.yaml",
+      "sha256": "2c65fb077e3ebdc0b1bea0869312030a4ca30f26eccd4016cafdb28b4613d072"
+    },
+    {
+      "path": "rules/njsscan/dos/regex_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/dos/regex_injection.yaml",
+      "sha256": "0caf5c7d933d093b26fd9966b3b44694b36a786b1661a6e8514939765473d776"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_deserialize.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_deserialize.yaml",
+      "sha256": "90445acf788809a2566eecb0054283ad6202325774c9b79e43a60de17fab9a75"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_grpc_deserialize.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_grpc_deserialize.yaml",
+      "sha256": "5769397e77a3227b629ed659eb806ebef291feffbde282d525bcfc49f5afb0c3"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_node.yaml",
+      "sha256": "992df497901ba2b0742ab4fa2779b269a7a917de8630cacf383cc7ad5ca323f2"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_require.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_require.yaml",
+      "sha256": "ca404fc78d5c3450dcfbcf55d6f3fefe8a224f1195a891f24dd1a14c29644618"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_sandbox.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_sandbox.yaml",
+      "sha256": "c97c54c4e632ebbfd43d8edb4722f189656bf5364de0785317ca8e043d592748"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_vm2_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_vm2_injection.yaml",
+      "sha256": "66c1643086cc8dafea6bb787fbc1d1e580bc19cc3a743bd7cae9416f18ad6407"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_vm_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_vm_injection.yaml",
+      "sha256": "8aa2ea13f8727d93239073c75638d2823ba2befbcc1ecbbee3e8c523d8b7c130"
+    },
+    {
+      "path": "rules/njsscan/eval/eval_yaml_deserialize.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/eval_yaml_deserialize.yaml",
+      "sha256": "3c80402d9e5ade13f76878e9bfc4a4524f36c6a9ee3e0729eb865cf2e06c3ab3"
+    },
+    {
+      "path": "rules/njsscan/eval/server_side_template_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/eval/server_side_template_injection.yaml",
+      "sha256": "4c814fec260d83a4744439367c84194eebe0d597d0f5f5de6aae49556c5f535b"
+    },
+    {
+      "path": "rules/njsscan/exec/exec_os_command.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/exec/exec_os_command.yaml",
+      "sha256": "e44b222f14440423c4adf179fb5a471fbaec8039ef59f9fbea39f75272455eea"
+    },
+    {
+      "path": "rules/njsscan/exec/exec_shelljs.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/exec/exec_shelljs.yaml",
+      "sha256": "15c13d830e0844d5c43aba75fa593c31c0a2eda190d07b6e5a107e5636cab534"
+    },
+    {
+      "path": "rules/njsscan/generic/hardcoded_passport.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/generic/hardcoded_passport.yaml",
+      "sha256": "fe973594ecf4fcc0b683911a3e7850ad41c117799cce38fbc060abaf648d6568"
+    },
+    {
+      "path": "rules/njsscan/generic/hardcoded_secrets.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/generic/hardcoded_secrets.yaml",
+      "sha256": "658b435b1c1aa1e92afee9fe5c9bc8017fa254f72cc217c5cdce7e58e930cc37"
+    },
+    {
+      "path": "rules/njsscan/generic/logic_bypass.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/generic/logic_bypass.yaml",
+      "sha256": "64d8ff2956e88bd5cdc2cd38dd2f3259afa828e580506faa4947dab43af6f326"
+    },
+    {
+      "path": "rules/njsscan/headers/header_cookie.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/header_cookie.yaml",
+      "sha256": "3b22b57a10dac39dd7db791d9a1c886f5141d15d7d8706963a7d2b8cfc4b825e"
+    },
+    {
+      "path": "rules/njsscan/headers/header_cors_star.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/header_cors_star.yaml",
+      "sha256": "31a0a21e867d42d3a740f81f286ff0b41e49408be264a3293f761f142b7d51c6"
+    },
+    {
+      "path": "rules/njsscan/headers/header_helmet_disabled.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/header_helmet_disabled.yaml",
+      "sha256": "91641825cbf3459464c4885b713aa5b25f1264e66cecac14e7284875447738fc"
+    },
+    {
+      "path": "rules/njsscan/headers/header_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/header_injection.yaml",
+      "sha256": "789d4b3472005adca38d0eda532f80036a9bb2ddbab1e147eb3be57ef959944f"
+    },
+    {
+      "path": "rules/njsscan/headers/header_xss_protection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/header_xss_protection.yaml",
+      "sha256": "ee495387262df25732b8ce506dc115264694630c5979acf9152fd9e3eb10ad50"
+    },
+    {
+      "path": "rules/njsscan/headers/host_header_injection.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/headers/host_header_injection.yaml",
+      "sha256": "f531e99fa7be8a448dbaaa411adfa41619d64c1f6f544e55312f7c9e2bfefcf4"
+    },
+    {
+      "path": "rules/njsscan/jwt/jwt_exposed_credentials.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/jwt/jwt_exposed_credentials.yaml",
+      "sha256": "ef93c1d60dfeac977bdb2bf96538c40b19e4d9feb5ff82cc520978ab7600ad7e"
+    },
+    {
+      "path": "rules/njsscan/jwt/jwt_exposed_data.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/jwt/jwt_exposed_data.yaml",
+      "sha256": "51b41ce3d7f284c5404ceef17894738ce93e92e50365559414f7bc4e9b19587d"
+    },
+    {
+      "path": "rules/njsscan/jwt/jwt_express_hardcoded.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/jwt/jwt_express_hardcoded.yaml",
+      "sha256": "bfa54cff45937660cd626ea4926485e46446fcd6c2ab8cf7f79d9a85b769a07f"
+    },
+    {
+      "path": "rules/njsscan/jwt/jwt_not_revoked.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/jwt/jwt_not_revoked.yaml",
+      "sha256": "2de74f8cc5fb6e1746426b43af765cd35617d5b00630799d03e4f4ee93a9c741"
+    },
+    {
+      "path": "rules/njsscan/memory/buffer_noassert.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/memory/buffer_noassert.yaml",
+      "sha256": "b6afaada6293c5c9d2dc3340eda881504369e2202fcc0d7ce7f8273dbc7028a0"
+    },
+    {
+      "path": "rules/njsscan/redirect/open_redirect.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/redirect/open_redirect.yaml",
+      "sha256": "a0f58b0b5ad1415e223c0bcaeb22efdee3fc757321fde99bf13c660e9bc473e3"
+    },
+    {
+      "path": "rules/njsscan/ssrf/ssrf_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/ssrf/ssrf_node.yaml",
+      "sha256": "75c3cc50bed57afc77551f516b0508adb5fc6111e3becee09b5537deb8401ff4"
+    },
+    {
+      "path": "rules/njsscan/traversal/archive_path_overwrite.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/traversal/archive_path_overwrite.yaml",
+      "sha256": "d6dc99740331e609bc54b2180f9fc6e74056f5f089dd414936a45db11850098c"
+    },
+    {
+      "path": "rules/njsscan/traversal/express_hbs_lfr.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/traversal/express_hbs_lfr.yaml",
+      "sha256": "804762f35051e1039986e66a4fc8157192c3462eb22bf549f4184fc4cefe9299"
+    },
+    {
+      "path": "rules/njsscan/traversal/path_traversal.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/traversal/path_traversal.yaml",
+      "sha256": "621bbaf24bb98c8f9d7c004360c632906c6cf37490a89e8d6ceabdd0da0a8a8a"
+    },
+    {
+      "path": "rules/njsscan/traversal/resolve_path_traversal.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/traversal/resolve_path_traversal.yaml",
+      "sha256": "0a4ee3453353e8df5f01597044aaa8f0b8da4a5598f3f6d570844176258f7015"
+    },
+    {
+      "path": "rules/njsscan/xml/xml_entity_expansion_dos.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xml_entity_expansion_dos.yaml",
+      "sha256": "97ae7cf053637a68e9d31094c3c5b7d37db6e2c01b359418485030a1199c5cec"
+    },
+    {
+      "path": "rules/njsscan/xml/xpathi_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xpathi_node.yaml",
+      "sha256": "b9fdc5383c36ff4e4f0cc716519ed9f4235b51fa9c864e8d0274e35283d22ca0"
+    },
+    {
+      "path": "rules/njsscan/xml/xxe_expat.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xxe_expat.yaml",
+      "sha256": "7e7760d398adbbed3ea0f1711796bf9325fb1530c36f29d333ee705437913d17"
+    },
+    {
+      "path": "rules/njsscan/xml/xxe_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xxe_node.yaml",
+      "sha256": "a09c764d2de7eb692f61795ce561a07f050b3e802837499fe5b12a415dc171fa"
+    },
+    {
+      "path": "rules/njsscan/xml/xxe_sax.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xxe_sax.yaml",
+      "sha256": "2166d00169a5ec2c59c9040ac246ac2fc11ddae3778da54b9e134ab939182994"
+    },
+    {
+      "path": "rules/njsscan/xml/xxe_xml2json.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xml/xxe_xml2json.yaml",
+      "sha256": "4bfd7a59c03e12f7ea1df908b4ff8a4f495e93918f78ed3149b4354c0b57bd94"
+    },
+    {
+      "path": "rules/njsscan/xss/xss_dom.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xss/xss_dom.yaml",
+      "sha256": "2bd366df56f6b9133a9955c4959f63b1d295fbdbaf02b2532b6b19ec0687c246"
+    },
+    {
+      "path": "rules/njsscan/xss/xss_mustache_escape.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xss/xss_mustache_escape.yaml",
+      "sha256": "7d86ecacbc7d46f0ba1288da552064eb3eb7efacdf0162d210e6592ca775d2ad"
+    },
+    {
+      "path": "rules/njsscan/xss/xss_node.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xss/xss_node.yaml",
+      "sha256": "d3d90fca0b3854a9570d64adfd5674e0da1b1ecd51314b58d8444d0e31a5572e"
+    },
+    {
+      "path": "rules/njsscan/xss/xss_serialize_js.yaml",
+      "upstream_path": "njsscan/rules/semantic_grep/xss/xss_serialize_js.yaml",
+      "sha256": "a6a7154f6ffc42ea0c1b02e1c48348402bf844c262d0097d2690ceba7ccd4459"
+    }
+  ],
+  "omitted_explicit_semgrep_origin_files": [
+    "database/sequelize_tls.yaml",
+    "database/sequelize_tls_validation.yaml",
+    "database/sequelize_weak_tls.yaml",
+    "jwt/jwt_hardcoded.yaml",
+    "jwt/jwt_none_algorithm.yaml"
+  ]
+}

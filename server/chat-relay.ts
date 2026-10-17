@@ -4,6 +4,7 @@ import type { User } from './types.js'
 import type { StoredChatMessage } from './chat-history.js'
 import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
 import type { ChatCommandService } from './chat-command-service.js'
+import { PublicRequestError, publicRequestFailure } from './public-request-error.js'
 
 type EventKind = 'message' | 'reaction' | 'typing'
 type Reply = { ok: boolean; error?: string }
@@ -18,6 +19,7 @@ export interface ChatRelayOptions {
   now?: () => number
   writePolicy?: ChatWritePolicy
   commands?: ChatCommandService
+  getMentionAudience?: (roomId: string, senderId: string) => Promise<User[]>
 }
 
 /** Room admission is checked for every event, including duplicate retries. Never opens a public topic. */
@@ -28,7 +30,7 @@ export function createChatRelay(options: ChatRelayOptions) {
   const publishOnce = async (id: string, roomId: string, userId: string, key: string, event: `chat:${EventKind}`, socketId: string, createPayload: () => Promise<unknown>) => {
     const existing = accepted.get(id)
     if (existing && existing.expiresAt > now()) {
-      if (existing.roomId !== roomId || existing.userId !== userId || existing.key !== key) throw new Error('This message ID was already used for different content.')
+      if (existing.roomId !== roomId || existing.userId !== userId || existing.key !== key) throw new PublicRequestError('This message ID was already used for different content.', 409)
       await existing.pending
       return
     }
@@ -61,37 +63,38 @@ export function createChatRelay(options: ChatRelayOptions) {
         }
         if (kind === 'message') {
           const input = chatMessageSchema.parse(envelope.message)
-          const message = canonicalMessage(input, user)
-          const key = immutableMessageKey(input)
+          const audience = input.mentions.length ? await options.getMentionAudience?.(roomId, user.id) || [] : []
+          const message = canonicalMessage(input, user, undefined, audience)
+          const key = immutableMessageKey(message)
           await publishOnce(input.id, roomId, user.id, key, 'chat:message', socketId, async () => {
             // A fresh process/cache miss must not let an admitted sender rewrite another stored UUID live.
             // Lookup errors propagate: database outage is not proof that the UUID is unused.
             const stored = await options.loadMessageById(input.id)
             if (stored) {
-              if (stored.roomId !== roomId || stored.userId !== user.id || immutableMessageKey(stored.message) !== key) throw new Error('This message ID already belongs to different content, account, or room.')
+              if (stored.roomId !== roomId || stored.userId !== user.id || immutableMessageKey(stored.message) !== key) throw new PublicRequestError('This message ID already belongs to different content, account, or room.', 409)
               writePolicy.message(roomId, user.id, input, true)
               const current = options.getMembership(socketId)
-              if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new Error('This room session has ended.')
+              if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
               return null // The durable original proves acceptance; uncertain ACK retry must not rebroadcast it.
             }
             writePolicy.message(roomId, user.id, input)
             const reply = input.replyTo ? await options.loadReply(roomId, input.replyTo.id) : undefined
-            if (input.replyTo && !reply) throw new Error('The message you replied to is unavailable.')
+            if (input.replyTo && !reply) throw new PublicRequestError('The message you replied to is unavailable.', 400)
             if (input.storagePath) {
-              if (!options.resolveMediaUrl) throw new Error('Private chat images are unavailable.')
+              if (!options.resolveMediaUrl) throw new PublicRequestError('Private chat images are unavailable.', 503)
               message.mediaUrl = await options.resolveMediaUrl(roomId, input.storagePath, user.id)
             }
             const current = options.getMembership(socketId)
-            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new Error('This room session has ended.')
+            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
             return { roomId, message: { ...message, replyTo: reply || undefined } satisfies RelayMessage }
           })
         } else if (kind === 'reaction') {
           const input = z.object({ ...chatReactionSchema.shape, id: z.string().uuid() }).parse(envelope.reaction)
           await publishOnce(input.id, roomId, user.id, JSON.stringify([input.action, input.messageId, input.emoji]), 'chat:reaction', socketId, async () => {
             writePolicy.reaction(roomId, user.id, input)
-            if (!await options.loadReply(roomId, input.messageId)) throw new Error('This room message is unavailable.')
+            if (!await options.loadReply(roomId, input.messageId)) throw new PublicRequestError('This room message is unavailable.', 404)
             const current = options.getMembership(socketId)
-            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new Error('This room session has ended.')
+            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
             return { roomId, reaction: { ...input, userId: user.id } }
           })
         } else {
@@ -102,7 +105,7 @@ export function createChatRelay(options: ChatRelayOptions) {
         }
         return { ok: true }
       } catch (error) {
-        return { ok: false, error: error instanceof z.ZodError ? 'Invalid chat event.' : error instanceof Error ? error.message : 'Chat could not be delivered.' }
+        return { ok: false, error: error instanceof z.ZodError ? 'Invalid chat event.' : publicRequestFailure(error, 'Chat could not be delivered. Try again.').message }
       }
     },
   }

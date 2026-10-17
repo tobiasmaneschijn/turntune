@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./public-route-fixture";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/login");

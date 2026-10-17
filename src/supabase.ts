@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { parseRuntimeConfig } from "./runtime-config";
 import { scopedFetch } from "./lib/bounded-operation";
+import { setTrustedImageStorageOrigin } from "./lib/remote-images";
 
 let clientPromise: Promise<SupabaseClient> | null = null;
 let configurationPromise: Promise<{ url: string; publishableKey: string }> | null = null;
@@ -17,7 +18,7 @@ function getConfiguration() {
         if (!supabase?.url || !supabase.anonKey) throw new Error("Supabase authentication is not configured.");
         return { url: supabase.url, publishableKey: supabase.anonKey };
       });
-    configurationPromise = configurationPromise.catch((error: unknown) => { configurationPromise = null; throw error; });
+    configurationPromise = configurationPromise.then(config => { setTrustedImageStorageOrigin(config.url); return config; }).catch((error: unknown) => { configurationPromise = null; throw error; });
   }
   return configurationPromise;
 }

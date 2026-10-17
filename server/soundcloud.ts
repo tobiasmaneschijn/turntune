@@ -1,3 +1,5 @@
+import { approvedRemoteImageUrl } from "../shared/remote-images.js";
+import { providerDuration, providerHttpsUrl, providerJson } from "./provider-http.js";
 import { formatDuration } from "./music.js";
 
 export interface SoundCloudSearchResult {
@@ -57,25 +59,27 @@ function soundCloudError(payload: unknown, fallback: string) {
 function mapTrack(track: SoundCloudTrack): SoundCloudSearchResult | null {
   if (
     track.kind && track.kind !== "track" ||
-    !track.urn ||
-    !track.title ||
-    !track.permalink_url ||
+    typeof track.urn !== "string" || track.urn.length > 200 ||
+    typeof track.title !== "string" || !track.title.trim() ||
+    !providerHttpsUrl(track.permalink_url) ||
     track.access === "blocked" ||
     track.streamable === false
   ) {
     return null;
   }
+  const durationMs = providerDuration(track.duration);
+  const artist = typeof track.user?.username === "string" ? track.user.username : typeof track.publisher_metadata?.artist === "string" ? track.publisher_metadata.artist : "SoundCloud creator";
   return {
     provider: "soundcloud",
     id: track.urn,
     title: track.title.slice(0, 120),
     // SoundCloud attribution requires crediting the uploader. Prefer the
     // account username even when publisher metadata names another artist.
-    artist: (track.user?.username || track.publisher_metadata?.artist || "SoundCloud creator").slice(0, 120),
-    thumbnail: track.artwork_url || track.user?.avatar_url || undefined,
-    duration: formatDuration(track.duration),
-    durationMs: track.duration,
-    permalinkUrl: track.permalink_url
+    artist: artist.slice(0, 120),
+    thumbnail: approvedRemoteImageUrl(track.artwork_url) || approvedRemoteImageUrl(track.user?.avatar_url),
+    duration: formatDuration(durationMs),
+    durationMs,
+    permalinkUrl: track.permalink_url!
   };
 }
 
@@ -94,7 +98,7 @@ export class SoundCloudApi {
     return Boolean(this.clientId && this.clientSecret);
   }
 
-  private async requestToken(grant: "client_credentials" | "refresh_token") {
+  private async requestToken(grant: "client_credentials" | "refresh_token", signal?: AbortSignal) {
     if (!this.clientId || !this.clientSecret) {
       throw new Error("SoundCloud search is not configured yet.");
     }
@@ -114,13 +118,12 @@ export class SoundCloudApi {
       body.set("refresh_token", this.token.refreshToken);
     }
 
-    const response = await this.fetcher("https://secure.soundcloud.com/oauth/token", {
+    const { response, payload } = await providerJson<SoundCloudTokenResponse>("soundcloud", this.fetcher, "https://secure.soundcloud.com/oauth/token", {
       method: "POST",
       headers,
       body,
-      signal: AbortSignal.timeout(10_000)
-    });
-    const payload = await response.json() as SoundCloudTokenResponse;
+      signal
+    }, { maxBytes: 16_384 });
     if (!response.ok || !payload.access_token) {
       throw new Error(soundCloudError(payload, "SoundCloud authentication failed."));
     }
@@ -133,25 +136,26 @@ export class SoundCloudApi {
     } satisfies SoundCloudToken;
   }
 
-  private async obtainToken() {
+  private async obtainToken(signal?: AbortSignal) {
     if (this.token?.refreshToken) {
       try {
-        return await this.requestToken("refresh_token");
+        return await this.requestToken("refresh_token", signal);
       } catch {
+        signal?.throwIfAborted();
         // Refresh tokens are single-use. Fall back to a fresh app token if it was
         // already consumed or invalidated.
         this.token = null;
       }
     }
-    return this.requestToken("client_credentials");
+    return this.requestToken("client_credentials", signal);
   }
 
-  private async accessToken(forceRefresh = false) {
+  private async accessToken(forceRefresh = false, signal?: AbortSignal) {
     if (!forceRefresh && this.token && this.token.expiresAt > Date.now()) {
       return this.token.accessToken;
     }
     if (!this.tokenPromise) {
-      this.tokenPromise = this.obtainToken()
+      this.tokenPromise = this.obtainToken(signal)
         .then((token) => {
           this.token = token;
           return token;
@@ -163,42 +167,40 @@ export class SoundCloudApi {
     return (await this.tokenPromise).accessToken;
   }
 
-  private async apiGet(url: string, retry = true): Promise<Response> {
-    const response = await this.fetcher(url, {
+  private async apiGet<T>(url: string, signal?: AbortSignal, retry = true): Promise<{ response: Response; payload: T }> {
+    signal?.throwIfAborted();
+    const result = await providerJson<T>("soundcloud", this.fetcher, url, {
       headers: {
         Accept: "application/json; charset=utf-8",
-        Authorization: `OAuth ${await this.accessToken()}`
-      },
-      signal: AbortSignal.timeout(10_000)
-    });
-    if (response.status === 401 && retry) {
+        Authorization: `OAuth ${await this.accessToken(false, signal)}`
+      }, signal
+    }, { allowedRedirectOrigins: ["https://api.soundcloud.com"] });
+    if (result.response.status === 401 && retry) {
       this.token = null;
-      await this.accessToken(true);
-      return this.apiGet(url, false);
+      await this.accessToken(true, signal);
+      return this.apiGet<T>(url, signal, false);
     }
-    return response;
+    return result;
   }
 
-  async searchTracks(query: string, limit = 12): Promise<SoundCloudSearchResult[]> {
+  async searchTracks(query: string, limit = 12, signal?: AbortSignal): Promise<SoundCloudSearchResult[]> {
     const params = new URLSearchParams({
       q: query,
       access: "playable",
-      limit: String(limit)
+      limit: String(Math.min(12, Math.max(1, limit)))
     });
-    const response = await this.apiGet(`https://api.soundcloud.com/tracks?${params}`);
-    const payload = await response.json() as SoundCloudTrack[] | { collection?: SoundCloudTrack[] };
+    const { response, payload } = await this.apiGet<SoundCloudTrack[] | { collection?: SoundCloudTrack[] }>(`https://api.soundcloud.com/tracks?${params}`, signal);
     if (!response.ok) {
       throw new Error(soundCloudError(payload, "SoundCloud search failed."));
     }
 
     const tracks = Array.isArray(payload) ? payload : payload.collection || [];
-    return tracks.map(mapTrack).filter((track): track is SoundCloudSearchResult => Boolean(track));
+    return tracks.slice(0, Math.min(12, limit)).map(mapTrack).filter((track): track is SoundCloudSearchResult => Boolean(track));
   }
 
-  async resolveTrack(permalinkUrl: string): Promise<SoundCloudSearchResult> {
+  async resolveTrack(permalinkUrl: string, signal?: AbortSignal): Promise<SoundCloudSearchResult> {
     const params = new URLSearchParams({ url: permalinkUrl });
-    const response = await this.apiGet(`https://api.soundcloud.com/resolve?${params}`);
-    const payload = await response.json() as SoundCloudTrack;
+    const { response, payload } = await this.apiGet<SoundCloudTrack>(`https://api.soundcloud.com/resolve?${params}`, signal);
     if (!response.ok) {
       throw new Error(soundCloudError(payload, "Could not resolve that SoundCloud URL."));
     }

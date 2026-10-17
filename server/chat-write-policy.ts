@@ -1,7 +1,9 @@
 import { immutableMessageKey, type ChatMessageInput } from "./chat-validation.js";
 
-export class ChatRateLimit extends Error {}
-export class ChatWriteConflict extends Error {}
+import { PublicRequestError } from "./public-request-error.js";
+
+import { ChatRateLimit, ChatWriteConflict } from './chat-errors.js'
+export { ChatRateLimit, ChatWriteConflict } from './chat-errors.js'
 export const CHAT_WRITE_WINDOW_MS = 10_000;
 export const CHAT_MESSAGE_RETRY_MS = 24 * 60 * 60_000;
 
@@ -34,7 +36,7 @@ export function createChatWritePolicy(now = Date.now) {
         // The caller has verified the durable immutable original. Older retries
         // do not become new sends and never spend rate capacity again.
         if (storedOriginal) return;
-        if (Date.parse(input.createdAt) > now() + 5 * 60_000 || Date.parse(input.createdAt) < now() - CHAT_MESSAGE_RETRY_MS) throw new Error("This message time is no longer valid. Send it as a new message.");
+        if (Date.parse(input.createdAt) > now() + 5 * 60_000 || Date.parse(input.createdAt) < now() - CHAT_MESSAGE_RETRY_MS) throw new PublicRequestError("This message time is no longer valid. Send it as a new message.", 400);
         consume(`${roomId}:${userId}:message`, 20);
       });
     },

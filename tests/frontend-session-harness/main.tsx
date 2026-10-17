@@ -8,8 +8,13 @@ import { ProfilePage } from '../../src/components/ProfilePage'
 import { RoomSettingsDialog } from '../../src/components/RoomSettingsDialog'
 import { ThemeProvider } from '../../src/components/theme-provider'
 import { useRoomSession } from '../../src/hooks/use-room-session'
+import { setTrustedImageStorageOrigin } from '../../src/lib/remote-images'
 import type { AppAuth } from '../../src/hooks/use-app-auth'
 import type { RoomSnapshot, SocketReply } from '../../src/types'
+
+// This component harness skips App's auth bootstrap. Supply its known test
+// project configuration before private rendering, as App does in production.
+setTrustedImageStorageOrigin('https://example.supabase.co')
 
 const user = { id: '00000000-0000-4000-8000-000000000001', name: 'Alice', avatarSeed: 'alice' }
 const bob = { id: '00000000-0000-4000-8000-000000000002', name: 'Bob', avatarSeed: 'bob' }

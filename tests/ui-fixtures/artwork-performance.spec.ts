@@ -20,6 +20,9 @@ async function preloadFixture(page: Page, hidden = false) {
 }
 
 test('hidden history and library issue no artwork requests; active scroll panes load only visible rows', async ({ page }, testInfo) => {
+  // This workflow mounts 500 private picks and traverses three scroll panes.
+  // Keep artwork request bounds exact while allowing shared CI setup/render work.
+  test.setTimeout(120_000)
   const requests = await preloadFixture(page)
   await expect(page.locator('.queue-track .track-artwork').first()).toHaveAttribute('data-artwork-state', 'ready')
   await page.waitForTimeout(250)

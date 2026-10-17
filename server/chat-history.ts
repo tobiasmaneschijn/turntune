@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ChatRateLimit, ChatWriteConflict, createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
-import { canonicalMessage, chatMessageSchema, chatReactionSchema, chatPollVoteSchema, immutableMessageKey, type ChatMessageInput, type ChatPollVoteEvent, type ChatReply, type RelayMessage } from './chat-validation.js'
+import { canonicalMessage, resolveVisibleMentions, chatMessageSchema, chatReactionSchema, chatPollVoteSchema, immutableMessageKey, type ChatMessageInput, type ChatPollVoteEvent, type ChatReply, type RelayMessage } from './chat-validation.js'
 import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
 import type { ChatCommandService } from './chat-command-service.js'
@@ -25,6 +25,7 @@ export interface ChatHistoryRouteOptions {
   writePolicy?: ChatWritePolicy
   onPollVote?: (roomSlug: string, event: ChatPollVoteEvent, userId: string) => Promise<void>
   commands?: ChatCommandService
+  getMentionAudience?: (roomId: string, senderId: string) => Promise<User[]>
 }
 const SELECT = 'id, content, message_type, media_url, storage_path, mentions, user_id, user_name, avatar_seed, created_at, reply_to_id, poll_options, soundspin_message_reactions(emoji, user_id), soundspin_poll_votes(user_id, option_index, revision)'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -157,6 +158,8 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
   app.post('/api/rooms/:roomSlug/chat/messages', express.json({ limit: '16kb' }), authorized(async (client, room, request, response, userId) => {
     const parsed = chatMessageSchema.safeParse(request.body)
     if (!parsed.success) throw new BadRequest('Invalid room chat message.')
+    const audience = parsed.data.mentions.length ? await options.getMentionAudience?.(room, userId) || [] : []
+    parsed.data.mentions = resolveVisibleMentions(parsed.data, audience, userId)
     const stored = await loadStoredChatMessage(client, parsed.data.id)
     if (stored) {
       if (stored.roomId !== room || stored.userId !== userId || immutableMessageKey(stored.message) !== immutableMessageKey(parsed.data)) throw new Conflict('This message ID already belongs to different content, account, or room.')
@@ -173,7 +176,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     const reply = parsed.data.replyTo ? await loadChatReply(client, room, parsed.data.replyTo.id) : undefined
     if (parsed.data.replyTo && !reply) throw new BadRequest('The message you replied to is unavailable.')
     let message: RelayMessage
-    try { message = canonicalMessage(parsed.data, user, reply || undefined) } catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Invalid chat image.') }
+    try { message = canonicalMessage(parsed.data, user, reply || undefined, audience) } catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Invalid chat image.') }
     if (message.storagePath) {
       try { message.mediaUrl = (await resolveChatMediaUrl(client, room, message.storagePath, userId)).url }
       catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Chat image is unavailable.') }

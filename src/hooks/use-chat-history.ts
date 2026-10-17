@@ -5,9 +5,9 @@ import { CHAT_HISTORY_LIMIT, chatHistoryCursor, type ChatHistoryCursor } from '@
 import type { ChatHistorySource, ChatMessageContext } from '@/chat/history-reader'
 
 type Context = ChatMessageContext
-export function useChatHistory(client: SupabaseClient, roomSlug: string | undefined, scope: string, initialMessages: ChatMessage[], onHistoricalMessages?: (messages: ChatMessage[]) => void, source?: ChatHistorySource) {
+export function useChatHistory(client: SupabaseClient, roomSlug: string | undefined, scope: string, initialMessages: ChatMessage[], onHistoricalMessages?: (messages: ChatMessage[]) => void, source?: ChatHistorySource, initialHasOlder?: boolean) {
   const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([])
-  const [hasOlder, setHasOlder] = useState(initialMessages.length >= CHAT_HISTORY_LIMIT)
+  const [hasOlder, setHasOlder] = useState(initialHasOlder === true || initialMessages.length >= CHAT_HISTORY_LIMIT)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [context, setContext] = useState<Context | null>(null)
@@ -43,9 +43,11 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
   useEffect(() => {
     if (!pagedRef.current) {
       cursorRef.current = initialMessages[0] ? chatHistoryCursor(initialMessages[0]) : undefined
-      setHasOlder(initialMessages.length >= CHAT_HISTORY_LIMIT)
+      // The server can return a short page when its message/child budget is
+      // reached. Keep its explicit cursor marker and the live-window fallback.
+      setHasOlder(initialHasOlder === true || initialMessages.length >= CHAT_HISTORY_LIMIT)
     }
-  }, [initialMessages, roomSlug, scope])
+  }, [initialMessages, initialHasOlder, roomSlug, scope])
 
   const loadOlder = useCallback(async () => {
     if (!roomSlug || !source || olderPendingRef.current || !cursorRef.current) return
@@ -122,8 +124,8 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
   const resetPages = useCallback((messages: ChatMessage[]) => {
     olderRequestRef.current++; olderPendingRef.current = false; pagedRef.current = false
     cursorRef.current = messages[0] ? chatHistoryCursor(messages[0]) : undefined
-    setOlderMessages([]); setLoadingOlder(false); setHistoryError(''); setHasOlder(messages.length >= CHAT_HISTORY_LIMIT)
-  }, [])
+    setOlderMessages([]); setLoadingOlder(false); setHistoryError(''); setHasOlder(initialHasOlder === true || messages.length >= CHAT_HISTORY_LIMIT)
+  }, [initialHasOlder])
   return { olderMessages, hasOlder, loadingOlder, historyError, loadOlder, context, contextLoading, revealContext, extendContext, closeContext,
     searchResults, searchHasMore, searchLoading, searchError, searchTerm, search, clearSearch, resetPages }
 }

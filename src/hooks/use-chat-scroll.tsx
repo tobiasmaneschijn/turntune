@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { effectiveScrollBehavior, useEffectiveMotion } from './use-effective-motion'
 
-export function useChatScroll() {
+export function useChatScroll(scope = 'chat') {
   const reducedMotion = useEffectiveMotion()
   const containerRef = useRef<HTMLDivElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -10,8 +10,16 @@ export function useChatScroll() {
   const publishedNearBottomRef = useRef(true)
   const notifyOnScrollRef = useRef(true)
   const geometryRef = useRef<{ height: number; contentHeight: number } | null>(null)
-  const anchorRef = useRef<{ id?: string; offset: number; top: number; height: number } | null>(null)
-  const anchorFrameRef = useRef<number | null>(null)
+  const scopeRef = useRef(scope)
+  scopeRef.current = scope
+  const anchorRef = useRef<{ id?: string; offset: number; top: number; height: number; scope: string; ready: boolean } | null>(null)
+  const [anchorRevision, setAnchorRevision] = useState(0)
+
+  const cancelAnchor = useCallback(() => { anchorRef.current = null }, [])
+
+  // Layout cleanup invalidates the previous room/account before any restoration
+  // effect can read geometry from the newly committed scope.
+  useLayoutEffect(() => () => cancelAnchor(), [scope, cancelAnchor])
 
   const publishPosition = useCallback((near: boolean, refresh = false) => {
     nearBottomRef.current = near
@@ -38,40 +46,46 @@ export function useChatScroll() {
       else high = middle
     }
     const first = rows[low]
-    const anchor = { id: first?.id, offset: first ? first.getBoundingClientRect().top - bounds.top : 0, top: container.scrollTop, height: container.scrollHeight }
+    const anchor = { id: first?.id, offset: first ? first.getBoundingClientRect().top - bounds.top : 0, top: container.scrollTop, height: container.scrollHeight, scope: scopeRef.current, ready: false }
     anchorRef.current = anchor
-    nearBottomRef.current = false
+    publishPosition(false)
     return () => {
-      if (anchorRef.current !== anchor || !container.isConnected) return
-      if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current)
-      anchorFrameRef.current = requestAnimationFrame(() => {
-        anchorFrameRef.current = null
-        if (anchorRef.current !== anchor || !container.isConnected) return
-        const row = anchor.id ? document.getElementById(anchor.id) : null
-        const height = container.clientHeight, contentHeight = container.scrollHeight
-        const top = row && container.contains(row)
-          ? container.scrollTop + row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset
-          : anchor.top + contentHeight - anchor.height
-        // Read geometry before writing scrollTop; the browser clamps the target.
-        container.scrollTop = top
-        geometryRef.current = { height, contentHeight }
-        anchorRef.current = null
-        notifyOnScrollRef.current = true
-        const clampedTop = Math.max(0, Math.min(top, contentHeight - height))
-        publishPosition(contentHeight - clampedTop - height < 90, true)
-      })
+      if (anchorRef.current !== anchor || anchor.scope !== scopeRef.current || !container.isConnected) return
+      // Request completion only queues message state. A layout effect in the
+      // message list restores this anchor after those rows actually commit.
+      anchor.ready = true
+      setAnchorRevision((current) => current + 1)
     }
   }, [publishPosition])
+
+  const restoreAnchor = useCallback(() => {
+    const anchor = anchorRef.current, container = containerRef.current
+    if (!anchor?.ready || !container?.isConnected) return
+    if (anchor.scope !== scopeRef.current) { cancelAnchor(); return }
+    const row = anchor.id ? document.getElementById(anchor.id) : null
+    const height = container.clientHeight, contentHeight = container.scrollHeight
+    const top = row && container.contains(row)
+      ? container.scrollTop + row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset
+      : anchor.top + contentHeight - anchor.height
+    // Read committed geometry before writing scrollTop; the browser clamps it.
+    container.scrollTop = top
+    geometryRef.current = { height, contentHeight }
+    anchorRef.current = null
+    notifyOnScrollRef.current = true
+    const clampedTop = Math.max(0, Math.min(top, contentHeight - height))
+    publishPosition(contentHeight - clampedTop - height < 90, true)
+  }, [cancelAnchor, publishPosition])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = containerRef.current
     if (!container) return
+    cancelAnchor()
     container.scrollTo({
       top: container.scrollHeight,
       behavior: effectiveScrollBehavior(behavior, reducedMotion),
     })
     publishPosition(true)
-  }, [reducedMotion, publishPosition])
+  }, [cancelAnchor, reducedMotion, publishPosition])
 
   const refreshPosition = useCallback(() => {
     const container = containerRef.current
@@ -83,7 +97,7 @@ export function useChatScroll() {
     // Visibility refresh deliberately retains unread until a subsequent scroll,
     // including a scroll that stays inside the near-bottom boundary.
     notifyOnScrollRef.current = true
-    publishPosition(contentHeight - container.scrollTop - height < 90, true)
+    publishPosition(!anchorRef.current && contentHeight - container.scrollTop - height < 90, true)
   }, [publishPosition])
 
   useEffect(() => {
@@ -106,7 +120,7 @@ export function useChatScroll() {
       if (followBottom && contentHeight - top - height > 0) {
         container.scrollTo({ top: contentHeight, behavior: 'auto' })
       }
-      const near = followBottom || contentHeight - top - height < 90
+      const near = !anchorRef.current && (followBottom || contentHeight - top - height < 90)
       const notify = scrolled && near && notifyOnScrollRef.current
       if (notify) notifyOnScrollRef.current = false
       publishPosition(near, notify)
@@ -137,10 +151,9 @@ export function useChatScroll() {
       container.removeEventListener('scroll', onScroll)
       observer?.disconnect()
       if (frame !== null) cancelAnimationFrame(frame)
-      if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current)
-      anchorFrameRef.current = null; anchorRef.current = null; geometryRef.current = null
+      anchorRef.current = null; geometryRef.current = null
     }
-  }, [refreshPosition, publishPosition])
+  }, [scope, refreshPosition, publishPosition])
 
-  return { containerRef, scrollToBottom, refreshPosition, isNearBottom, scrollRevision, preserveAnchor }
+  return { containerRef, scrollToBottom, refreshPosition, isNearBottom, scrollRevision, preserveAnchor, restoreAnchor, cancelAnchor, anchorRevision }
 }

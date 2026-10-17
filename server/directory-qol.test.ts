@@ -4,11 +4,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Store } from "./store.js";
 
 test("public discovery remains bounded while all older memberships, favorites and owned rooms are looked up", async () => {
-  const row = (slug: string, isPublic: boolean, index: number, owner = "other") => ({ slug, name: slug, owner_id: owner, is_public: isPublic, password_hash: null, settings: { description: "x".repeat(300) }, created_at: "2020-01-01", updated_at: `2026-${String(index).padStart(5, "0")}` });
+  const row = (slug: string, isPublic: boolean, index: number, owner = "other") => ({ slug, name: slug, owner_id: owner, is_public: isPublic, access_mode: isPublic ? "public" : "members", password_hash: null, settings: { description: "x".repeat(300) }, created_at: "2020-01-01", updated_at: `2026-${String(index).padStart(5, "0")}` });
   const rooms = [...Array.from({ length: 220 }, (_, index) => row(`public-room-${index}`, true, 900 - index)), ...Array.from({ length: 501 }, (_, index) => row(`private-member-${index}`, false, index)), row("old-favorite", true, 1), row("owned-private", false, 0, "alice"), row("revoked-private", false, 0)];
   const tables: Record<string, any[]> = { soundspin_rooms: rooms, soundspin_room_members: Array.from({ length: 501 }, (_, index) => ({ user_id: "alice", room_slug: `private-member-${index}`, role: "member" })), soundspin_room_favorites: [{ user_id: "alice", room_slug: "old-favorite" }, { user_id: "alice", room_slug: "revoked-private" }, { user_id: "alice", room_slug: "invalid,(injected)" }] };
+  tables.soundspin_room_moderation = [];
+  tables.soundspin_room_restrictions = [];
+  tables.soundspin_account_restrictions = [];
   const lookupSlugs: string[] = [];
   const client = { from(table: string) {
+    assert.ok(Object.hasOwn(tables, table), `Unexpected directory table: ${table}`);
     let result = [...tables[table]];
     const query = {
       select() { return query; },

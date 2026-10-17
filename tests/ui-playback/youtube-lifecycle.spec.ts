@@ -243,6 +243,7 @@ for (const initialLive of [false, true]) {
   test(`a failed metadata refresh uses the iframe when a ${initialLive ? "live stream ends" : "scheduled stream starts"}`, async ({ page }) => {
     let requests = 0;
     await page.clock.install({ time: 100_000 });
+    await page.clock.pauseAt(new Date(160_000));
     await page.route("**/api/youtube/live?id=bbbbbbbbbbb", (route) => {
       requests++;
       return route.fulfill(requests === 1 ? {
@@ -290,6 +291,7 @@ for (const initialLive of [false, true]) {
 
 test("expired server metadata falls back to the iframe while a refresh is still pending", async ({ page }) => {
   await page.clock.install({ time: 100_000 });
+  await page.clock.pauseAt(new Date(160_000));
   await page.route("**/api/youtube/live?id=bbbbbbbbbbb", (route) => route.fulfill({
     contentType: "application/json", body: JSON.stringify({ isLive: false })
   }));

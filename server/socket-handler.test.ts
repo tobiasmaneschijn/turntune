@@ -35,9 +35,12 @@ test("joins complete in request order even when the first operation fails", asyn
 });
 
 test("server rejects partial configuration and unauthenticated production startup", () => {
-  assert.doesNotThrow(() => validateServerConfig({}));
+  assert.throws(() => validateServerConfig({}), /authentication is required/);
+  assert.doesNotThrow(() => validateServerConfig({ NODE_ENV: "test" }));
+  assert.doesNotThrow(() => validateServerConfig({ NODE_ENV: "development" }));
   assert.throws(() => validateServerConfig({ SUPABASE_URL: "https://example.com" }), /Incomplete/);
-  assert.throws(() => validateServerConfig({ NODE_ENV: "production" }), /requires Supabase/);
-  assert.doesNotThrow(() => validateServerConfig({ NODE_ENV: "production", SUPABASE_URL: "url",
-    SUPABASE_PUBLISHABLE_KEY: "public", SUPABASE_SECRET_KEY: "secret", SUPABASE_JWKS_URL: "jwks" }));
+  assert.throws(() => validateServerConfig({ NODE_ENV: "production" }), /authentication is required/);
+  assert.throws(() => validateServerConfig({ NODE_ENV: "production", SUPABASE_URL: "url", SUPABASE_PUBLISHABLE_KEY: "public", SUPABASE_SECRET_KEY: "secret", SUPABASE_JWKS_URL: "jwks" }));
+  assert.doesNotThrow(() => validateServerConfig({ NODE_ENV: "production", SUPABASE_URL: "https://project.invalid",
+    SUPABASE_PUBLISHABLE_KEY: "public", SUPABASE_SECRET_KEY: "secret", SUPABASE_JWKS_URL: "https://project.invalid/auth/v1/.well-known/jwks.json" }));
 });

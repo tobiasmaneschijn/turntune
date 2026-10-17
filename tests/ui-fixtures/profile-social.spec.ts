@@ -149,3 +149,21 @@ test('switching accounts discards a pending profile save and resets the editor',
   await page.getByRole('button', { name: 'Edit profile', exact: true }).click()
   await expect(page.getByLabel('Display name', { exact: true })).toHaveValue('Bob')
 })
+
+test('profile blocking revokes friendship controls and request preferences are usable',async({page})=>{
+  await fixture(page)
+  let blocked=false,receiveRequests=true
+  await page.route('**/api/social',route=>route.fulfill({json:{people:blocked?[]:[{user:bob,state:'friends'}],shareActivity:false,blockedPeople:blocked?[bob]:[],receiveRequests}}))
+  await page.route(`**/api/social/blocks/${bobId}`,route=>{blocked=route.request().postDataJSON().blocked;return route.fulfill({json:{blocked}})})
+  await page.route('**/api/social/settings',route=>{receiveRequests=route.request().postDataJSON().receiveRequests;return route.fulfill({json:{receiveRequests}})})
+  await page.goto('/tests/frontend-session-harness/index.html?profile=other&embedded')
+  await page.getByRole('button',{name:'Block Bob',exact:true}).click()
+  await expect(page.getByRole('button',{name:'Invite Bob to this room',exact:true})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'Add friend Bob',exact:true})).toHaveCount(0)
+  await page.getByRole('button',{name:'Unblock Bob',exact:true}).click()
+  await expect(page.getByRole('button',{name:'Block Bob',exact:true})).toBeVisible()
+  await page.goto('/tests/frontend-session-harness/index.html?embedded')
+  const requests=page.getByRole('switch',{name:'Receive friend requests',exact:true})
+  await expect(requests).toBeChecked();await requests.click();await expect(requests).not.toBeChecked()
+  expect(receiveRequests).toBe(false)
+})
