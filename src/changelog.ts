@@ -17,6 +17,26 @@ export type ChangelogRelease = {
 // Keep the newest release first, with a fixed version number for every entry.
 export const CHANGELOG: readonly ChangelogRelease[] = [
   {
+    version: "0.1.9",
+    date: "2026-10-18",
+    title: "Player and room reactions",
+    sections: [
+      {
+        title: "Improved",
+        items: [
+          "Player layout with full track titles, centered playback controls, and grouped local audio settings.",
+          "Bang-O-Meter VU gauge with Lame and Banger icon buttons, accessible vote totals, keyboard access, and reduced-motion support.",
+        ],
+      },
+      {
+        title: "Fixed",
+        items: [
+          "Reduced player scrolling on laptops and phones by adapting artwork to the available height.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.1.8",
     date: "2026-10-17",
     title: "Room controls and account privacy",

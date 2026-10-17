@@ -30,6 +30,11 @@ const track: Track = { id: "t1", provider: "youtube", providerId: "fixture0001",
 const snapshot: RoomSnapshot = { room: { id: "player-room", name: "Evening radio", ownerUserId: user.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true, passwordProtected: false, settings: { spotifyEnabled: true }, djUserId: user.id, djQueueUserIds: [], queue: [], history: [], playback: { track, playing: true, position: 30, updatedAt: Date.now() }, vibe: null, createdAt: 1 }, users: [user, { ...user, id: "listener", name: "Jonas" }], djUsers: [user], serverTime: Date.now() };
 if (polished) {
   snapshot.room.name = "Evening Radio";
+  snapshot.room.capabilities = {
+    owner: true, staff: true, invite: true, chat: true, media: true, links: true, polls: true,
+    joinDj: true, playback: true, chatParticipants: true, djsPlayback: true,
+    roomDetailsMusic: true, accessInvites: true
+  };
   snapshot.room.djQueueUserIds = [user.id, "listener"];
   snapshot.djUsers = snapshot.users;
   snapshot.room.playback.track = { ...track, title: "Midnight City", artist: "M83" };
@@ -46,8 +51,8 @@ const chatHistorySource: ChatHistorySource = {
   saveReaction: async () => {},
   loadMediaUrl: async () => "",
 };
-type TestState = { spotifyActive: boolean; setSpotifyEnabled: (enabled: boolean) => void; useSpotify: () => void; mounts: number; calls: string[]; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void; setAllowedProviders: (providers: Provider[]) => void; useMixcloud: () => void; savedRoomSettings?: { allowedProviders: Provider[] } };
-const qa: TestState = { spotifyActive: false, setSpotifyEnabled: () => {}, useSpotify: () => {}, mounts: 0, calls: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {}, setAllowedProviders: () => {}, useMixcloud: () => {} };
+type TestState = { spotifyActive: boolean; setSpotifyEnabled: (enabled: boolean) => void; useSpotify: () => void; mounts: number; calls: string[]; requests: Array<{ event: string; payload: unknown }>; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void; setAllowedProviders: (providers: Provider[]) => void; useMixcloud: () => void; savedRoomSettings?: { allowedProviders: Provider[] } };
+const qa: TestState = { spotifyActive: false, setSpotifyEnabled: () => {}, useSpotify: () => {}, mounts: 0, calls: [], requests: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {}, setAllowedProviders: () => {}, useMixcloud: () => {} };
 declare global { interface Window { playerQolTest: TestState } }
 window.playerQolTest = qa;
 const originalFetch = globalThis.fetch;
@@ -74,7 +79,7 @@ function SpotifyFixture({ playback, onStatus }: React.ComponentProps<typeof Fixt
   return null;
 }
 const adapters = { youtube: FixturePlayer, mixcloud: FixturePlayer, spotify: SpotifyFixture };
-const requestAction = (event: string, _payload: unknown, reply: (result: SocketReply) => void) => { qa.calls.push(event); qa.pending = reply; };
+const requestAction = (event: string, payload: unknown, reply: (result: SocketReply) => void) => { qa.calls.push(event); qa.requests.push({ event, payload }); qa.pending = reply; };
 function ReadyDialog({ onClose }: { onClose: () => void }) { return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}><DialogContent><DialogTitle>Deferred panel</DialogTitle><DialogDescription>Ready</DialogDescription></DialogContent></Dialog>; }
 let releaseModule: () => void;
 const loadDelayed = () => new Promise<{ default: typeof ReadyDialog }>((resolve) => { releaseModule = () => resolve({ default: ReadyDialog }); });
