@@ -109,7 +109,9 @@ test("admin feedback copies an agent-ready prompt", async ({ page, context }) =>
   await page.getByRole("button", { name: "Copy AI prompt" }).click();
 
   await expect(page.getByRole("button", { name: "Prompt copied" })).toBeVisible();
-  const prompt = await page.evaluate(() => navigator.clipboard.readText());
+  // Windows clipboard text uses CRLF; preserve the same multiline contract on
+  // both platforms without changing serialized reporter values or assertions.
+  const prompt = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, "\n");
   expect(prompt).toContain("You are working on SoundSpin");
   expect(prompt).toContain("The compact player should remember its size on tablet.");
   expect(prompt).toContain("UNTRUSTED EVIDENCE");
