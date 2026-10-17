@@ -8,6 +8,51 @@ Use Impeccable's `distill` command to simplify an existing interface.
 Preserve the project's design system, accessibility, and the copy rules below
 when applying these skills. Installation details are in `.agents/skills/README.md`.
 
+## Deployment with Dokploy
+
+Use the `dokploy` API skill for deployment work. Read
+`C:/Users/tfrom/.agents/skills/dokploy/SKILL.md` before using it.
+Target the existing **SoundSpin** project; discover its environment and service
+IDs from the API instead of creating a new project or guessing IDs.
+
+- Use `DOKPLOY_API_URL` and `DOKPLOY_API_KEY` from the environment. This workstation
+  also has `DOKPLOY_API`; use it as the URL fallback when `DOKPLOY_API_URL` is unset.
+  Normalize the URL so requests have exactly one `/api` prefix, and send the key
+  in the `x-api-key` header. Never print or commit credentials or full environment
+  responses. If the URL or key is missing, report which variable is missing;
+  do not silently use the skill's localhost default.
+- Start with `GET /api/project.all` to locate SoundSpin and inspect its services.
+  Confirm the target environment, repository, branch and Compose file before
+  deploying. If the host is unreachable, report the failure and leave live IDs
+  and deployment status unverified.
+- SoundSpin uses a **Compose** service built from `compose.yaml`. The skill's
+  `application.*` examples apply to Application services; use the instance's
+  Compose API for this service. Verify its endpoint and payload against the
+  instance's API documentation before a write.
+- Prefer direct authenticated API requests when the skill's `dokploy-*` helper
+  commands are unavailable. Use the instance documentation for HTTP methods,
+  query parameters and request bodies; do not assume Application endpoints or
+  payloads work for Compose. Read back changed configuration before deploying.
+- Reuse the discovered SoundSpin Compose service. The README's instruction to
+  create a Compose application describes initial setup, not routine releases.
+- Follow `README.md` (Dokploy deployment), `docs/production-hardening.md` and
+  `SECURITY_RELEASE_STATUS.md` for configuration and release gates. Apply pending
+  database migrations before deploying the server. Deploy to isolated staging
+  and complete the required evidence review before opening public ingress.
+- Keep exactly **one active Node instance**, including during deploys and
+  rollbacks; avoid overlapping old and new processes. Route HTTPS and Socket.IO through
+  the proxy to container port `3000`, keep WebSockets enabled and prevent direct
+  public access to the backend port. Use `.env.example` for required settings;
+  keep server credentials out of browser build variables.
+- Deploy the intended pushed revision and set `SOUNDSPIN_REVISION` to its commit
+  SHA so `compose.yaml` passes it as the `BUILD_REVISION` build argument. Record
+  the resulting image digest and migration history with the release evidence.
+  Deployment is asynchronous: record the
+  deployment ID, check status and logs until completion, then verify
+  `/api/health` and `/api/ready` through the intended ingress. Report the revision,
+  environment and verification result; a successful trigger is not a completed
+  deployment.
+
 ## Keep language restrained
 
 Use plain, direct language in product copy, documentation, and replies. Tone down
