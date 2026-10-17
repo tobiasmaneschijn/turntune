@@ -40,22 +40,35 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
       - run: node scripts/check-secrets.mjs --self-test && npm run security:secrets
 
-  codeql:
-    runs-on: ubuntu-latest
+  static-analysis:
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          languages: javascript-typescript
-          queries: security-extended
-      - uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3.38.3
+          python-version: "3.12"
+      - name: Install hash-pinned Semgrep CE and dependencies
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/semgrep-ce"
+          "$RUNNER_TEMP/semgrep-ce/bin/python" -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r security/static-analysis/requirements.txt
+      - name: Verify vulnerable, clean and failure paths
+        run: '"$RUNNER_TEMP/semgrep-ce/bin/python" security/static-analysis/check.py --self-test --output work/static-analysis-selftest'
+      - name: Scan tracked application and build sources with local rules
+        run: '"$RUNNER_TEMP/semgrep-ce/bin/python" security/static-analysis/check.py --output work/static-analysis-results'
+      - name: Preserve local static analysis reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: static-analysis-reports
+          path: |
+            work/static-analysis-selftest/
+            work/static-analysis-results/
+          if-no-files-found: error
+          retention-days: 7
 
   container:
     runs-on: ubuntu-latest

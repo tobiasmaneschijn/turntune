@@ -16,6 +16,15 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+  - package-ecosystem: pip
+    directory: /security/static-analysis
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      static-analysis-scanner:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: /
     schedule:

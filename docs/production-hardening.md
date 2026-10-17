@@ -50,7 +50,8 @@ moderation, export/deletion steps and the detailed data/retention inventory.
   aborts are propagated. Admission is released on cancellation/failure.
 - CI uses verified immutable action commits, a reviewed Node image digest,
   weekly dependency/action/image update proposals, full/runtime dependency
-  gates, redacted history/working-tree secret scanning, CodeQL and an image
+  gates, redacted history/working-tree secret scanning, local Semgrep CE static
+  analysis and an image
   vulnerability gate. Dependency exceptions are exact advisory/package records
   with ownership, justification and expiry, at most 90 days.
 
@@ -370,9 +371,16 @@ npm run security:secrets
 The secrets commands require the checksum-pinned Gitleaks binary used by CI,
 on PATH or selected with `GITLEAKS_BIN`. Build/smoke tests use isolated fixtures;
 they are not permission to contact production providers or modify production data.
-Run the relevant existing behavior/browser tests as CI requires. Review CodeQL
-and image scan results; enable GitHub code scanning for the private repository if
-the account plan requires it. Never silently disable a failing scanner.
+Run the relevant existing behavior/browser tests as CI requires. Review the
+`static-analysis` and image scan results. Semgrep CE uses pinned tooling and local
+rules; see `security/static-analysis/README.md` for setup, rule provenance,
+enforced coverage, licenses and failure-path checks. It does not upload source to
+a scanner service and does not claim CodeQL-equivalent coverage. GitHub CodeQL
+code scanning is unavailable for private personal Free/Pro repositories; private
+code scanning requires an eligible organization plan with Code Security, as
+[GitHub documents](https://docs.github.com/en/code-security/reference/code-scanning/troubleshoot-analysis-errors/private-repository-enablement). This
+repository therefore enforces the local static-analysis gate instead. Never
+silently disable a failing scanner or accept an incomplete scan as clean.
 The ordinary unit, SQL, compiled smoke and browser npm test commands use the
 shared environment allowlist: application/provider credentials, Auth overrides,
 proxy trust and Node injection settings are removed. Browser suites force
@@ -466,7 +474,7 @@ exists:
 - [ ] Music SDK authorization/logout/playback passed under enforced CSP for every
   enabled provider. No unexplained CSP violation is accepted; missing hosts are
   reviewed individually instead of adding `*`, unsafe-eval or unsafe-inline scripts.
-- [ ] Image scan and CodeQL gates passed or exact reviewed expiring exceptions
+- [ ] Image scan and static-analysis gates passed or exact reviewed expiring exceptions
   recorded; branch/ruleset requires app/security checks and code/migration review.
 - [ ] Host reports nonroot/restricted resources and exactly one active process;
   controlled concurrency/restart/shutdown checks passed.

@@ -70,12 +70,12 @@ export class SocialStore {
     return result;
   }
   private async profiles(ids: string[]): Promise<Map<string, User>> {
-    const unique = [...new Set(ids)];
-    if (!unique.length) return new Map();
+    const uniqueIds = [...new Set(ids)];
+    if (!uniqueIds.length) return new Map();
     if (this.options.supabase) {
       const users = new Map<string, User>();
-      for (let offset = 0; offset < unique.length; offset += 500) {
-        const { data, error } = await this.options.supabase.rpc("soundspin_social_profiles", { p_ids: unique.slice(offset, offset + 500) });
+      for (let offset = 0; offset < uniqueIds.length; offset += 500) {
+        const { data, error } = await this.options.supabase.rpc("soundspin_social_profiles", { p_ids: uniqueIds.slice(offset, offset + 500) });
         if (error) throw new Error("Could not load listeners.");
         for (const profile of (data || []) as SoundSpinProfile[]) {
           const user = profileUser(profile); users.set(user.id, user);
@@ -83,7 +83,7 @@ export class SocialStore {
       }
       return users;
     }
-    const entries = await Promise.all(unique.map(async id => {
+    const entries = await Promise.all(uniqueIds.map(async id => {
       if (this.options.isProfileVisible && !await this.options.isProfileVisible(id)) return null;
       const profile = await this.options.getProfile?.(id);
       return profile ? [id, profileUser(profile)] as const : null;

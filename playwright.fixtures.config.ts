@@ -10,7 +10,7 @@ export default defineConfig({
   // Keep a final failure screenshot,
   // test-source/API-call traces and the reporter's accessible error context.
   // Playwright also disables network HAR when DOM snapshots are disabled.
-  use: { baseURL: "http://127.0.0.1:4175", colorScheme: "dark", screenshot: "only-on-failure", trace: {mode:"retain-on-failure",snapshots:false,screenshots:false,sources:true} },
+  use: { baseURL: "http://127.0.0.1:4175", timezoneId: "UTC", colorScheme: "dark", screenshot: "only-on-failure", trace: {mode:"retain-on-failure",snapshots:false,screenshots:false,sources:true} },
   projects: [
     { name: "desktop", grepInvert: /@mobile-only/, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     // Tests that choose their own viewport already exercise the same geometry

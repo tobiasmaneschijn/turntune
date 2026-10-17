@@ -1,0 +1,147 @@
+# Project additions for ESM, typed arrow handlers and native fetch.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 SoundSpin contributors
+rules:
+  - id: soundspin.request-command-injection
+    languages: [javascript, typescript]
+    message: Request data reaches a shell command. Use a fixed executable and argument array with shell disabled.
+    severity: ERROR
+    metadata: {cwe: CWE-78, category: security}
+    mode: taint
+    pattern-sources: &request-sources
+      - pattern: $REQ.body
+      - pattern: $REQ.query
+      - pattern: $REQ.params
+      - pattern: $REQ.headers
+      - pattern: $REQ.cookies
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CP.exec($CMD, ...)
+              - pattern: $CP.execSync($CMD, ...)
+              - pattern: exec($CMD, ...)
+              - pattern: execSync($CMD, ...)
+          - focus-metavariable: $CMD
+
+  - id: soundspin.request-code-injection
+    languages: [javascript, typescript]
+    message: Request data reaches JavaScript execution. Replace dynamic code with explicit operations.
+    severity: ERROR
+    metadata: {cwe: CWE-95, category: security}
+    mode: taint
+    pattern-sources: *request-sources
+    pattern-sinks:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+      - pattern: $VM.runInNewContext(...)
+      - pattern: $VM.runInContext(...)
+
+  - id: soundspin.request-html-response
+    languages: [javascript, typescript]
+    message: Request data reaches an HTML response. Return JSON or encode untrusted text for its HTML context.
+    severity: ERROR
+    metadata: {cwe: CWE-79, category: security}
+    mode: taint
+    pattern-sources: *request-sources
+    pattern-sinks:
+      - pattern: $RES.send(...)
+      - pattern: $RES.write(...)
+      - pattern: $RES.end(...)
+
+  - id: soundspin.request-sql-injection
+    languages: [javascript, typescript]
+    message: Request data reaches raw SQL text. Use a fixed SQL statement and bound parameters.
+    severity: ERROR
+    metadata: {cwe: CWE-89, category: security}
+    mode: taint
+    pattern-sources: *request-sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.query($SQL, ...)
+              - pattern: $DB.execute($SQL, ...)
+              - pattern: $DB.raw($SQL, ...)
+              - pattern: $DB.exec($SQL, ...)
+          - focus-metavariable: $SQL
+
+  - id: soundspin.request-ssrf
+    languages: [javascript, typescript]
+    message: Request data reaches an outbound URL. Resolve identifiers against fixed approved origins and reject redirects to unapproved destinations.
+    severity: ERROR
+    metadata: {cwe: CWE-918, category: security}
+    mode: taint
+    pattern-sources: *request-sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: fetch($URL, ...)
+          - focus-metavariable: $URL
+
+  - id: soundspin.request-path-traversal
+    languages: [javascript, typescript]
+    message: Request data reaches a filesystem path. Use server-owned identifiers and prove path containment before filesystem access.
+    severity: ERROR
+    metadata: {cwe: CWE-22, category: security}
+    mode: taint
+    pattern-sources: *request-sources
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $FS.readFile($PATH, ...)
+              - pattern: $FS.readFileSync($PATH, ...)
+              - pattern: $FS.createReadStream($PATH, ...)
+              - pattern: $FS.writeFile($PATH, ...)
+              - pattern: readFile($PATH, ...)
+              - pattern: readFileSync($PATH, ...)
+              - pattern: createReadStream($PATH, ...)
+              - pattern: $RES.sendFile($PATH, ...)
+          - focus-metavariable: $PATH
+
+  - id: soundspin.react-unsafe-html
+    languages: [javascript, typescript]
+    message: Review raw HTML passed to React. Render text or sanitize with a maintained HTML sanitizer before using dangerouslySetInnerHTML.
+    severity: ERROR
+    metadata: {cwe: CWE-79, category: security}
+    patterns:
+      - pattern: <$EL ... dangerouslySetInnerHTML={$HTML} ... />
+      - pattern-not: '<$EL ... dangerouslySetInnerHTML={{__html: "..."}} ... />'
+      - pattern-not: '<$EL ... dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(...)}} ... />'
+
+  - id: soundspin.tls-verification-disabled
+    languages: [javascript, typescript]
+    message: TLS certificate verification must remain enabled.
+    severity: ERROR
+    metadata: {cwe: CWE-295, category: security}
+    pattern-either:
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+      - pattern: process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'
+      - pattern: '{..., rejectUnauthorized: false, ...}'
+
+  - id: soundspin.jwt-none-algorithm
+    languages: [javascript, typescript]
+    message: Do not accept unsigned JWTs. Require the expected signature algorithm, issuer, audience and expiry.
+    severity: ERROR
+    metadata: {cwe: CWE-347, category: security}
+    pattern-either:
+      - pattern: '$JWT.verify(..., {..., algorithms: [..., "none", ...], ...}, ...)'
+      - pattern: 'jwtVerify(..., {..., algorithms: [..., "none", ...], ...}, ...)'
+      - pattern: '$JWT.jwtVerify(..., {..., algorithms: [..., "none", ...], ...}, ...)'
+
+  - id: soundspin.hardcoded-jwt-key
+    languages: [javascript, typescript]
+    message: A JWT signing or verification key is embedded in source. Load keys from the approved secret store or project JWKS.
+    severity: ERROR
+    metadata: {cwe: CWE-798, category: security}
+    pattern-either:
+      - pattern: $JWT.sign($PAYLOAD, "...", ...)
+      - pattern: $JWT.verify($TOKEN, "...", ...)
+      - pattern: jwtVerify($TOKEN, "...", ...)
+
+  - id: soundspin.deprecated-pseudorandom-bytes
+    languages: [javascript, typescript]
+    message: Use crypto.randomBytes for cryptographic randomness instead of deprecated pseudoRandomBytes.
+    severity: ERROR
+    metadata: {cwe: CWE-338, category: security}
+    pattern-either:
+      - pattern: $CRYPTO.pseudoRandomBytes(...)
+      - pattern: pseudoRandomBytes(...)

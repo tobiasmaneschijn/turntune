@@ -70,7 +70,7 @@ import {
   removeDj,
   roomForListener
 } from "./radio.js";
-import type { Room, RoomSnapshot, User } from "./types.js";
+import type { Room, RoomMemberRecord, RoomSnapshot, User } from "./types.js";
 
 validateServerConfig(process.env);
 
@@ -378,7 +378,7 @@ const moderation=new ModerationService(store,{
   memberPage:supabaseAdmin ? async(roomId,query,cursor)=>{
     const {data,error}=await supabaseAdmin.rpc("soundspin_room_member_page",{p_room:roomId,p_query:query,p_cursor:cursor??null,p_limit:50});
     if(error)throw new Error("Room members are unavailable.");
-    return data as {members:import("./types.js").RoomMemberRecord[];cursor:string|null};
+    return data as {members:RoomMemberRecord[];cursor:string|null};
   }:undefined,
   validateMessage:async(roomId,messageId)=>{const message=await chatCommands.loadMessage(messageId);return message?.roomId===roomId?{userId:message.userId}:null;}
 });
