@@ -7,9 +7,9 @@ interface ConnectionLeaseTarget {
 }
 /** An Engine.IO close can precede namespace acceptance, when disconnect never
  * fires. Both lifecycle signals release the same idempotent account lease. */
-export function claimSocketAccount(budget:SecurityBudget,socket:ConnectionLeaseTarget,userId:string):()=>void {
+export function claimSocketAccount(budget:SecurityBudget,socket:ConnectionLeaseTarget,userId:string,maximum=5):()=>void {
   if(socket.conn.readyState!=="open")throw new RoomCommandError("This connection has ended.");
-  const release=budget.acquire(`socket-user:${userId}`,5);
+  const release=budget.acquire(`socket-user:${userId}`,maximum);
   if(!release)throw new SecurityLimitError();
   socket.conn.once("close",release);socket.once("disconnect",release);
   if(socket.conn.readyState!=="open"){release();throw new RoomCommandError("This connection has ended.");}
@@ -28,6 +28,7 @@ interface Window { count: number; expiresAt: number }
 export class SecurityBudget {
   private windows = new Map<string, Window>();
   private running = new Map<string, number>();
+  private buckets = new Map<string, { tokens: number; updatedAt: number; expiresAt: number }>();
   private nextPrune = 0;
   constructor(private readonly now = Date.now, private readonly maximumKeys = 20_000) {}
 
@@ -60,6 +61,21 @@ export class SecurityBudget {
       const remaining = (this.running.get(key) ?? 1)-1;
       if (remaining) this.running.set(key,remaining); else this.running.delete(key);
     };
+  }
+
+  /** Short bursts refill gradually; denied multi-key requests spend no tokens. */
+  consumeBurst(rules: Array<{key:string;capacity:number;perMinute:number}>): boolean {
+    const now=this.now();
+    for(const [key,value] of this.buckets) if(value.expiresAt<=now)this.buckets.delete(key);
+    const changes=rules.map(rule=>{
+      const previous=this.buckets.get(rule.key);
+      const tokens=previous?Math.min(rule.capacity,previous.tokens+Math.max(0,now-previous.updatedAt)*rule.perMinute/60_000):rule.capacity;
+      return {rule,tokens};
+    });
+    if(changes.some(({rule,tokens})=>!Number.isFinite(rule.capacity)||rule.capacity<1||!Number.isFinite(rule.perMinute)||rule.perMinute<1||tokens<1))return false;
+    if(this.buckets.size+changes.filter(({rule})=>!this.buckets.has(rule.key)).length>this.maximumKeys)return false;
+    for(const {rule,tokens} of changes)this.buckets.set(rule.key,{tokens:tokens-1,updatedAt:now,expiresAt:now+Math.max(60_000,rule.capacity*60_000/rule.perMinute)});
+    return true;
   }
 
   run<T>(key: string, maximum: number, operation: () => Promise<T>): Promise<T> {

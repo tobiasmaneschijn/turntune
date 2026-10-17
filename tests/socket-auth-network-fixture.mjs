@@ -1,9 +1,11 @@
 // Test-only transport. The real JWT verifier uses an ephemeral public JWKS and
 // every operation remains local: provider/real-project traffic is prohibited.
+import { defaultResourcePolicy } from "../shared/resource-policy.ts";
 const origin = "https://soundspin-socket-auth.invalid";
 const userId = "11111111-1111-4111-8111-111111111111";
 let state = { id: "auth-room", name: "Auth room", ownerUserId: userId, moderatorUserIds: [], djRoleUserIds: [],
-  isPublic: true, passwordProtected: false, settings: {}, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
+  // Explicit fixture grant allows the real HTTP gate to exercise live admission.
+  isPublic: true, passwordProtected: false, settings: { spotifyEnabled: true }, djUserId: null, djQueueUserIds: [], djQueues: {}, history: [],
   playback: { track: null, playing: false, position: 0, updatedAt: 1 }, vibe: null, createdAt: 1 };
 const profile = { user_id: userId, display_name: "Verified listener", is_app_admin: false, avatar_key: "default", avatar_url: null };
 const metadata = () => ({ slug: state.id, state, name: state.name, owner_id: userId, is_public: true, access_mode: "public", password_hash: null, settings: state.settings });
@@ -30,6 +32,10 @@ globalThis.fetch = async (input, init) => {
   const table = url.pathname.split("/").at(-1);
   if (url.pathname.startsWith("/rest/v1/rpc/") && method === "POST") {
     const body = JSON.parse(init?.body || await request?.text() || "{}");
+    if (table === "soundspin_resource_policy") {
+      if (body.p_actor !== null && body.p_actor !== userId) throw new Error("Invalid test resource-policy actor.");
+      return json(defaultResourcePolicy());
+    }
     if (maintenance.has(table)) return json(maintenance.get(table));
     if (table === "soundspin_room_enabled") return json(body.p_room_slug === "auth-room" && !roomDisabled && !accountSuspended);
     if (table === "soundspin_admit_room") {

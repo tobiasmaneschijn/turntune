@@ -10,11 +10,12 @@ import type { ProfileTrack } from "../types";
 
 export const profileTrackKey = (track: ProfileTrack) => `${track.provider}:${track.providerId}`;
 
-export function ProfileMusicEditor({ tracks, onChange, accessToken, userId, disabled = false }: {
+export function ProfileMusicEditor({ tracks, onChange, accessToken, userId, spotifyEnabled = false, disabled = false }: {
   tracks: ProfileTrack[];
   onChange: (tracks: ProfileTrack[]) => void;
   accessToken: string;
   userId: string;
+  spotifyEnabled?: boolean;
   disabled?: boolean;
 }) {
   const filterId = useId();
@@ -44,8 +45,8 @@ export function ProfileMusicEditor({ tracks, onChange, accessToken, userId, disa
     for (const track of [...(library?.picks.map((pick) => pick.track) || []), ...(library?.sets.flatMap((set) => set.tracks) || [])]) {
       if (!unique.has(profileTrackKey(track))) unique.set(profileTrackKey(track), libraryTrack(track));
     }
-    return [...unique.values()];
-  }, [library]);
+    return [...unique.values()].filter(track => spotifyEnabled || track.provider !== "spotify");
+  }, [library, spotifyEnabled]);
   const selected = new Set(tracks.map(profileTrackKey));
   const needle = filter.trim().toLocaleLowerCase();
   const matches = available.filter((track) => `${track.title} ${track.artist || ""}`.toLocaleLowerCase().includes(needle));
@@ -59,7 +60,7 @@ export function ProfileMusicEditor({ tracks, onChange, accessToken, userId, disa
     <div className="profile-section-heading"><h2>Favorite songs</h2><small>{tracks.length} / 3</small></div>
     <p className="profile-visibility-note">Shown on your profile.</p>
     {tracks.length > 0 && <ol className="profile-song-list" aria-label="Selected favorite songs">
-      {tracks.map((track, index) => <li key={profileTrackKey(track)} className="profile-song">
+      {tracks.map((track, index) => spotifyEnabled || track.provider !== "spotify" ? <li key={profileTrackKey(track)} className="profile-song">
         <TrackArtwork track={track} compact />
         <span className="profile-song-copy"><strong>{track.title}</strong><small>{[track.artist, providerLabel(track.provider)].filter(Boolean).join(" · ")}</small></span>
         <div className="profile-song-actions">
@@ -67,7 +68,7 @@ export function ProfileMusicEditor({ tracks, onChange, accessToken, userId, disa
           <Button type="button" variant="ghost" size="icon-sm" disabled={disabled || index === tracks.length - 1} aria-label={`Move ${track.title} down`} onClick={() => move(index, 1)}><ArrowDown /></Button>
           <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} aria-label={`Remove ${track.title} from favorites`} onClick={() => onChange(tracks.filter((_, position) => position !== index))}><X /></Button>
         </div>
-      </li>)}
+      </li> : null)}
     </ol>}
     {loading && <p role="status">Loading picks…</p>}
     {error && <div className="profile-inline-error" role="alert"><p>{error}</p><Button type="button" variant="outline" size="sm" onClick={() => setRevision((value) => value + 1)}>Retry</Button></div>}

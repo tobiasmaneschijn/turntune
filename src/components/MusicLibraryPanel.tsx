@@ -5,7 +5,7 @@ import { Input } from "./ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { TrackArtwork } from "./TrackArtwork";
 import { providerLabel } from "../music-presentation";
-import { libraryTrack, type LibraryMutation, type LibraryTrack, type PrivateLibrary, type SavedSet } from "../music-library";
+import { libraryLimits, libraryTrack, type LibraryMutation, type LibraryTrack, type PrivateLibrary, type SavedSet } from "../music-library";
 import type { Provider, Track } from "../types";
 import "../styles/music-library.css";
 
@@ -76,6 +76,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
   };
 
   if (!signedIn) return <div className="rail-empty"><p>Sign in to save picks and sets.</p></div>;
+  const limits = libraryLimits(library);
   const needle = filter.trim().toLocaleLowerCase();
   const picks = library?.picks.filter((pick) => [pick.track.title, pick.track.artist].some((value) => value?.toLocaleLowerCase().includes(needle))) || [];
   const sets = library?.sets.filter((set) => set.name.toLocaleLowerCase().includes(needle) || set.tracks.some((track) => [track.title, track.artist].some((value) => value?.toLocaleLowerCase().includes(needle)))) || [];
@@ -93,7 +94,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
       <Button variant="ghost" disabled={busy || loading} onClick={() => setConfirmClear(false)}>Cancel</Button>
     </> : <Button variant="ghost" size="sm" disabled={busy || loading} onClick={() => setConfirmClear(true)}>Clear library…</Button>}</div>}
     {library && <>
-      <h3>Picks {library.picks.length >= 450 && <small>{library.picks.length}/500</small>}</h3>
+      <h3>Picks {library.picks.length >= limits.libraryPicks * 0.9 && <small>{library.picks.length}/{limits.libraryPicks}</small>}</h3>
       {picks.map((pick, index) => {
         const queued = isQueued(pick.track);
         const providerDisabled = !allowsProvider(pick.track.provider);
@@ -118,7 +119,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
         </div>;
       })}
       {picks.length === 0 && <p className="music-library-empty">{needle ? "No matching picks." : "Save picks from a track’s menu."}</p>}
-      <h3>Sets {library.sets.length >= 25 && <small>{library.sets.length}/30</small>}</h3>
+      <h3>Sets {library.sets.length >= limits.librarySets * 0.8 && <small>{library.sets.length}/{limits.librarySets}</small>}</h3>
       <details className="music-create-set" open={createSetOpen} onToggle={(event) => {
         if (event.currentTarget.open !== createSetOpen) changeSaveSetOpen(event.currentTarget.open);
       }}>
@@ -127,7 +128,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
           event.preventDefault();
           const form = event.currentTarget;
           if (!setName.trim()) { setFormError("Enter a set name."); setNameRef.current?.focus(); return; }
-          if (!queue.length || queue.length > 50) { setFormError("A set needs 1–50 waiting tracks."); return; }
+          if (!queue.length || queue.length > limits.librarySetTracks) { setFormError(`A set needs 1–${limits.librarySetTracks} waiting tracks.`); return; }
           draftId.current ||= crypto.randomUUID();
           if (await mutate({ type: "save-set", id: draftId.current, name: setName.trim(), tracks: queue.map(libraryTrack) })) {
             setSetName(""); draftId.current = null; setFormError(""); changeSaveSetOpen(false);
@@ -135,10 +136,10 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
           }
         }}>
           <label>Set name<Input ref={setNameRef} value={setName} disabled={busy} maxLength={60} onChange={(event) => { setSetName(event.target.value); draftId.current = null; setFormError(""); }} placeholder="Friday focus" /></label>
-          <div className="music-library-form-actions"><Button type="submit" disabled={busy || !queue.length || queue.length > 50 || library.sets.length >= 30}>Save set</Button><Button variant="ghost" type="button" disabled={busy} onClick={(event) => { changeSaveSetOpen(false); restoreActionFocus(() => saveSetSummaryRef.current, [event.currentTarget]); }}>Cancel</Button></div>
+          <div className="music-library-form-actions"><Button type="submit" disabled={busy || !queue.length || queue.length > limits.librarySetTracks || library.sets.length >= limits.librarySets}>Save set</Button><Button variant="ghost" type="button" disabled={busy} onClick={(event) => { changeSaveSetOpen(false); restoreActionFocus(() => saveSetSummaryRef.current, [event.currentTarget]); }}>Cancel</Button></div>
           {!queue.length && <small>Add a track to your queue first.</small>}
-          {queue.length > 50 && <small>50-track limit. Shorten your queue first.</small>}
-          {library.sets.length >= 30 && <small>30-set limit. Delete a set first.</small>}
+          {queue.length > limits.librarySetTracks && <small>{limits.librarySetTracks}-track limit. Shorten your queue first.</small>}
+          {library.sets.length >= limits.librarySets && <small>{limits.librarySets}-set limit. Delete a set first.</small>}
           {formError && <p role="alert">{formError}</p>}
         </form>
       </details>

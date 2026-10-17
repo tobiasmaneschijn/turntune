@@ -175,8 +175,12 @@ Staging completion evidence:
 Before deployment, apply **all** committed migrations in timestamp order to an
 isolated staging project. The security release adds platform/privacy, managed
 upload/feedback, chat moderation, social/library, and ordered room admission
-migrations dated 2026-10-13. Do not cherry-pick only a new file; they rely on the
-preceding schema. Use the migration tool's recorded history, review the exact
+migrations dated 2026-10-13, followed by
+`20261017174956_configurable_resource_limits.sql`. There are 31 committed
+migrations. The latest adds service-only plans/configuration, quota enforcement,
+bounded chat retention, and the administrator-only room Spotify capability.
+Do not cherry-pick only a new file; they rely on the preceding schema.
+Use the migration tool's recorded history, review the exact
 pending migration list, and take a recovery snapshot before production apply.
 This work does not apply migrations to the configured live project.
 
@@ -208,6 +212,15 @@ After migrating, verify with the real Supabase gateway:
 - Review database console/SQL access, project members and service-key consumers.
   The database need not have a public unrestricted SQL port because the app uses
   the Supabase API. Restrict direct SQL access to required operators/tools.
+- Verify resource configuration, plans, and assignments reject direct browser
+  reads/writes and privileged policy RPC calls. Accounts default to `free`;
+  operators alone assign future plans. Read back effective policies after changes
+  and test both quota rejection and removal of existing over-limit saved work.
+  See [resource limits](resource-limits.md) for the configuration contract.
+- Spotify starts disabled for rooms. An active application administrator with
+  MFA/AAL2 can enable it through the dedicated control; an owner/moderator settings
+  update must not change that capability. Verify direct RPC denial and the SQL
+  guard for both persisted settings representations.
 
 ## Capacity, containers and one active process
 
@@ -294,12 +307,24 @@ Feedback resolved/closed for 90 days is deleted after screenshot keys are queued
 admin/chat-removal audits and completed deletion jobs expire after 180 days.
 The separate `soundspin_purge_security_archives()` RPC removes at most 1,000
 expired rows from each of its moderation and chat-child archive tables per batch.
+`soundspin_prune_chat_history(500)` removes chat outside the latest 10,000 messages
+per room or older than 90 days by default. Limits are operator configurable.
+The worker processes at most 20 rooms and 500 parent messages per call; a durable
+cursor advances even when a room fills the batch so other rooms receive cleanup.
+Reply lookups use the reply index. Each call clears at most 500 incoming reply
+references; a still-referenced parent waits for another pass. This avoids an
+unbounded FK update for a popular message. Deleting a parent cascades its bounded
+reactions/poll votes. Owned attachments enter
+the existing outbox with a five-minute signed-URL delay. Migration installation
+does not trim messages. Review and publish this policy before deploying its worker.
 The app runs retention at startup and hourly, at most 20 batches or 20 seconds
 per maintenance run. Storage cleanup runs every 60 seconds with
 at most 20 batches of 100 objects or 20 seconds. Monitor cleanup until the queue
 drains, and verify the schedules actually execute on the deployed process.
-Live room history/private libraries persist until owner/room
-deletion, and active feedback persists until resolution. UUID/slug restriction
+Private libraries persist until owner deletion, and active feedback persists
+until resolution. Chat backlogs drain over multiple bounded runs; review age/count
+backlog and actual hosting throughput rather than assuming immediate deletion.
+UUID/slug restriction
 tombstones remain until an explicit reviewed backup-replay policy permits their
 removal. Verify these actual periods match the notice/legal requirements and
 that scheduled runs occur; a document alone does not prune data.

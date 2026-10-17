@@ -57,10 +57,10 @@ interface ProfileUpdate {
 }
 
 export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwnProfileUpdated, onOpenAdmin,
-  embedded = false, onInvite, onEditStateChange }: {
+  embedded = false, spotifyEnabled = false, onInvite, onEditStateChange }: {
   profileId: string; accessToken: string; currentUser: User; onBack: () => void;
   onOwnProfileUpdated: (profile: SoundSpinProfile) => void; onOpenAdmin?: () => void;
-  embedded?: boolean; onInvite?: (userId: string) => void;
+  embedded?: boolean; spotifyEnabled?: boolean; onInvite?: (userId: string) => void;
   onEditStateChange?: (state: { dirty: boolean; busy: boolean; discard: () => void }) => void;
 }) {
   const formId = useId();
@@ -409,7 +409,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const themeOptions = options.filter((option) => option.kind === "theme");
   const blocked = Boolean(social?.blockedPeople?.some(user => user.id === profileId));
   const relationship = social?.people.find((person) => person.user.id === profileId)?.state;
-  const songs = profile.favorite_tracks || [];
+  const songs = (profile.favorite_tracks || []).filter(track => spotifyEnabled || track.provider !== "spotify");
 
   return <Container className={`profile-page profile-theme-${profile.theme_key}${embedded ? " profile-embedded" : ""}`}>
     {!embedded && <header className="profile-page-header"><div className="profile-header-inner">
@@ -474,7 +474,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
             <div className="grid gap-2"><Label htmlFor={`${formId}-handle`}>Handle</Label><Input id={`${formId}-handle`} value={handle} maxLength={24} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={`${formId}-handle-help`} onChange={(event) => { draftVersionRef.current++; setHandle(event.target.value.toLowerCase()); }} /><small id={`${formId}-handle-help`}>3–24 letters, numbers, or underscores.</small></div>
             <div className="grid gap-2"><Label htmlFor={`${formId}-status`}>Status</Label><Input id={`${formId}-status`} value={statusText} maxLength={80} onChange={(event) => { draftVersionRef.current++; setStatusText(event.target.value); }} /></div>
             <div className="grid gap-2"><Label htmlFor={`${formId}-bio`}>Bio</Label><Textarea id={`${formId}-bio`} value={bio} maxLength={160} rows={3} onChange={(event) => { draftVersionRef.current++; setBio(event.target.value); }} /><small>{bio.length} / 160</small></div>
-            <ProfileMusicEditor tracks={favoriteTracks} onChange={(tracks) => { draftVersionRef.current++; setFavoriteTracks(tracks); }} accessToken={accessToken} userId={currentUser.id} disabled={saving || uploadingAvatar} />
+            <ProfileMusicEditor spotifyEnabled={spotifyEnabled} tracks={favoriteTracks} onChange={(tracks) => { draftVersionRef.current++; setFavoriteTracks(tracks); }} accessToken={accessToken} userId={currentUser.id} disabled={saving || uploadingAvatar} />
             {error && <p className="profile-inline-error" role="alert">{error}</p>}
             <div className="profile-edit-actions"><Button type="submit" disabled={saving || uploadingAvatar || !displayName.trim()}>{saving ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={saving || uploadingAvatar} onClick={discardDraft}>Cancel</Button></div>
           </form>

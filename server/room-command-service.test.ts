@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Store } from "./store.js";
+import { ResourcePolicyStore } from "./resource-policy.js";
 import { RoomCommandService } from "./room-command-service.js";
 import { advanceRadio, QueueUndoRegistry } from "./radio.js";
 import type { Room, Track } from "./types.js";
@@ -13,7 +14,7 @@ const room = (id = "room-one"): Room => ({ id, name: id, ownerUserId: "alice", m
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
 async function setup(write: (state: Room) => Promise<void>) {
   let recording = false;
-  const store = new Store({ supabase: { from() { return { update({ state }: { state: Room }) {
+  const store = new Store({ resourcePolicies:new ResourcePolicyStore(null),supabase: { from() { return { update({ state }: { state: Room }) {
     const query = { eq() { return query; }, select() { return query; }, async maybeSingle() {
       if (recording) await write(state); return { data: { slug: state.id }, error: null };
     } }; return query;

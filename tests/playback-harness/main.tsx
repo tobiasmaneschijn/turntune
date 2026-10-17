@@ -132,6 +132,7 @@ const realFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const path = new URL(url, location.href).pathname;
+  if (path.startsWith("/api/spotify/") && new Headers(init?.headers).get("x-soundspin-room") !== "fixture-room") return Response.json({ error: "An enabled room is required." }, { status: 403 });
   if (path === "/api/spotify/token") {
     commands.push({ source: "api", action: "token", authorization: new Headers(init?.headers).get("Authorization") });
     return Response.json({ accessToken: "mock-spotify-access-token" });
@@ -193,7 +194,7 @@ const onError = (message: string) => { errors.push(message); };
 let mounted = true;
 
 function render() {
-  root.render(mounted ? <SpotifyPlayer
+  root.render(mounted ? <SpotifyPlayer roomSlug="fixture-room"
     playback={playback}
     mapping={mapping}
     mode={mode}

@@ -360,7 +360,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     setSearchError("");
     try {
       const response = await fetch(`/api/${provider}/search?q=${encodeURIComponent(searchQuery)}`, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), "x-soundspin-room": snapshot.room.id },
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)])
       });
       const payload = await response.json() as { results?: Array<ProviderSearchResult & { channel?: string }>; error?: string };
@@ -417,7 +417,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
         track = { provider: "youtube", providerId: parsed.providerId!, title: title || "YouTube track", artist, permalinkUrl: parsed.url };
       } else {
         const response = await fetch(`/api/${parsed.provider}/resolve?url=${encodeURIComponent(parsed.url)}`, {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), "x-soundspin-room": snapshot.room.id },
           signal: AbortSignal.any([request.signal, AbortSignal.timeout(15_000)])
         });
         const payload = await response.json() as { result?: ProviderSearchResult; error?: string };
@@ -525,7 +525,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   </div>;
 
   const queueActions = accessToken && tab === "queue" && snapshot.room.queue.length > 0 ? (
-    <DropdownMenu onOpenChange={(open) => { if (open) queueSaveFocusRef.current = false; }}><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Queue actions" />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu" finalFocus={() => queueSaveFocusRef.current ? saveSetInputRef.current || libraryTabRef.current || true : true}><DropdownMenuItem disabled={libraryBusy || Boolean(pending) || snapshot.room.queue.length > 50} onClick={() => { queueSaveFocusRef.current = true; setSaveSetOpen(true); setTab("library"); }}><Bookmark />Save queue as set</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => { if (open) queueSaveFocusRef.current = false; }}><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="Queue actions" />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu" finalFocus={() => queueSaveFocusRef.current ? saveSetInputRef.current || libraryTabRef.current || true : true}><DropdownMenuItem disabled={libraryBusy || Boolean(pending)} onClick={() => { queueSaveFocusRef.current = true; setSaveSetOpen(true); setTab("library"); }}><Bookmark />Save queue as set</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
   ) : null;
 
   const feedback = (

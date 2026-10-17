@@ -44,7 +44,7 @@ test("source verifier uses canonical URLs and rejects unavailable or mismatched 
   const spotify = { configured: false } as SpotifyApi;
   const appleMusic = { configured: false } as AppleMusicApi;
   const soundCloud = { configured: true, resolveTrack: async () => { calls++; return { id: "soundcloud:tracks:999", title: "Wrong recording" }; } } as unknown as SoundCloudApi;
-  const resolve = createSavedSetResolver({ spotify, appleMusic, soundCloud, fetchImpl: (async (url) => { requested = String(url); return new Response(JSON.stringify({ title: "Current source title", author_name: "Current artist" }), { status: 200 }); }) as typeof fetch });
+  const resolve = createSavedSetResolver({ spotify, appleMusic, soundCloud, allowSpotify: true, fetchImpl: (async (url) => { requested = String(url); return new Response(JSON.stringify({ title: "Current source title", author_name: "Current artist" }), { status: 200 }); }) as typeof fetch });
   const result = await resolve(track, new AbortController().signal);
   assert.equal(result.title, "Current source title"); assert.equal(result.artist, "Current artist");
   assert.equal(new URL(requested).searchParams.get("url"), "https://www.youtube.com/watch?v=dQw4w9WgXcQ");

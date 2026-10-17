@@ -118,6 +118,10 @@ export function normalizeRadioState(room: Room) {
   } else {
     room.vibe = null;
   }
+  if(room.playback.playing&&room.playback.track?.provider==="spotify"&&!roomAllowsProvider(room.settings,"spotify")) {
+    room.playback.playing=false;
+    room.playback.updatedAt=Date.now();
+  }
 }
 
 function isUsableTrack(value: unknown): value is Track {

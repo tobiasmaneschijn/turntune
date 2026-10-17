@@ -2,6 +2,7 @@ import express from "express";
 import { libraryMutationSchema, PrivateLibraryDataError } from "./private-library.js";
 import { BoundedCache } from "./bounded-cache.js";
 import type { Store } from "./store.js";
+import { PublicRequestError } from "./public-request-error.js";
 
 /** Identity always comes from verified request credentials, never from JSON/query. */
 export function mountPrivateLibraryRoutes(app: express.Express, store: Store, getUserId: (request: express.Request) => Promise<string | null>, now = Date.now) {
@@ -23,7 +24,7 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
       const userId = await getUserId(request);
       if (!userId) return response.status(401).json({ error: "Sign in to use private picks and sets." });
       if (!allow(userId, "read", response)) return;
-      response.json({ library: await store.getPrivateLibrary(userId) });
+      response.json({ library: await store.getPrivateLibrary(userId), limits:(await store.resourcePolicies.get(userId)).limits });
     } catch (error) { response.status(error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PrivateLibraryDataError ? error.message : "Could not load private picks and sets." }); }
   });
   app.post("/api/library", noStore, express.json({ limit: "1mb" }), async (request, response) => {
@@ -33,7 +34,7 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
       if (!allow(userId, "write", response)) return;
       const parsed = libraryMutationSchema.safeParse(request.body);
       if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid library action." });
-      response.json({ library: await store.updatePrivateLibrary(userId, parsed.data) });
-    } catch (error) { response.status(error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PrivateLibraryDataError ? error.message : "Could not save private picks and sets." }); }
+      response.json({ library: await store.updatePrivateLibrary(userId, parsed.data),limits:(await store.resourcePolicies.get(userId)).limits });
+    } catch (error) { response.status(error instanceof PublicRequestError?error.status:error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PublicRequestError||error instanceof PrivateLibraryDataError ? error.message : "Could not save private picks and sets." }); }
   });
 }

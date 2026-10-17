@@ -43,6 +43,10 @@ import { createSavedSetResolver, SetImportRegistry } from "./saved-set.js";
 import { validateServerConfig } from "./config.js";
 import { configureHttpSecurity, trustedClientIp, trustedSocketPeer } from "./security-http.js";
 import { SecurityBudget, SecurityLimitError, peerRequestBudget, claimSocketAccount } from "./security-budget.js";
+import { ResourceAdmission } from "./resource-admission.js";
+import { DEFAULT_GLOBAL_LIMITS } from "../shared/resource-policy.js";
+import { roomAllowsProvider } from "../shared/providers.js";
+import { spotifyRoomContext } from "./spotify-access.js";
 import { validUserClaims } from "./security-identity.js";
 import { PlatformSecurity } from "./platform-security.js";
 import { cleanupRestrictedAccount } from "./account-restriction-cleanup.js";
@@ -54,6 +58,7 @@ import { cleanupManagedUploads } from "./managed-uploads.js";
 import { mountSignupRoutes } from "./signup-routes.js";
 import { securityEvent, securityEventSnapshot, securityRequestContext } from "./security-events.js";
 import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
+import { PublicRequestError } from "./public-request-error.js";
 import { roomPresence, uniqueUsers } from "./presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./announcements.js";
 import { SoundCloudApi } from "./soundcloud.js";
@@ -80,6 +85,9 @@ app.use(securityRequestContext);
 app.use("/api",(_request,response,next)=>{response.set("Cache-Control","no-store");response.vary("Authorization");next();});
 const httpSecurity = configureHttpSecurity(app,process.env);
 const securityBudget = new SecurityBudget();
+const resourceAdmission = new ResourceAdmission(securityBudget);
+let globalResourceLimits = DEFAULT_GLOBAL_LIMITS;
+let globalResourcePolicyAvailable = true;
 app.use("/api",peerRequestBudget(securityBudget,trustedClientIp));
 const httpServer = createServer(app);
 httpServer.requestTimeout = 30_000;
@@ -90,12 +98,20 @@ const io: Server = new Server(httpServer, {
   allowRequest: (request,done) => httpSecurity.allowRequest(request,(error,allowed) => {
     if (!allowed) return done(error,false);
     const peer=trustedClientIp(request);
-    if (io.engine.clientsCount >= 1000 || !securityBudget.consume([{key:`socket-open:${peer}`,maximum:120,windowMs:60_000}])) return done("Too many connections.",false);
+    if (!globalResourcePolicyAvailable || io.engine.clientsCount >= globalResourceLimits.socketsTotal || !securityBudget.consume([{key:`socket-open:${peer}`,maximum:120,windowMs:60_000}])) return done("Too many connections.",false);
     done(null,true);
   })
 });
 io.engine.use((request:IncomingMessage,_response:ServerResponse,next:(error?:Error)=>void)=>httpSecurity.allowRequest(request,(error,allowed)=>allowed?next():next(new Error(error||"Request not allowed."))));
 const store = new Store();
+const resourcePolicies = store.resourcePolicies;
+// Engine.IO includes unauthenticated transports. Claim capacity synchronously
+// when the transport opens so simultaneous handshakes cannot over-admit.
+io.engine.on("connection",connection=>{
+  const release=securityBudget.acquire("socket-total",globalResourceLimits.socketsTotal);
+  if(!release){connection.close(true);return;}
+  connection.once("close",release);
+});
 const roomCommands = new RoomCommandService(store, broadcast);
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
@@ -139,6 +155,7 @@ const queueUndo = new QueueUndoRegistry();
 const setImports = new SetImportRegistry();
 const roomEntryLimiter = new RoomEntryLimiter();
 const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey });
+const resolveSpotifySavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey,allowSpotify:true });
 const sessionScheduler=new RoomSessionScheduler(roomCommands,broadcast,id=>uniqueUsers(roomUsers.get(id)?.values()??[]).length);
 const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
   await roomCommands.execute(room, draft => {
@@ -242,6 +259,22 @@ async function getApiAdminUserId(request: express.Request): Promise<
   return { ok: true, userId };
 }
 
+async function canUseSpotify(request:express.Request,userId:string,explicitRoom?:string) {
+  if(!await platform.activeAccount(userId))return false;
+  const callback=/^(?:\/api\/spotify)?\/callback$/i.test(request.path);
+  const roomId=callback?explicitRoom:(explicitRoom??spotifyRoomContext(request));
+  if(!roomId)return Boolean((await store.getProfile(userId))?.is_app_admin);
+  if(!await platform.activeRoom(roomId))return false;
+  const room=await store.loadRoom(roomId);
+  if(!room||!roomAllowsProvider(room.settings,"spotify")||isRoomBanned(room,userId))return false;
+  const access=await store.getRoomAccess(roomId,userId);
+  if(!access.exists||access.banned||(!access.isPublic&&!access.role))return false;
+  // OAuth navigation closes the initiating socket. The saved flow carries the
+  // already-checked room; all later provider requests require live admission.
+  if(callback)return true;
+  return [...(roomUsers.get(roomId)?.values()??[])].some(user=>user.id===userId);
+}
+
 // Verify private requests before accepting/parsing uploads or other request bodies.
 app.use("/api",async(request,response,next)=>{
   try {
@@ -256,13 +289,20 @@ app.use("/api",async(request,response,next)=>{
     if(!securityBudget.consume([{key:`http-user:${actor}`,maximum:300,windowMs:60_000}]))return void response.set("Retry-After","60").status(429).json({error:"Too many requests. Wait a minute before trying again."});
     const release=securityBudget.acquire(`http-user-flight:${actor}`,12);
     if(!release)return void response.set("Retry-After","60").status(429).json({error:"Too many concurrent requests."});
-    response.once("finish",release);response.once("close",release);next();
-  }catch{response.status(503).json({error:"Account access could not be verified. Try again."});}
+    response.once("finish",release);response.once("close",release);
+    const roomWrite=roomSlug&&!["GET","HEAD"].includes(request.method)&&!request.path.includes("/chat/")&&!request.path.endsWith("/favorite");
+    if(roomWrite) {
+      const policy=await resourcePolicies.get(actor);
+      await resourceAdmission.roomAction("http:room-write",actor,roomSlug,policy,()=>new Promise<void>(resolve=>{
+        response.once("finish",resolve);response.once("close",resolve);next();
+      }));
+    } else next();
+  }catch(error){if(!response.headersSent)response.status(error instanceof SecurityLimitError?429:503).json({error:error instanceof SecurityLimitError?error.message:"Account access could not be verified. Try again."});}
 });
 
 mountSignupRoutes(app,{admin:signupAdmin?.auth.admin??null,invitePassword:signupInvitePassword,
   appOrigin:process.env.APP_ORIGIN || "http://127.0.0.1:5173"});
-mountManagedUploadRoutes(app,{client:supabaseAdmin,getUserId:getApiUserId});
+mountManagedUploadRoutes(app,{client:supabaseAdmin,getUserId:getApiUserId,getResourcePolicy:actor=>resourcePolicies.get(actor)});
 mountFeedbackRoutes(app,{client:supabaseAdmin,getUserId:getApiUserId});
 
 mountPrivateLibraryRoutes(app, store, getApiUserId);
@@ -340,6 +380,7 @@ const chatRelay = createChatRelay({
   emitToRoom: emitAdmittedChat
 });
 mountChatHistoryRoutes(app, {
+  getResourcePolicy:actor=>resourcePolicies.get(actor),
   commands:chatCommands,
   writePolicy: chatWritePolicy,
   client: supabaseAdmin,
@@ -602,14 +643,15 @@ io.use(async (socket, next) => {
   );
   if (error || !data.userClaims || !validUserClaims(data.jwtClaims,supabaseUrl)) return next(new Error("Your session has expired."));
   if(!await platform.activeAccount(data.userClaims.id))return next(new Error("Account access is unavailable."));
-  const release=claimSocketAccount(securityBudget,socket,data.userClaims.id);
+  const policy=await resourcePolicies.get(data.userClaims.id);
+  const release=claimSocketAccount(securityBudget,socket,data.userClaims.id,policy.limits.socketsPerAccount);
   try {
     socket.data.credentialLease = createSocketCredentialLease(data.userClaims.id, data.jwtClaims?.exp);
   } catch { release();return next(new Error("Your session has expired.")); }
   socket.data.authUserId = data.userClaims.id;
   socket.data.platformAllowed=true;
   next();
-  }catch{next(new Error("Account access could not be verified. Try again."));}
+  }catch(error){next(new Error(error instanceof SecurityLimitError?error.message:"Account access could not be verified. Try again."));}
 });
 
 io.on("connection", (socket) => {
@@ -632,10 +674,10 @@ io.on("connection", (socket) => {
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
     socket.on(event, (payload: unknown, reply?: unknown) => {
       if (shuttingDown) return;
-      const userId=socket.data.authUserId||socket.id;
+      const userId=socket.data.authUserId||getMembership(socket.id)?.user.id||socket.id;
       const peer=trustedSocketPeer(socket);
       const rules=[{key:`socket-actions-user:${userId}`,maximum:240,windowMs:60_000},{key:`socket-actions-peer:${peer}`,maximum:1500,windowMs:60_000}];
-      if(["queue:add","queue:import-set","fallback:set"].includes(event))rules.push({key:`socket-provider:${userId}`,maximum:120,windowMs:60_000});
+      if(["queue:add","queue:set-add","fallback:set"].includes(event))rules.push({key:`socket-provider:${userId}`,maximum:120,windowMs:60_000});
       const userRelease=securityBudget.acquire(`socket-action-flight:${userId}`,event==="room:join"?2:8);
       const globalRelease=securityBudget.acquire("socket-action-global",256);
       if(!userRelease||!globalRelease||!securityBudget.consume(rules)){
@@ -643,7 +685,14 @@ io.on("connection", (socket) => {
         if(typeof reply==="function")reply({ok:false,error:"Too many requests. Wait a minute before trying again.",retryAfter:60});
         securityEvent("rate_limited","denied");return;
       }
-      const operation = run(payload, reply).finally(()=>{userRelease();globalRelease();});
+      const operation = (async()=>{
+        try {
+          const policy=await resourcePolicies.get(userId);
+          await resourceAdmission.roomAction(event,userId,socketRooms.get(socket.id),policy,()=>run(payload,reply));
+        } catch(error) {
+          if(typeof reply==="function")reply({ok:false,error:error instanceof SecurityLimitError?error.message:"Resource limits are unavailable. Try again shortly.",retryAfter:60});
+        }
+      })().finally(()=>{userRelease();globalRelease();});
       activeSocketActions.add(operation);
       void operation.finally(() => activeSocketActions.delete(operation));
     });
@@ -669,6 +718,7 @@ io.on("connection", (socket) => {
     if (previousRoomId === roomId) cancelDjEviction(roomId, user.id);
 
     try {
+      const admissionLimits=await resourcePolicies.getGlobal();
       if(!await platform.activeRoom(roomId))return reply?.({ok:false,error:"Room not found."});
       blockedRooms.delete(roomId);
       if (authEnabled) {
@@ -706,6 +756,8 @@ io.on("connection", (socket) => {
       let departure:Promise<void>|undefined;
       await store.admitRoom(room,user,access.passwordHash,()=>{
         assertAuthorized();if(!socket.connected)throw new RoomCommandError("This room session has ended.");
+        const present=roomUsers.get(roomId);
+        if(!present?.has(socket.id)&&(present?.size??0)>=admissionLimits.socketsPerRoom)throw new RoomCommandError("This room is full. Try again later.");
       },()=>{
         // Departure starts synchronously but is awaited outside the destination queue,
         // avoiding a cross-room deadlock when two listeners switch in opposite directions.
@@ -778,7 +830,10 @@ io.on("connection", (socket) => {
     },
     broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
     watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
-    resolveTrack: async track => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi);return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};}, resolveSavedRecording,
+    resolveTrack: async (track,room) => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi,undefined,{allowSpotify:roomAllowsProvider(room.settings,"spotify")});return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};},
+    resolveSavedRecording:(track,signal,room)=>(roomAllowsProvider(room.settings,"spotify")?resolveSpotifySavedRecording:resolveSavedRecording)(track,signal),
+    getResourcePolicy:actor=>resourcePolicies.get(actor),
+    runImport:async(actor,operation)=>resourceAdmission.importSet(actor,await resourcePolicies.get(actor),operation),
     onlineUserIds:id=>uniqueUsers(roomUsers.get(id)?.values()??[]).map(u=>u.id)
   });
   for (const kind of ["message", "reaction", "typing"] as const) {
@@ -851,17 +906,20 @@ app.post("/api/rooms", express.json(), async (request, response) => {
     return response.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid room." });
   }
   try {
-    if(!securityBudget.consume([{key:`room-create:${userId}`,maximum:3,windowMs:3600_000},{key:`room-create-peer:${trustedClientIp(request)}`,maximum:20,windowMs:3600_000}]))return response.set("Retry-After","3600").status(429).json({error:"Too many room creation attempts. Try again later."});
+    const {limits}=await resourcePolicies.get(userId);
+    if(!securityBudget.consume([{key:`room-create:${userId}`,maximum:limits.roomCreatesPerHour,windowMs:3600_000},{key:`room-create-peer:${trustedClientIp(request)}`,maximum:Math.max(20,limits.roomCreatesPerHour*2),windowMs:3600_000}]))return response.set("Retry-After","3600").status(429).json({error:"Too many room creation attempts. Try again later."});
     const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
     room.settings.accessMode=parsed.data.accessMode??(parsed.data.isPublic?"public":"members");
     room.isPublic = room.settings.accessMode!=="members";
     room.passwordProtected = Boolean(parsed.data.password?.trim());
     await store.createRoom(room, await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)));
     watchIdleRoom(room.id);
-    await store.setFavorite(room.id, userId, true);
+    // A full favorites list must not turn a completed creation into a failed
+    // request that the user might retry and duplicate.
+    try { await store.setFavorite(room.id, userId, true); } catch { /* Room is created. */ }
     response.status(201).json({ room: { slug: room.id, name: room.name } });
   } catch (error) {
-    response.status(error instanceof SecurityLimitError?429:error instanceof RoomCommandError?400:503).json({ error: error instanceof RoomCommandError ? error.message : "Could not create room. Your room limit may have been reached." });
+    response.status(error instanceof PublicRequestError?error.status:error instanceof SecurityLimitError?429:error instanceof RoomCommandError?400:503).json({ error: error instanceof RoomCommandError ? error.message : "Could not create room. Your room limit may have been reached." });
   }
 });
 
@@ -879,7 +937,7 @@ app.put("/api/rooms/:slug/favorite", express.json(), async (request, response) =
     await store.setFavorite(slug.data, userId, parsed.data.favorite);
     response.json({ favorite: parsed.data.favorite });
   } catch (error) {
-    response.status(400).json({ error: "Could not update favorite." });
+    response.status(error instanceof PublicRequestError?error.status:400).json({ error: error instanceof RoomCommandError?error.message:"Could not update favorite." });
   }
 });
 
@@ -931,16 +989,41 @@ app.patch("/api/profile", express.json(), async (request, response) => {
   }
 });
 
-mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,
+mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,canUseSpotify,
   soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
-mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,
+mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,canUseSpotify,
   isAccountActive:userId=>platform.activeAccount(userId),
   authorizationUrl: (redirectUri, state) => spotifyApi.authorizationUrl(redirectUri, state), redirectUri: spotifyRedirectUri });
-app.get("/api/config", (_request, response) => {
+app.get("/api/resource-policy",async(request,response)=>{
+  try {
+    const actor=await getApiUserId(request);
+    if(!actor)return response.status(401).json({error:"Authentication required."});
+    response.json(await resourcePolicies.get(actor));
+  }catch{response.status(503).json({error:"Resource limits are unavailable. Try again shortly."});}
+});
+app.put("/api/admin/rooms/:slug/spotify",express.json({limit:"1kb"}),async(request,response)=>{
+  try {
+    const admin=await getApiAdminUserId(request);
+    if(!admin.ok)return response.status(admin.status).json({error:admin.error});
+    const slug=z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
+    const body=z.object({enabled:z.boolean()}).strict().safeParse(request.body);
+    if(!slug.success||!body.success)return response.status(400).json({error:"Invalid Spotify setting."});
+    const room=await store.setRoomSpotifyEnabled(slug.data,admin.userId,body.data.enabled,async()=>{
+      const current=await getApiAdminUserId(request);
+      if(!current.ok||!await platform.activeRoom(slug.data))throw new RoomCommandError("Administrator access required.");
+    });
+    broadcast(room);
+    securityEvent("admin_change","success",{actorId:admin.userId,requestId:response.locals.requestId});
+    response.json({enabled:room.settings.spotifyEnabled===true});
+  }catch{response.status(503).json({error:"Could not change Spotify access. Try again."});}
+});
+app.get("/api/config", async(request, response) => {
+  let spotifyConfigured=false;
+  try {const actor=await getApiUserId(request);spotifyConfigured=Boolean(actor&&spotifyAccounts.configured&&await canUseSpotify(request,actor));}catch{/* Public configuration does not expose disabled capabilities. */}
   response.json({
     giphyConfigured: giphyApi.configured,
     music: {
-      spotifyConfigured: spotifyAccounts.configured,
+      spotifyConfigured,
       appleMusicConfigured: appleMusicApi.configured
     },
     supabase: authEnabled
@@ -971,6 +1054,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 await store.init();
+globalResourceLimits=await resourcePolicies.getGlobal();
 if(supabaseAdmin){
   const {data,error}=await supabaseAdmin.rpc("soundspin_release_ready");
   if(error||data!==true)throw new Error("Release security migrations and grants must be applied before starting the server.");
@@ -998,9 +1082,9 @@ function pruneRetention(){
   retentionWork=(async()=>{
     const deadline=Date.now()+20_000;
     for(let batch=0;batch<20&&Date.now()<deadline;batch++){
-      const [records,archives]=await Promise.all([supabaseAdmin.rpc("soundspin_prune_security_retention"),supabaseAdmin.rpc("soundspin_purge_security_archives",{p_limit:1000})]);
-      if(records.error||archives.error)throw new Error("Retention maintenance failed.");
-      const counts=[...Object.values(records.data||{}),...Object.values(archives.data||{})];
+      const [records,archives,chat]=await Promise.all([supabaseAdmin.rpc("soundspin_prune_security_retention"),supabaseAdmin.rpc("soundspin_purge_security_archives",{p_limit:1000}),supabaseAdmin.rpc("soundspin_prune_chat_history",{p_limit:500})]);
+      if(records.error||archives.error||chat.error)throw new Error("Retention maintenance failed.");
+      const counts=[...Object.values(records.data||{}),...Object.values(archives.data||{}),Number(chat.data?.removed??0),Number(chat.data?.updatedReplies??0),chat.data?.hasMoreRooms?1:0];
       if(counts.every(value=>Number(value)===0))break;
     }
   })().catch(()=>securityEvent("storage_cleanup","failed")).finally(()=>{retentionWork=null;});
@@ -1022,6 +1106,8 @@ function recheckConnections(){
 cleanManagedMedia();processDeletion();pruneRetention();
 const mediaCleanupTimer = setInterval(cleanManagedMedia,60_000);
 const deletionTimer=setInterval(processDeletion,60_000),retentionTimer=setInterval(pruneRetention,3600_000),connectionTimer=setInterval(recheckConnections,20_000);
+const resourcePolicyTimer=setInterval(()=>{void resourcePolicies.getGlobal().then(limits=>{globalResourceLimits=limits;globalResourcePolicyAvailable=true;}).catch(()=>{globalResourcePolicyAvailable=false;securityEvent("configuration_failure","failed");});},15_000);
+resourcePolicyTimer.unref();
 mediaCleanupTimer.unref();
 deletionTimer.unref();retentionTimer.unref();connectionTimer.unref();
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
@@ -1036,7 +1122,7 @@ async function shutdown() {
   announcementExpiries.clear();
   sessionScheduler.clear();
   clearInterval(mediaCleanupTimer);
-  clearInterval(deletionTimer);clearInterval(retentionTimer);clearInterval(connectionTimer);
+  clearInterval(deletionTimer);clearInterval(retentionTimer);clearInterval(connectionTimer);clearInterval(resourcePolicyTimer);
   idleRooms.clear();
   const deadline = setTimeout(() => process.exit(1), 25_000);
   deadline.unref();

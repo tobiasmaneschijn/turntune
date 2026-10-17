@@ -2,10 +2,12 @@ import express, { type Express, type Request } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { managedUploadAdmission, uploadReservedImage, type UploadLease, type UploadPurpose } from './managed-uploads.js'
 import { PublicRequestError, publicRequestFailure } from './public-request-error.js'
+import type { ResolvedResourcePolicy } from '../shared/resource-policy.js'
 
 export interface ManagedUploadRouteOptions {
   client: SupabaseClient | null
   getUserId: (request: Request) => Promise<string | null>
+  getResourcePolicy?: (actor:string)=>Promise<ResolvedResourcePolicy>
 }
 export function mountManagedUploadRoutes(app: Express, options: ManagedUploadRouteOptions) {
   for (const purpose of ['avatar', 'feedback'] as UploadPurpose[]) {

@@ -106,7 +106,7 @@ function isDeviceUnavailable(error: unknown) {
   return /device not found|no active device|device.*offline/i.test(error instanceof Error ? error.message : "");
 }
 
-async function transferSpotifyPlayback(accessToken: string, deviceId: string, current: () => boolean, signal?: AbortSignal) {
+async function transferSpotifyPlayback(accessToken: string, deviceId: string, current: () => boolean, signal?: AbortSignal, roomSlug?: string) {
   let lastError: unknown;
   for (const delay of [0, 250, 750, 1_500]) {
     if (delay) await wait(delay);
@@ -115,6 +115,7 @@ async function transferSpotifyPlayback(accessToken: string, deviceId: string, cu
       await api("/api/spotify/playback", accessToken, {
         method: "POST",
         signal,
+        headers: { "x-soundspin-room": roomSlug ?? "" },
         body: JSON.stringify({ action: "transfer", deviceId })
       });
       return;
@@ -134,6 +135,7 @@ export function SpotifyPlayer({
   volume,
   accessToken,
   userId,
+  roomSlug,
   preferredDeviceId,
   resumeAfterReconnect,
   onEnded,
@@ -145,6 +147,7 @@ export function SpotifyPlayer({
   mode: "web" | "desktop";
   accessToken: string;
   userId: string;
+  roomSlug?: string;
   preferredDeviceId?: string;
   resumeAfterReconnect: boolean;
   onConnectionLost: (message: string) => void;
@@ -185,7 +188,7 @@ export function SpotifyPlayer({
   modeRef.current = mode;
 
   function sessionApi<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-    return api<T>(path, token, { ...init, signal: init?.signal || AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]) });
+    return api<T>(path, token, { ...init, headers: { ...init?.headers, "x-soundspin-room": roomSlug ?? "" }, signal: init?.signal || AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]) });
   }
 
   const reconcilePlayback = (force = false, wake = false) => {
@@ -243,7 +246,7 @@ export function SpotifyPlayer({
             await sendCommand();
           } catch (cause) {
             if (!player || !isDeviceUnavailable(cause) || !current()) throw cause;
-            await transferSpotifyPlayback(accessTokenRef.current, currentDeviceId, current, AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]));
+            await transferSpotifyPlayback(accessTokenRef.current, currentDeviceId, current, AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]), roomSlug);
             if (!current()) return;
             await sendCommand();
           }
@@ -602,7 +605,7 @@ export function SpotifyPlayer({
       playerRef.current = null;
       deviceIdRef.current = "";
     };
-  }, [mode, preferredDeviceId, userId]);
+  }, [mode, preferredDeviceId, userId, roomSlug]);
 
   useEffect(() => {
     if (mode === "web") {

@@ -77,6 +77,12 @@ addresses; the example environment's provider callbacks are production values.
 For local development, use the separate HTTP callback/origin instructions in
 [`docs/production-hardening.md`](docs/production-hardening.md).
 
+Apply all 31 committed migrations, through
+`20261017174956_configurable_resource_limits.sql`. Resource plans and server caps
+are service-only configuration; every account defaults to `free`. See
+[`docs/resource-limits.md`](docs/resource-limits.md) for defaults, safe operator
+updates, saved-work recovery, and chat retention.
+
 [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md) maps the audit findings
 to implemented changes, verification and remaining external release gates.
 [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) preserves the original audit.
@@ -326,8 +332,10 @@ Commands clone the last committed room, validate within its command queue,
 persist, and then publish. Unrelated Supabase rooms write independently; the
 local JSON fallback shares one atomic file writer. Idle Supabase room cache
 entries are released after ten minutes, waiting for commands and DJ grace.
-Each waiting queue is capped at 1,000 tracks; chat retains a 1,000-row active
-window and a scrolled reader snapshot. Catalog caches are bounded.
+Waiting queues default to 100 tracks per account/room and 500 across rooms, with
+500 tracks total per room. Chat keeps a 1,000-row client window and a scrolled
+reader snapshot; server retention defaults to the latest 10,000 messages within
+90 days, drained by bounded maintenance. Catalog caches are bounded.
 
 Apply all pending migrations before deploying this server, including
 `20261007063943_restrict_feedback_submission_columns.sql`,
@@ -371,8 +379,11 @@ The shared `Track` model stores a source provider plus ISRC-first provider
 mappings. Tracks waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
 currently playing track remain visible to the room.
 YouTube and SoundCloud play through their embedded players. A listener can link
-Spotify and choose either the Lydman Web Playback device or their Spotify
-Desktop/Connect device. Apple Music listeners authorize MusicKit in the player.
+Spotify when an application administrator enables it for the room, then choose
+either the Lydman Web Playback device or their Spotify Desktop/Connect device.
+Spotify starts disabled for every room; the administrator control requires
+MFA/AAL2 and is separate from room-owner permissions. Apple Music listeners
+authorize MusicKit in the player.
 Lydman tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
 

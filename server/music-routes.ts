@@ -11,10 +11,12 @@ import { MixcloudApi, type MixcloudSearchResult } from "./mixcloud.js";
 import { mixcloudShowKey } from "../shared/mixcloud.js";
 import { BoundedCache } from "./bounded-cache.js";
 import { runtimeMetrics } from "./runtime-metrics.js";
+import { spotifyAccessAllowed, spotifyRoomContext, type SpotifyAccessCheck } from "./spotify-access.js";
 
 export interface MusicRouteOptions {
   authEnabled: boolean;
   getUserId: (request: express.Request) => Promise<string | null>;
+  canUseSpotify?: SpotifyAccessCheck;
   youtubeApiKey?: string;
   soundCloudApi: Pick<SoundCloudApi, "configured" | "searchTracks" | "resolveTrack">;
   spotifyApi: Pick<SpotifyApi, "configured" | "searchTracks" | "getTrack" | "request">;
@@ -169,11 +171,18 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
     if (request.path === "/connect" || request.path === "/callback") return next();
     const userId = await getApiUserId(request);
     if (authEnabled && !userId) return response.status(401).json({ error: "Authentication required." });
+    const removingConnection=request.method==="DELETE"&&request.path.toLowerCase()==="/connection";
+    if (request.baseUrl.toLowerCase() === "/api/spotify"&&!removingConnection) {
+      let roomSlug: string | undefined;
+      try { roomSlug = spotifyRoomContext(request); }
+      catch { return response.status(400).json({ error: "Invalid room context." }); }
+      if (!userId || !await spotifyAccessAllowed(options.canUseSpotify, request, userId, roomSlug)) return response.status(403).json({ error: "Spotify is unavailable in this room." });
+    }
     const ip = request.ip || request.socket.remoteAddress || "unknown";
     const path = `${request.baseUrl}${request.path}`;
     const endpoint = path === "/api/spotify/playback" ? playbackBudget : endpointBudget;
     if (!ipBudget.consume(ip) || userId && !accountBudget.consume(userId) ||
-      !endpoint.consume(`ip:${ip}:${path}`) || userId && !endpoint.consume(`account:${userId}:${path}`)) {
+      (!userId && !endpoint.consume(`ip:${ip}:${path}`)) || userId && !endpoint.consume(`account:${userId}:${path}`)) {
       return response.status(429).json({ error: "Too many music requests. Try again shortly." });
     }
     const controller = new AbortController();
@@ -189,7 +198,7 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   };
 function consumeProviderSearchLimit(request: express.Request) {
   const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
   const current = providerSearchLimits.get(rateKey);
   const limit = !current || current.resetAt <= now
     ? { count: 0, resetAt: now + 10 * 60 * 1000 }
@@ -229,7 +238,7 @@ app.get("/api/youtube/live", async (request, response) => {
 
   let pending = youtubeLivePending.get(id);
   if (!pending) {
-    const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+    const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
     const currentLimit = youtubeLiveLimits.get(rateKey);
     const limit = !currentLimit || currentLimit.resetAt <= now
       ? { count: 0, resetAt: now + 10 * 60 * 1000 }
@@ -287,7 +296,7 @@ app.get("/api/youtube/search", async (request, response) => {
   }
 
   const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
   const currentLimit = youtubeSearchLimits.get(rateKey);
   const limit = !currentLimit || currentLimit.resetAt <= now
     ? { count: 0, resetAt: now + 10 * 60 * 1000 }
@@ -387,7 +396,7 @@ app.get("/api/soundcloud/search", async (request, response) => {
   }
 
   const now = Date.now();
-  const rateKey = request.ip || request.socket.remoteAddress || "unknown";
+  const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
   const currentLimit = soundCloudSearchLimits.get(rateKey);
   const limit = !currentLimit || currentLimit.resetAt <= now
     ? { count: 0, resetAt: now + 10 * 60 * 1000 }
@@ -579,7 +588,11 @@ app.get("/api/music/connections", async (request, response) => {
   const userId = await getApiUserId(request);
   if (!userId) return response.status(401).json({ error: "Authentication required." });
   try {
-    const spotifyConnected = spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false;
+    let roomSlug: string | undefined;
+    try { roomSlug = spotifyRoomContext(request); }
+    catch { return response.status(400).json({ error: "Invalid room context." }); }
+    const spotifyAllowed = await spotifyAccessAllowed(options.canUseSpotify, request, userId, roomSlug);
+    const spotifyConnected = spotifyAllowed && spotifyAccounts.configured ? await spotifyAccounts.connected(userId) : false;
     let spotifyProfile: { displayName: string; product?: string } | null = null;
     if (spotifyConnected) {
       try {
@@ -594,7 +607,7 @@ app.get("/api/music/connections", async (request, response) => {
     }
     response.json({
       spotify: {
-        configured: spotifyAccounts.configured,
+        configured: spotifyAllowed && spotifyAccounts.configured,
         connected: spotifyConnected,
         profile: spotifyProfile
       },

@@ -37,7 +37,7 @@ test("saved-set timeout aborts the actual Spotify token/source connection", asyn
     fetchSignal = init!.signal as AbortSignal;
     return new Promise<Response>((_resolve, reject) => fetchSignal!.addEventListener("abort", () => reject(fetchSignal!.reason), { once: true }));
   });
-  const resolve = createSavedSetResolver({ spotify, appleMusic: new AppleMusicApi(undefined, undefined, undefined), soundCloud: new SoundCloudApi() });
+  const resolve = createSavedSetResolver({ spotify, appleMusic: new AppleMusicApi(undefined, undefined, undefined), soundCloud: new SoundCloudApi(), allowSpotify: true });
   const result = await resolveSavedSet([{ provider: "spotify", providerId: "abcdefghij123456789012", title: "Recording" }], resolve, 25);
   assert.equal(result.tracks.length, 0);
   assert.equal(result.skipped.length, 1);
@@ -72,7 +72,7 @@ test("saved YouTube verification forwards one caller deadline through counterpar
   const upstreamSignals: AbortSignal[] = [];
   const spotify = { configured: true, searchTracks: async (_query: string, _limit: number, signal: AbortSignal) => { catalogSignals.push(signal); return []; } } as unknown as SpotifyApi;
   const appleMusic = { configured: true, searchTracks: async (_query: string, _limit: number, _storefront: string, signal: AbortSignal) => { catalogSignals.push(signal); return []; } } as unknown as AppleMusicApi;
-  const resolver = createSavedSetResolver({ spotify, appleMusic, soundCloud: new SoundCloudApi(), youtubeApiKey: "fixture", fetchImpl: async (url, init) => {
+  const resolver = createSavedSetResolver({ spotify, appleMusic, soundCloud: new SoundCloudApi(), youtubeApiKey: "fixture", allowSpotify: true, fetchImpl: async (url, init) => {
     upstreamSignals.push(init!.signal as AbortSignal);
     return String(url).includes("/oembed") ? Response.json({ title: "Verified", author_name: "Artist" }) : Response.json({ items: [{ id: "abcdefghijk", contentDetails: { duration: "PT3M" } }] });
   } });
