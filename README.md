@@ -356,6 +356,15 @@ When Supabase is configured, room state is stored in Postgres. The named
 must remain enabled on the proxy; Dokploy's standard Traefik setup supports
 them.
 
+Keep the Dokploy domain's target port at `3000`. `SOUNDSPIN_PORT` controls only
+the host's loopback binding; staging can use `3001` there. Set
+`TRUSTED_PROXY_CIDRS` to the proxy's observed address on the shared Docker
+network and recheck it after recreating the proxy.
+
+After changing a domain port on Dokploy v0.29.12, use a fresh **Deploy** from
+Git. **Redeploy** reuses the generated Compose file and can retain old routing
+labels. Stop the active SoundSpin service before either operation.
+
 ## Playback providers
 
 The shared `Track` model stores a source provider plus ISRC-first provider

@@ -36,6 +36,28 @@ test("untrusted forwarded headers cannot select protocol, host or limiter identi
   assert.equal(trustedSocketPeer({ request: req }), "203.0.113.8");
 });
 
+test("trusted wss requires a WebSocket upgrade and preserves the origin, host and proxy boundary", () => {
+  const policy = configureHttpSecurity(express(), { ...production, TRUSTED_PROXY_CIDRS: "10.0.0.2/32" });
+  const headers = { host: "soundspin.test", origin: "https://soundspin.test", "x-forwarded-proto": "wss",
+    upgrade: "WebSocket", connection: "keep-alive, Upgrade" };
+  assert.equal(allowed(policy, request("10.0.0.2", headers)).success, true);
+  assert.equal(allowed(policy, request("203.0.113.8", headers)).error, "HTTPS required.");
+  assert.equal(allowed(policy, request("10.0.0.2", { ...headers, origin: "https://evil.test" })).error, "Origin not allowed.");
+  assert.equal(allowed(policy, request("10.0.0.2", { ...headers, host: "evil.test" })).error, "Host not allowed.");
+  for (const invalid of [{ upgrade: "" }, { connection: "keep-alive" }, { connection: "not-upgrade" }]) {
+    assert.equal(allowed(policy, request("10.0.0.2", { ...headers, ...invalid })).error, "HTTPS required.");
+  }
+  const post = request("10.0.0.2", headers);
+  post.method = "POST";
+  assert.equal(allowed(policy, post).error, "HTTPS required.");
+  for (const protocol of ["ws", "wss,https", "https,wss", "WSS", " wss", "wss "]) {
+    assert.equal(allowed(policy, request("10.0.0.2", { ...headers, "x-forwarded-proto": protocol })).error, "HTTPS required.");
+  }
+  const multipleProtocols = request("10.0.0.2", headers);
+  multipleProtocols.headers["x-forwarded-proto"] = ["wss", "https"];
+  assert.equal(allowed(policy, multipleProtocols).error, "HTTPS required.");
+});
+
 test("HTTP and socket peers follow the trusted chain and normalize mapped IPv4", () => {
   const policy = configureHttpSecurity(express(), { ...production, TRUSTED_PROXY_CIDRS: "10.0.0.0/8" });
   const req = request("::ffff:10.0.0.2", { host: "soundspin.test", origin: "https://soundspin.test", "x-forwarded-proto": "https", "x-forwarded-for": "198.51.100.99, 203.0.113.7" });
@@ -116,19 +138,22 @@ test("polling sessions and WebSocket upgrades enforce Origin on every request wh
   });
   const initial = await polling("EIO=4&transport=polling", headers);
   assert.equal(initial.status, 200);
+  const invalidProtocol = await polling("EIO=4&transport=polling", { ...headers, "x-forwarded-proto": "wss" });
+  assert.ok(invalidProtocol.status >= 400, "wss must not authorize an ordinary HTTP request.");
   const sid = JSON.parse(initial.body.slice(1)).sid;
   assert.ok(sid);
   const hostilePoll = await polling(`EIO=4&transport=polling&sid=${encodeURIComponent(sid)}`, { ...headers, origin: "https://evil.test" });
   assert.ok(hostilePoll.status >= 400, "An existing SID must not skip the Origin guard.");
-  async function connect(origin: string | undefined, token: string | undefined) {
+  async function connect(origin: string | undefined, token: string | undefined, forwardedProto = "wss") {
     return await new Promise<boolean>(resolve => {
       const socket = clientSocket(url, { forceNew: true, reconnection: false, timeout: 2000, transports: ["websocket"],
-        auth: { token }, extraHeaders: { host: headers.host, "x-forwarded-proto": "https", ...(origin ? { origin } : {}) } });
+        auth: { token }, extraHeaders: { host: headers.host, "x-forwarded-proto": forwardedProto, ...(origin ? { origin } : {}) } });
       socket.once("connect", () => { socket.close(); resolve(true); });
       socket.once("connect_error", () => { socket.close(); resolve(false); });
     });
   }
   assert.equal(await connect("https://soundspin.test", "local-fixture"), true);
+  assert.equal(await connect("https://soundspin.test", "local-fixture", "https"), true);
   assert.equal(await connect("https://evil.test", "local-fixture"), false);
   assert.equal(await connect("https://soundspin.test", undefined), false);
   assert.equal(await connect(undefined, "local-fixture"), true, "Native clients still require namespace credentials.");

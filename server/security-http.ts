@@ -138,7 +138,11 @@ export function configureHttpSecurity(app: express.Express, env: NodeJS.ProcessE
     const encrypted = Boolean((request.socket as typeof request.socket & { encrypted?: boolean }).encrypted);
     // Forwarded protocol is authoritative only when the direct peer is trusted.
     const forwardedProto = request.headers["x-forwarded-proto"];
-    const https = encrypted || (trust(request.socket.remoteAddress ?? "", 0) && forwardedProto === "https");
+    // Traefik reports secure WebSocket upgrades as wss instead of https.
+    const websocketUpgrade = request.method === "GET" && request.headers.upgrade?.toLowerCase() === "websocket" &&
+      request.headers.connection?.split(",").some(token => token.trim().toLowerCase() === "upgrade");
+    const forwardedSecure = forwardedProto === "https" || (forwardedProto === "wss" && websocketUpgrade);
+    const https = encrypted || (trust(request.socket.remoteAddress ?? "", 0) && forwardedSecure);
     return https ? null : "HTTPS required.";
   }
 
