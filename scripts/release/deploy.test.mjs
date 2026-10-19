@@ -9,7 +9,7 @@ const env = { DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.reposito
 const template = 'services:\n  soundspin:\n    image: ${SOUNDSPIN_IMAGE:?Set an immutable GHCR image}\n';
 const manifest = await createImageManifest({ repository: targets.repository, branch: 'develop', revision, digest: `sha256:${'b'.repeat(64)}`, runId: '123', runAttempt: '1' });
 
-function fixture({ neverExits = false, inventoryFailure = false, sourceChanges = false, missingRegistry = false, badPort = false, deploymentFails = false } = {}) {
+function fixture({ neverExits = false, inventoryFailure = false, sourceChanges = false, missingRegistry = false, badPort = false, deploymentFails = false, aliasFails = false } = {}) {
   let stopped = false;
   let deployed = false;
   let preflightDone = false;
@@ -48,7 +48,7 @@ function fixture({ neverExits = false, inventoryFailure = false, sourceChanges =
   const options = { dokploy, env, manifest, template, attempts: 2, intervalMs: 0, wait: async () => {},
     inspect: async () => ({ compose: structuredClone({ ...compose, ...(sourceChanges && preflightDone ? { branch: 'changed' } : {}) }), runtime, deployments: [] }),
     preflight: async () => { events.push({ name: 'preflight' }); preflightDone = true; return { gates: { ci: true, migrations: true } }; },
-    verify: async () => { events.push({ name: 'verifyIngress' }); return { health: true, ready: true, socketPolling: true, websocketUpgrade: true, hostileOrigin: true, missingCredential: true }; },
+    verify: async origin => { events.push({ name: 'verifyIngress', origin }); if (aliasFails && origin === targets.staging.additionalOrigins[0]) throw new Error('The approved legacy domain is unavailable.'); return { health: true, ready: true, socketPolling: true, websocketUpgrade: true, hostileOrigin: true, missingCredential: true }; },
     save: async (path, value) => { saved[path] = value; },
   };
   return { options, events, saved };
@@ -62,6 +62,8 @@ test('An operator deploys the scanned staging image after the old process exits 
   assert.equal(result.image, manifest.image);
   assert.ok(Object.values(result.checks).every(value => value === true));
   assert.deepEqual(result.migrations, manifest.migrations);
+  assert.deepEqual(events.filter(item => item.name === 'verifyIngress').map(item => item.origin), [targets.staging.origin, ...targets.staging.additionalOrigins]);
+  assert.deepEqual(result.config.additionalOrigins, targets.staging.additionalOrigins);
   const names = events.map(item => item.name);
   assert.ok(names.indexOf('preflight') < names.indexOf('compose.stop'));
   assert.ok(names.indexOf('compose.stop') < names.indexOf('compose.update'));
@@ -90,10 +92,10 @@ test('An operator sees changed configuration or missing pull credentials before 
   }
 });
 
-test('A failed deployment or wrong proxy target cannot produce a successful release or an automatic rollback', async () => {
-  for (const failure of [{ deploymentFails: true }, { badPort: true }]) {
+test('A failed deployment or failed ingress cannot produce a successful release or an automatic rollback', async () => {
+  for (const failure of [{ deploymentFails: true }, { badPort: true }, { aliasFails: true }]) {
     const { options, events, saved } = fixture(failure);
-    await assert.rejects(deployRelease(options), /deployment failed|container port 3000/);
+    await assert.rejects(deployRelease(options), /deployment failed|container port 3000|intended ingress/);
     assert.equal(saved['deployment-evidence.json'], undefined);
     assert.equal(saved['failure-evidence.json'].verified, false);
     assert.equal(events.filter(item => item.name === 'compose.deploy').length, 1);

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createDokploy, createGitHub } from './clients.mjs';
 import { createImageManifest } from './image-manifest.mjs';
-import { inspectTarget, releaseContext, runPreflight } from './preflight.mjs';
+import { inspectTarget, releaseContext, runPreflight, targetOrigins } from './preflight.mjs';
 import { verifyPromotion } from './promotion.mjs';
 import { verifyIngress } from './verify-ingress.mjs';
 
@@ -178,8 +178,9 @@ export async function deployRelease({
       const running = assertSingleInstance(await observeTargets(dokploy, compose));
       if (running.length === 1 && verifyRunningContainer(running[0], manifest, context.target)) {
         try {
-          const ingress = await verify(context.target.origin);
-          if (!ingressProofs.every(name => ingress?.[name] === true)) throw new Error('Ingress verification returned incomplete evidence.');
+          const results = await Promise.allSettled(targetOrigins(context.target).map(origin => verify(origin)));
+          if (results.some(result => result.status !== 'fulfilled' || !ingressProofs.every(name => result.value?.[name] === true))) throw new Error('Ingress verification returned incomplete evidence for an approved origin.');
+          const ingress = results[0].value;
           const confirmed = assertSingleInstance(await observeTargets(dokploy, compose));
           if (confirmed.length !== 1 || confirmed[0].Id !== running[0].Id || !verifyRunningContainer(confirmed[0], manifest, context.target)) throw new Error('The application changed during ingress verification.');
           checks = { singleInstance: true, ...ingress };
@@ -191,7 +192,7 @@ export async function deployRelease({
       await wait(intervalMs);
     }
     if (!checks) throw new Error('Exactly one healthy application container was not verified before the deadline.');
-    const evidence = { ...evidenceBase, imageRevision: manifest.revision, image: manifest.image, digest: manifest.digest, manifest, migrations: manifest.migrations, verified: true, checks, gates: gates.gates, config: { origin: context.target.origin, composeId: compose.composeId, environmentId: context.target.environmentId, projectRef: env.SUPABASE_PROJECT_REF, proxyAddress, templateSha256: hash(template) }, deploymentId, deploymentLogsReadable: logsRead, releaseEvidence: env.RELEASE_EVIDENCE };
+    const evidence = { ...evidenceBase, imageRevision: manifest.revision, image: manifest.image, digest: manifest.digest, manifest, migrations: manifest.migrations, verified: true, checks, gates: gates.gates, config: { origin: context.target.origin, additionalOrigins: context.target.additionalOrigins || [], composeId: compose.composeId, environmentId: context.target.environmentId, projectRef: env.SUPABASE_PROJECT_REF, proxyAddress, templateSha256: hash(template) }, deploymentId, deploymentLogsReadable: logsRead, releaseEvidence: env.RELEASE_EVIDENCE };
     await save('deployment-evidence.json', evidence);
     return evidence;
   } catch (error) {

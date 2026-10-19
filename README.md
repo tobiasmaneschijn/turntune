@@ -4,8 +4,8 @@ turntune is a shared music room where friends take turns choosing the soundtrack
 
 **Take turns. Pick the Tunes**
 
-The official hosted domain will be [turntune.app](https://turntune.app) once its DNS
-is configured. Existing domains can continue serving the app during the transition;
+The production deployment target is [turntune.app](https://turntune.app).
+Existing domains can continue serving the app during the transition;
 keep the active domain in `APP_ORIGIN` and list additional approved origins in
 `APP_ORIGINS`. For self-hosting, use your own origin and provider callbacks.
 
