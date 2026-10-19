@@ -1,5 +1,5 @@
 # Reviewed 2026-10-13; Dependabot proposes digest updates for review.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM node:26-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS build
 WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=secret,id=proxy_ca \
@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build
 RUN find dist-server -name '*.test.js' -delete
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
+FROM node:26-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS runtime
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.title="turntune" \
       org.opencontainers.image.revision=$BUILD_REVISION
