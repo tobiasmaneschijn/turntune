@@ -45,8 +45,8 @@ function nativeTimestamp(value) {
   return new Date(timestamp).toISOString() === canonical ? timestamp : NaN;
 }
 
-/** Native PR approval is the production gate; staging only records an evidence reference. */
-export async function verifyReleaseReview({ github, repository, sha, releaseEvidenceUrl, environment, stagingRunUrl }) {
+/** A fresh manual GitHub dispatch authorizes production; staging records an evidence reference. */
+export async function verifyReleaseReview({ github, repository, sha, releaseEvidenceUrl, environment, stagingRunUrl, productionRunId, productionRunAttempt, productionConfirmed }) {
   if (typeof repository !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
     || !/^[a-f0-9]{40}$/.test(sha ?? '') || !['staging', 'production'].includes(environment)) {
     fail('RELEASE_REVIEW_CONFIGURATION', 'Release review requires this repository, full commit SHA and deployment environment.');
@@ -56,12 +56,19 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
     return { type: 'evidence_reference', url: releaseEvidenceUrl, approvalRequired: false };
   }
   if (reference.type !== 'pull') {
-    fail('RELEASE_PR_REQUIRED', 'Production requires an approved, merged release pull request.');
+    fail('RELEASE_PR_REQUIRED', 'Production requires a merged release pull request.');
   }
   try {
     parseStagingRunUrl(repository, stagingRunUrl);
   } catch {
-    fail('RELEASE_STAGING_LINK', 'Production review requires the selected staging deployment run URL.');
+    fail('RELEASE_STAGING_LINK', 'Production requires the selected staging deployment run URL.');
+  }
+  if (productionConfirmed !== 'true') {
+    fail('RELEASE_CONFIRMATION_REQUIRED', 'Check the production confirmation when starting a new Deploy workflow.');
+  }
+  if (!/^[1-9][0-9]*$/.test(String(productionRunId ?? '')) || !Number.isSafeInteger(Number(productionRunId))
+    || !/^[1-9][0-9]*$/.test(String(productionRunAttempt ?? '')) || !Number.isSafeInteger(Number(productionRunAttempt))) {
+    fail('RELEASE_DISPATCH_CONFIGURATION', 'Production requires the current GitHub run ID and attempt.');
   }
   const request = typeof github === 'function' ? github : github?.request?.bind(github);
   if (!request) fail('RELEASE_REVIEW_CONFIGURATION', 'A GitHub request client is required.');
@@ -71,7 +78,7 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
       const response = await request(route, { owner, repo, ...parameters });
       return response?.data ?? response;
     } catch {
-      fail('RELEASE_REVIEW_API', 'Could not verify the native GitHub release review.');
+      fail('RELEASE_REVIEW_API', 'Could not verify GitHub release authorization.');
     }
   }
   const pull = await get('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: reference.number });
@@ -89,6 +96,44 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
   const stagingVerifiedAt = nativeTimestamp(stagingRun.updated_at);
   if (!Number.isFinite(stagingVerifiedAt)) {
     fail('RELEASE_REVIEW_RESPONSE', 'GitHub returned no valid completion timestamp for the latest staging attempt.');
+  }
+
+  const productionRun = await get('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: Number(productionRunId) });
+  if (productionRun?.id !== Number(productionRunId) || productionRun.run_attempt !== Number(productionRunAttempt)
+    || productionRun.event !== 'workflow_dispatch' || productionRun.head_branch !== 'master'
+    || productionRun.head_sha !== sha || productionRun.path !== '.github/workflows/deploy.yml'
+    || !sameRepository(productionRun.repository?.full_name, repository)
+    || !sameRepository(productionRun.head_repository?.full_name, repository)
+    || !Array.isArray(productionRun.pull_requests) || productionRun.pull_requests.length !== 0
+    || productionRun.status !== 'in_progress' || productionRun.conclusion !== null) {
+    fail('RELEASE_DISPATCH_UNTRUSTED', 'Production requires this active manual Deploy run on the selected master revision.');
+  }
+  const dispatchedAt = nativeTimestamp(productionRun.created_at);
+  const mergedAt = nativeTimestamp(pull.merged_at);
+  // created_at belongs to the original dispatch. Queuing or rerunning a job must
+  // not authorize staging evidence that became available after that dispatch.
+  if (!Number.isFinite(dispatchedAt) || !Number.isFinite(mergedAt)) {
+    fail('RELEASE_REVIEW_RESPONSE', 'GitHub returned incomplete release dispatch timestamps.');
+  }
+  if (dispatchedAt < stagingVerifiedAt || dispatchedAt < mergedAt) {
+    fail('RELEASE_DISPATCH_STALE', 'Start a new Deploy workflow after the release PR is merged and the latest staging attempt succeeds.');
+  }
+  const operators = [];
+  for (const user of [productionRun.actor, productionRun.triggering_actor]) {
+    if (!Number.isSafeInteger(user?.id) || user.id <= 0 || user.type !== 'User'
+      || typeof user.login !== 'string' || !/^[A-Za-z0-9-]+$/.test(user.login)) {
+      fail('RELEASE_OPERATOR_UNTRUSTED', 'A repository writer must manually start or rerun production deployment.');
+    }
+    const existing = operators.find(operator => operator.id === user.id);
+    if (existing) {
+      if (existing.login !== user.login) fail('RELEASE_OPERATOR_UNTRUSTED', 'GitHub returned inconsistent deployment operator identity.');
+      continue;
+    }
+    const access = await get('GET /repos/{owner}/{repo}/collaborators/{username}/permission', { username: user.login });
+    if (!PERMISSIONS.has(access?.permission) || access.user?.id !== user.id || access.user?.login !== user.login) {
+      fail('RELEASE_OPERATOR_UNTRUSTED', 'The dispatch actor and rerun actor must still have repository write access.');
+    }
+    operators.push({ id: user.id, login: user.login, permission: access.permission });
   }
 
   const reviews = [];
@@ -119,18 +164,14 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
   })));
   const trusted = permissions.filter(({ review, access }) => PERMISSIONS.has(access?.permission)
     && access.user?.id === review.user.id);
-  if (trusted.some(({ review }) => review.state !== 'APPROVED')) {
-    fail('RELEASE_REVIEW_BLOCKED', 'Resolve requested changes or dismissed reviews with a new approval before release.');
+  if (trusted.some(({ review }) => review.state === 'CHANGES_REQUESTED')) {
+    fail('RELEASE_REVIEW_BLOCKED', 'Resolve outstanding change requests from repository writers before release.');
   }
-  const approvers = trusted.filter(({ review }) => review.commit_id === pull.head.sha
-    && containsStagingLink(review.body, stagingRunUrl)
-    && nativeTimestamp(review.submitted_at) >= stagingVerifiedAt);
-  if (!approvers.length) {
-    fail('RELEASE_APPROVAL_MISSING', 'Another collaborator with write access must approve the final release PR head after the latest successful staging attempt and include its run URL in the approval text.');
-  }
-  return { type: 'pull_request', url: releaseEvidenceUrl, number: reference.number,
+  return { type: 'workflow_dispatch', url: releaseEvidenceUrl, number: reference.number,
     headSha: pull.head.sha, mergeSha: sha, stagingRunUrl,
     stagingRunAttempt: stagingRun.run_attempt, stagingVerifiedAt: stagingRun.updated_at,
-    reviewers: approvers.map(({ review, access }) => ({ login: review.user.login,
-      reviewId: review.id, permission: access.permission })) };
+    productionRunId: productionRun.id, productionRunAttempt: productionRun.run_attempt,
+    dispatchedAt: productionRun.created_at, confirmed: true,
+    actor: operators.find(user => user.id === productionRun.actor.id),
+    triggeringActor: operators.find(user => user.id === productionRun.triggering_actor.id) };
 }

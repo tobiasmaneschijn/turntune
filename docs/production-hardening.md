@@ -236,11 +236,13 @@ Build once from a reviewed revision and record the image digest, migration
 history, dependency lock hash and runtime configuration version. The manual
 [GitHub deployment workflow](github-deployments.md) builds and scans in staging,
 then promotes that exact digest to production. It checks CI and Supabase results
-for the selected commit, binds evidence to the run and attempt, and requires
-an approved release PR for production. The approving review and PR description
-must both link the selected staging run. A merge commit may have a different SHA only
-when its Git tree equals the staged source tree. The full hosted release gates
-in this runbook still apply.
+for the selected commit and binds evidence to the run and attempt. Production
+requires the merged release PR linking the selected staging run and a maintainer
+with write access confirming the native manual workflow after the merge and
+latest successful staging attempt. The maintainer may be the PR author. Active
+trusted changes-requested reviews still block deployment. A merge commit may
+have a different SHA only when its Git tree equals the staged source tree. The
+full hosted release gates in this runbook still apply.
 
 The base-image digest is reviewed, not permanently frozen: merge verified update
 proposals and rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
