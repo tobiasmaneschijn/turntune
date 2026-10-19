@@ -4,11 +4,11 @@ turntune is a shared listening room application. Listeners play music through su
 
 ## Room management
 
-The approved [room settings and moderation plan](docs/room-settings-and-moderation-implementation-plan-2026-10-09.md) extends the existing interface. Owners and authorized moderators configure lasting policy, manage members, and act on participants or messages. Public, Unlisted, and Members only access remain distinct from password protection. Roles, membership removal, and bans are separate operations.
+Owners and authorized moderators configure room policy, manage members, and act on participants or messages. Public, Unlisted, and Members only access remain distinct from password protection. Roles, membership removal, and bans are separate operations. See [rooms and radio](docs/rooms-and-radio.md) for permissions, persistence, and playback behavior.
 
 General, Music, Chat, and Members organize Room settings. Policy edits use Save changes; participant and member actions apply immediately. Reports, moderation reasons, and staff activity remain private. Temporary session restrictions show their expiry and restore the underlying policy when ended.
 
-The complete approved scope includes reports, warnings, invitation management, optional versioned rules, music policy, vote to skip, multiple songs per turn, fallback music, tags/language, scheduled themes, and presets. Their defaults and limits are recorded in the approved plan. Broad room styling, configurable disconnect grace, history-retention sliders, and lower private queue caps remain outside this change.
+Room controls include reports, warnings, invitations, optional versioned rules, music policy, vote to skip, multiple songs per turn, fallback music, tags/language, scheduled themes, and presets. Resource and retention limits are operator configuration; see [resource limits](docs/resource-limits.md).
 
 ## Interface constraints
 

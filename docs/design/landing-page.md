@@ -1,26 +1,33 @@
 # Landing page
 
-Surface: `/`, friends-first, Persuade. Approved direction: real app flow and explicit cloud/self-hosting choices. Preserve Geist, semantic themes, shared controls, and the existing lime accent. Example room data is illustrative; accounts and invite restrictions remain real.
+The public `/` page introduces shared listening and links to hosted sign-in and
+self-hosting instructions. The example room uses illustrative data; the hosted
+app still requires an account and invitation.
 
-## Direction contract
+## Room demonstration
 
-THESIS: Show a friend handing over the next track. A private queue feeds the shared DJ rotation; there is no public list of everyone’s waiting songs.
+The demonstration shows a private queue feeding the shared DJ rotation, a track
+handoff, and chat reactions. It uses the production `MusicRail`, `NowPlaying`,
+`RoomWorkspace`, and chat components with isolated scripted state.
 
-OWN-WORLD: Existing Geist typography, semantic light/dark surfaces, lime for primary actions and the musical focal point, solid shared controls. No added decorative visual system.
+Pause, replay, keyboard steps, and reduced-motion behavior keep the demonstration
+usable without automatic playback. It must not open provider players, join a
+room, or send provider or room requests.
 
-STORY: Friends understand queue, join, handoff, and response; then choose the hosted app or their own deployment.
+## Design constraints
 
-FIRST VIEWPORT: Large two-line motto beside concise explanation and two hosting actions. A full-width production room demonstration starts immediately below. The primary cloud action opens sign-in.
+Preserve Geist typography, semantic light/dark themes, shared controls, and the
+existing lime accent. Keep private waiting tracks out of shared room views.
+Landing and demonstration copy uses the shared localization catalogs.
+The primary hosted-app action opens sign-in. Self-hosting actions lead to the
+hosting options and setup guide.
 
-FORM: User-approved product demonstration, code-led, inherited world. Real MusicRail, NowPlaying, RoomWorkspace and chat components with isolated scripted state. Pause, replay, manual steps, and reduced motion keep the demonstration understandable.
+Use [DESIGN.md](../../DESIGN.md) and `.impeccable/design.json` for the inherited
+design system. Generated review captures belong in ignored `.impeccable/review/`.
 
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+## Relevant checks
 
-## Verification
-
-- The publication candidate preserves the local landing composition and the newer application's localization. Existing catalog entries remain unchanged; new landing and demonstration copy uses the public catalog.
-- Production build and type checking pass. The existing emoji-picker chunk size warning remains. Both localization tests pass.
-- Fourteen affected browser workflows pass: two landing, eight player, three existing public-entry, and one profile artwork workflow. The landing scenarios cover private queues, DJ handoff, pause/replay, keyboard steps, reduced motion, visible mobile reaction feedback, and no provider or room traffic.
-- Desktop dark (1440px) and narrow dark (390px) full-page renders were inspected, with no horizontal document overflow. This was a preservation check; no independent finish review was performed for the candidate.
-- The design detector reported advisory font-size and radius differences between the inherited landing CSS and the shared `DESIGN.md` ramp. The existing landing styles were preserved.
-- `DESIGN.md` and `.impeccable/design.json` describe the inherited system. No shipping raster assets were added. Candidate inspection captures remain in ignored `work/ui-reconcile-review/`; earlier `.impeccable/review/` captures are excluded from publication.
+[tests/ui/landing.spec.ts](../../tests/ui/landing.spec.ts) covers private queues,
+DJ handoff, pause/replay, keyboard steps, reduced motion, mobile reaction
+feedback, reflow, and isolation from provider and room traffic. Run it through
+`npm run test:ui` with the public-entry workflows.

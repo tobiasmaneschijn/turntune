@@ -7,7 +7,7 @@ const scanner = process.env.GITLEAKS_BIN || "gitleaks";
 const shared = ["--redact", "--no-banner", "--ignore-gitleaks-allow", "--timeout=120"];
 // Generic account passwords can escape pattern scanners. Keep local environment
 // files out of the source inventory even when someone force-adds an ignored file.
-const publishedEnvironmentFiles = new Set([".env.example", ".env.test"]);
+const publishedEnvironmentFiles = new Set([".env.example"]);
 function unexpectedEnvironmentFiles(files) {
   return files.filter(file => /(?:^|\/)\.env[^/]*$/.test(file) && !publishedEnvironmentFiles.has(file));
 }
@@ -17,9 +17,9 @@ function run(args, input) {
   return result;
 }
 if (process.argv.includes("--self-test")) {
-  assert.deepEqual(unexpectedEnvironmentFiles([".env.example", ".env.test", "server/config.ts"]), []);
-  assert.deepEqual(unexpectedEnvironmentFiles([".env", ".env.test-users.local", "nested/.env.local"]),
-    [".env", ".env.test-users.local", "nested/.env.local"], "Local environment files must be rejected even without a recognized credential pattern.");
+  assert.deepEqual(unexpectedEnvironmentFiles([".env.example", "server/config.ts"]), []);
+  assert.deepEqual(unexpectedEnvironmentFiles([".env", ".env.test", ".env.test-users.local", "nested/.env.local"]),
+    [".env", ".env.test", ".env.test-users.local", "nested/.env.local"], "Local environment files must be rejected even without a recognized credential pattern.");
   // Construct a well-known NONVALID credential shape in memory; never commit a key.
   const fixture = `github_token = ghp_${"aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2"}\n`;
   const detected = run(["stdin", ...shared], fixture);
@@ -29,7 +29,12 @@ if (process.argv.includes("--self-test")) {
 } else {
   const files = spawnSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
   assert.equal(files.status, 0, "Cannot inventory working files.");
-  const sourceFiles = files.stdout.split("\0").filter(Boolean);
+  const sourceFiles = files.stdout.split("\0").filter(Boolean).filter(file => {
+    // The index still lists files removed by an unstaged cleanup. Scan the
+    // working source inventory here; the history scan below covers old copies.
+    try { lstatSync(file); return true; }
+    catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  });
   const unexpected = unexpectedEnvironmentFiles(sourceFiles);
   assert.equal(unexpected.length, 0, `Local environment files must not be published: ${unexpected.join(", ")}`);
   // Complete available history, then unstaged diff and every tracked/untracked
