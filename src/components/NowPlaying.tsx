@@ -245,7 +245,8 @@ export function NowPlaying({
   controlsRef,
   onLocalStateChange,
   requestAction = defaultRequestAction,
-  providerPlayers
+  providerPlayers,
+  isolatedPreview = false
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
@@ -272,12 +273,15 @@ export function NowPlaying({
     apple: ComponentType<React.ComponentProps<typeof AppleMusicPlayer>>;
     mixcloud: ComponentType<React.ComponentProps<typeof MixcloudPlayer>>;
   }>;
+  /** An offline preview must not change the signed-in listener's provider session. */
+  isolatedPreview?: boolean;
 }) {
   const { t } = useTranslation("music");
   useEffect(() => {
+    if (isolatedPreview) return;
     setProviderAccount(currentUserId); setSpotifyWebStarted(false);
     setConnections({ loaded: false, spotifyConfigured: false, spotifyConnected: false, spotifyProfile: null, appleConfigured: false });
-  }, [currentUserId]);
+  }, [currentUserId, isolatedPreview]);
   const playback = snapshot.room.playback;
   const track = playback.track;
   const volume = userSettings.playback.defaultVolume;
@@ -331,8 +335,9 @@ export function NowPlaying({
   const Mixcloud = providerPlayers?.mixcloud || MixcloudPlayer;
 
   useEffect(() => {
+    if (isolatedPreview) return;
     if (!spotifyEnabled) { void resetProviderSession("spotify"); setSpotifyWebStarted(false); }
-  }, [spotifyEnabled, roomSlug]);
+  }, [spotifyEnabled, roomSlug, isolatedPreview]);
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   useEffect(() => () => connectionRequestRef.current?.abort(), []);
   useEffect(() => {

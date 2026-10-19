@@ -1,0 +1,802 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-19T20:07:58.486Z",
+  "title": "Design System: turntune",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "displayName": "Background",
+        "tonalRamp": [
+          "oklch(0.15 0.008 285)",
+          "oklch(0.26 0.008 285)",
+          "oklch(0.38 0.008 285)",
+          "oklch(0.49 0.008 285)",
+          "oklch(0.61 0.008 285)",
+          "oklch(0.72 0.008 285)",
+          "oklch(0.84 0.008 285)",
+          "oklch(0.95 0.008 285)"
+        ]
+      },
+      "foreground": {
+        "displayName": "Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "card": {
+        "displayName": "Card",
+        "tonalRamp": [
+          "oklch(0.15 0.009 285)",
+          "oklch(0.26 0.009 285)",
+          "oklch(0.38 0.009 285)",
+          "oklch(0.49 0.009 285)",
+          "oklch(0.61 0.009 285)",
+          "oklch(0.72 0.009 285)",
+          "oklch(0.84 0.009 285)",
+          "oklch(0.95 0.009 285)"
+        ]
+      },
+      "card-foreground": {
+        "displayName": "Card Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "popover": {
+        "displayName": "Popover",
+        "tonalRamp": [
+          "oklch(0.15 0.01 285)",
+          "oklch(0.26 0.01 285)",
+          "oklch(0.38 0.01 285)",
+          "oklch(0.49 0.01 285)",
+          "oklch(0.61 0.01 285)",
+          "oklch(0.72 0.01 285)",
+          "oklch(0.84 0.01 285)",
+          "oklch(0.95 0.01 285)"
+        ]
+      },
+      "popover-foreground": {
+        "displayName": "Popover Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "primary": {
+        "displayName": "Primary",
+        "tonalRamp": [
+          "oklch(0.15 0.18 115)",
+          "oklch(0.26 0.18 115)",
+          "oklch(0.38 0.18 115)",
+          "oklch(0.49 0.18 115)",
+          "oklch(0.61 0.18 115)",
+          "oklch(0.72 0.18 115)",
+          "oklch(0.84 0.18 115)",
+          "oklch(0.95 0.18 115)"
+        ]
+      },
+      "primary-foreground": {
+        "displayName": "Primary Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.03 115)",
+          "oklch(0.26 0.03 115)",
+          "oklch(0.38 0.03 115)",
+          "oklch(0.49 0.03 115)",
+          "oklch(0.61 0.03 115)",
+          "oklch(0.72 0.03 115)",
+          "oklch(0.84 0.03 115)",
+          "oklch(0.95 0.03 115)"
+        ]
+      },
+      "primary-text": {
+        "displayName": "Primary Text",
+        "tonalRamp": [
+          "oklch(0.15 0.18 115)",
+          "oklch(0.26 0.18 115)",
+          "oklch(0.38 0.18 115)",
+          "oklch(0.49 0.18 115)",
+          "oklch(0.61 0.18 115)",
+          "oklch(0.72 0.18 115)",
+          "oklch(0.84 0.18 115)",
+          "oklch(0.95 0.18 115)"
+        ]
+      },
+      "secondary": {
+        "displayName": "Secondary",
+        "tonalRamp": [
+          "oklch(0.15 0.01 285)",
+          "oklch(0.26 0.01 285)",
+          "oklch(0.38 0.01 285)",
+          "oklch(0.49 0.01 285)",
+          "oklch(0.61 0.01 285)",
+          "oklch(0.72 0.01 285)",
+          "oklch(0.84 0.01 285)",
+          "oklch(0.95 0.01 285)"
+        ]
+      },
+      "secondary-foreground": {
+        "displayName": "Secondary Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "muted": {
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(0.15 0.01 285)",
+          "oklch(0.26 0.01 285)",
+          "oklch(0.38 0.01 285)",
+          "oklch(0.49 0.01 285)",
+          "oklch(0.61 0.01 285)",
+          "oklch(0.72 0.01 285)",
+          "oklch(0.84 0.01 285)",
+          "oklch(0.95 0.01 285)"
+        ]
+      },
+      "muted-foreground": {
+        "displayName": "Muted Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.008 285)",
+          "oklch(0.26 0.008 285)",
+          "oklch(0.38 0.008 285)",
+          "oklch(0.49 0.008 285)",
+          "oklch(0.61 0.008 285)",
+          "oklch(0.72 0.008 285)",
+          "oklch(0.84 0.008 285)",
+          "oklch(0.95 0.008 285)"
+        ]
+      },
+      "accent": {
+        "displayName": "Accent",
+        "tonalRamp": [
+          "oklch(0.15 0.015 285)",
+          "oklch(0.26 0.015 285)",
+          "oklch(0.38 0.015 285)",
+          "oklch(0.49 0.015 285)",
+          "oklch(0.61 0.015 285)",
+          "oklch(0.72 0.015 285)",
+          "oklch(0.84 0.015 285)",
+          "oklch(0.95 0.015 285)"
+        ]
+      },
+      "accent-foreground": {
+        "displayName": "Accent Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "destructive": {
+        "displayName": "Destructive",
+        "tonalRamp": [
+          "oklch(0.15 0.22 25)",
+          "oklch(0.26 0.22 25)",
+          "oklch(0.38 0.22 25)",
+          "oklch(0.49 0.22 25)",
+          "oklch(0.61 0.22 25)",
+          "oklch(0.72 0.22 25)",
+          "oklch(0.84 0.22 25)",
+          "oklch(0.95 0.22 25)"
+        ]
+      },
+      "border": {
+        "displayName": "Border",
+        "tonalRamp": [
+          "oklch(0.15 0 0 / 11%)",
+          "oklch(0.26 0 0 / 11%)",
+          "oklch(0.38 0 0 / 11%)",
+          "oklch(0.49 0 0 / 11%)",
+          "oklch(0.61 0 0 / 11%)",
+          "oklch(0.72 0 0 / 11%)",
+          "oklch(0.84 0 0 / 11%)",
+          "oklch(0.95 0 0 / 11%)"
+        ]
+      },
+      "input": {
+        "displayName": "Input",
+        "tonalRamp": [
+          "oklch(0.15 0 0 / 15%)",
+          "oklch(0.26 0 0 / 15%)",
+          "oklch(0.38 0 0 / 15%)",
+          "oklch(0.49 0 0 / 15%)",
+          "oklch(0.61 0 0 / 15%)",
+          "oklch(0.72 0 0 / 15%)",
+          "oklch(0.84 0 0 / 15%)",
+          "oklch(0.95 0 0 / 15%)"
+        ]
+      },
+      "ring": {
+        "displayName": "Ring",
+        "tonalRamp": [
+          "oklch(0.15 0.18 115)",
+          "oklch(0.26 0.18 115)",
+          "oklch(0.38 0.18 115)",
+          "oklch(0.49 0.18 115)",
+          "oklch(0.61 0.18 115)",
+          "oklch(0.72 0.18 115)",
+          "oklch(0.84 0.18 115)",
+          "oklch(0.95 0.18 115)"
+        ]
+      },
+      "success": {
+        "displayName": "Success",
+        "tonalRamp": [
+          "oklch(0.15 0.17 150)",
+          "oklch(0.26 0.17 150)",
+          "oklch(0.38 0.17 150)",
+          "oklch(0.49 0.17 150)",
+          "oklch(0.61 0.17 150)",
+          "oklch(0.72 0.17 150)",
+          "oklch(0.84 0.17 150)",
+          "oklch(0.95 0.17 150)"
+        ]
+      },
+      "warning": {
+        "displayName": "Warning",
+        "tonalRamp": [
+          "oklch(0.15 0.16 75)",
+          "oklch(0.26 0.16 75)",
+          "oklch(0.38 0.16 75)",
+          "oklch(0.49 0.16 75)",
+          "oklch(0.61 0.16 75)",
+          "oklch(0.72 0.16 75)",
+          "oklch(0.84 0.16 75)",
+          "oklch(0.95 0.16 75)"
+        ]
+      },
+      "info": {
+        "displayName": "Info",
+        "tonalRamp": [
+          "oklch(0.15 0.14 255)",
+          "oklch(0.26 0.14 255)",
+          "oklch(0.38 0.14 255)",
+          "oklch(0.49 0.14 255)",
+          "oklch(0.61 0.14 255)",
+          "oklch(0.72 0.14 255)",
+          "oklch(0.84 0.14 255)",
+          "oklch(0.95 0.14 255)"
+        ]
+      },
+      "light-background": {
+        "displayName": "Light Background",
+        "tonalRamp": [
+          "oklch(0.15 0.004 106)",
+          "oklch(0.26 0.004 106)",
+          "oklch(0.38 0.004 106)",
+          "oklch(0.49 0.004 106)",
+          "oklch(0.61 0.004 106)",
+          "oklch(0.72 0.004 106)",
+          "oklch(0.84 0.004 106)",
+          "oklch(0.95 0.004 106)"
+        ]
+      },
+      "light-foreground": {
+        "displayName": "Light Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.012 285)",
+          "oklch(0.26 0.012 285)",
+          "oklch(0.38 0.012 285)",
+          "oklch(0.49 0.012 285)",
+          "oklch(0.61 0.012 285)",
+          "oklch(0.72 0.012 285)",
+          "oklch(0.84 0.012 285)",
+          "oklch(0.95 0.012 285)"
+        ]
+      },
+      "light-card": {
+        "displayName": "Light Card",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "light-card-foreground": {
+        "displayName": "Light Card Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.012 285)",
+          "oklch(0.26 0.012 285)",
+          "oklch(0.38 0.012 285)",
+          "oklch(0.49 0.012 285)",
+          "oklch(0.61 0.012 285)",
+          "oklch(0.72 0.012 285)",
+          "oklch(0.84 0.012 285)",
+          "oklch(0.95 0.012 285)"
+        ]
+      },
+      "light-popover": {
+        "displayName": "Light Popover",
+        "tonalRamp": [
+          "oklch(0.15 0 0)",
+          "oklch(0.26 0 0)",
+          "oklch(0.38 0 0)",
+          "oklch(0.49 0 0)",
+          "oklch(0.61 0 0)",
+          "oklch(0.72 0 0)",
+          "oklch(0.84 0 0)",
+          "oklch(0.95 0 0)"
+        ]
+      },
+      "light-popover-foreground": {
+        "displayName": "Light Popover Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.012 285)",
+          "oklch(0.26 0.012 285)",
+          "oklch(0.38 0.012 285)",
+          "oklch(0.49 0.012 285)",
+          "oklch(0.61 0.012 285)",
+          "oklch(0.72 0.012 285)",
+          "oklch(0.84 0.012 285)",
+          "oklch(0.95 0.012 285)"
+        ]
+      },
+      "light-primary": {
+        "displayName": "Light Primary",
+        "tonalRamp": [
+          "oklch(0.15 0.18 115)",
+          "oklch(0.26 0.18 115)",
+          "oklch(0.38 0.18 115)",
+          "oklch(0.49 0.18 115)",
+          "oklch(0.61 0.18 115)",
+          "oklch(0.72 0.18 115)",
+          "oklch(0.84 0.18 115)",
+          "oklch(0.95 0.18 115)"
+        ]
+      },
+      "light-primary-foreground": {
+        "displayName": "Light Primary Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.03 115)",
+          "oklch(0.26 0.03 115)",
+          "oklch(0.38 0.03 115)",
+          "oklch(0.49 0.03 115)",
+          "oklch(0.61 0.03 115)",
+          "oklch(0.72 0.03 115)",
+          "oklch(0.84 0.03 115)",
+          "oklch(0.95 0.03 115)"
+        ]
+      },
+      "light-primary-text": {
+        "displayName": "Light Primary Text",
+        "tonalRamp": [
+          "oklch(0.15 0.11 115)",
+          "oklch(0.26 0.11 115)",
+          "oklch(0.38 0.11 115)",
+          "oklch(0.49 0.11 115)",
+          "oklch(0.61 0.11 115)",
+          "oklch(0.72 0.11 115)",
+          "oklch(0.84 0.11 115)",
+          "oklch(0.95 0.11 115)"
+        ]
+      },
+      "light-secondary": {
+        "displayName": "Light Secondary",
+        "tonalRamp": [
+          "oklch(0.15 0.007 106)",
+          "oklch(0.26 0.007 106)",
+          "oklch(0.38 0.007 106)",
+          "oklch(0.49 0.007 106)",
+          "oklch(0.61 0.007 106)",
+          "oklch(0.72 0.007 106)",
+          "oklch(0.84 0.007 106)",
+          "oklch(0.95 0.007 106)"
+        ]
+      },
+      "light-secondary-foreground": {
+        "displayName": "Light Secondary Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.012 285)",
+          "oklch(0.26 0.012 285)",
+          "oklch(0.38 0.012 285)",
+          "oklch(0.49 0.012 285)",
+          "oklch(0.61 0.012 285)",
+          "oklch(0.72 0.012 285)",
+          "oklch(0.84 0.012 285)",
+          "oklch(0.95 0.012 285)"
+        ]
+      },
+      "light-muted": {
+        "displayName": "Light Muted",
+        "tonalRamp": [
+          "oklch(0.15 0.007 106)",
+          "oklch(0.26 0.007 106)",
+          "oklch(0.38 0.007 106)",
+          "oklch(0.49 0.007 106)",
+          "oklch(0.61 0.007 106)",
+          "oklch(0.72 0.007 106)",
+          "oklch(0.84 0.007 106)",
+          "oklch(0.95 0.007 106)"
+        ]
+      },
+      "light-muted-foreground": {
+        "displayName": "Light Muted Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.012 285)",
+          "oklch(0.26 0.012 285)",
+          "oklch(0.38 0.012 285)",
+          "oklch(0.49 0.012 285)",
+          "oklch(0.61 0.012 285)",
+          "oklch(0.72 0.012 285)",
+          "oklch(0.84 0.012 285)",
+          "oklch(0.95 0.012 285)"
+        ]
+      },
+      "light-accent": {
+        "displayName": "Light Accent",
+        "tonalRamp": [
+          "oklch(0.15 0.02 112)",
+          "oklch(0.26 0.02 112)",
+          "oklch(0.38 0.02 112)",
+          "oklch(0.49 0.02 112)",
+          "oklch(0.61 0.02 112)",
+          "oklch(0.72 0.02 112)",
+          "oklch(0.84 0.02 112)",
+          "oklch(0.95 0.02 112)"
+        ]
+      },
+      "light-accent-foreground": {
+        "displayName": "Light Accent Foreground",
+        "tonalRamp": [
+          "oklch(0.15 0.02 112)",
+          "oklch(0.26 0.02 112)",
+          "oklch(0.38 0.02 112)",
+          "oklch(0.49 0.02 112)",
+          "oklch(0.61 0.02 112)",
+          "oklch(0.72 0.02 112)",
+          "oklch(0.84 0.02 112)",
+          "oklch(0.95 0.02 112)"
+        ]
+      },
+      "light-destructive": {
+        "displayName": "Light Destructive",
+        "tonalRamp": [
+          "oklch(0.15 0.22 25)",
+          "oklch(0.26 0.22 25)",
+          "oklch(0.38 0.22 25)",
+          "oklch(0.49 0.22 25)",
+          "oklch(0.61 0.22 25)",
+          "oklch(0.72 0.22 25)",
+          "oklch(0.84 0.22 25)",
+          "oklch(0.95 0.22 25)"
+        ]
+      },
+      "light-border": {
+        "displayName": "Light Border",
+        "tonalRamp": [
+          "oklch(0.15 0.01 285 / 13%)",
+          "oklch(0.26 0.01 285 / 13%)",
+          "oklch(0.38 0.01 285 / 13%)",
+          "oklch(0.49 0.01 285 / 13%)",
+          "oklch(0.61 0.01 285 / 13%)",
+          "oklch(0.72 0.01 285 / 13%)",
+          "oklch(0.84 0.01 285 / 13%)",
+          "oklch(0.95 0.01 285 / 13%)"
+        ]
+      },
+      "light-input": {
+        "displayName": "Light Input",
+        "tonalRamp": [
+          "oklch(0.15 0.01 285 / 18%)",
+          "oklch(0.26 0.01 285 / 18%)",
+          "oklch(0.38 0.01 285 / 18%)",
+          "oklch(0.49 0.01 285 / 18%)",
+          "oklch(0.61 0.01 285 / 18%)",
+          "oklch(0.72 0.01 285 / 18%)",
+          "oklch(0.84 0.01 285 / 18%)",
+          "oklch(0.95 0.01 285 / 18%)"
+        ]
+      },
+      "light-ring": {
+        "displayName": "Light Ring",
+        "tonalRamp": [
+          "oklch(0.15 0.17 115)",
+          "oklch(0.26 0.17 115)",
+          "oklch(0.38 0.17 115)",
+          "oklch(0.49 0.17 115)",
+          "oklch(0.61 0.17 115)",
+          "oklch(0.72 0.17 115)",
+          "oklch(0.84 0.17 115)",
+          "oklch(0.95 0.17 115)"
+        ]
+      },
+      "light-success": {
+        "displayName": "Light Success",
+        "tonalRamp": [
+          "oklch(0.15 0.15 150)",
+          "oklch(0.26 0.15 150)",
+          "oklch(0.38 0.15 150)",
+          "oklch(0.49 0.15 150)",
+          "oklch(0.61 0.15 150)",
+          "oklch(0.72 0.15 150)",
+          "oklch(0.84 0.15 150)",
+          "oklch(0.95 0.15 150)"
+        ]
+      },
+      "light-warning": {
+        "displayName": "Light Warning",
+        "tonalRamp": [
+          "oklch(0.15 0.15 75)",
+          "oklch(0.26 0.15 75)",
+          "oklch(0.38 0.15 75)",
+          "oklch(0.49 0.15 75)",
+          "oklch(0.61 0.15 75)",
+          "oklch(0.72 0.15 75)",
+          "oklch(0.84 0.15 75)",
+          "oklch(0.95 0.15 75)"
+        ]
+      },
+      "light-info": {
+        "displayName": "Light Info",
+        "tonalRamp": [
+          "oklch(0.15 0.14 255)",
+          "oklch(0.26 0.14 255)",
+          "oklch(0.38 0.14 255)",
+          "oklch(0.49 0.14 255)",
+          "oklch(0.61 0.14 255)",
+          "oklch(0.72 0.14 255)",
+          "oklch(0.84 0.14 255)",
+          "oklch(0.95 0.14 255)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default application text."
+      },
+      "panel-title": {
+        "displayName": "Panel Title",
+        "purpose": "Music, playback, and chat pane headings."
+      },
+      "card-title": {
+        "displayName": "Card Title",
+        "purpose": "Shared Card title."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Shared buttons and navigation."
+      },
+      "detail": {
+        "displayName": "Detail",
+        "purpose": "Compact secondary information."
+      }
+    },
+    "shadows": [
+      {
+        "name": "panel",
+        "value": "none",
+        "purpose": "Room panels use borders and tonal separation; src/styles/room.css."
+      },
+      {
+        "name": "card-ring",
+        "value": "0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)",
+        "purpose": "Shared Card ring; src/components/ui/card.tsx."
+      },
+      {
+        "name": "active-music-tab",
+        "value": "0 1px 3px rgb(0 0 0 / .28)",
+        "purpose": "Active room music tab; src/styles/room.css."
+      },
+      {
+        "name": "media",
+        "value": "0 12px 32px rgb(0 0 0 / .45)",
+        "purpose": "Embedded provider media; src/styles/app.css."
+      },
+      {
+        "name": "toast",
+        "value": "0 10px 30px rgb(0 0 0 / .28)",
+        "purpose": "Transient app toast; src/styles/app.css."
+      },
+      {
+        "name": "album-art",
+        "value": "0 20px 52px rgb(0 0 0 / .52)",
+        "purpose": "Album artwork in the playback stage; src/styles/room.css."
+      }
+    ],
+    "motion": [
+      {
+        "name": "motion-fast",
+        "value": "110ms",
+        "purpose": "Shared motion primitive; src/styles/motion.css."
+      },
+      {
+        "name": "motion-control",
+        "value": "150ms",
+        "purpose": "Button and control state transitions; src/styles/motion.css."
+      },
+      {
+        "name": "motion-surface",
+        "value": "200ms",
+        "purpose": "Room pane appearance; src/styles/motion.css."
+      },
+      {
+        "name": "motion-artwork",
+        "value": "280ms",
+        "purpose": "Shared artwork motion primitive; src/styles/motion.css."
+      },
+      {
+        "name": "motion-ease-out",
+        "value": "cubic-bezier(.2,.8,.2,1)",
+        "purpose": "Shared control and pane easing; src/styles/motion.css."
+      },
+      {
+        "name": "motion-ease-exit",
+        "value": "ease-in",
+        "purpose": "Shared exit easing primitive; src/styles/motion.css."
+      },
+      {
+        "name": "landing-step",
+        "value": "160ms ease",
+        "purpose": "Landing demo step color and border changes; src/styles/landing.css."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "landing-mobile",
+        "value": "600px"
+      },
+      {
+        "name": "shared-mobile",
+        "value": "640px"
+      },
+      {
+        "name": "input-desktop",
+        "value": "768px"
+      },
+      {
+        "name": "landing-stack",
+        "value": "800px"
+      },
+      {
+        "name": "room-single-pane",
+        "value": "1024px"
+      },
+      {
+        "name": "landing-gap-reduction",
+        "value": "1100px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Observed shared Button primary variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Sign in</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--primary, oklch(0.91 0.18 115));color:var(--primary-foreground, oklch(0.16 0.03 115));}.ds-btn-primary:hover:not(:disabled){background:color-mix(in oklch,var(--primary, oklch(0.91 0.18 115)) 85%,transparent);}.ds-btn-primary:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-primary:active:not(:disabled){translate:0 1px;}.ds-btn-primary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-primary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-primary{transition:none;}.ds-btn-primary:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-primary{transition:none;}:host-context(.reduced-motion) .ds-btn-primary:active{translate:none;}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Observed shared Button outline variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-outline\" type=\"button\">Cancel</button>",
+      "css": ".ds-btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));border-color:var(--border, oklch(1 0 0 / 11%));background:var(--background, oklch(0.085 0.008 285));color:var(--foreground, oklch(0.97 0 0));}.ds-btn-outline:hover:not(:disabled){background:var(--muted, oklch(0.19 0.01 285));}.ds-btn-outline:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-outline:active:not(:disabled){translate:0 1px;}.ds-btn-outline:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-outline{border-color:var(--input, oklch(1 0 0 / 15%));background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 30%,transparent);}:host-context(.dark) .ds-btn-outline:hover{background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 50%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-outline{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-outline{transition:none;}.ds-btn-outline:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-outline{transition:none;}:host-context(.reduced-motion) .ds-btn-outline:active{translate:none;}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Observed shared Button secondary variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Replay</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--secondary, oklch(0.19 0.01 285));color:var(--secondary-foreground, oklch(0.97 0 0));}.ds-btn-secondary:hover:not(:disabled){background:color-mix(in oklch,var(--secondary, oklch(0.19 0.01 285)),var(--foreground, oklch(0.97 0 0)) 5%);}.ds-btn-secondary:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-secondary:active:not(:disabled){translate:0 1px;}.ds-btn-secondary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-secondary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-secondary{transition:none;}.ds-btn-secondary:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-secondary{transition:none;}:host-context(.reduced-motion) .ds-btn-secondary:active{translate:none;}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Observed shared Button ghost variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-ghost\" type=\"button\">Close</button>",
+      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--foreground, oklch(0.97 0 0));}.ds-btn-ghost:hover:not(:disabled){background:var(--muted, oklch(0.19 0.01 285));}.ds-btn-ghost:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-ghost:active:not(:disabled){translate:0 1px;}.ds-btn-ghost:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-ghost:hover{background:color-mix(in oklch,var(--muted, oklch(0.19 0.01 285)) 50%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-ghost{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-ghost{transition:none;}.ds-btn-ghost:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-ghost{transition:none;}:host-context(.reduced-motion) .ds-btn-ghost:active{translate:none;}"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Observed shared Button destructive variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-destructive\" type=\"button\">Remove</button>",
+      "css": ".ds-btn-destructive{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 10%,transparent);color:var(--destructive, oklch(0.65 0.22 25));}.ds-btn-destructive:hover:not(:disabled){background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}.ds-btn-destructive:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-destructive:active:not(:disabled){translate:0 1px;}.ds-btn-destructive:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-destructive{background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}:host-context(.dark) .ds-btn-destructive:hover{background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 30%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-destructive{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-destructive{transition:none;}.ds-btn-destructive:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-destructive{transition:none;}:host-context(.reduced-motion) .ds-btn-destructive:active{translate:none;}"
+    },
+    {
+      "name": "Link Button",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "Observed shared Button link variant; use the production Base UI component.",
+      "html": "<button class=\"ds-btn-link\" type=\"button\">View profile</button>",
+      "css": ".ds-btn-link{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--primary, oklch(0.91 0.18 115));text-underline-offset:4px;}.ds-btn-link:hover:not(:disabled){text-decoration:underline;}.ds-btn-link:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-link:active:not(:disabled){translate:0 1px;}.ds-btn-link:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-link{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-link{transition:none;}.ds-btn-link:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-link{transition:none;}:host-context(.reduced-motion) .ds-btn-link:active{translate:none;}"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Shared labeled field with semantic border, focus, placeholder, and invalid state.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-room-name\">Room name</label><input class=\"ds-field\" id=\"ds-room-name\" placeholder=\"Room name\" />",
+      "css": ".ds-field-label{display:block;margin-bottom:8px;color:var(--foreground, oklch(0.97 0 0));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;}.ds-field{width:100%;min-width:0;height:36px;padding:6px 12px;border:1px solid var(--input, oklch(1 0 0 / 15%));border-radius:var(--radius-lg,.7rem);background:transparent;color:var(--foreground, oklch(0.97 0 0));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:16px;line-height:24px;letter-spacing:-.01em;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));}.ds-field::placeholder{color:var(--muted-foreground, oklch(0.72 0.008 285));}.ds-field:hover:not(:disabled){border-color:var(--input, oklch(1 0 0 / 15%));}.ds-field:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-field:disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}.ds-field[aria-invalid=true]{border-color:var(--destructive, oklch(0.65 0.22 25));box-shadow:0 0 0 3px color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}:host-context(.dark) .ds-field{background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 30%,transparent);}@media(min-width:768px){.ds-field{font-size:14px;line-height:20px;}}@media(max-width:640px),(pointer:coarse){.ds-field{min-height:44px;font-size:16px;}}@media(prefers-reduced-motion:reduce){.ds-field{transition:none;}}"
+    },
+    {
+      "name": "Primary Badge",
+      "kind": "chip",
+      "refersTo": "badge-primary",
+      "description": "Compact primary status label from the shared Badge component.",
+      "html": "<span class=\"ds-badge\">Owner</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;width:fit-content;height:20px;padding:0 6px;border:1px solid transparent;border-radius:var(--radius-md,.56rem);background:var(--primary, oklch(0.91 0.18 115));color:var(--primary-foreground, oklch(0.16 0.03 115));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:11px;font-weight:500;line-height:16.5px;white-space:nowrap;}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Shared card surface with the production ring, default spacing, and title.",
+      "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Appearance</h2><div class=\"ds-card-content\">Theme</div></section>",
+      "css": ".ds-card{display:flex;flex-direction:column;gap:16px;padding:16px 0;overflow:hidden;border-radius:var(--radius-xl,.98rem);background:var(--card, oklch(0.135 0.009 285));color:var(--card-foreground, oklch(0.97 0 0));box-shadow:0 0 0 1px color-mix(in oklch,var(--foreground, oklch(0.97 0 0)) 10%,transparent);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:20px;letter-spacing:-.01em;}.ds-card-title{margin:0;padding:0 16px;font-size:16px;font-weight:500;line-height:1.375;}.ds-card-content{padding:0 16px;}"
+    },
+    {
+      "name": "Shared Navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Observed shared header: main navigation, bottom border, compact mobile spacing, and visible focus.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a class=\"ds-nav-brand\" href=\"#home\">turntune</a><a class=\"ds-nav-link\" href=\"#rooms\" aria-current=\"page\">Rooms</a></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;gap:24px;height:64px;padding:0 24px;border-bottom:1px solid var(--border, oklch(1 0 0 / 11%));background:var(--background, oklch(0.085 0.008 285));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;letter-spacing:-.01em;}.ds-nav-brand,.ds-nav-link{display:inline-flex;align-items:center;min-height:44px;min-width:44px;text-decoration:none;}.ds-nav-brand{color:var(--foreground, oklch(0.97 0 0));font-size:15px;font-weight:600;letter-spacing:-.02em;}.ds-nav-link{color:var(--muted-foreground, oklch(0.72 0.008 285));font-size:14px;font-weight:500;}.ds-nav-link:hover,.ds-nav-link[aria-current=page]{color:var(--foreground, oklch(0.97 0 0));}.ds-nav a:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:4px;border-radius:4px;}@media(max-width:640px){.ds-nav{height:56px;padding:0 12px;gap:20px;}}"
+    }
+  ],
+  "narrative": {
+    "overview": "The inherited interface uses Geist, solid semantic surfaces, compact room panes, and a lime accent. Shared Base UI controls carry the same states across public pages, rooms, and dialogs. Keep this existing system when extending the interface.",
+    "keyCharacteristics": [
+      "One sans-serif family with weight and size establishing hierarchy.",
+      "Dark and light semantic themes with a single lime brand accent.",
+      "Bordered surfaces, restrained depth, and clear control states.",
+      "Labeled controls, visible focus, and reachable mobile actions."
+    ],
+    "rules": [],
+    "dos": [
+      "**Do** preserve Geist, semantic dark/light themes, and the existing lime accent.",
+      "**Do** reuse shared controls and their keyboard, focus, disabled, and error states.",
+      "**Do** keep mobile actions at least 44 pixels and honor reduced motion.",
+      "**Do** use short labels and add supporting copy only when it enables the next action."
+    ],
+    "donts": [
+      "**Don't** add a separate decorative palette, font pairing, or component system to an existing surface.",
+      "**Don't** turn every setting or section into a card with a description.",
+      "**Don't** use color alone for essential state or remove accessibility names to shorten copy.",
+      "**Don't** promote the landing page's composition into a global layout requirement."
+    ]
+  }
+}
