@@ -1,11 +1,11 @@
-# Open-source publication preparation
+# Open-source publication record
 
 turntune uses [Apache-2.0](../LICENSE). Commercial use, proprietary reuse, and paid
 hosting are permitted under its terms. Third-party material retains its own
 licenses; see [NOTICE](../NOTICE) and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-The repository remains private while the publication review is completed. The
-existing repository was [renamed and its integrations verified](repository-rename.md).
+The repository is public. It was [renamed and its integrations verified](repository-rename.md)
+before publication. This record describes the preparation and maintainer follow-up.
 A full private backup of the original Git history, working files, and linked
 worktrees was verified before preparing a fresh source history. The old history
 and private operation evidence are not part of the new source snapshots.
@@ -22,9 +22,9 @@ not require resetting either database.
 Only reviewed source files belong in the snapshots. Local environment files,
 runtime data, operator exports, private screenshots, backups, and audit logs stay
 outside published source. The secret check rejects local `.env*` files even if
-force-added; only the reviewed root `.env.example` and synthetic `.env.test` are
-allowed. Pattern scanning still cannot establish that every secret or private
-detail is absent.
+force-added; only the reviewed root `.env.example` is allowed. The unused root
+`.env.test` was removed; browser fixtures use `tests/env/`. Pattern scanning still
+cannot establish that every secret or private detail is absent.
 
 ## Licensing and packaging
 
@@ -49,19 +49,18 @@ The optional LZMA build helper's missing upstream notice also needs clarificatio
 before public binary distribution; its declared MIT terms and exact provenance
 are recorded in the third-party notices.
 
-## Complete before making GitHub public
+## Maintainer follow-up
 
 1. Confirm rights to license the original work and existing contributions,
    including any employer-owned work. Confirm the source of the six SVG avatars
    in `public/avatars/`; attribution metadata was not found. Preserve all
    third-party notices.
-2. Review the exact branch/tag allowlist and new source commits. Replacing
+2. Review the published branches, tags, and source commits. Replacing
    primary branch history does not remove other branches, pull-request refs,
    cached views, releases, Actions logs/artifacts, or attachments. Review these
    separately and use GitHub's sensitive-data removal process where needed.
-3. Run the final source checks and CI on the exact new commits. Verify the
-   required checks and protections after the reset, and keep the repository
-   private until the review is complete.
+3. Run source checks and CI on the exact commits being released. Verify the
+   required checks and branch protections after repository administration.
 4. Enable GitHub private vulnerability reporting when available and verify the
    reporting route in `SECURITY.md`.
 
@@ -69,7 +68,7 @@ The offline static-analysis toolchain has a pending medium-severity
 [MCP advisory](https://github.com/advisories/GHSA-84m7-p3x7-pcfv). Semgrep 1.181.0
 pins the affected MCP version exactly; an isolated MCP update would break
 dependency resolution. Keep the consistent lock while awaiting a compatible
-upstream release, then verify that update before public publication. No MCP
+upstream release, then verify the replacement lock and scanner checks. No MCP
 server runs in the app or this scanner workflow. See the
 [scanner follow-up](../security/static-analysis/README.md#pending-upstream-mcp-security-update).
 

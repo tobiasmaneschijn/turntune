@@ -157,7 +157,7 @@ components:
     height: "64px"
 ---
 
-# Design System: turntune
+# Design system: turntune
 
 ## Overview
 
