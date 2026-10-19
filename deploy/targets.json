@@ -7,7 +7,8 @@
     "environmentId": "4_DTAeylE2U_zTxZ11iHT",
     "composeId": "lHqUphhpHX-XwZbBn3SHn",
     "service": "soundspin-staging",
-    "origin": "https://beta.soundspin.tobiasmaneschijn.com",
+    "origin": "https://beta.turntune.app",
+    "additionalOrigins": ["https://beta.soundspin.tobiasmaneschijn.com"],
     "hostPort": "3001",
     "supabaseProjectRef": "mknqduphywlluihgxysg"
   },

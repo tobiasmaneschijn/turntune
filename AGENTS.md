@@ -78,7 +78,7 @@ project or guessing IDs.
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
   deployment disabled; deploy manually only after that commit's migrations and
   CI checks succeed.
-- Staging currently uses `https://beta.soundspin.tobiasmaneschijn.com`. Verify
+- Staging currently uses `https://beta.turntune.app`. Verify
   the configured domain and keep `APP_ORIGIN`, Supabase Auth's Site URL and the
   exact `/update-password` redirect allowlist entry aligned with it.
 - Follow `README.md` (Dokploy deployment), `docs/production-hardening.md` and

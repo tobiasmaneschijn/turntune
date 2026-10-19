@@ -44,6 +44,17 @@ export function parseRuntime(value = '') {
   return Object.fromEntries(entries);
 }
 
+function exactHttpsOrigin(value) {
+  let url; try { url = new URL(value); } catch { throw new Error('Deployment origins must be exact HTTPS origins.'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.hostname.includes('*')) throw new Error('Deployment origins must be exact HTTPS origins.');
+  return url.origin;
+}
+
+export function targetOrigins(target) {
+  if (target.additionalOrigins !== undefined && !Array.isArray(target.additionalOrigins)) throw new Error('Deployment additionalOrigins must be an exact origin list.');
+  return [...new Set([target.origin, ...(target.additionalOrigins || [])].map(exactHttpsOrigin))];
+}
+
 export async function inspectTarget(dokploy, context, projectRef) {
   const { target, environment, repository } = context;
   if (!target) throw new Error('Select a deployment environment.');
@@ -58,12 +69,23 @@ export async function inspectTarget(dokploy, context, projectRef) {
   if (compose.environmentId !== target.environmentId || compose.name !== target.service || `${compose.owner}/${compose.repository}` !== repository || compose.branch !== target.branch || compose.composePath !== './compose.yaml' || !['github', 'raw'].includes(compose.sourceType) || compose.autoDeploy !== false || compose.composeType !== 'docker-compose' || compose.serverId) throw new Error('Dokploy source, branch, Compose type or manual-deployment configuration differs from the verified target.');
   if (compose.composeStatus === 'running') throw new Error('Dokploy already has a deployment in progress.');
   const runtime = parseRuntime(compose.env);
-  let origin; try { origin = new URL(runtime.APP_ORIGIN).origin; } catch { throw new Error('Dokploy APP_ORIGIN is invalid.'); }
-  if (origin !== target.origin || runtime.SUPABASE_URL?.replace(/\/$/, '') !== `https://${projectRef}.supabase.co` || String(runtime.SOUNDSPIN_PORT || '3000') !== target.hostPort) throw new Error('Dokploy origin, database or loopback port does not match this environment.');
+  const origins = targetOrigins(target);
+  let origin; try { origin = exactHttpsOrigin(runtime.APP_ORIGIN); } catch { throw new Error('Dokploy APP_ORIGIN is invalid.'); }
+  if (origin !== origins[0] || runtime.SUPABASE_URL?.replace(/\/$/, '') !== `https://${projectRef}.supabase.co` || String(runtime.SOUNDSPIN_PORT || '3000') !== target.hostPort) throw new Error('Dokploy origin, database or loopback port does not match this environment.');
   if (!runtime.SUPABASE_PUBLISHABLE_KEY || !runtime.SUPABASE_SECRET_KEY || runtime.SUPABASE_JWKS_URL !== `https://${projectRef}.supabase.co/auth/v1/.well-known/jwks.json`) throw new Error('Dokploy requires the project’s publishable key, server secret and exact JWKS URL before stopping the active service.');
+  if ([runtime.SPOTIFY_CLIENT_ID, runtime.SPOTIFY_CLIENT_SECRET, runtime.SPOTIFY_REDIRECT_URI].some(value => value?.trim())) {
+    if (!runtime.SPOTIFY_CLIENT_ID?.trim() || !runtime.SPOTIFY_CLIENT_SECRET?.trim()) throw new Error('Configured Spotify requires both SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET before deploying.');
+    if (runtime.SPOTIFY_REDIRECT_URI !== `${origin}/api/spotify/callback`) throw new Error('SPOTIFY_REDIRECT_URI must exactly match APP_ORIGIN/api/spotify/callback before deploying.');
+  }
+  const expectedAliases = new Set(origins.slice(1));
+  let aliases;
+  try { aliases = new Set((runtime.APP_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean).map(exactHttpsOrigin)); }
+  catch { throw new Error('Dokploy APP_ORIGINS must match the approved additional origins.'); }
+  if (aliases.size !== expectedAliases.size || [...aliases].some(value => !expectedAliases.has(value))) throw new Error('Dokploy APP_ORIGINS must match the approved additional origins.');
   const domains = compose.domains || [];
-  if (!domains.some(item => item.host === new URL(target.origin).host && item.https === true && item.port === 3000 && item.serviceName === 'soundspin' && item.path === '/')) throw new Error('The intended HTTPS domain must route to soundspin container port 3000.');
-  if (domains.some(item => item.serviceName === 'soundspin' && (!item.https || item.host !== new URL(target.origin).host || item.port !== 3000))) throw new Error('Remove unexpected or insecure SoundSpin ingress routes before deploying.');
+  const hosts = new Set(origins.map(value => new URL(value).host));
+  if (domains.some(item => item.serviceName !== 'soundspin' || item.https !== true || !hosts.has(item.host) || item.port !== 3000 || item.path !== '/')) throw new Error('Remove unexpected or insecure SoundSpin ingress routes before deploying.');
+  if ([...hosts].some(host => !domains.some(item => item.host === host))) throw new Error('Every approved HTTPS domain must route to soundspin container port 3000.');
   const deployments = await dokploy.call('deployment.allByCompose', { composeId: target.composeId });
   if (deployments.some(item => ['queued', 'running'].includes(item.status))) throw new Error('Dokploy has a queued or running deployment.');
   return { compose, runtime, deployments };

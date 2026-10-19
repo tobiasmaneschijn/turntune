@@ -5,7 +5,7 @@ there is no revision field to copy from a terminal.
 
 | Environment | Select branch | Dokploy service | Supabase project | Origin |
 | --- | --- | --- | --- | --- |
-| Staging | `develop` | Fun → staging → soundspin-staging | `mknqduphywlluihgxysg` | `https://beta.soundspin.tobiasmaneschijn.com` |
+| Staging | `develop` | Fun → staging → soundspin-staging | `mknqduphywlluihgxysg` | `https://beta.turntune.app` |
 | Production | `master` | Fun → production → soundspin | `xmutopoyxizxepkoshon` | `https://soundspin.tobiasmaneschijn.com` |
 
 [`deploy/targets.json`](../deploy/targets.json) contains the verified project,
