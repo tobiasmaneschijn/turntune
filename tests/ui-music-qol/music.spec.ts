@@ -100,11 +100,11 @@ test("reorder the private queue and undo a removal without changing room playbac
   const actions = page.getByRole("button", { name: "Actions for Gamma", exact: true });
   await actions.focus();
   await page.keyboard.press("Enter");
-  await page.getByRole("menuitem", { name: "First in my queue", exact: true }).click();
+  await page.getByRole("menu", { name: "Actions for Gamma", exact: true }).getByRole("menuitem", { name: "First in my queue", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Actions for Beta", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Remove from my queue", exact: true }).click();
+  await page.getByRole("menu", { name: "Actions for Beta", exact: true }).getByRole("menuitem", { name: "Remove from my queue", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha"]);
   await page.getByRole("button", { name: "Undo removal", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
