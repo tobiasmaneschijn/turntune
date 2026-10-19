@@ -67,6 +67,7 @@ function Harness() {
   const roles = new URLSearchParams(location.search).get('surface') === 'roles'
   const otherProfile = new URLSearchParams(location.search).get('profile') === 'other'
   const embedded = new URLSearchParams(location.search).has('embedded')
+  const spotifyEnabled = new URLSearchParams(location.search).has('spotify')
   const dialog = new URLSearchParams(location.search).has('dialog')
   return <ThemeProvider><main>
     <button onClick={() => setToken('token-two')}>Rotate token</button>
@@ -77,7 +78,7 @@ function Harness() {
     {roles ? <RoomSettingsDialog snapshot={snapshot} currentUserId={user.id} accessToken={token} connected={connected} transport={transport} onClose={() => {}} onNotice={setNotice} />
       : dialog ? <><button onClick={() => setDialogOpen(true)}>Open profile</button><RoomProfileDialog profileId={dialogOpen ? account.id : null} accessToken={token} currentUser={account}
           onClose={() => setDialogOpen(false)} onUpdate={(profile) => setUpdatedProfile(profile.display_name)} /></>
-      : <ProfilePage profileId={otherProfile ? bob.id : account.id} accessToken={token} currentUser={account} embedded={embedded} onBack={() => setNotice("Profile closed")} onOwnProfileUpdated={(profile) => setUpdatedProfile(profile.display_name)} onInvite={(id) => setNotice(`Invited ${id}`)} />}
+      : <ProfilePage profileId={otherProfile ? bob.id : account.id} accessToken={token} currentUser={account} embedded={embedded} spotifyEnabled={spotifyEnabled} onBack={() => setNotice("Profile closed")} onOwnProfileUpdated={(profile) => setUpdatedProfile(profile.display_name)} onInvite={(id) => setNotice(`Invited ${id}`)} />}
   </main></ThemeProvider>
 }
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).get('surface') === 'session' ? <RoomSessionHarness /> : <Harness />)
