@@ -1,7 +1,6 @@
 # Localization and brand copy
 
 The product name is **turntune**. Its motto is **Take turns. Pick the Tunes**.
-The official brand reference is the [Brand & Copy Kit](https://chatgpt.com/space/page_6ac8b159ae488191837287529c3faedd).
 
 English is the initial supported language. `i18next` and `react-i18next` provide
 language detection, fallback, interpolation, and plural rules. All maintained app
