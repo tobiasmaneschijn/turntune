@@ -237,10 +237,9 @@ history, dependency lock hash and runtime configuration version. The manual
 [GitHub deployment workflow](github-deployments.md) builds and scans in staging,
 then promotes that exact digest to production. It checks CI and Supabase results
 for the selected commit and binds evidence to the run and attempt. Production
-requires the merged release PR linking the selected staging run and a maintainer
-with write access confirming the native manual workflow after the merge and
-latest successful staging attempt. The maintainer may be the PR author. Active
-trusted changes-requested reviews still block deployment. A merge commit may
+requires a maintainer with write access to select **Confirm deployment** in a
+fresh manual workflow run. It automatically selects a successful staging
+deployment with the same source tree, completed before that dispatch. A merge commit may
 have a different SHA only when its Git tree equals the staged source tree. The
 full hosted release gates in this runbook still apply.
 

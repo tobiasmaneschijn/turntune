@@ -124,7 +124,9 @@ export async function deployRelease({
     initial = await inspect(dokploy, context, env.SUPABASE_PROJECT_REF);
     if (!isDeepStrictEqual(sourceSnapshot(initial.compose), original)) throw new Error('Dokploy configuration changed during release preparation; review it and retry.');
     if (!gates?.gates) throw new Error('Release preflight did not return verified CI and migration gates.');
-    if (context.environment === 'production' && gates.gates.releaseReview?.stagingRunAttempt !== promotion.stagingRun.attempt) throw new Error('The approved staging attempt changed during release preparation; review the latest attempt and retry.');
+    if (context.environment === 'production' && (gates.gates.authorization?.stagingRunId !== promotion.stagingRun.id
+      || gates.gates.authorization?.stagingRunAttempt !== promotion.stagingRun.attempt
+      || gates.gates.authorization?.stagingRunUrl !== promotion.stagingRun.url)) throw new Error('The selected staging deployment changed during release preparation; start a new Deploy workflow.');
     const compose = initial.compose;
     const oldIds = new Set(previous.map(item => item.Id));
     phase = 'stopping';
@@ -192,7 +194,7 @@ export async function deployRelease({
       await wait(intervalMs);
     }
     if (!checks) throw new Error('Exactly one healthy application container was not verified before the deadline.');
-    const evidence = { ...evidenceBase, imageRevision: manifest.revision, image: manifest.image, digest: manifest.digest, manifest, migrations: manifest.migrations, verified: true, checks, gates: gates.gates, config: { origin: context.target.origin, additionalOrigins: context.target.additionalOrigins || [], composeId: compose.composeId, environmentId: context.target.environmentId, projectRef: env.SUPABASE_PROJECT_REF, proxyAddress, templateSha256: hash(template) }, deploymentId, deploymentLogsReadable: logsRead, releaseEvidence: env.RELEASE_EVIDENCE };
+    const evidence = { ...evidenceBase, imageRevision: manifest.revision, image: manifest.image, digest: manifest.digest, manifest, migrations: manifest.migrations, verified: true, checks, gates: gates.gates, config: { origin: context.target.origin, additionalOrigins: context.target.additionalOrigins || [], composeId: compose.composeId, environmentId: context.target.environmentId, projectRef: env.SUPABASE_PROJECT_REF, proxyAddress, templateSha256: hash(template) }, deploymentId, deploymentLogsReadable: logsRead };
     await save('deployment-evidence.json', evidence);
     return evidence;
   } catch (error) {
