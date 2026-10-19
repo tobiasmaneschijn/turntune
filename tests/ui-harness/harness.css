@@ -1,0 +1,4 @@
+body { min-width: 0; }
+.fixture-page { min-height: 100dvh; background: var(--background); color: var(--foreground); }
+.fixture-state { min-height: 100dvh; padding: 24px; display: grid; place-items: center; }
+.fixture-state > * { width: min(520px,100%); }

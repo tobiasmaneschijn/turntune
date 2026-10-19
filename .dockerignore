@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-server
+data
+.git
+.env*
+!.env.example
+npm-debug.log*
+work
+output
+test-results*
+playwright-report
+.agents
+.codex
+.github
+docs
+SECURITY_AUDIT_REPORT.md

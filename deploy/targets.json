@@ -1,0 +1,25 @@
+{
+  "repository": "tobiasmaneschijn/turntune",
+  "project": "Fun",
+  "projectId": "mux4qGjFvO-HJy-3zAIf_",
+  "staging": {
+    "branch": "develop",
+    "environmentId": "4_DTAeylE2U_zTxZ11iHT",
+    "composeId": "lHqUphhpHX-XwZbBn3SHn",
+    "service": "soundspin-staging",
+    "origin": "https://beta.turntune.app",
+    "additionalOrigins": ["https://beta.soundspin.tobiasmaneschijn.com"],
+    "hostPort": "3001",
+    "supabaseProjectRef": "mknqduphywlluihgxysg"
+  },
+  "production": {
+    "branch": "master",
+    "environmentId": "vH7qyivcot6pJqjoKFnvc",
+    "composeId": "ZXfjmVIjsn7XwCqNzgzsF",
+    "service": "soundspin",
+    "origin": "https://turntune.app",
+    "additionalOrigins": ["https://soundspin.tobiasmaneschijn.com"],
+    "hostPort": "3002",
+    "supabaseProjectRef": "xmutopoyxizxepkoshon"
+  }
+}

@@ -1,0 +1,35 @@
+@napi-rs/lzma-linux-x64-gnu 1.5.1
+
+Publisher-declared license: MIT (npm package.json).
+Same-version parent: @napi-rs/lzma 1.5.1, also declared MIT.
+Both registry records identify source commit f164df92d83e095f195d628b1a68a141ae2eb638.
+Source: https://github.com/Brooooooklyn/lzma/tree/f164df92d83e095f195d628b1a68a141ae2eb638
+Native tarball integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==
+Parent tarball integrity: sha512-sgOZ89+y8cDbY+3WbzR8CtIhCuFRWotZ9/2PjPVDJHz6np5KFTAev0DrwiyTJTgFsCRDhfGlbmhMgyhHbWdZ6g==
+
+Upstream supplied no copyright notice or standalone license text in either
+published package or the matching source tree. No copyright holder or year
+has been added here. This record preserves the available metadata declaration.
+
+The following permission and warranty terms are the standard MIT text from
+SPDX (https://spdx.org/licenses/MIT.json), not text copied from upstream.
+The template copyright placeholder is omitted because upstream supplied no
+corresponding notice. Upstream notice clarification and native-binary license
+review remain required before public binary distribution.
+
+--- Standard MIT permission and warranty terms ---
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.

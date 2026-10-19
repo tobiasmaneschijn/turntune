@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#09090b" />
+    <link rel="license" href="/LICENSE" />
+    <link rel="license" href="/third-party-notices.txt" title="Third-party notices" />
+    <script>
+      (() => {
+        try {
+          const stored = localStorage.getItem("soundspin-theme") || "dark";
+          const resolved = stored === "system"
+            ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : stored;
+          const effectiveTheme = resolved === "light" ? "light" : "dark";
+          document.documentElement.classList.add(effectiveTheme);
+          document.documentElement.style.colorScheme = effectiveTheme;
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", effectiveTheme === "light" ? "#f7f7f2" : "#09090b");
+        } catch {
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.colorScheme = "dark";
+        }
+      })();
+    </script>
+    <meta
+      name="description"
+      content="turntune is a shared music room where friends take turns choosing the soundtrack. Create a room, queue your picks, and listen together."
+    />
+    <title>turntune — Take turns. Pick the Tunes</title>
+    <meta property="og:title" content="turntune — Take turns. Pick the Tunes" />
+    <meta property="og:description" content="Listen together. Take turns playing music. Discover your next favorite track." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="turntune" />
+    <meta property="og:url" content="https://turntune.app/" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

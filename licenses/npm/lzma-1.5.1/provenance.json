@@ -1,0 +1,46 @@
+{
+  "reviewedAt": "2026-10-19",
+  "packages": [
+    {
+      "name": "@napi-rs/lzma",
+      "version": "1.5.1",
+      "license": "MIT",
+      "gitHead": "f164df92d83e095f195d628b1a68a141ae2eb638",
+      "metadataUrl": "https://registry.npmjs.org/%40napi-rs%2Flzma/1.5.1",
+      "tarball": "https://registry.npmjs.org/@napi-rs/lzma/-/lzma-1.5.1.tgz",
+      "integrity": "sha512-sgOZ89+y8cDbY+3WbzR8CtIhCuFRWotZ9/2PjPVDJHz6np5KFTAev0DrwiyTJTgFsCRDhfGlbmhMgyhHbWdZ6g=="
+    },
+    {
+      "name": "@napi-rs/lzma-linux-x64-gnu",
+      "version": "1.5.1",
+      "license": "MIT",
+      "gitHead": "f164df92d83e095f195d628b1a68a141ae2eb638",
+      "metadataUrl": "https://registry.npmjs.org/%40napi-rs%2Flzma-linux-x64-gnu/1.5.1",
+      "tarball": "https://registry.npmjs.org/@napi-rs/lzma-linux-x64-gnu/-/lzma-linux-x64-gnu-1.5.1.tgz",
+      "integrity": "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ=="
+    }
+  ],
+  "standardTerms": {
+    "licenseId": "MIT",
+    "source": "https://spdx.org/licenses/MIT.json",
+    "fullTextSha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+    "permissionTextSha256": "83330a27667f812efa9c7cdaefd4c83f95b57a7454323a61ee29291312640468",
+    "note": "Standard SPDX permission and warranty terms, not a license file copied from upstream. The SPDX copyright placeholder is not an upstream notice and is omitted."
+  },
+  "upstreamNoticeReview": {
+    "sourceCommit": "https://github.com/Brooooooklyn/lzma/tree/f164df92d83e095f195d628b1a68a141ae2eb638",
+    "sourceTreeEntries": 75,
+    "npmLicenseOrCopyrightNoticeSupplied": false,
+    "sourceLicenseOrCopyrightNoticeSupplied": false,
+    "note": "Parent/native package manifests declare MIT. Neither integrity-verified npm tarball nor matching complete source tree contains a license/copyright notice; no copyright holder or year has been invented."
+  },
+  "notice": {
+    "file": "licenses/npm/lzma-1.5.1/NOTICE.txt",
+    "sha256": "b92a071ea5362fbed53a097a17f602af46dd9253526b758f5c34be25a1cc1f45",
+    "hashNormalization": "UTF-8 with CRLF normalized to LF"
+  },
+  "metadataConvention": {
+    "source": "https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#license",
+    "note": "npm documents the license field as a current SPDX identifier for a common license such as MIT. This record preserves the publisher declaration without inventing an absent copyright notice."
+  }
+}

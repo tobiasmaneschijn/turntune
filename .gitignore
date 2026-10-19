@@ -1,0 +1,15 @@
+node_modules/
+work/
+output/
+test-results-*.png
+dist/
+dist-server/
+data/
+.env*
+!.env.example
+.DS_Store
+supabase/.temp/
+npm-debug.log*
+playwright-report/
+test-results/
+test-results-*/
