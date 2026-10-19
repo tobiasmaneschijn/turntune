@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { mergeChatMessages, type ChatMessage } from '@/chat/model'
@@ -6,6 +7,7 @@ import type { ChatHistorySource, ChatMessageContext } from '@/chat/history-reade
 
 type Context = ChatMessageContext
 export function useChatHistory(client: SupabaseClient, roomSlug: string | undefined, scope: string, initialMessages: ChatMessage[], onHistoricalMessages?: (messages: ChatMessage[]) => void, source?: ChatHistorySource, initialHasOlder?: boolean) {
+  const { t } = useTranslation('chat')
   const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([])
   const [hasOlder, setHasOlder] = useState(initialHasOlder === true || initialMessages.length >= CHAT_HISTORY_LIMIT)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -62,9 +64,9 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
       cursorRef.current = page.cursor || cursorRef.current
       setOlderMessages((current) => mergeChatMessages(current, page.messages))
       setHasOlder(page.hasMore)
-    } catch { if (generation === generationRef.current && request === olderRequestRef.current) setHistoryError('Older messages could not be loaded. Try again.') }
+    } catch { if (generation === generationRef.current && request === olderRequestRef.current) setHistoryError(t('olderLoadFailed')) }
     finally { if (generation === generationRef.current && request === olderRequestRef.current) { olderPendingRef.current = false; setLoadingOlder(false) } }
-  }, [client, roomSlug, source])
+  }, [client, roomSlug, source, t])
 
   const search = useCallback(async (term: string, more = false) => {
     if (!roomSlug || !source) return
@@ -80,9 +82,9 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
       setSearchResults((current) => more ? mergeChatMessages(page.messages, current) : page.messages)
       setSearchHasMore(page.hasMore)
     } catch (error) {
-      if (request === searchRequestRef.current && generation === generationRef.current) setSearchError(error instanceof Error ? error.message : 'Room messages could not be searched. Try again.')
+      if (request === searchRequestRef.current && generation === generationRef.current) setSearchError(error instanceof Error ? error.message : t('searchFailed'))
     } finally { if (request === searchRequestRef.current && generation === generationRef.current) setSearchLoading(false) }
-  }, [client, roomSlug, source])
+  }, [client, roomSlug, source, t])
 
   const revealContext = useCallback(async (messageId: string) => {
     if (!roomSlug || !source) return false
@@ -92,15 +94,15 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
     try {
       const result = await source.loadContext(messageId)
       if (request !== contextRequestRef.current || generation !== generationRef.current) return false
-      if (!result) { setHistoryError('That message is unavailable. It may have been removed or you may no longer have access.'); return false }
+      if (!result) { setHistoryError(t('messageUnavailable')); return false }
       notifyRef.current?.(result.messages)
       setContext(result)
       return true
     } catch {
-      if (request === contextRequestRef.current && generation === generationRef.current) setHistoryError('That message could not be loaded. Try again.')
+      if (request === contextRequestRef.current && generation === generationRef.current) setHistoryError(t('messageLoadFailed'))
       return false
     } finally { if (request === contextRequestRef.current && generation === generationRef.current) setContextLoading(false) }
-  }, [client, roomSlug, source])
+  }, [client, roomSlug, source, t])
 
   const extendContext = useCallback(async (direction: 'older' | 'newer') => {
     if (!roomSlug || !source || !context || contextLoading) return
@@ -115,9 +117,9 @@ export function useChatHistory(client: SupabaseClient, roomSlug: string | undefi
       setContext((current) => current ? { ...current, messages: mergeChatMessages(current.messages, page.messages),
         ...(direction === 'older' ? { olderCursor: page.cursor || current.olderCursor, hasOlder: page.hasMore }
           : { newerCursor: page.cursor || current.newerCursor, hasNewer: page.hasMore }) } : current)
-    } catch { if (generation === generationRef.current && request === contextRequestRef.current) setHistoryError('More context could not be loaded. Try again.') }
+    } catch { if (generation === generationRef.current && request === contextRequestRef.current) setHistoryError(t('contextLoadFailed')) }
     finally { if (generation === generationRef.current && request === contextRequestRef.current) setContextLoading(false) }
-  }, [client, context, contextLoading, roomSlug, source])
+  }, [client, context, contextLoading, roomSlug, source, t])
 
   const closeContext = useCallback(() => { contextRequestRef.current++; setContext(null); setContextLoading(false); setHistoryError('') }, [])
   const clearSearch = useCallback(() => { searchRequestRef.current++; setSearchLoading(false); setSearchResults([]); setSearchHasMore(false); setSearchError(''); setSearchTerm('') }, [])

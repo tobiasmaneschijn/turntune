@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express from "express";
 import { z } from "zod";
 import type { ModerationService } from "./moderation-service.js";
@@ -8,11 +9,11 @@ export function mountModerationRoutes(app: express.Express, service: ModerationS
   const handle = (run: (request: express.Request, actor: string, roomId: string) => Promise<unknown>): express.RequestHandler => async (request, response) => {
     response.set("Cache-Control", "no-store");
     try {
-      const actor = await getUserId(request); if (!actor) return void response.status(401).json({ error: "Sign in to use room tools." });
+      const actor = await getUserId(request); if (!actor) return void response.status(401).json({ error: serverT("sign_in_to_use_room_tools") });
       response.json(await run(request, actor, slug.parse(request.params.slug)));
     } catch (error) {
       const status = error instanceof z.ZodError ? 400 : error instanceof RoomCommandError ? 403 : 503;
-      response.status(status).json({ error: error instanceof z.ZodError ? error.issues[0]?.message || "Invalid room action." : error instanceof RoomCommandError ? error.message : "Could not complete this room action. Try again." });
+      response.status(status).json({ error: error instanceof z.ZodError ? error.issues[0]?.message || serverT("invalid_room_action") : error instanceof RoomCommandError ? error.message : serverT("could_not_complete_this_room_action_try_again") });
     }
   };
   app.get("/api/rooms/:slug/members", handle((request, actor, roomId) => service.members(roomId, actor, query.parse(request.query.q ?? ""), cursor.parse(request.query.cursor))));

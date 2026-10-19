@@ -11,7 +11,7 @@ RUN find dist-server -name '*.test.js' -delete
 
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
 ARG BUILD_REVISION=unknown
-LABEL org.opencontainers.image.title="SoundSpin" \
+LABEL org.opencontainers.image.title="turntune" \
       org.opencontainers.image.revision=$BUILD_REVISION
 WORKDIR /app
 ENV NODE_ENV=production

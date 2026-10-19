@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { User } from '@/types'
 
 export type ChatMessageType = 'text' | 'image' | 'gif'
@@ -33,8 +34,8 @@ export function applyRemovalEvents(messages:ChatMessage[],events:ChatRemovedEven
   return messages.map(message=>{
     const removedAt=message.removedAt||removed.get(message.id)
     const replyRemoved=message.replyTo?.removedAt||removed.get(message.replyTo?.id||'')
-    const replyTo=message.replyTo&&replyRemoved?{...message.replyTo,content:'Message removed',type:'text' as const,mediaUrl:undefined,mentions:[],removedAt:replyRemoved}:message.replyTo
-    return removedAt?{id:message.id,user:message.user,createdAt:message.createdAt,content:'Message removed',type:'text',removedAt,replyTo,reactions:[]}:replyTo!==message.replyTo?{...message,replyTo}:message
+    const replyTo=message.replyTo&&replyRemoved?{...message.replyTo,content:i18n.t('chat:removed'),type:'text' as const,mediaUrl:undefined,mentions:[],removedAt:replyRemoved}:message.replyTo
+    return removedAt?{id:message.id,user:message.user,createdAt:message.createdAt,content:i18n.t('chat:removed'),type:'text',removedAt,replyTo,reactions:[]}:replyTo!==message.replyTo?{...message,replyTo}:message
   })
 }
 
@@ -302,17 +303,16 @@ export function groupReactions(
 
 export function reactionLabel(group: ReactionGroup, currentUserId: string): string {
   const names = group.reactors.map((reactor) =>
-    reactor.userId === currentUserId ? 'You' : reactor.userName || 'Unknown listener'
+    reactor.userId === currentUserId ? i18n.t('chat:you') : reactor.userName || i18n.t('chat:unknownListener')
   )
   const visibleNames = names.slice(0, 5)
   const remaining = names.length - visibleNames.length
-  return remaining > 0
-    ? `${visibleNames.join(', ')} and ${remaining} ${remaining === 1 ? 'other' : 'others'}`
-    : visibleNames.join(', ')
+  if (remaining > 0) visibleNames.push(i18n.t('chat:otherReactors', { count: remaining }))
+  return new Intl.ListFormat(i18n.resolvedLanguage, { style: 'long', type: 'conjunction' }).format(visibleNames)
 }
 
 export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type' | 'removedAt'>): string {
-  return message.removedAt?'Message removed':message.content || (message.type === 'gif' ? 'GIF' : 'Image')
+  return message.removedAt?i18n.t('chat:removed'):message.content || (message.type === 'gif' ? i18n.t('chat:gif') : i18n.t('chat:image'))
 }
 
 export function startsNewDay(message: ChatMessage, previous?: ChatMessage): boolean {

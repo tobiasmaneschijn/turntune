@@ -20,6 +20,7 @@ services:
       PORT: 3000
       DATA_DIR: /app/data
       APP_ORIGIN: ${APP_ORIGIN:?Set the public HTTPS origin}
+      APP_ORIGINS: ${APP_ORIGINS:-}
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
       CSP_MODE: ${CSP_MODE:-enforce}
       SUPABASE_URL: ${SUPABASE_URL:?Set the Supabase project HTTPS URL}

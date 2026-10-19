@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ImageUp, Palette, Pencil, Plus, UserPlus } from "lucide-react";
 import { Avatar } from "./Avatar";
@@ -65,6 +66,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   onHome?: () => void; onOpenProfile?: () => void; onSignOut?: () => void;
   userSettings?: SoundSpinUserSettings; onSettingsChange?: (settings: SoundSpinUserSettings) => void;
 }) {
+  const { t, i18n } = useTranslation("rooms");
   const formId = useId();
   const [profile, setProfile] = useState<SoundSpinProfile | null>(null);
   const [options, setOptions] = useState<SoundSpinProfileOption[]>([]);
@@ -146,7 +148,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     draftVersionRef.current = 0;
     void requestJson<ProfileResponse>(`/api/profiles/${profileId}`, {
       accessToken: tokenRef.current, signal: controller.signal,
-      errorMessage: "Could not load this profile. Try again.", validate: isProfileResponse
+      errorMessage: t("socialCouldNotLoadThisProfileTryAgain"), validate: isProfileResponse
     }).then((payload) => {
       if (!lifetime.active) return;
       setProfile(payload.profile); setOptions(payload.options || []); restoreFields(payload.profile);
@@ -160,7 +162,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         setAvatarDraft(avatar?.kind === "image" ? { ...avatar, url: URL.createObjectURL(avatar.file) } : avatar);
       }
     }).catch((cause) => {
-      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not load this profile. Try again.");
+      if (lifetime.active) setError(cause instanceof Error ? cause.message : t("socialCouldNotLoadThisProfileTryAgain"));
     }).finally(() => { if (lifetime.active) setLoading(false); });
     return () => {
       lifetime.active = false; controller.abort();
@@ -184,9 +186,9 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     let active = true;
     setSocial(null); setSocialError(""); setSocialBusy(false);
     void requestJson<SocialResponse>("/api/social", { accessToken: tokenRef.current, signal: controller.signal,
-      validate: isSocialResponse, errorMessage: "Could not load friends. Try again." })
+      validate: isSocialResponse, errorMessage: t("socialCouldNotLoadFriendsTryAgain") })
       .then((loaded) => { if (active && lifetime.active) setSocial(loaded); })
-      .catch((cause) => { if (active && lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not load friends. Try again."); });
+      .catch((cause) => { if (active && lifetime.active) setSocialError(cause instanceof Error ? cause.message : t("socialCouldNotLoadFriendsTryAgain")); });
     return () => { active = false; controller.abort(); };
   }, [profileId, currentUser.id, loadRevision, socialRevision]);
 
@@ -199,7 +201,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
       const avatarUpload = update.customAvatarPath ? uploadedAvatarRef.current : null;
       const payload = await requestJson<ProfileResponse>("/api/profile", {
         method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
-        body: JSON.stringify(update), errorMessage: "Could not save your profile. Try again.", validate: isProfileResponse
+        body: JSON.stringify(update), errorMessage: t("socialCouldNotSaveYourProfileTryAgain"), validate: isProfileResponse
       }, async (input, init) => {
         const response = await fetch(input, init);
         // A validation/auth rejection did not commit. A timeout or server error is uncertain.
@@ -216,7 +218,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
       onOwnProfileUpdated(payload.profile); setSaved(true);
       return true;
     } catch (cause) {
-      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not save your profile. Try again.");
+      if (lifetime.active) setError(cause instanceof Error ? cause.message : t("socialCouldNotSaveYourProfileTryAgain"));
       return false;
     } finally {
       requestControllers.current.delete(controller);
@@ -229,7 +231,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     if (detailsSavingRef.current || saving) return;
     const normalizedHandle = handle.trim().toLowerCase();
     if (normalizedHandle && !/^[a-z0-9_]{3,24}$/.test(normalizedHandle)) {
-      setError("Handle: 3–24 letters, numbers, or underscores."); return;
+      setError(t("socialHandle324LettersNumbersOrUnderscores")); return;
     }
     const draftVersion = draftVersionRef.current;
     const submittedFields = fieldsRef.current;
@@ -252,7 +254,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
               headers: { "Content-Type": chosenAvatar.file.type },
               validate: (value): value is { storagePath: string } => Boolean(value && typeof value === "object" &&
                 "storagePath" in value && typeof value.storagePath === "string" && value.storagePath.startsWith(`${currentUser.id}/`)),
-              errorMessage: "Could not upload your avatar. Try again.", timeoutMs: UPLOAD_TIMEOUT_MS
+              errorMessage: t("socialCouldNotUploadYourAvatarTryAgain"), timeoutMs: UPLOAD_TIMEOUT_MS
             }), { signal: controller.signal, timeoutMs: UPLOAD_TIMEOUT_MS });
             path = result.storagePath;
           } finally { requestControllers.current.delete(controller); }
@@ -272,7 +274,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
         if (draftVersionRef.current === draftVersion) { explicitDiscardRef.current = true; profileDrafts.delete(`${currentUser.id}:${profileId}`); setEditing(false); }
       }
     } catch (cause) {
-      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not upload your avatar. Try again.");
+      if (lifetime.active) setError(cause instanceof Error ? cause.message : t("socialCouldNotUploadYourAvatarTryAgain"));
     } finally {
       if (lifetime.active) { detailsSavingRef.current = false; setUploadingAvatar(false); }
     }
@@ -285,12 +287,12 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
     try {
       await requestJson(`/api/friends/${profileId}`, { method: "PUT", accessToken: tokenRef.current,
-        signal: controller.signal, body: JSON.stringify({ action }), errorMessage: "Could not update this friendship. Try again." });
+        signal: controller.signal, body: JSON.stringify({ action }), errorMessage: t("socialCouldNotUpdateThisFriendshipTryAgain") });
       const loaded = await requestJson<SocialResponse>("/api/social", { accessToken: tokenRef.current,
-        signal: controller.signal, validate: isSocialResponse, errorMessage: "Could not load friends. Try again." });
+        signal: controller.signal, validate: isSocialResponse, errorMessage: t("socialCouldNotLoadFriendsTryAgain") });
       if (lifetime.active) setSocial(loaded);
     } catch (cause) {
-      if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not update this friendship. Try again.");
+      if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : t("socialCouldNotUpdateThisFriendshipTryAgain"));
     } finally {
       requestControllers.current.delete(controller);
       if (lifetime.active) setSocialBusy(false);
@@ -303,10 +305,10 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
     try {
       await requestJson(`/api/social/blocks/${encodeURIComponent(profileId)}`, { method: "PUT", accessToken: tokenRef.current,
-        signal: controller.signal, body: JSON.stringify({ blocked }), errorMessage: "Could not update this block. Try again." });
+        signal: controller.signal, body: JSON.stringify({ blocked }), errorMessage: t("socialCouldNotUpdateThisBlockTryAgain") });
       const loaded = await requestJson<SocialResponse>("/api/social", { accessToken: tokenRef.current, signal: controller.signal, validate: isSocialResponse });
       if (lifetime.active) setSocial(loaded);
-    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not update this block. Try again."); }
+    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : t("socialCouldNotUpdateThisBlockTryAgain")); }
     finally { requestControllers.current.delete(controller); if (lifetime.active) setSocialBusy(false); }
   };
   const changeReceiveRequests = async (receiveRequests: boolean) => {
@@ -315,9 +317,9 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
     try {
       await requestJson("/api/social/settings", { method: "PATCH", accessToken: tokenRef.current, signal: controller.signal,
-        body: JSON.stringify({ receiveRequests }), errorMessage: "Could not save this setting. Try again." });
+        body: JSON.stringify({ receiveRequests }), errorMessage: t("socialCouldNotSaveThisSettingTryAgain") });
       if (lifetime.active) setSocial(current => current ? { ...current, receiveRequests } : current);
-    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not save this setting. Try again."); }
+    } catch (cause) { if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : t("socialCouldNotSaveThisSettingTryAgain")); }
     finally { requestControllers.current.delete(controller); if (lifetime.active) setSocialBusy(false); }
   };
   const changeShareActivity = async (shareActivity: boolean) => {
@@ -327,10 +329,10 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     requestControllers.current.add(controller); setSocialBusy(true); setSocialError("");
     try {
       await requestJson("/api/social/settings", { method: "PATCH", accessToken: tokenRef.current,
-        signal: controller.signal, body: JSON.stringify({ shareActivity }), errorMessage: "Could not save this setting. Try again." });
+        signal: controller.signal, body: JSON.stringify({ shareActivity }), errorMessage: t("socialCouldNotSaveThisSettingTryAgain") });
       if (lifetime.active) setSocial((current) => current ? { ...current, shareActivity } : current);
     } catch (cause) {
-      if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : "Could not save this setting. Try again.");
+      if (lifetime.active) setSocialError(cause instanceof Error ? cause.message : t("socialCouldNotSaveThisSettingTryAgain"));
     } finally {
       requestControllers.current.delete(controller);
       if (lifetime.active) setSocialBusy(false);
@@ -348,7 +350,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
       await requestPrivateLibrary(tokenRef.current, { type: "save-pick", track: libraryTrack(track) }, controller.signal);
       if (lifetime.active) setSavedPicks((current) => new Set([...current, key]));
     } catch (cause) {
-      if (lifetime.active) setError(cause instanceof Error ? cause.message : "Could not save this song. Try again.");
+      if (lifetime.active) setError(cause instanceof Error ? cause.message : t("socialCouldNotSaveThisSongTryAgain"));
     } finally {
       requestControllers.current.delete(controller);
       if (lifetime.active) setSavingPick("");
@@ -376,8 +378,8 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     setAvatarDraft(null);
   };
   const stageAvatar = (file: File) => {
-    if (!AVATAR_MIME_EXTENSIONS.has(file.type)) return setError("Choose a PNG, JPEG, WebP, or GIF image.");
-    if (file.size > AVATAR_MAX_BYTES) return setError("Avatar images must be 5 MB or smaller.");
+    if (!AVATAR_MIME_EXTENSIONS.has(file.type)) return setError(t("socialChooseAPNGJPEGWebPOrGIFImage"));
+    if (file.size > AVATAR_MAX_BYTES) return setError(t("socialAvatarImagesMustBe5MBOrSmaller"));
     resetAvatarDraft(); draftVersionRef.current++; setSaved(false); setError("");
     setAvatarDraft({ kind: "image", file, url: URL.createObjectURL(file) });
   };
@@ -398,12 +400,12 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     onProfile={onOpenProfile ?? onBack} onAdmin={onOpenAdmin} onSignOut={onSignOut} beforeNavigate={leaveProfile}
     navigationDisabled={editBusy} skipTo="#profile-main" diagnosticContext={{ surface: "profile" }}
     settings={userSettings && onSettingsChange ? { accessToken, userSettings, onSettingsChange } : undefined} />;
-  if (loading) return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page${embedded ? " profile-embedded" : ""}`}><div className="profile-loading" role="status">Loading profile…</div></Container></>;
+  if (loading) return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page${embedded ? " profile-embedded" : ""}`}><div className="profile-loading" role="status">{t("socialLoadingProfile")}</div></Container></>;
   if (!profile) return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page${embedded ? " profile-embedded" : ""}`}>
     <div className="profile-shell profile-state-shell">
-      {!embedded && <Button variant="ghost" onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button>}
-      <Card className="profile-error-card"><CardHeader><CardTitle>Profile unavailable</CardTitle><CardDescription>{error}</CardDescription></CardHeader>
-        <CardContent><Button variant="outline" onClick={() => setLoadRevision((value) => value + 1)}>Retry</Button></CardContent></Card>
+      {!embedded && <Button variant="ghost" onClick={() => leaveProfile(onBack)}><ArrowLeft /> {t("socialBack")}</Button>}
+      <Card className="profile-error-card"><CardHeader><CardTitle>{t("socialProfileUnavailable")}</CardTitle><CardDescription>{error}</CardDescription></CardHeader>
+        <CardContent><Button variant="outline" onClick={() => setLoadRevision((value) => value + 1)}>{t("socialRetry")}</Button></CardContent></Card>
     </div>
   </Container></>;
 
@@ -411,6 +413,19 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     avatarKey: profile.avatar_key, avatarUrl: profile.avatar_url || undefined, isAppAdmin: profile.is_app_admin };
   const previewUser: User = avatarDraft?.kind === "image" ? { ...profileUser, avatarUrl: avatarDraft.url }
     : avatarDraft?.kind === "preset" ? { ...profileUser, avatarKey: avatarDraft.key, avatarUrl: undefined } : profileUser;
+  const optionLabels: Record<string, string> = {
+    "pulse": t("socialProfileOptionPulse"),
+    "sunset": t("socialProfileOptionSunset"),
+    "orbit": t("socialProfileOptionOrbit"),
+    "midnight": t("socialProfileOptionMidnight"),
+    "prism": t("socialProfileOptionPrism"),
+    "voltage": t("socialProfileOptionVoltage"),
+    "studio": t("socialProfileOptionStudio"),
+    "afterglow": t("socialProfileOptionAfterglow"),
+    "deep-space": t("socialProfileOptionDeepSpace"),
+    "laser-lime": t("socialProfileOptionLaserLime")
+  };
+  const optionLabel = (option: SoundSpinProfileOption) => optionLabels[option.key] || option.name;
   const avatarOptions = options.filter((option) => option.kind === "avatar");
   const themeOptions = options.filter((option) => option.kind === "theme");
   const blocked = Boolean(social?.blockedPeople?.some(user => user.id === profileId));
@@ -418,8 +433,8 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
   const songs = (profile.favorite_tracks || []).filter(track => spotifyEnabled || track.provider !== "spotify");
 
   return <>{appHeader}<Container id={!embedded ? "profile-main" : undefined} tabIndex={!embedded ? -1 : undefined} className={`profile-page profile-theme-${profile.theme_key}${embedded ? " profile-embedded" : ""}`}>
-    <section className="profile-shell profile-shell-simple" aria-label={`${profile.display_name}'s profile`}>
-      {!embedded && <nav className="profile-page-navigation" aria-label="Profile"><Button variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> Back</Button></nav>}
+    <section className="profile-shell profile-shell-simple" aria-label={t("socialProfileName", { name: profile.display_name })}>
+      {!embedded && <nav className="profile-page-navigation" aria-label={t("socialProfile")}><Button variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> {t("socialBack")}</Button></nav>}
       <div className="profile-hero">
         <div className="profile-avatar-wrap"><Avatar user={profileUser} size={embedded ? 72 : 96} /></div>
         <div className="profile-identity">
@@ -427,92 +442,92 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
           {profile.handle && <span className="profile-handle">@{profile.handle}</span>}
           {profile.status_text && <p className="profile-status">{profile.status_text}</p>}
           {profile.bio && <p className="profile-bio">{profile.bio}</p>}
-          <span className="profile-member-since">Joined {new Date(profile.created_at).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+          <span className="profile-member-since">{t("socialJoinedDate", { date: new Date(profile.created_at).toLocaleDateString(i18n.resolvedLanguage, { month: "long", year: "numeric" }) })}</span>
         </div>
         <div className="profile-actions">
-          {isOwnProfile && !editing && <Button variant="outline" size="sm" onClick={() => { explicitDiscardRef.current = false; setEditing(true); setSaved(false); }}><Pencil /> Edit profile</Button>}
+          {isOwnProfile && !editing && <Button variant="outline" size="sm" onClick={() => { explicitDiscardRef.current = false; setEditing(true); setSaved(false); }}><Pencil /> {t("socialEditProfile")}</Button>}
           {!isOwnProfile && social && <>
-            {!blocked && !relationship && <Button size="sm" disabled={socialBusy} aria-label={`Add friend ${profile.display_name}`} onClick={() => void changeFriend("request")}><UserPlus /> Add friend</Button>}
-            {!blocked && relationship === "incoming" && <><Button size="sm" disabled={socialBusy} aria-label={`Accept ${profile.display_name}'s friend request`} onClick={() => void changeFriend("accept")}>Accept</Button><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Decline ${profile.display_name}'s friend request`} onClick={() => void changeFriend("decline")}>Decline</Button></>}
-            {!blocked && relationship === "outgoing" && <><span className="profile-friend-state">Requested</span><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Cancel request to ${profile.display_name}`} onClick={() => void changeFriend("decline")}>Cancel request</Button></>}
-            {!blocked && relationship === "friends" && <><span className="profile-friend-state"><Check /> Friends</span>{onInvite && <Button size="sm" aria-label={`Invite ${profile.display_name} to this room`} onClick={() => onInvite(profileId)}>Invite</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`Remove friend ${profile.display_name}`} onClick={() => setConfirmRemoval(true)}>Remove friend</Button></>}
-            <Button variant="ghost" size="sm" disabled={socialBusy} aria-label={`${blocked ? "Unblock" : "Block"} ${profile.display_name}`} onClick={() => void changeBlock(!blocked)}>{blocked ? "Unblock" : "Block"}</Button>
+            {!blocked && !relationship && <Button size="sm" disabled={socialBusy} aria-label={t("socialAddFriendName", { name: profile.display_name })} onClick={() => void changeFriend("request")}><UserPlus /> {t("socialAddFriend")}</Button>}
+            {!blocked && relationship === "incoming" && <><Button size="sm" disabled={socialBusy} aria-label={t("socialAcceptFriendRequest", { name: profile.display_name })} onClick={() => void changeFriend("accept")}>{t("socialAccept")}</Button><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={t("socialDeclineFriendRequest", { name: profile.display_name })} onClick={() => void changeFriend("decline")}>{t("socialDecline")}</Button></>}
+            {!blocked && relationship === "outgoing" && <><span className="profile-friend-state">{t("socialRequested")}</span><Button variant="ghost" size="sm" disabled={socialBusy} aria-label={t("socialCancelFriendRequest", { name: profile.display_name })} onClick={() => void changeFriend("decline")}>{t("socialCancelRequest")}</Button></>}
+            {!blocked && relationship === "friends" && <><span className="profile-friend-state"><Check /> {t("socialFriends")}</span>{onInvite && <Button size="sm" aria-label={t("socialInviteListener", { name: profile.display_name })} onClick={() => onInvite(profileId)}>{t("socialInvite")}</Button>}<Button variant="ghost" size="sm" disabled={socialBusy} aria-label={t("socialRemoveFriendName", { name: profile.display_name })} onClick={() => setConfirmRemoval(true)}>{t("socialRemoveFriend")}</Button></>}
+            <Button variant="ghost" size="sm" disabled={socialBusy} aria-label={blocked ? t("socialUnblockListener", { name: profile.display_name }) : t("socialBlockListener", { name: profile.display_name })} onClick={() => void changeBlock(!blocked)}>{blocked ? t("socialUnblock") : t("socialBlock")}</Button>
           </>}
         </div>
       </div>
 
-      {socialError && <div className="profile-inline-error" role="alert"><p>{socialError}</p><Button variant="outline" size="sm" disabled={socialBusy} onClick={() => setSocialRevision((value) => value + 1)}>Retry friends</Button></div>}
+      {socialError && <div className="profile-inline-error" role="alert"><p>{socialError}</p><Button variant="outline" size="sm" disabled={socialBusy} onClick={() => setSocialRevision((value) => value + 1)}>{t("socialRetryFriends")}</Button></div>}
       {error && !editing && <p className="profile-inline-error" role="alert">{error}</p>}
-      {saved && !editing && <p className="profile-save-status" role="status">Saved</p>}
+      {saved && !editing && <p className="profile-save-status" role="status">{t("socialSaved")}</p>}
 
       {!editing && songs.length > 0 && <Card className="profile-card profile-favorites-card">
-        <CardHeader><CardTitle>Favorite songs</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t("socialFavoriteSongs")}</CardTitle></CardHeader>
         <CardContent><ol className="profile-song-list">{songs.map((track) => {
           const key = profileTrackKey(track);
           const source = trackSourceUrl(track);
           return <li className="profile-song" key={key}>
             <TrackArtwork track={track} compact />
             <span className="profile-song-copy">{source ? <a href={source} target="_blank" rel="noreferrer">{track.title}</a> : <strong>{track.title}</strong>}<small>{[track.artist, providerLabel(track.provider)].filter(Boolean).join(" · ")}</small></span>
-            {!isOwnProfile && <Button variant="ghost" size="sm" disabled={Boolean(savingPick) || savedPicks.has(key)} aria-label={savingPick === key ? `Saving… ${track.title} to my picks` : savedPicks.has(key) ? `Saved ${track.title}` : `Save ${track.title} to my picks`} onClick={() => void savePick(track)}>{savedPicks.has(key) ? <Check /> : <Plus />}{savingPick === key ? "Saving…" : savedPicks.has(key) ? "Saved" : "Save"}</Button>}
+            {!isOwnProfile && <Button variant="ghost" size="sm" disabled={Boolean(savingPick) || savedPicks.has(key)} aria-label={savingPick === key ? t("socialSavingTrack", { title: track.title }) : savedPicks.has(key) ? t("socialSavedTrack", { title: track.title }) : t("socialSaveTrack", { title: track.title })} onClick={() => void savePick(track)}>{savedPicks.has(key) ? <Check /> : <Plus />}{savingPick === key ? t("socialSaving") : savedPicks.has(key) ? t("socialSaved") : t("socialSave")}</Button>}
           </li>;
         })}</ol></CardContent>
       </Card>}
 
       {isOwnProfile && editing && <div className="profile-settings-grid">
-        <Card className="profile-card details-card"><CardHeader><CardTitle>Edit profile</CardTitle></CardHeader><CardContent>
+        <Card className="profile-card details-card"><CardHeader><CardTitle>{t("socialEditProfile")}</CardTitle></CardHeader><CardContent>
           <div className={`avatar-upload ${previewUser.avatarUrl ? "has-custom-avatar" : ""}`}>
-            <Avatar user={previewUser} size={56} /><span><strong>Avatar</strong><small>PNG, JPEG, WebP, or GIF · up to 5 MB</small></span>
-            <label htmlFor={`${formId}-avatar`} aria-disabled={uploadingAvatar || saving}><ImageUp />{uploadingAvatar ? "Uploading…" : previewUser.avatarUrl ? "Replace" : "Upload image"}</label>
+            <Avatar user={previewUser} size={56} /><span><strong>{t("socialAvatar")}</strong><small>{t("socialPNGJPEGWebPOrGIFUpTo5MB")}</small></span>
+            <label htmlFor={`${formId}-avatar`} aria-disabled={uploadingAvatar || saving}><ImageUp />{uploadingAvatar ? t("socialUploading") : previewUser.avatarUrl ? t("socialReplace") : t("socialUploadImage")}</label>
             <input id={`${formId}-avatar`} type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingAvatar || saving} onChange={(event) => {
               const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) stageAvatar(file);
             }} />
           </div>
           <form className="profile-edit" aria-busy={editBusy} onSubmit={(event) => void saveDetails(event)}>
-            <div className="grid gap-2"><Label htmlFor={`${formId}-name`}>Display name</Label><Input id={`${formId}-name`} value={displayName} maxLength={32} onChange={(event) => { draftVersionRef.current++; setDisplayName(event.target.value); }} /></div>
-            <div className="grid gap-2"><Label htmlFor={`${formId}-handle`}>Handle</Label><Input id={`${formId}-handle`} value={handle} maxLength={24} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={`${formId}-handle-help`} onChange={(event) => { draftVersionRef.current++; setHandle(event.target.value.toLowerCase()); }} /><small id={`${formId}-handle-help`}>3–24 letters, numbers, or underscores.</small></div>
-            <div className="grid gap-2"><Label htmlFor={`${formId}-status`}>Status</Label><Input id={`${formId}-status`} value={statusText} maxLength={80} onChange={(event) => { draftVersionRef.current++; setStatusText(event.target.value); }} /></div>
-            <div className="grid gap-2"><Label htmlFor={`${formId}-bio`}>Bio</Label><Textarea id={`${formId}-bio`} value={bio} maxLength={160} rows={3} onChange={(event) => { draftVersionRef.current++; setBio(event.target.value); }} /><small>{bio.length} / 160</small></div>
+            <div className="grid gap-2"><Label htmlFor={`${formId}-name`}>{t("socialDisplayName")}</Label><Input id={`${formId}-name`} value={displayName} maxLength={32} onChange={(event) => { draftVersionRef.current++; setDisplayName(event.target.value); }} /></div>
+            <div className="grid gap-2"><Label htmlFor={`${formId}-handle`}>{t("socialHandle")}</Label><Input id={`${formId}-handle`} value={handle} maxLength={24} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={`${formId}-handle-help`} onChange={(event) => { draftVersionRef.current++; setHandle(event.target.value.toLowerCase()); }} /><small id={`${formId}-handle-help`}>{t("social324LettersNumbersOrUnderscores")}</small></div>
+            <div className="grid gap-2"><Label htmlFor={`${formId}-status`}>{t("socialStatus")}</Label><Input id={`${formId}-status`} value={statusText} maxLength={80} onChange={(event) => { draftVersionRef.current++; setStatusText(event.target.value); }} /></div>
+            <div className="grid gap-2"><Label htmlFor={`${formId}-bio`}>{t("socialBio")}</Label><Textarea id={`${formId}-bio`} value={bio} maxLength={160} rows={3} onChange={(event) => { draftVersionRef.current++; setBio(event.target.value); }} /><small>{t("socialCountLimit", { current: bio.length, limit: 160 })}</small></div>
             <ProfileMusicEditor spotifyEnabled={spotifyEnabled} tracks={favoriteTracks} onChange={(tracks) => { draftVersionRef.current++; setFavoriteTracks(tracks); }} accessToken={accessToken} userId={currentUser.id} disabled={saving || uploadingAvatar} />
             {error && <p className="profile-inline-error" role="alert">{error}</p>}
-            <div className="profile-edit-actions"><Button type="submit" disabled={saving || uploadingAvatar || !displayName.trim()}>{saving ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={saving || uploadingAvatar} onClick={discardDraft}>Cancel</Button></div>
+            <div className="profile-edit-actions"><Button type="submit" disabled={saving || uploadingAvatar || !displayName.trim()}>{saving ? t("socialSaving") : t("socialSaveChanges")}</Button><Button type="button" variant="ghost" disabled={saving || uploadingAvatar} onClick={discardDraft}>{t("socialCancel")}</Button></div>
           </form>
         </CardContent></Card>
 
-        <Card className="profile-card appearance-card"><CardHeader><CardTitle><Palette /> Appearance</CardTitle><CardDescription>Avatar changes save with your profile. Theme saves automatically.</CardDescription></CardHeader><CardContent>
-          <section className="appearance-section"><h2>Avatar</h2><div className="avatar-collection">
+        <Card className="profile-card appearance-card"><CardHeader><CardTitle><Palette /> {t("socialAppearance")}</CardTitle><CardDescription>{t("socialAvatarChangesSaveWithYourProfileThemeSavesAutomatically")}</CardDescription></CardHeader><CardContent>
+          <section className="appearance-section"><h2>{t("socialAvatar")}</h2><div className="avatar-collection">
             {avatarOptions.map((option) => {
               const selected = !previewUser.avatarUrl && previewUser.avatarKey === option.key;
-              return <button type="button" key={option.key} className={selected ? "selected" : ""} disabled={saving || uploadingAvatar} aria-pressed={selected} title={`Use ${option.name}`} onClick={() => chooseAvatar(option.key)}>
-                <Avatar user={{ ...profileUser, avatarKey: option.key, avatarUrl: undefined }} size={48} /><strong>{option.name}</strong>{selected && <span><Check /> Selected</span>}
+              return <button type="button" key={option.key} className={selected ? "selected" : ""} disabled={saving || uploadingAvatar} aria-pressed={selected} title={t("socialUseAvatar", { name: optionLabel(option) })} onClick={() => chooseAvatar(option.key)}>
+                <Avatar user={{ ...profileUser, avatarKey: option.key, avatarUrl: undefined }} size={48} /><strong>{optionLabel(option)}</strong>{selected && <span><Check /> {t("socialSelected")}</span>}
               </button>;
             })}
           </div></section>
-          <section className="appearance-section"><h2>Theme</h2><div className="theme-collection">
+          <section className="appearance-section"><h2>{t("socialTheme")}</h2><div className="theme-collection">
             {themeOptions.map((option) => {
               const selected = profile.theme_key === option.key;
-              return <button type="button" key={option.key} className={`${selected ? "selected" : ""} theme-swatch-${option.key}`} disabled={saving || uploadingAvatar} aria-pressed={selected} onClick={() => void updateProfile({ themeKey: option.key })}><i /><span><strong>{option.name}</strong></span>{selected && <Check />}</button>;
+              return <button type="button" key={option.key} className={`${selected ? "selected" : ""} theme-swatch-${option.key}`} disabled={saving || uploadingAvatar} aria-pressed={selected} onClick={() => void updateProfile({ themeKey: option.key })}><i /><span><strong>{optionLabel(option)}</strong></span>{selected && <Check />}</button>;
             })}
           </div></section>
         </CardContent></Card>
       </div>}
 
-      {isOwnProfile && social && <div className="profile-privacy-setting"><Label htmlFor={`${formId}-requests`}>Receive friend requests</Label><Switch id={`${formId}-requests`} checked={social.receiveRequests !== false} disabled={socialBusy} onCheckedChange={checked => void changeReceiveRequests(checked)} /></div>}
-      {isOwnProfile && social && <div className="profile-privacy-setting"><div><Label htmlFor={`${formId}-activity`}>Share activity with friends</Label><small>Friends can see rooms they can access.</small></div><Switch id={`${formId}-activity`} checked={social.shareActivity} disabled={socialBusy} onCheckedChange={(checked) => void changeShareActivity(checked)} /></div>}
+      {isOwnProfile && social && <div className="profile-privacy-setting"><Label htmlFor={`${formId}-requests`}>{t("socialReceiveFriendRequests")}</Label><Switch id={`${formId}-requests`} checked={social.receiveRequests !== false} disabled={socialBusy} onCheckedChange={checked => void changeReceiveRequests(checked)} /></div>}
+      {isOwnProfile && social && <div className="profile-privacy-setting"><div><Label htmlFor={`${formId}-activity`}>{t("socialShareActivityWithFriends")}</Label><small>{t("socialFriendsCanSeeRoomsTheyCanAccess")}</small></div><Switch id={`${formId}-activity`} checked={social.shareActivity} disabled={socialBusy} onCheckedChange={(checked) => void changeShareActivity(checked)} /></div>}
     </section>
     <Dialog open={Boolean(discardAction)} onOpenChange={(open) => { if (!open) setDiscardAction(null); }}>
       <DialogContent showCloseButton={false}>
-        <DialogTitle>Discard changes?</DialogTitle>
-        <DialogDescription>Your profile changes have not been saved.</DialogDescription>
-        <DialogFooter><Button variant="outline" onClick={() => setDiscardAction(null)}>Keep editing</Button>
-          <Button variant="destructive" onClick={() => { const action = discardAction; setDiscardAction(null); discardDraft(); action?.(); }}>Discard changes</Button></DialogFooter>
+        <DialogTitle>{t("socialDiscardChanges2")}</DialogTitle>
+        <DialogDescription>{t("socialYourProfileChangesHaveNotBeenSaved")}</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setDiscardAction(null)}>{t("socialKeepEditing")}</Button>
+          <Button variant="destructive" onClick={() => { const action = discardAction; setDiscardAction(null); discardDraft(); action?.(); }}>{t("socialDiscardChanges")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <Dialog open={confirmRemoval} onOpenChange={setConfirmRemoval}>
       <DialogContent showCloseButton={false}>
-        <DialogTitle>Remove {profile.display_name} from friends?</DialogTitle>
-        <DialogDescription>Adding them again requires a new friend request.</DialogDescription>
-        <DialogFooter><Button variant="outline" onClick={() => setConfirmRemoval(false)}>Cancel</Button>
-          <Button variant="destructive" aria-label={`Remove friend ${profile.display_name}`} onClick={() => { setConfirmRemoval(false); void changeFriend("remove"); }}>Remove friend</Button></DialogFooter>
+        <DialogTitle>{t("socialRemoveFriendConfirm", { name: profile.display_name })}</DialogTitle>
+        <DialogDescription>{t("socialAddingThemAgainRequiresANewFriendRequest")}</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setConfirmRemoval(false)}>{t("socialCancel")}</Button>
+          <Button variant="destructive" aria-label={t("socialRemoveFriendName", { name: profile.display_name })} onClick={() => { setConfirmRemoval(false); void changeFriend("remove"); }}>{t("socialRemoveFriend")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </Container></>;

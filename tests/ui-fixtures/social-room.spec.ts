@@ -27,9 +27,9 @@ test("visit your profile and a friend's profile while staying in the listening r
   await page.setViewportSize({ width: 320, height: 740 });
   const roomActions = page.getByRole("button", { name: "More room actions", exact: true });
   for (const control of [account, roomActions,
-    page.getByRole("link", { name: "Lydman home", exact: true }),
+    page.getByRole("link", { name: "turntune home", exact: true }),
     page.getByRole("link", { name: "Rooms", exact: true }),
-    page.getByRole("button", { name: "Copy room link", exact: true }),
+    page.getByRole("button", { name: "Copy invite link", exact: true }),
     page.getByRole("button", { name: "Room listeners, 2 listeners", exact: true })]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ComponentType, ReactNode } from "react";
 import { AlertCircle, LoaderCircle, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -8,10 +9,11 @@ import { Skeleton } from "./ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function Brand({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation("public");
   return (
-    <span className="logo" aria-label="Lydman">
+    <span className="logo" aria-label={t("brandName")}>
       <span className="logo-mark" aria-hidden="true"><i /><i /><i /></span>
-      {!compact && <span>Lydman</span>}
+      {!compact && <span>{t("brandName")}</span>}
     </span>
   );
 }

@@ -137,7 +137,7 @@ test.describe("authenticated UI acceptance", () => {
 
     await page.getByRole("button", { name: "Admin dashboard" }).click();
     await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible({ timeout: 20_000 });
-    await page.getByRole("button", { name: /Back to Lydman/i }).click();
+    await page.getByRole("button", { name: /Back to turntune/i }).click();
 
     await page.locator(".lobby-profile").click();
     await expect(page.getByRole("heading", { name: /QA Admin/i })).toBeVisible({ timeout: 20_000 });
@@ -145,7 +145,7 @@ test.describe("authenticated UI acceptance", () => {
 
     await page.goto(`/room/${qaRoomSlug}`);
     await expect(page.getByText("QA UI Audit").first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("tab", { name: "Queue" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "My queue" })).toBeVisible();
 
     await setTheme(page, "light");
     await expect(page.locator("html")).toHaveClass(/light/);

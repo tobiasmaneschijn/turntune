@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import {approvedLocalImageUrl,approvedRemoteImageUrl} from '../../shared/remote-images';
 
 let trustedStorageOrigin: string | undefined = import.meta.env?.VITE_SUPABASE_URL;
@@ -8,7 +9,7 @@ export function setTrustedImageStorageOrigin(value: string | null): void {
   const url = new URL(value);
   const localHttp = url.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && !localHttp) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    throw new Error('Authentication configuration must use the project origin.');
+    throw new Error(i18n.t("common:remote_images_authentication_configuration_must_use_the_project_origin"));
   }
   trustedStorageOrigin = url.origin;
 }

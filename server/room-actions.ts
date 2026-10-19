@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import crypto from "node:crypto";
 import { z } from "zod";
 import type { Socket } from "socket.io";
@@ -49,7 +50,7 @@ const permittedMappings = <T extends { mappings?: Track["mappings"] }>(room: Roo
 const controlsPlayback = (room: Room, userId: string) => hasRoomCapability(room,userId,"djsPlayback") || (effectiveRoomPolicy(room).manualPlayback!=="staff"&&room.djUserId === userId);
 const queueReceipt = <T>(operation: () => T): T => {
   try { return operation(); }
-  catch (error) { return fail(error instanceof Error ? error.message : "This queue change is no longer available."); }
+  catch (error) { return fail(error instanceof Error ? error.message : serverT("this_queue_change_is_no_longer_available")); }
 };
 
 /** Feature boundary for admitted room commands. No draft is broadcast before saving. */
@@ -90,7 +91,7 @@ export function mountRoomActions(options: RoomActionOptions) {
   const action = <T>(event: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, change: (draft: Room, member: Membership, input: T) => RoomChange<Record<string, unknown>>) => {
     onAction(event, async (payload, reply) => {
       const input = schema.safeParse(payload);
-      if (!input.success) return reply?.({ ok: false, error: "Invalid room command." });
+      if (!input.success) return reply?.({ ok: false, error: serverT("invalid_room_command") });
       const member = currentMember();
       const result = await commands.execute(member.room, async draft => { await assertFreshCurrent(member);if(["dj:join","queue:next","playback:update","playback:skip-vote","vibe:vote"].includes(event)&&draft.settings.requireRulesAcceptance&&draft.moderation?.rulesAcceptance?.[member.user.id]!==(draft.settings.rulesVersion??1))fail("Accept the room rules before participating.");return change(draft, member, input.data); });
       reply?.({ ok: true, ...result });
@@ -103,7 +104,7 @@ export function mountRoomActions(options: RoomActionOptions) {
   };
   onAction("room:moderator:set", async (payload, reply) => {
     const parsed = moderatorSchema.safeParse(payload); const member = currentMember();
-    if (!parsed.success) return reply?.({ ok: false, error: "Invalid moderator change." });
+    if (!parsed.success) return reply?.({ ok: false, error: serverT("invalid_moderator_change") });
     if (parsed.data.roomId !== undefined && parsed.data.roomId !== member.room.id) fail("Your room session changed. Join the room again.");
     const previous = [...member.room.djQueueUserIds]; assertCurrent(member);
     await store.setModerator(member.room.id, member.user.id, parsed.data.userId, parsed.data.moderator, () => assertFreshCurrent(member));
@@ -111,7 +112,7 @@ export function mountRoomActions(options: RoomActionOptions) {
   });
   onAction("room:dj-role:set", async (payload, reply) => {
     const parsed = djRoleSchema.safeParse(payload); const member = currentMember();
-    if (!parsed.success) return reply?.({ ok: false, error: "Invalid DJ role change." });
+    if (!parsed.success) return reply?.({ ok: false, error: serverT("invalid_dj_role_change") });
     if (parsed.data.roomId !== undefined && parsed.data.roomId !== member.room.id) fail("Your room session changed. Join the room again.");
     const previous = [...member.room.djQueueUserIds]; assertCurrent(member);
     await store.setDjRole(member.room.id, member.user.id, parsed.data.userId, parsed.data.dj, () => assertFreshCurrent(member));
@@ -135,7 +136,7 @@ export function mountRoomActions(options: RoomActionOptions) {
   });
   onAction("queue:add", async (payload, reply) => {
     const parsed = trackSchema.safeParse(payload); const member = currentMember();
-    if (!parsed.success) return reply?.({ ok: false, error: "Invalid track." });
+    if (!parsed.success) return reply?.({ ok: false, error: serverT("invalid_track") });
     assertCurrent(member);
     if (!roomAllowsProvider(member.room.settings, parsed.data.provider)) fail(`${PROVIDER_LABELS[parsed.data.provider]} is disabled in this room.`);
     assertQueueCapacity(member.room, member.user.id, await policyFor(member), 1);
@@ -160,7 +161,7 @@ export function mountRoomActions(options: RoomActionOptions) {
   });
   onAction("queue:set-add", async (payload, reply) => {
     const input = roomCommandSchemas["queue:set-add"].safeParse(payload);
-    const member = currentMember(); if (!input.success) return reply?.({ ok: false, error: "Invalid saved set." });
+    const member = currentMember(); if (!input.success) return reply?.({ ok: false, error: serverT("invalid_saved_set") });
     assertCurrent(member);
     const result = await options.setImports.run(member.room, member.user.id, input.data.requestId, input.data.setId, markCommitted => runImport(member, async () => {
       const library = await store.getPrivateLibrary(member.user.id);

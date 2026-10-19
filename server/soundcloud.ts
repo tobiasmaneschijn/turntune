@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { providerDuration, providerHttpsUrl, providerJson } from "./provider-http.js";
 import { formatDuration } from "./music.js";
@@ -100,7 +101,7 @@ export class SoundCloudApi {
 
   private async requestToken(grant: "client_credentials" | "refresh_token", signal?: AbortSignal) {
     if (!this.clientId || !this.clientSecret) {
-      throw new Error("SoundCloud search is not configured yet.");
+      throw new Error(serverT("soundcloud_search_is_not_configured_yet"));
     }
 
     const body = new URLSearchParams({ grant_type: grant });
@@ -112,7 +113,7 @@ export class SoundCloudApi {
     if (grant === "client_credentials") {
       headers.Authorization = `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64")}`;
     } else {
-      if (!this.token?.refreshToken) throw new Error("No SoundCloud refresh token is available.");
+      if (!this.token?.refreshToken) throw new Error(serverT("no_soundcloud_refresh_token_is_available"));
       body.set("client_id", this.clientId);
       body.set("client_secret", this.clientSecret);
       body.set("refresh_token", this.token.refreshToken);
@@ -125,7 +126,7 @@ export class SoundCloudApi {
       signal
     }, { maxBytes: 16_384 });
     if (!response.ok || !payload.access_token) {
-      throw new Error(soundCloudError(payload, "SoundCloud authentication failed."));
+      throw new Error(soundCloudError(payload, serverT("soundcloud_authentication_failed")));
     }
 
     return {
@@ -191,7 +192,7 @@ export class SoundCloudApi {
     });
     const { response, payload } = await this.apiGet<SoundCloudTrack[] | { collection?: SoundCloudTrack[] }>(`https://api.soundcloud.com/tracks?${params}`, signal);
     if (!response.ok) {
-      throw new Error(soundCloudError(payload, "SoundCloud search failed."));
+      throw new Error(soundCloudError(payload, serverT("soundcloud_search_failed")));
     }
 
     const tracks = Array.isArray(payload) ? payload : payload.collection || [];
@@ -202,11 +203,11 @@ export class SoundCloudApi {
     const params = new URLSearchParams({ url: permalinkUrl });
     const { response, payload } = await this.apiGet<SoundCloudTrack>(`https://api.soundcloud.com/resolve?${params}`, signal);
     if (!response.ok) {
-      throw new Error(soundCloudError(payload, "Could not resolve that SoundCloud URL."));
+      throw new Error(soundCloudError(payload, serverT("could_not_resolve_that_soundcloud_url")));
     }
     const track = mapTrack(payload);
     if (!track) {
-      throw new Error("That SoundCloud URL is not a playable public track.");
+      throw new Error(serverT("that_soundcloud_url_is_not_a_playable_public_track"));
     }
     return track;
   }

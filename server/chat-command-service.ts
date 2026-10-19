@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -193,7 +194,7 @@ export class ChatCommandService {
   private checkReceipt(data: LocalChatData, id: string, roomId: string, userId: string, fingerprint: string) {
     const receipt = data.receipts[id]
     if (receipt && (receipt.roomId !== roomId || receipt.userId !== userId || receipt.fingerprint !== fingerprint))
-      throw new PublicRequestError('This operation ID belongs to different content, account, or room.', 409)
+      throw new PublicRequestError(serverT("this_operation_id_belongs_to_different_content_account_or_room"), 409)
     return receipt
   }
   private commitReceipt(data: LocalChatData, id: string, receipt: Omit<Receipt, 'createdAt'>) {
@@ -201,7 +202,7 @@ export class ChatCommandService {
     const removal = id.startsWith('remove:')
     if (entries.filter(item => item.roomId === receipt.roomId).length >= MAX_ROOM_RECEIPTS + (removal ? 1000 : 0) ||
         entries.filter(item => item.userId === receipt.userId).length >= MAX_USER_RECEIPTS + (removal ? 1000 : 0))
-      throw new PublicRequestError('Chat operation limit reached. Try again later.', 429)
+      throw new PublicRequestError(serverT("chat_operation_limit_reached_try_again_later"), 429)
     data.receipts[id] = { ...receipt, createdAt: this.now() }
   }
   private boundRow(row: ChatReadRow): ChatReadRow {
@@ -214,14 +215,14 @@ export class ChatCommandService {
       ...targets.map(target => [`recipient:${target.userId}`, 1, 5] as const)]
     for (const [key, cost, max] of keys) {
       const entry = data.mentionBudgets[key]
-      if (entry && entry.expiresAt > this.now() && entry.count + cost > max) throw new PublicRequestError('Mention limit reached. Send a message without mentions.', 429)
+      if (entry && entry.expiresAt > this.now() && entry.count + cost > max) throw new PublicRequestError(serverT("mention_limit_reached_send_a_message_without_mentions"), 429)
     }
     for (const [key, cost] of keys) {
       const current = data.mentionBudgets[key]
       data.mentionBudgets[key] = { count: (current && current.expiresAt > this.now() ? current.count : 0) + cost, expiresAt: current && current.expiresAt > this.now() ? current.expiresAt : this.now() + 60_000 }
     }
     for (const [key, entry] of Object.entries(data.mentionBudgets)) if (entry.expiresAt <= this.now()) delete data.mentionBudgets[key]
-    if (Object.keys(data.mentionBudgets).length > 20_000) throw new PublicRequestError('Mentions are temporarily unavailable.', 503)
+    if (Object.keys(data.mentionBudgets).length > 20_000) throw new PublicRequestError(serverT("mentions_are_temporarily_unavailable"), 503)
   }
   private async rpc(
     kind: string,
@@ -268,15 +269,15 @@ export class ChatCommandService {
     if (/https?:\/\/|www\./i.test(input.content)) await this.options.authorize(userId, roomId, 'links')
     if (input.poll) await this.options.authorize(userId, roomId, 'poll')
     const user = await this.options.getUser(userId, roomId)
-    if (!user || user.id !== userId) throw new PublicRequestError('This room session has ended.', 403)
+    if (!user || user.id !== userId) throw new PublicRequestError(serverT("this_room_session_has_ended"), 403)
     const reply = input.replyTo ? await this.loadReply(roomId, input.replyTo.id) : undefined
-    if (input.replyTo && !reply) throw new PublicRequestError('The replied-to message is unavailable.', 400)
+    if (input.replyTo && !reply) throw new PublicRequestError(serverT("the_replied_to_message_is_unavailable"), 400)
     const audience = input.mentions.length ? await this.options.getMentionAudience?.(roomId, userId) || [] : []
     let message = canonicalMessage(input, user, reply || undefined, audience)
     const existing = await this.loadMessage(input.id)
     const removed = existing?.removedAt || (await this.loadTombstone(input.id))?.removedAt
     if (existing && (existing.roomId !== roomId || existing.userId !== userId || existing.fingerprint !== fingerprint))
-      throw new PublicRequestError('This message ID belongs to different content, account, or room.', 409)
+      throw new PublicRequestError(serverT("this_message_id_belongs_to_different_content_account_or_room"), 409)
     this.policy.message(roomId, userId, input, Boolean(existing))
     if (message.storagePath && !removed)
       message.mediaUrl = (
@@ -295,15 +296,15 @@ export class ChatCommandService {
           original &&
           (original.roomId !== roomId || original.userId !== userId || original.fingerprint !== fingerprint)
         )
-          throw new PublicRequestError('This message ID belongs to different content, account, or room.', 409)
+          throw new PublicRequestError(serverT("this_message_id_belongs_to_different_content_account_or_room"), 409)
         if (original) return false
         const removal = draft.tombstones[input.id]
-        if (removal && removal.roomId !== roomId) throw new PublicRequestError('This message ID is unavailable.', 409)
+        if (removal && removal.roomId !== roomId) throw new PublicRequestError(serverT("this_message_id_is_unavailable"), 409)
         if (!removal) this.reserveMentions(draft, userId, message.mentions)
         const cooldownKey = `${roomId}:${userId}`
         const cooldown = authorization?.bypassSlowMode ? 0 : authorization?.slowModeSeconds || 0
         if (!removal && cooldown && (draft.cooldowns[cooldownKey] || 0) + cooldown * 1000 > this.now())
-          throw new PublicRequestError('Slow mode is active. Wait before sending another message.', 429)
+          throw new PublicRequestError(serverT("slow_mode_is_active_wait_before_sending_another_message"), 429)
         draft.messages[input.id] = {
           roomId,
           userId,
@@ -316,7 +317,7 @@ export class ChatCommandService {
         return !removal
       })
     const record = await this.loadMessage(input.id)
-    if (!record) throw new PublicRequestError('The saved message is unavailable.', 503)
+    if (!record) throw new PublicRequestError(serverT("the_saved_message_is_unavailable"), 503)
     message = record.message
     if (record.removedAt)
       await this.options.emit(
@@ -336,7 +337,7 @@ export class ChatCommandService {
     const authorization = await this.options.authorize(userId, roomId, 'reaction')
     this.policy.reaction(roomId, userId, { ...input, id: operationId })
     const target = await this.loadMessage(input.messageId)
-    if (!target || target.roomId !== roomId || target.removedAt) throw new PublicRequestError('This message is unavailable.', 404)
+    if (!target || target.roomId !== roomId || target.removedAt) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
     const event = { ...input, id: operationId, userId }
     let fresh: boolean
     if (this.options.client) {
@@ -347,14 +348,14 @@ export class ChatCommandService {
         await this.options.authorize(userId, roomId, 'reaction')
         if (this.checkReceipt(draft, id, roomId, userId, fingerprint)) return false
         const record = draft.messages[input.messageId]
-        if (!record || record.removedAt || record.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
+        if (!record || record.removedAt || record.roomId !== roomId) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
         const reactions = ((
           record.message as RelayMessage & { reactions?: Array<{ userId: string; emoji: string }> }
         ).reactions ||= [])
         const index = reactions.findIndex((r) => r.userId === userId && r.emoji === input.emoji)
         if (input.action === 'add' && index < 0) {
           if (reactions.filter(item => item.userId === userId).length >= CHAT_MAX_REACTIONS_PER_USER || reactions.length >= CHAT_MAX_REACTIONS_PER_MESSAGE)
-            throw new PublicRequestError('This message has reached its reaction limit.', 429)
+            throw new PublicRequestError(serverT("this_message_has_reached_its_reaction_limit"), 429)
           reactions.push({ userId, emoji: input.emoji })
         } else if (input.action === 'remove' && index >= 0) reactions.splice(index, 1)
         else {
@@ -381,7 +382,7 @@ export class ChatCommandService {
       optionIndex < 0 ||
       optionIndex > 3
     )
-      throw new PublicRequestError('Choose a poll option.', 400)
+      throw new PublicRequestError(serverT("choose_a_poll_option"), 400)
     const authorization = await this.options.authorize(userId, roomId, 'reaction')
     this.policy.pollVote(roomId, userId)
     const id = `poll:${operationId}`,
@@ -403,14 +404,14 @@ export class ChatCommandService {
           !target.message.poll ||
           optionIndex >= target.message.poll.options.length
         )
-          throw new PublicRequestError('This poll is unavailable.', 400)
+          throw new PublicRequestError(serverT("this_poll_is_unavailable"), 400)
         const previous = target.message.poll.votes.find((v) => v.userId === userId)
         if (previous?.optionIndex === optionIndex) {
           const event = { messageId, ...previous }
           this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
           return { fresh: false, result: event }
         }
-        if (!previous && target.message.poll.votes.length >= CHAT_MAX_POLL_VOTERS) throw new PublicRequestError('This poll has reached its voter limit.', 429)
+        if (!previous && target.message.poll.votes.length >= CHAT_MAX_POLL_VOTERS) throw new PublicRequestError(serverT("this_poll_has_reached_its_voter_limit"), 429)
         const event = { messageId, userId, optionIndex, revision: (previous?.revision || 0) + 1 }
         target.message.poll.votes = target.message.poll.votes.filter((v) => v.userId !== userId)
         target.message.poll.votes.push(event)
@@ -429,9 +430,9 @@ export class ChatCommandService {
     reason = ''
   ) {
     if (!uuid.test(messageId) || !uuid.test(operationId) || reason.length > 500)
-      throw new PublicRequestError('Invalid message removal.', 400)
+      throw new PublicRequestError(serverT("invalid_message_removal"), 400)
     const target = await this.loadMessage(messageId)
-    if (target && target.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
+    if (target && target.roomId !== roomId) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
     const authorization = await this.options.authorize(actorId, roomId, 'remove', target?.userId)
     const id = `remove:${operationId}`,
       fingerprint = hash(JSON.stringify([messageId, reason]))
@@ -445,11 +446,11 @@ export class ChatCommandService {
     } else
       fresh = await this.local(async (draft) => {
         const current = draft.messages[messageId]
-        if (current && current.roomId !== roomId) throw new PublicRequestError('This message is unavailable.', 404)
+        if (current && current.roomId !== roomId) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
         await this.options.authorize(actorId, roomId, 'remove', current?.userId)
         if (this.checkReceipt(draft, id, roomId, actorId, fingerprint)) return false
         if (draft.tombstones[messageId] && draft.tombstones[messageId].roomId !== roomId)
-          throw new PublicRequestError('This message ID is unavailable.', 409)
+          throw new PublicRequestError(serverT("this_message_id_is_unavailable"), 409)
         if (draft.tombstones[messageId]) return false
         draft.tombstones[messageId] ||= { roomId, removedAt }
         const record = draft.messages[messageId]
@@ -715,11 +716,11 @@ export class ChatCommandService {
     return { rows, cursor: last ? { createdAt: last.created_at, id: last.id } : undefined, hasMore }
   }
   async readPayload(roomId: string, rows: ChatReadRow[]) {
-    if (rows.length > CHAT_MAX_HISTORY_MESSAGES) throw new PublicRequestError('Chat history page is too large.', 400)
+    if (rows.length > CHAT_MAX_HISTORY_MESSAGES) throw new PublicRequestError(serverT("chat_history_page_is_too_large"), 400)
     rows = rows.map(row => this.boundRow(row))
     // A context page combines two bounded 6,000-child pages and one 600-child target.
     if (rows.reduce((count, row) => count + row.soundspin_message_reactions.length + row.soundspin_poll_votes.length, 0) > CHAT_MAX_HISTORY_CHILDREN * 2 + CHAT_MAX_REACTIONS_PER_MESSAGE + CHAT_MAX_POLL_VOTERS)
-      throw new PublicRequestError('Chat history children exceed the page limit.', 400)
+      throw new PublicRequestError(serverT("chat_history_children_exceed_the_page_limit"), 400)
     const replies: ChatReadRow[] = [],
       replyIds = [...new Set(rows.flatMap((row) => (row.reply_to_id ? [row.reply_to_id] : [])))]
     if (this.options.client) {
@@ -790,7 +791,7 @@ export class ChatCommandService {
           ? {
               ...row,
               removed_at: removedAt,
-              content: 'Message removed',
+              content: serverT("message_removed"),
               message_type: 'text' as const,
               media_url: null,
               storage_path: null,

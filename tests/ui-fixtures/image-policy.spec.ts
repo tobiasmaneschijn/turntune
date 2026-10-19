@@ -14,7 +14,7 @@ test('view profile artwork with safe fallbacks for unavailable images and extern
     {provider:'spotify',providerId:'4uLU6hMCjMI75M1A2tKUQC',title:'Unavailable recording',artworkUrl:'https://i.scdn.co/image/unavailable'}
   ]},options:[]}}));
   await page.route('**/api/social',route=>route.fulfill({json:{people:[],shareActivity:false}}));
-  await page.goto('/tests/frontend-session-harness/index.html?embedded');
+  await page.goto('/tests/frontend-session-harness/index.html?embedded&spotify');
   await expect(page.getByRole('heading',{name:'Alice',exact:true})).toBeVisible();
   await expect(page.locator('.profile-avatar-wrap img')).toHaveAttribute('src','/avatars/pulse.svg');
   await expect.poll(()=>approvedLoads).toBe(1);

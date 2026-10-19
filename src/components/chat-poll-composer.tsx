@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useId, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
@@ -22,6 +23,7 @@ export function ChatPollComposer({
   disabled = false,
   initialQuestion = '',
 }: ChatPollComposerProps) {
+  const { t } = useTranslation('chat')
   const id = useId()
   const [question, setQuestion] = useState(initialQuestion)
   const [options, setOptions] = useState(['', ''])
@@ -37,14 +39,14 @@ export function ChatPollComposer({
     const trimmedQuestion = question.trim()
     const trimmedOptions = options.map((option) => option.trim())
     let invalid: PollValidationError | undefined
-    if (!trimmedQuestion) invalid = { message: 'Enter a question.', field: 'question' }
-    else if (trimmedQuestion.length > 200) invalid = { message: 'Use 200 characters or fewer for the question.', field: 'question' }
+    if (!trimmedQuestion) invalid = { message: t('questionRequired'), field: 'question' }
+    else if (trimmedQuestion.length > 200) invalid = { message: t('questionTooLong'), field: 'question' }
     else {
       const seen = new Set<string>()
       for (const [index, option] of trimmedOptions.entries()) {
-        if (!option) invalid = { message: `Enter option ${index + 1}.`, field: index }
-        else if (option.length > 80) invalid = { message: `Use 80 characters or fewer for option ${index + 1}.`, field: index }
-        else if (seen.has(option.toLowerCase())) invalid = { message: 'Use different options.', field: index }
+        if (!option) invalid = { message: t('optionRequired', { number: index + 1 }), field: index }
+        else if (option.length > 80) invalid = { message: t('optionTooLong', { number: index + 1 }), field: index }
+        else if (seen.has(option.toLowerCase())) invalid = { message: t('differentOptions'), field: index }
         if (invalid) break
         seen.add(option.toLowerCase())
       }
@@ -60,7 +62,7 @@ export function ChatPollComposer({
     try {
       if (await onSubmit(trimmedQuestion, trimmedOptions)) onClose()
     } catch {
-      setError({ message: 'Could not send poll. Try again.' })
+      setError({ message: t('pollSendFailed') })
     } finally {
       submittingRef.current = false
       setSubmitting(false)
@@ -84,13 +86,13 @@ export function ChatPollComposer({
       }}
     >
       <div className="chat-poll-composer-header">
-        <h3 id={`${id}-title`}>New poll</h3>
-        <Button type="button" variant="ghost" size="icon" className="chat-poll-close" aria-label="Close poll" onClick={onClose}>
+        <h3 id={`${id}-title`}>{t('newPoll')}</h3>
+        <Button type="button" variant="ghost" size="icon" className="chat-poll-close" aria-label={t('closePoll')} onClick={onClose}>
           <X size={16} />
         </Button>
       </div>
       <div className="chat-poll-field">
-        <label htmlFor={`${id}-question`}>Question</label>
+        <label htmlFor={`${id}-question`}>{t('question')}</label>
         <Input
           ref={questionRef}
           id={`${id}-question`}
@@ -108,7 +110,7 @@ export function ChatPollComposer({
       <div className="chat-poll-option-fields">
         {options.map((option, index) => (
           <div className="chat-poll-field" key={index}>
-            <label htmlFor={`${id}-option-${index}`}>Option {index + 1}</label>
+            <label htmlFor={`${id}-option-${index}`}>{t('option', { number: index + 1 })}</label>
             <div className="chat-poll-option-field">
               <Input
                 ref={(node) => { optionRefs.current[index] = node }}
@@ -131,7 +133,7 @@ export function ChatPollComposer({
                   variant="ghost"
                   size="icon"
                   className="chat-poll-remove-option"
-                  aria-label={`Remove option ${index + 1}`}
+                  aria-label={t('removeOption', { number: index + 1 })}
                   disabled={unavailable}
                   onClick={() => {
                     setOptions((current) => current.filter((_, optionIndex) => optionIndex !== index))
@@ -159,10 +161,10 @@ export function ChatPollComposer({
               setError(undefined)
               requestAnimationFrame(() => optionRefs.current[nextIndex]?.focus())
             }}
-          >Add option</Button>
+          >{t('addOption')}</Button>
         )}
         <Button type="button" className="chat-poll-post" disabled={unavailable} onClick={() => void submit()}>
-          {submitting ? 'Posting…' : 'Post poll'}
+          {submitting ? t('posting') : t('postPoll')}
         </Button>
       </div>
     </section>

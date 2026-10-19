@@ -1,4 +1,4 @@
-# Lydman: QOL and feel implementation
+# turntune: QOL and feel implementation
 
 Implementation review · 6 October 2026 · Companion to the [40 proposals](qol-and-feel-suggestions.md).
 

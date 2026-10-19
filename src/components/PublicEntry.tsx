@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LandingPage } from "./LandingPage";
@@ -51,6 +52,7 @@ function AuthScreen({
   path: string;
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useTranslation("public");
 
   const form = path === "/sign-up"
     ? <SignUpForm client={client} onNavigate={onNavigate} className="w-full" />
@@ -63,7 +65,7 @@ function AuthScreen({
       <AppHeader onHome={() => onNavigate("/")} publicActions={<ThemeToggle compact />} />
       <section className="auth-content" id="main-content" tabIndex={-1}>
         <div className="auth-intro">
-          <h1>{path === "/sign-up" ? "Create an account" : path === "/forgot-password" ? "Reset password" : "Sign in"}</h1>
+          <h1>{path === "/sign-up" ? t("createAnAccount") : path === "/forgot-password" ? t("resetPassword") : t("signIn")}</h1>
         </div>
         {form}
       </section>
@@ -79,12 +81,13 @@ export function PasswordRecoveryScreen({
   client: SupabaseClient;
   onComplete: () => void;
 }) {
+  const { t } = useTranslation("public");
   return (
     <main className="welcome auth-welcome">
       <AppHeader publicActions={<ThemeToggle compact />} />
       <section className="auth-content" id="main-content" tabIndex={-1}>
         <div className="auth-intro">
-          <h1>Account recovery</h1>
+          <h1>{t("accountRecovery")}</h1>
         </div>
         <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
       </section>

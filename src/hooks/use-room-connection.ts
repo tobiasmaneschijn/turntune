@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { RoomPlaybackClock } from "../playback-clock";
 import { socket } from "../socket";
@@ -21,6 +23,7 @@ interface RoomConnectionOptions {
 
 export function useRoomConnection({ roomId, password, profile, ready, accessToken,
   onConnected, onSnapshot, onPasswordRequired, onJoinError, onNotice, transport = socket }: RoomConnectionOptions) {
+  useTranslation();
   const [retryRevision, setRetryRevision] = useState(0);
   const playbackClockRef = useRef(new RoomPlaybackClock());
   useEffect(() => {
@@ -49,7 +52,7 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
         admitted = result.ok;
         onConnected(admitted && hasFreshSnapshot);
         onPasswordRequired(Boolean(result.requiresPassword));
-        onJoinError(result.ok ? "" : result.error || "Could not join the room.");
+        onJoinError(result.ok ? "" : result.error || i18n.t("common:use_room_connection_could_not_join_the_room"));
       });
     };
     const onDisconnect = () => {
@@ -61,7 +64,7 @@ export function useRoomConnection({ roomId, password, profile, ready, accessToke
     const onConnectError = (error: Error) => {
       onConnected(false);
       onNotice(error.message);
-      if (!transport.active) onJoinError(error.message || "Could not connect. Try again.");
+      if (!transport.active) onJoinError(error.message || i18n.t("common:use_room_connection_could_not_connect_try_again"));
     };
     const receiveSnapshot = (next: RoomSnapshot) => {
       if (active && next.room.id === roomId) {

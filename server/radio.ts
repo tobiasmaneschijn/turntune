@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { randomUUID } from "node:crypto";
 import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS, roomAllowsProvider } from "../shared/providers.js";
 import type { Room, SnapshotRoom, Track, User } from "./types.js";
@@ -247,7 +248,7 @@ export class QueueUndoRegistry {
   beginRemove(room: Room, userId: string, trackId: string, now = Date.now(), draft = room) {
     const queue = privateQueue(draft, userId);
     const index = queue.findIndex((track) => track.id === trackId);
-    if (index < 0) throw new Error("That waiting track is no longer in your queue.");
+    if (index < 0) throw new Error(serverT("that_waiting_track_is_no_longer_in_your_queue"));
     for (const [token, entry] of this.entries) if (entry.expiresAt <= now || (entry.room === room && entry.userId === userId)) this.entries.delete(token);
     const token = randomUUID();
     const track = queue[index];
@@ -289,15 +290,15 @@ export class QueueUndoRegistry {
     const entry = this.entries.get(token);
     if (!entry || entry.expiresAt <= now) {
       if (entry?.expiresAt && entry.expiresAt <= now) this.entries.delete(token);
-      throw new Error("Undo expired. You can add the track again from your saved picks or search.");
+      throw new Error(serverT("undo_expired_you_can_add_the_track_again_from_your_saved_picks_or_search"));
     }
-    if (entry.room !== room || entry.userId !== userId) throw new Error("This Undo belongs to a different room or account.");
-    if (entry.phase !== "removed") throw new Error("This queue change is still being saved. Wait before trying Undo again.");
+    if (entry.room !== room || entry.userId !== userId) throw new Error(serverT("this_undo_belongs_to_a_different_room_or_account"));
+    if (entry.phase !== "removed") throw new Error(serverT("this_queue_change_is_still_being_saved_wait_before_trying_undo_again"));
     if (!roomAllowsProvider(draft.settings, entry.track.provider)) throw new Error(`${PROVIDER_LABELS[entry.track.provider]} is disabled in this room.`);
     const queue = privateQueue(draft, userId);
     const same = (track: Track) => track.id === entry.track.id || sameRecording(track, entry.track);
-    if ((draft.playback.track && same(draft.playback.track)) || queue.some(same)) throw new Error("That recording is already playing or waiting in your queue.");
-    if (draft.history.some((track) => track.id === entry.track.id)) throw new Error("That queue item has already played and cannot be restored.");
+    if ((draft.playback.track && same(draft.playback.track)) || queue.some(same)) throw new Error(serverT("that_recording_is_already_playing_or_waiting_in_your_queue"));
+    if (draft.history.some((track) => track.id === entry.track.id)) throw new Error(serverT("that_queue_item_has_already_played_and_cannot_be_restored"));
     // Stable surviving neighbors preserve current edits; no old numeric index.
     entry.phase = "restoring";
     const position = insertAtSurvivingAnchor(queue, entry.track, entry);
@@ -346,7 +347,7 @@ export function pruneUnauthorizedDjs(room: Room) {
 
 /** Append a pre-resolved set in order and report every skipped item. */
 export function appendQueueSet(room: Room, user: User, inputs: Array<Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">>, now = Date.now()) {
-  if (inputs.length === 0 || inputs.length > 50) throw new Error("A set must contain between 1 and 50 tracks.");
+  if (inputs.length === 0 || inputs.length > 50) throw new Error(serverT("a_set_must_contain_between_1_and_50_tracks"));
   const queue = privateQueue(room, user.id);
   const skipped: Array<{ title: string; reason: string }> = [];
   let added = 0;

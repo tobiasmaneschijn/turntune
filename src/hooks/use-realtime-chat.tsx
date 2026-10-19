@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -33,6 +34,7 @@ interface UseRealtimeChatProps {
 }
 
 export function useRealtimeChat({ client, roomName, user, onConnected, transport, onBeforeMessage }: UseRealtimeChatProps) {
+  const { t } = useTranslation('chat')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
@@ -96,30 +98,30 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     mentions: ChatMention[] = []
   ) => {
     const session = sessionRef.current
-    if (!session) throw new Error('Chat is reconnecting. Try again.')
+    if (!session) throw new Error(t('reconnecting'))
     const message = normalizeRealtimeMessage({
       id: crypto.randomUUID(), content, type: media?.type || 'text',
       mediaUrl: media?.mediaUrl, storagePath: media?.storagePath,
       user, mentions, replyTo, createdAt: new Date().toISOString(),
     })
-    if (!message) throw new Error('This message could not be sent. Check its text or image.')
+    if (!message) throw new Error(t('invalidMessage'))
     await session.sendMessage(message)
     return message
-  }, [user])
+  }, [user, t])
   const prepareMessage = useCallback((content: string, media?: ChatMedia, replyTo?: ChatReply, mentions: ChatMention[] = [], pollOptions?: string[]) => {
     const message = normalizeRealtimeMessage({ id: crypto.randomUUID(), content, type: media?.type || 'text', mediaUrl: media?.mediaUrl,
       storagePath: media?.storagePath, user, mentions, replyTo, createdAt: new Date().toISOString(),
       poll: pollOptions ? { options: pollOptions } : undefined })
-    if (!message) throw new Error('This message could not be sent. Check its text or image.')
+    if (!message) throw new Error(t('invalidMessage'))
     return message
-  }, [user])
+  }, [user, t])
   const sendExistingMessage = useCallback(async (message: ChatMessage) => {
-    if (message.user.id !== user.id) throw new Error('This message belongs to another account.')
+    if (message.user.id !== user.id) throw new Error(t('otherAccount'))
     const session = sessionRef.current
-    if (!session) throw new Error('Chat is reconnecting. Try again.')
+    if (!session) throw new Error(t('reconnecting'))
     await session.sendMessage(message)
     return message
-  }, [user.id])
+  }, [user.id, t])
 
   const broadcastReaction = useCallback(async (event: Omit<ChatReactionEvent, 'id'> & { id?: string }) => {
     await sessionRef.current?.sendReaction({ ...event, id: event.id || crypto.randomUUID() })

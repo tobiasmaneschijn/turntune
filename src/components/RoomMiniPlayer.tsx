@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Volume2, VolumeX } from "lucide-react";
 import type { Track } from "../types";
 import { TrackArtwork } from "./TrackArtwork";
@@ -13,10 +14,11 @@ export function RoomMiniPlayer({ track, statusText, statusTone = "quiet", muted,
   onToggleMute: () => void;
   onOpenPlayer: () => void;
 }) {
-  return <section className="room-mini-player" aria-label="Current track" data-status={statusTone}>
+  const { t } = useTranslation("rooms");
+  return <section className="room-mini-player" aria-label={t("roomMiniPlayer.currentTrack")} data-status={statusTone}>
     {track && <TrackArtwork track={track} compact className="room-mini-art" />}
-    <div className="room-mini-copy"><strong title={track?.title}>{track?.title || "No track playing"}</strong><span title={statusText}>{statusText}</span></div>
-    <Button variant="ghost" size="icon" disabled={!localVolumeSupported} title={!localVolumeSupported ? "Use your device volume for Mixcloud" : undefined} onClick={onToggleMute} aria-label={muted ? "Unmute my audio" : "Mute my audio"} aria-pressed={muted}>{muted ? <VolumeX /> : <Volume2 />}</Button>
-    <Button variant="outline" size="sm" onClick={onOpenPlayer}>Open player</Button>
+    <div className="room-mini-copy"><strong title={track?.title}>{track?.title || t("roomMiniPlayer.noTrackPlaying")}</strong><span title={statusText}>{statusText}</span></div>
+    <Button variant="ghost" size="icon" disabled={!localVolumeSupported} title={!localVolumeSupported ? t("roomMiniPlayer.useYourDeviceVolumeForMixcloud") : undefined} onClick={onToggleMute} aria-label={muted ? t("roomMiniPlayer.unmuteMyAudio") : t("roomMiniPlayer.muteMyAudio")} aria-pressed={muted}>{muted ? <VolumeX /> : <Volume2 />}</Button>
+    <Button variant="outline" size="sm" onClick={onOpenPlayer}>{t("roomMiniPlayer.openPlayer")}</Button>
   </section>;
 }

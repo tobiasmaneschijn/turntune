@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from 'react-i18next'
 import { approvedImageUrl } from "../lib/remote-images";
 import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -185,6 +186,7 @@ const ChatMessageList = memo(function ChatMessageList({
   pollVotingEnabled,
   onRemove,onReport,canRemoveMessage,participationDisabled,
 }: ChatMessageListProps) {
+  const { t, i18n } = useTranslation('chat')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [openPickerId, setOpenPickerId] = useState<string | null>(null)
   const handleActionMenuOpenChange = useCallback((messageId: string, open: boolean) => {
@@ -210,7 +212,7 @@ const ChatMessageList = memo(function ChatMessageList({
             {beginsNewDay && (
               <div className="chat-date-divider">
                 <span>
-                  {new Date(message.createdAt).toLocaleDateString(undefined, {
+                  {new Date(message.createdAt).toLocaleDateString(i18n.resolvedLanguage, {
                     weekday: 'short',
                     month: 'short',
                     day: 'numeric',
@@ -219,7 +221,7 @@ const ChatMessageList = memo(function ChatMessageList({
               </div>
             )}
             {unreadMessageId === message.id && (
-              <div className="chat-unread-divider"><span>New messages</span></div>
+              <div className="chat-unread-divider"><span>{t('newMessages')}</span></div>
             )}
             <ChatMessageItem
               message={message}
@@ -293,6 +295,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   capabilities,slowModeSeconds=0,restrictionMessage,onRemoveMessage,onReportMessage,canRemoveMessage,
   messages: initialMessages = EMPTY_MESSAGES,
 }, ref) {
+  const { t, i18n } = useTranslation('chat')
   const reducedMotion = useEffectiveMotion()
   const { resolvedTheme } = useTheme()
   const mentionListId = useId()
@@ -303,9 +306,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const handleHiddenChange = useCallback((messageId: string, hidden: boolean) => {
     const persisted = setMessageHidden(messageId, hidden)
     toast.dismiss(`mention:${user.id}:${historyRoomSlug || roomName}:${messageId}`)
-    if (!persisted) toast.info(hidden ? 'Hidden until you leave this chat. Device storage is unavailable.' : 'Unhidden until you leave this chat. Device storage is unavailable.')
-    else if (hidden) toast.info('Message hidden on this device.')
-  }, [setMessageHidden, user.id, roomName, historyRoomSlug])
+    if (!persisted) toast.info(hidden ? t('hiddenTemporary') : t('unhiddenTemporary'))
+    else if (hidden) toast.info(t('hiddenDeviceNotice'))
+  }, [setMessageHidden, user.id, roomName, historyRoomSlug, t])
   useEffect(() => {
     for (const messageId of hiddenIds) toast.dismiss(`mention:${user.id}:${historyRoomSlug || roomName}:${messageId}`)
   }, [hiddenIds, user.id, roomName, historyRoomSlug])
@@ -575,7 +578,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   useEffect(()=>{setReplyingTo(current=>{
     if(!current||current.removedAt)return current
     const removedAt=removalEvents.find(event=>event.messageId===current.id)?.removedAt||allMessages.find(message=>message.id===current.id)?.removedAt
-    return removedAt?{...current,content:'Message removed',type:'text',mediaUrl:undefined,mentions:[],removedAt}:current
+    return removedAt?{...current,content:t('removed'),type:'text',mediaUrl:undefined,mentions:[],removedAt}:current
   })},[removalEvents,allMessages])
   const visibleMessages = useMemo(() => history.context
     ? applyRemovalEvents(applyPollVoteEvents(applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId), pollVoteEvents),removalEvents)
@@ -616,20 +619,20 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           } else messageInputRef.current?.focus({ preventScroll: true })
         }))
       }
-      notifyWithAttention({ key, title: `${message.user.name} mentioned you`, body: message.content || 'New room chat mention',
+      notifyWithAttention({ key, title: t('mentionTitle', { name: message.user.name }), body: message.content || t('newMention'),
         backgroundOnly: notifications.backgroundOnly,
         onClick: activate,
-        onInApp: () => toast.info(`${message.user.name} mentioned you`, { id: key, description: message.content,
-          action: { label: 'View', onClick: activate } }) })
+        onInApp: () => toast.info(t('mentionTitle', { name: message.user.name }), { id: key, description: message.content,
+          action: { label: t('view'), onClick: activate } }) })
     }
-  }, [attentionTracker, attendingLive, cancelAnchor, hiddenIds, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id])
+  }, [attentionTracker, attendingLive, cancelAnchor, hiddenIds, history.closeContext, historyLoading, historyRoomSlug, notifications, onNotificationActivate, realtimeMessages, roomMuted, roomName, user.id, t])
   useEffect(() => {
     const original = document.title.replace(/^\(\d+\) /, '')
     let ownedTitle = document.title
-    const update = () => { ownedTitle = unreadMessageIds.length ? `(${unreadMessageIds.length}) ${original}` : original; document.title = ownedTitle }
+    const update = () => { ownedTitle = unreadMessageIds.length ? t('unreadDocumentTitle', { count: unreadMessageIds.length, title: original }) : original; document.title = ownedTitle }
     update()
     return () => { if (document.title === ownedTitle) document.title = original }
-  }, [unreadMessageIds.length])
+  }, [unreadMessageIds.length, t])
   useEffect(() => {
     const replyId = restoredReplyIdRef.current
     if (!replyId) return
@@ -651,18 +654,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         if (original) setReplyingTo(createReplySnapshot(original))
         else {
           draftSnapshotRef.current.draft.replyToId = undefined
-          setReplyRestoreNotice('Reply unavailable. Draft text restored.')
+          setReplyRestoreNotice(t('replyUnavailable'))
         }
       } catch {
         if (!active || restoredReplyIdRef.current !== replyId) return
         restoredReplyIdRef.current = undefined
         draftSnapshotRef.current.draft.replyToId = undefined
-        setReplyRestoreNotice('Could not restore reply. Draft text restored.')
+        setReplyRestoreNotice(t('replyRestoreFailed'))
       }
     }
     void restore()
     return () => { active = false }
-  }, [client, historyLoading, historyRoomSlug, historySource, initialDraft])
+  }, [client, historyLoading, historyRoomSlug, historySource, initialDraft, t])
   const typingNames = useMemo(() => {
     if (roomUsers.length > TYPING_ROOM_LIMIT) return []
     const typingIds = new Set(typingUserIds)
@@ -671,10 +674,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       .map((roomUser) => roomUser.name)
   }, [roomUsers, typingUserIds, user.id])
   const typingLabel = typingNames.length === 1
-    ? `${typingNames[0]} is typing…`
+    ? t('typingOne', { name: typingNames[0] })
     : typingNames.length === 2
-      ? `${typingNames[0]} and ${typingNames[1]} are typing…`
-      : typingNames.length > 2 ? 'Several people are typing…' : ''
+      ? t('typingTwo', { first: typingNames[0], second: typingNames[1] })
+      : typingNames.length > 2 ? t('typingSeveral') : ''
 
   useImperativeHandle(ref, () => ({
     focusComposer: () => messageInputRef.current?.focus(),
@@ -789,23 +792,23 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     stopTyping()
   }, [draftStore, stopTyping])
   const executeCommand = useCallback((name: ChatCommandName, argumentsText = '') => {
-    if(name==='poll'&&!canPoll){setComposerError('Poll creation is disabled for you in this room.');return}
+    if(name==='poll'&&!canPoll){setComposerError(t('pollDisabled'));return}
     if ((name === 'queue' || name === 'mute') && argumentsText) {
-      setComposerError(`Use /${name} without extra text.`); return
+      setComposerError(t('commandNoArguments', { command: name })); return
     }
-    if (name === 'queue' && !onOpenQueue) { setComposerError('The queue is unavailable in this view.'); return }
-    if (name === 'search' && !historyRoomSlug) { setComposerError('Room message search is unavailable in this view.'); return }
+    if (name === 'queue' && !onOpenQueue) { setComposerError(t('queueUnavailable')); return }
+    if (name === 'search' && !historyRoomSlug) { setComposerError(t('searchUnavailable')); return }
     if (name === 'search' && argumentsText && (argumentsText.length < 2 || argumentsText.length > 100)) {
-      setComposerError('Enter 2–100 characters to search room messages.'); return
+      setComposerError(t('searchLength')); return
     }
-    if (name === 'poll' && argumentsText.length > 200) { setComposerError('Keep the poll question to 200 characters.'); return }
+    if (name === 'poll' && argumentsText.length > 200) { setComposerError(t('pollQuestionLimit')); return }
     setComposerError('')
     clearCommandDraft()
     setShowEmoji(false); setShowGiphy(false)
     if (name === 'queue') onOpenQueue?.()
     else if (name === 'mute') {
       setRoomMuted(!roomMuted)
-      toast.info(roomMuted ? 'Room notifications unmuted.' : 'Room notifications muted.')
+      toast.info(roomMuted ? t('unmutedNotice') : t('mutedNotice'))
       messageInputRef.current?.focus({ preventScroll: true })
     } else if (name === 'search') {
       setShowHistorySearch(true)
@@ -816,7 +819,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       pollComposerGenerationRef.current++
       setPollQuestion(argumentsText)
     }
-  }, [clearCommandDraft, history.search, historyRoomSlug, onOpenQueue, roomMuted, setRoomMuted,canPoll])
+  }, [clearCommandDraft, history.search, historyRoomSlug, onOpenQueue, roomMuted, setRoomMuted,canPoll, t])
   const handleSendMessage = useCallback((event: React.FormEvent) => {
     event.preventDefault()
     if (commandCandidates.length) {
@@ -825,13 +828,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     const command = parseChatCommand(draftMessageRef.current)
     if (command) {
       if (command.name) executeCommand(command.name, command.arguments)
-      else setComposerError('Unknown command. Use /queue, /mute, /search or /poll.')
+      else setComposerError(t('unknownCommand'))
       return
     }
-    if(!canChat||cooldownRemaining){setComposerError(!canChat?restrictionMessage||'Chat is limited in this room.':`Wait ${cooldownRemaining} seconds before sending.`);return}
-    if(capabilities?.links===false&&/https?:\/\/|www\./i.test(draftMessageRef.current)){setComposerError('Links are disabled for you in this room.');return}
+    if(!canChat||cooldownRemaining){setComposerError(!canChat?restrictionMessage||t('chatLimited'):t('cooldown', { count: cooldownRemaining }));return}
+    if(capabilities?.links===false&&/https?:\/\/|www\./i.test(draftMessageRef.current)){setComposerError(t('linksDisabled'));return}
     void sendText()
-  }, [activeCommandIndex, commandCandidates, executeCommand, sendText,canChat,cooldownRemaining,restrictionMessage,capabilities?.links])
+  }, [activeCommandIndex, commandCandidates, executeCommand, sendText,canChat,cooldownRemaining,restrictionMessage,capabilities?.links, t])
   const closePollComposer = useCallback(() => {
     pollComposerGenerationRef.current++
     setPollQuestion(null)
@@ -859,9 +862,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       applyPollVote(event)
       setPollVoteStates((current) => ({ ...current, [message.id]: { pending: false } }))
     } catch (error) {
-      if (lifetime.active) setPollVoteStates((current) => ({ ...current, [message.id]: { pending: false, error: error instanceof Error ? error.message : 'Could not save vote. Try again.' } }))
+      if (lifetime.active) setPollVoteStates((current) => ({ ...current, [message.id]: { pending: false, error: error instanceof Error ? error.message : t('voteFailed') } }))
     } finally { pending.delete(message.id) }
-  }, [applyPollVote, historySource, isConnected, lifetimeRef,canChat])
+  }, [applyPollVote, historySource, isConnected, lifetimeRef,canChat, t])
 
   const chooseMention = useCallback((option: RoomMentionOption) => {
     if (!mentionQuery) return
@@ -916,11 +919,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const jumpToMessage = useCallback((messageId: string) => {
     cancelAnchor()
     if (markJumpTarget(messageId)) return
-    if (!historyRoomSlug) { setComposerError('That message is not in the loaded history.'); return }
+    if (!historyRoomSlug) { setComposerError(t('messageNotLoaded')); return }
     liveScrollTopRef.current = containerRef.current?.scrollTop || 0
     pendingJumpRef.current = messageId
     void history.revealContext(messageId).then((found) => { if (!found) pendingJumpRef.current = null })
-  }, [cancelAnchor, containerRef, history.revealContext, historyRoomSlug, markJumpTarget])
+  }, [cancelAnchor, containerRef, history.revealContext, historyRoomSlug, markJumpTarget, t])
   useEffect(() => {
     const messageId = pendingJumpRef.current
     if (!messageId || !history.context) return
@@ -965,11 +968,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         action,
       })
     } catch {
-      if (lifetime.active) setComposerError('Could not confirm reaction. Try again.')
+      if (lifetime.active) setComposerError(t('reactionFailed'))
     } finally {
       pendingReactionsRef.current.delete(key)
     }
-  }, [broadcastReaction, client, isConnected, onPersistReaction, user.id,canChat])
+  }, [broadcastReaction, client, isConnected, onPersistReaction, user.id,canChat, t])
 
   const handleReaction = useCallback((message: ChatMessage, emoji: string) => {
     void toggleReaction(message, emoji)
@@ -996,7 +999,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     let registeredUpload=false,outboxOwnsUpload=false
     const cleanupRegisteredUpload=()=>{if(registeredUpload&&!outboxOwnsUpload&&historySource?.cleanupUpload)void boundedOperation(signal=>historySource.cleanupUpload!(storagePath,signal),{timeoutMs:CLEANUP_TIMEOUT_MS}).catch(()=>undefined)}
     try {
-      if (!onResolveMediaUrl) throw new Error('Private chat image delivery is unavailable.')
+      if (!onResolveMediaUrl) throw new Error(t('mediaUnavailable'))
       const uploaded=historySource?.uploadImage?await historySource.uploadImage(file,controller.signal):undefined
       if(uploaded){storagePath=uploaded.storagePath;registeredUpload=true}
       const mediaUrl = uploaded?.url||await prepareUploadedChatImage({
@@ -1013,7 +1016,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       if (!isCurrent()) return
       if (result.accepted) setPendingImage(null)
       else {
-        setComposerError((current) => current || 'Image not sent. Retry the upload when chat is ready.')
+        setComposerError((current) => current || t('imageNotSent'))
         if(!uploaded)void boundedOperation(async (signal) => {
           const transport = await getScopedSupabaseClient(client, user.id, signal)
           signal.throwIfAborted()
@@ -1021,7 +1024,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         }, { timeoutMs: CLEANUP_TIMEOUT_MS }).catch(() => undefined)
       }
     } catch (error) {
-      if (isCurrent()) setComposerError(controller.signal.aborted ? 'Upload cancelled. Your image and draft are kept.' : error instanceof Error ? error.message : 'Could not upload this image. Try again.')
+      if (isCurrent()) setComposerError(controller.signal.aborted ? t('uploadCancelled') : error instanceof Error ? error.message : t('uploadFailed'))
     } finally {
       cleanupRegisteredUpload()
       if (uploadAbortRef.current === controller) uploadAbortRef.current = null
@@ -1074,12 +1077,12 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       setGifs(results)
     } catch (error) {
       if (!lifetime.active || requestId !== giphyRequestRef.current) return
-      setComposerError(error instanceof Error ? error.message : 'Could not load GIFs.')
+      setComposerError(error instanceof Error ? error.message : t('gifsLoadFailed'))
       setGifs([])
     } finally {
       if (lifetime.active && requestId === giphyRequestRef.current) setGifsLoading(false)
     }
-  }, [client, giphyConfigured])
+  }, [client, giphyConfigured, t])
 
   useEffect(() => {
     // Invalidate immediately, including cached results, the debounce window,
@@ -1130,11 +1133,11 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }
   const historyControls = (historyRoomSlug || notifications) ? (
     <div className={headerActionsContainer ? 'chat-header-tools' : 'chat-history-toolbar'}>
-      {historyRoomSlug && <Button ref={historySearchButtonRef} type="button" variant="ghost" size="icon-sm" aria-label="Search room messages" title="Search room messages" aria-expanded={showHistorySearch} aria-controls={showHistorySearch ? historySearchId : undefined} onClick={() => { if (showHistorySearch) closeHistorySearch(); else setShowHistorySearch(true) }}><Search size={16} /></Button>}
-      {notifications && <Button type="button" variant="ghost" size="icon-sm" aria-label={roomMuted ? 'Room muted' : 'Mute room'} aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title={roomMuted ? 'Unmute room notifications' : 'Mute room notifications'}>{roomMuted ? <BellOff size={16} /> : <Bell size={16} />}</Button>}
+      {historyRoomSlug && <Button ref={historySearchButtonRef} type="button" variant="ghost" size="icon-sm" aria-label={t('searchRoomMessages')} title={t('searchRoomMessages')} aria-expanded={showHistorySearch} aria-controls={showHistorySearch ? historySearchId : undefined} onClick={() => { if (showHistorySearch) closeHistorySearch(); else setShowHistorySearch(true) }}><Search size={16} /></Button>}
+      {notifications && <Button type="button" variant="ghost" size="icon-sm" aria-label={roomMuted ? t('roomMuted') : t('muteRoom')} aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title={roomMuted ? t('unmuteNotifications') : t('muteNotifications')}>{roomMuted ? <BellOff size={16} /> : <Bell size={16} />}</Button>}
     </div>
   ) : null
-  const composerStatus = !canChat?restrictionMessage||'Chat is limited in this room.':cooldownRemaining?`Slow mode · ${cooldownRemaining}s`:uploading ? 'Uploading image…' : sending ? 'Sending…' : !isConnected ? 'Chat reconnecting · your draft stays here' : draftRestored ? 'Draft restored' : ''
+  const composerStatus = !canChat?restrictionMessage||t('chatLimited'):cooldownRemaining?t('slowMode', { count: cooldownRemaining }):uploading ? t('uploading') : sending ? t('sending') : !isConnected ? t('draftKept') : draftRestored ? t('draftRestored') : ''
   const openModeration = useCallback((kind: 'remove' | 'report', message: ChatMessage) => {
     setModerationTarget({ kind, message })
     setModerationReason('')
@@ -1149,7 +1152,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     if (!action || (target.kind === 'remove' && (
       capabilities?.chatParticipants === false || (canRemoveMessage && !canRemoveMessage(target.message))
     ))) {
-      setModerationError(target.kind === 'remove' ? 'You can no longer remove this message.' : 'Reporting is unavailable.')
+      setModerationError(target.kind === 'remove' ? t('removeUnavailable') : t('reportUnavailable'))
       return
     }
     setModerationPending(true)
@@ -1159,7 +1162,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       if (target.kind === 'remove') applyRemoval({ messageId: target.message.id, removedAt: new Date().toISOString() })
       setModerationTarget(null)
     } catch (error) {
-      setModerationError(error instanceof Error ? error.message : 'Could not save. Try again.')
+      setModerationError(error instanceof Error ? error.message : t('saveFailed'))
     } finally {
       setModerationPending(false)
     }
@@ -1168,30 +1171,30 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   return (
     <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
       {headerActionsContainer ? createPortal(historyControls, headerActionsContainer) : historyControls}
-      {showHistorySearch && <section id={historySearchId} className="chat-history-search" aria-label="Search room history" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeHistorySearch() } }}>
+      {showHistorySearch && <section id={historySearchId} className="chat-history-search" aria-label={t('searchHistory')} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeHistorySearch() } }}>
         <form onSubmit={(event) => { event.preventDefault(); void history.search(historySearchText) }}>
-          <Input ref={historySearchInputRef} aria-label="Search all saved room messages" value={historySearchText} maxLength={100} placeholder="Search message text" onChange={(event) => setHistorySearchText(event.target.value)} />
-          <Button size="sm" type="submit" disabled={history.searchLoading || historySearchText.trim().length < 2}>Search</Button>
-          <Button type="button" size="icon-sm" variant="ghost" aria-label="Close room message search" onClick={closeHistorySearch}><X size={15} /></Button>
+          <Input ref={historySearchInputRef} aria-label={t('searchSavedMessages')} value={historySearchText} maxLength={100} placeholder={t('searchMessageText')} onChange={(event) => setHistorySearchText(event.target.value)} />
+          <Button size="sm" type="submit" disabled={history.searchLoading || historySearchText.trim().length < 2}>{t('search')}</Button>
+          <Button type="button" size="icon-sm" variant="ghost" aria-label={t('closeSearch')} onClick={closeHistorySearch}><X size={15} /></Button>
         </form>
-        {history.searchLoading && <p role="status">Searching saved room messages…</p>}
+        {history.searchLoading && <p role="status">{t('searching')}</p>}
         {history.searchError && <p role="alert">{history.searchError}</p>}
-        {!history.searchLoading && history.searchTerm && !history.searchError && history.searchResults.length === 0 && <p>No saved messages match “{history.searchTerm}”.</p>}
-        <div className="chat-history-results">{applyRemovalEvents([...history.searchResults].reverse(),removalEvents).filter(message=>!message.removedAt).map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={`View message from ${message.user.name}: ${getVisibleMessagePreview(message, hiddenIds)}`}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString()}</time><span>{getVisibleMessagePreview(message, hiddenIds)}</span></button>)}</div>
-        {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>More search results</Button>}
+        {!history.searchLoading && history.searchTerm && !history.searchError && history.searchResults.length === 0 && <p>{t('noSearchResults', { term: history.searchTerm })}</p>}
+        <div className="chat-history-results">{applyRemovalEvents([...history.searchResults].reverse(),removalEvents).filter(message=>!message.removedAt).map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={t('viewMessage', { name: message.user.name, preview: getVisibleMessagePreview(message, hiddenIds) })}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString(i18n.resolvedLanguage)}</time><span>{getVisibleMessagePreview(message, hiddenIds)}</span></button>)}</div>
+        {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>{t('moreResults')}</Button>}
       </section>}
-      {history.context && <div className="chat-context-banner"><span>Earlier messages</span><Button variant="ghost" size="sm" onClick={returnToLive}>Back to live messages</Button></div>}
+      {history.context && <div className="chat-context-banner"><span>{t('earlierMessages')}</span><Button variant="ghost" size="sm" onClick={returnToLive}>{t('backToLive')}</Button></div>}
       {/* Messages */}
       <div ref={containerRef} className="chat-message-scroll flex-1 overflow-y-auto p-4 space-y-4">
         {(history.context ? history.context.hasOlder : history.hasOlder) && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.loadingOlder || history.contextLoading || historyLoading} onClick={() => {
           const restore = preserveAnchor()
           void (history.context ? history.extendContext('older') : history.loadOlder()).finally(restore)
-        }}>{history.loadingOlder ? 'Loading older messages…' : 'Load older messages'}</Button></div>}
-        {history.contextLoading && <p role="status">Loading message context…</p>}
+        }}>{history.loadingOlder ? t('loadingOlder') : t('loadOlder')}</Button></div>}
+        {history.contextLoading && <p role="status">{t('loadingContext')}</p>}
         {history.historyError && <p role="alert" className="chat-history-error">{history.historyError}</p>}
         {visibleMessages.length === 0 && !historyLoading && !historyUnavailable && !history.historyError ? (
           <div className="text-center text-sm text-muted-foreground">
-            No messages yet.
+            {t('empty')}
           </div>
         ) : null}
         <ChatMessageList
@@ -1217,7 +1220,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           onReport={onReportMessage ? openReportModeration : undefined}
           canRemoveMessage={canRemoveMessage}
         />
-        {history.context?.hasNewer && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.contextLoading} onClick={() => void history.extendContext('newer')}>Load newer messages</Button></div>}
+        {history.context?.hasNewer && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.contextLoading} onClick={() => void history.extendContext('newer')}>{t('loadNewer')}</Button></div>}
       </div>
 
       {(!isNearBottom || unreadMessageIds.length > 0) && (
@@ -1229,7 +1232,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             clearUnread()
           }}
         >
-          <span>{unreadMessageIds.length > 0 ? `${unreadMessageIds.length} new` : 'Jump to latest'}</span>
+          <span>{unreadMessageIds.length > 0 ? t('unreadCount', { count: unreadMessageIds.length }) : t('jumpLatest')}</span>
           <ArrowDown className="size-4" />
         </button>
       )}
@@ -1237,7 +1240,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       {(showEmoji || showGiphy) && (
         <div className="chat-picker-popover" style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
           <div className="chat-picker-header">
-          <div className="chat-picker-tabs" role="tablist" aria-label="Message media" onKeyDown={(event) => {
+          <div className="chat-picker-tabs" role="tablist" aria-label={t('messageMedia')} onKeyDown={(event) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !giphyConfigured) return
             event.preventDefault()
             const emoji = event.key === 'End' || (event.key !== 'Home' && !showEmoji)
@@ -1258,7 +1261,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                 setShowGiphy(true)
               }}
             >
-              GIFs
+              {t('gifs')}
             </button>
             <button
               type="button"
@@ -1273,13 +1276,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                 setShowEmoji(true)
               }}
             >
-              Emoji
+              {t('emoji')}
             </button>
           </div>
             <button
               type="button"
               className="chat-picker-close"
-              aria-label="Close media picker"
+              aria-label={t('closeMediaPicker')}
               onClick={() => { setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) }}
             >
               <X size={15} />
@@ -1287,7 +1290,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           </div>
           {showEmoji ? (
             <div id={mediaPanelId} role="tabpanel" aria-labelledby={`${mediaPanelId}-emoji`} className="chat-emoji-panel">
-              <Suspense fallback={<div className="chat-picker-loading">Loading emoji…</div>}>
+              <Suspense fallback={<div className="chat-picker-loading">{t('loadingEmoji')}</div>}>
                 <EmojiPicker
                   theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
                   width="100%"
@@ -1296,7 +1299,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                   emojiStyle={chatPickerEmojiStyle}
                   defaultSkinTone={skinTone}
                   previewConfig={{ showPreview: false }}
-                  searchPlaceholder="Find the perfect emoji"
+                  searchPlaceholder={t('findPerfectEmoji')}
                   onSkinToneChange={(selectedSkinTone) => {
                     setSkinTone(selectedSkinTone)
                     saveEmojiSkinTone(selectedSkinTone)
@@ -1336,22 +1339,22 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                 <Input
                   value={giphyQuery}
                   onChange={(event) => setGiphyQuery(event.target.value)}
-                  placeholder="Search GIFs"
+                  placeholder={t('searchGifs')}
                   maxLength={50}
                 />
                 {giphyQuery && (
-                  <button type="button" aria-label="Clear GIF search" onClick={() => setGiphyQuery('')}>
+                  <button type="button" aria-label={t('clearGifSearch')} onClick={() => setGiphyQuery('')}>
                     <X size={14} />
                   </button>
                 )}
-                <button type="submit" className="sr-only">Search GIFs</button>
+                <button type="submit" className="sr-only">{t('searchGifs')}</button>
               </form>
               {gifsLoading ? (
-                <div className="chat-gif-status">Loading GIFs…</div>
+                <div className="chat-gif-status">{t('loadingGifs')}</div>
               ) : giphyQuery.trim().length === 1 ? (
-                <div className="chat-gif-status">Type one more character to search.</div>
+                <div className="chat-gif-status">{t('gifSearchMore')}</div>
               ) : gifs.length === 0 ? (
-                <div className="chat-gif-status">No GIFs found.</div>
+                <div className="chat-gif-status">{t('noGifs')}</div>
               ) : (
                 <div className="chat-gif-grid">
                   {[0, 1].map((column) => (
@@ -1363,7 +1366,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                           className="chat-gif-tile"
                           onClick={() => {
                             const lifetime = lifetimeRef.current
-                            void sendMediaMessage('gif', gif.url, gif.title || 'GIPHY GIF').then((sent) => {
+                            void sendMediaMessage('gif', gif.url, gif.title || t('giphyGif')).then((sent) => {
                               if (sent && lifetime.active) setShowGiphy(false)
                             })
                           }}
@@ -1375,7 +1378,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
                   ))}
                 </div>
               )}
-              <p className="chat-gif-footer">Powered by GIPHY</p>
+              <p className="chat-gif-footer">{t('giphyAttribution')}</p>
             </div>
           )}
         </div>
@@ -1403,9 +1406,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         />
         {pendingImage && <div className="chat-pending-image">
           <span>{pendingImage.name}</span>
-          {uploading ? <Button type="button" variant="ghost" size="sm" onClick={() => uploadAbortRef.current?.abort()}>Cancel upload</Button> : <>
-            <Button type="button" variant="ghost" size="sm" disabled={!isConnected || sending} onClick={() => void uploadImage(pendingImage)}>Retry upload</Button>
-            <Button type="button" variant="ghost" size="sm" aria-label="Remove attached image" onClick={() => setPendingImage(null)}><X size={14} /></Button>
+          {uploading ? <Button type="button" variant="ghost" size="sm" onClick={() => uploadAbortRef.current?.abort()}>{t('cancelUpload')}</Button> : <>
+            <Button type="button" variant="ghost" size="sm" disabled={!isConnected || sending} onClick={() => void uploadImage(pendingImage)}>{t('retryUpload')}</Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={t('removeAttachment')} onClick={() => setPendingImage(null)}><X size={14} /></Button>
           </>}
         </div>}
         <div className="chat-typing-indicator" aria-live="polite" aria-atomic="true">
@@ -1416,7 +1419,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             <Reply className="size-3.5" />
             <div>
               <span>
-                Replying to <strong>@{replyingTo.user.name}</strong>
+                <Trans t={t} i18nKey="replyingTo" values={{ name: replyingTo.user.name }} components={{ name: <strong /> }} />
                 {(replyingTo.user.isAppAdmin || liveAdminUserIds.has(replyingTo.user.id)) && <DevFlair className="chat-dev-flair" />}
               </span>
               <small><PlatformEmojiText text={getVisibleMessagePreview(replyingTo, hiddenIds)} /></small>
@@ -1425,7 +1428,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="Cancel reply"
+              aria-label={t('cancelReply')}
               onClick={() => { draftRevisionRef.current++; restoredReplyIdRef.current = undefined; draftSnapshotRef.current.draft.replyToId = undefined; setReplyingTo(null) }}
             >
               <X className="size-3.5" />
@@ -1433,8 +1436,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           </div>
         )}
         {mentionQuery && mentionCandidates.length > 0 && (
-          <div className="chat-mention-picker" id={mentionListId} role="listbox" aria-label="Tag a listener">
-            <div className="chat-mention-picker-heading"><strong>Tag a listener</strong></div>
+          <div className="chat-mention-picker" id={mentionListId} role="listbox" aria-label={t('tagListener')}>
+            <div className="chat-mention-picker-heading"><strong>{t('tagListener')}</strong></div>
             {mentionCandidates.map((option, index) => (
               <button
                 id={`${mentionListId}-${index}`}
@@ -1453,13 +1456,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             ))}
           </div>
         )}
-        {commandCandidates.length > 0 && <div id={commandListId} className="chat-command-picker" role="listbox" aria-label="Chat commands">
+        {commandCandidates.length > 0 && <div id={commandListId} className="chat-command-picker" role="listbox" aria-label={t('chatCommands')}>
           {commandCandidates.map((name, index) => <button
             id={`${commandListId}-${name}`} key={name} type="button" role="option"
             aria-selected={index === activeCommandIndex} className={index === activeCommandIndex ? 'active' : undefined}
             onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActiveCommandIndex(index)}
             onClick={() => executeCommand(name)}
-          ><code>/{name}</code><span>{name === 'queue' ? 'Open queue' : name === 'mute' ? roomMuted ? 'Unmute room notifications' : 'Mute room notifications' : name === 'search' ? 'Search room messages' : 'Create poll'}</span></button>)}
+          ><code>/{name}</code><span>{name === 'queue' ? t('openQueue') : name === 'mute' ? roomMuted ? t('unmuteNotifications') : t('muteNotifications') : name === 'search' ? t('searchRoomMessages') : t('createPoll')}</span></button>)}
         </div>}
         <InputGroup className="chat-composer-bar">
           <Button
@@ -1468,8 +1471,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             variant="ghost"
             size="icon"
             disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || uploading || sending}
-            aria-label="Upload image"
-            title="Upload image"
+            aria-label={t('uploadImage')}
+            title={t('uploadImage')}
             onClick={() => fileInputRef.current?.click()}
           >
             <Plus className="size-5" />
@@ -1479,7 +1482,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             className="chat-composer-input"
             rows={1}
             value={draftText}
-            aria-label="Message room chat"
+            aria-label={t('messageRoom')}
             aria-describedby={composerHintId}
             autoComplete="off"
             autoCorrect="off"
@@ -1546,7 +1549,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               stopTyping()
             }}
             onPaste={(event) => void pasteMedia(event)}
-            placeholder="Message the room, or / for commands"
+            placeholder={t('composerPlaceholder')}
           />
           <Button
             className="chat-composer-gif"
@@ -1554,19 +1557,19 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             variant="ghost"
             size="icon"
             disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphyConfigured || uploading || sending}
-            aria-label={giphyConfigured ? 'Add GIF' : 'GIFs unavailable'}
-            title={giphyConfigured ? 'Add GIF' : 'GIFs are unavailable in this room'}
+            aria-label={giphyConfigured ? t('addGif') : t('gifsUnavailable')}
+            title={giphyConfigured ? t('addGif') : t('gifsUnavailableRoom')}
             onClick={toggleGiphy}
           >
-            <span>GIF</span>
+            <span>{t('gif')}</span>
           </Button>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             disabled={!isConnected}
-            aria-label="Add emoji"
-            title="Add emoji"
+            aria-label={t('addEmoji')}
+            title={t('addEmoji')}
             onPointerDown={() => { if (messageInputRef.current) selectionRef.current = { start: messageInputRef.current.selectionStart, end: messageInputRef.current.selectionEnd } }}
             onClick={() => { setShowGiphy(false); setShowEmoji((current) => !current) }}
           >
@@ -1577,19 +1580,19 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="submit"
             size="icon"
             disabled={(!isConnected && !commandDraft)||(!commandDraft&&(!canChat||Boolean(cooldownRemaining))) || uploading || sending || !hasDraft}
-            aria-label={commandDraft ? 'Run chat command' : sending ? 'Sending message' : 'Send message'}
-            title={commandDraft ? 'Run chat command (Enter)' : 'Send message (Enter)'}
+            aria-label={commandDraft ? t('runCommand') : sending ? t('sendingMessage') : t('sendMessage')}
+            title={commandDraft ? t('runCommandEnter') : t('sendMessageEnter')}
           >
             <Send className="size-4" />
           </Button>
         </InputGroup>
-        <span id={composerHintId} className="sr-only">Enter to send. Shift+Enter for a new line. Type / for commands. Maximum 500 characters.</span>
+        <span id={composerHintId} className="sr-only">{t('composerHint')}</span>
         {(composerStatus || draftText.length >= 450) && <div className="chat-composer-hint">
           <span role="status">{composerStatus}</span>
-          {draftText.length >= 450 && <span>{draftText.length}/500</span>}
+          {draftText.length >= 450 && <span>{t('characterCount', { count: draftText.length, limit: 500 })}</span>}
         </div>}
       </form>
-      <Dialog open={Boolean(moderationTarget)} onOpenChange={open=>{if(!open&&!moderationPending)setModerationTarget(null)}}><DialogContent><DialogHeader><DialogTitle>{moderationTarget?.kind==='remove'?'Remove message':'Report message'}</DialogTitle></DialogHeader><form className="grid gap-4" onSubmit={event=>{event.preventDefault();void submitModeration()}}><div className="grid gap-2"><Label htmlFor="chat-moderation-reason">Reason{moderationTarget?.kind==='remove'?' (optional)':''}</Label><Input id="chat-moderation-reason" maxLength={500} value={moderationReason} disabled={moderationPending} required={moderationTarget?.kind==='report'} onChange={event=>setModerationReason(event.target.value)}/></div>{moderationError&&<p role="alert">{moderationError}</p>}<DialogFooter><Button type="button" variant="outline" disabled={moderationPending} onClick={()=>setModerationTarget(null)}>Cancel</Button><Button type="submit" variant={moderationTarget?.kind==='remove'?'destructive':'default'} disabled={moderationPending||moderationTarget?.kind==='report'&&!moderationReason.trim()}>{moderationPending?'Saving…':moderationTarget?.kind==='remove'?'Remove':'Report'}</Button></DialogFooter></form></DialogContent></Dialog>
+      <Dialog open={Boolean(moderationTarget)} onOpenChange={open=>{if(!open&&!moderationPending)setModerationTarget(null)}}><DialogContent><DialogHeader><DialogTitle>{moderationTarget?.kind==='remove'?t('removeMessage'):t('reportMessage')}</DialogTitle></DialogHeader><form className="grid gap-4" onSubmit={event=>{event.preventDefault();void submitModeration()}}><div className="grid gap-2"><Label htmlFor="chat-moderation-reason">{t(moderationTarget?.kind === 'remove' ? 'reasonOptional' : 'reason')}</Label><Input id="chat-moderation-reason" maxLength={500} value={moderationReason} disabled={moderationPending} required={moderationTarget?.kind==='report'} onChange={event=>setModerationReason(event.target.value)}/></div>{moderationError&&<p role="alert">{moderationError}</p>}<DialogFooter><Button type="button" variant="outline" disabled={moderationPending} onClick={()=>setModerationTarget(null)}>{t('cancel')}</Button><Button type="submit" variant={moderationTarget?.kind==='remove'?'destructive':'default'} disabled={moderationPending||moderationTarget?.kind==='report'&&!moderationReason.trim()}>{moderationPending?t('saving'):moderationTarget?.kind==='remove'?t('remove'):t('report')}</Button></DialogFooter></form></DialogContent></Dialog>
     </div>
   )
 })

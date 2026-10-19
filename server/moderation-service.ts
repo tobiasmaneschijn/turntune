@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { accessMode, hasRoomCapability, isRoomStaff } from "../shared/room-policy.js";
@@ -17,7 +18,7 @@ export const moderationActionSchema = z.object({
   value: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(30), z.literal(60)]).optional(), overrideId: uuid.optional(), warningId: uuid.optional()
 }).strict();
 export type ModerationAction = z.infer<typeof moderationActionSchema>;
-export const roomReportSchema = z.object({ requestId: uuid, targetUserId: id.optional(), messageId: uuid.optional(), reason: z.string().trim().min(1).max(500), category: z.string().trim().min(1).max(48).default("other").refine(value => value !== "track-exception", "This report category is reserved.") }).strict().refine(value => value.targetUserId || value.messageId, "Choose a message or participant to report.");
+export const roomReportSchema = z.object({ requestId: uuid, targetUserId: id.optional(), messageId: uuid.optional(), reason: z.string().trim().min(1).max(500), category: z.string().trim().min(1).max(48).default("other").refine(value => value !== "track-exception", serverT("this_report_category_is_reserved")) }).strict().refine(value => value.targetUserId || value.messageId, serverT("choose_a_message_or_participant_to_report"));
 export const invitationActionSchema = z.object({ requestId: uuid, action: z.enum(["cancel", "create-link", "revoke-link"]), invitationId: uuid.optional(), linkId: uuid.optional(), durationDays: z.number().int().min(1).max(365).optional(), maxUses: z.number().int().min(1).max(1000).optional() }).strict();
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (message: string): never => { throw new RoomCommandError(message); };
@@ -60,7 +61,7 @@ export class ModerationService {
       rulesAccepted: !room.settings.requireRulesAcceptance || room.moderation?.rulesAcceptance?.[userId] === (room.settings.rulesVersion ?? 1),
       warnings: (room.moderation?.warnings || []).filter(warning => warning.userId === userId && warning.readAt === null).map(({ id, text, createdAt }) => ({ id, text, createdAt })), openReports };
   }
-  private async room(roomId: string) { return await this.store.loadRoom(roomId) || fail("Room not found."); }
+  private async room(roomId: string) { return await this.store.loadRoom(roomId) || fail(serverT("room_not_found")); }
   private async actor(room: Room, actorId: string) {
     await this.options.authorizeActor?.(room.id, actorId);
     const access = await this.store.getRoomAccess(room.id, actorId);

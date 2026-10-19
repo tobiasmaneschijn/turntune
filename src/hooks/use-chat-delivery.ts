@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChatSaveTracker, type ChatSaveStates } from '@/chat/delivery'
 import { mergeChatMessages, type ChatMedia, type ChatMention, type ChatMessage, type ChatReply } from '@/chat/model'
@@ -18,6 +19,7 @@ interface Options {
 
 /** Owns delivery lifetimes and immutable retry snapshots independently of composer rendering. */
 export function useChatDelivery(options: Options) {
+  const { t } = useTranslation('chat')
   const optionsRef = useRef(options)
   optionsRef.current = options
   const [saveStates, setSaveStates] = useState<ChatSaveStates>({})
@@ -62,12 +64,12 @@ export function useChatDelivery(options: Options) {
   const send = useCallback(async (media?: ChatMedia, caption?: string, accepted?: () => void, pollOptions?: string[]) => {
     const current = optionsRef.current
     const snapshot = current.composer()
-    const content = pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || 'Shared image') : snapshot.text.trim()
+    const content = pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || t('sharedImage')) : snapshot.text.trim()
     if (!current.isConnected || !content || sendingRef.current || (uploadingRef.current && !media?.storagePath)) return false
     const textKey = !media && !pollOptions ? JSON.stringify([snapshot.revision, snapshot.text, snapshot.mentions, snapshot.replyTo?.id]) : null
     const previous = textKey && textSubmissionRef.current?.key === textKey ? textSubmissionRef.current : null
     if (!previous && Object.values(saveStatesRef.current).filter((entry) => entry.state === 'failed' || entry.state === 'send-failed').length >= 100) {
-      current.onError('Retry pending messages before sending more.'); return false
+      current.onError(t('retryPending')); return false
     }
     const lifetime = lifetimeRef.current
     const tracker = trackerRef.current
@@ -90,10 +92,10 @@ export function useChatDelivery(options: Options) {
       if (delivered) finish(message.id, lifetime)
       return Boolean(delivered)
     } catch (error) {
-      if (lifetime.active) current.onError(error instanceof Error ? error.message : 'Could not send this message. Try again.')
+      if (lifetime.active) current.onError(error instanceof Error ? error.message : t('sendFailed'))
       return false
     } finally { if (lifetime.active) { sendingRef.current = false; setSending(false) } }
-  }, [finish])
+  }, [finish, t])
 
   const retrySend = useCallback(async (messageId: string) => {
     if (sendingRef.current || uploadingRef.current || !optionsRef.current.isConnected) return
@@ -101,7 +103,7 @@ export function useChatDelivery(options: Options) {
     sendingRef.current = true; setSending(true)
     try { if (await trackerRef.current?.retrySend(messageId)) finish(messageId, lifetime) }
     finally { if (lifetime.active) { sendingRef.current = false; setSending(false) } }
-  }, [finish])
+  }, [finish, t])
   const retrySave = useCallback((messageId: string) => { void trackerRef.current?.retry(messageId) }, [])
   const sendText = useCallback(() => send(), [send])
   const sendPoll = useCallback(async (question: string, pollOptions: string[]) => {

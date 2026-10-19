@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -21,6 +22,7 @@ export function UpdatePasswordForm({
   client: SupabaseClient
   onComplete: () => void
 }) {
+  const { t } = useTranslation("public");
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -28,7 +30,7 @@ export function UpdatePasswordForm({
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     if (password.length < 12 || password.length > 128) {
-      setError('Use a password with 12–128 characters.')
+      setError(t("passwordLengthError"))
       return
     }
     setIsLoading(true)
@@ -39,7 +41,7 @@ export function UpdatePasswordForm({
       if (error) throw error
       onComplete()
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'Could not save password. Try again.')
+      setError(error instanceof Error ? error.message : t("savePasswordError"))
     } finally {
       setIsLoading(false)
     }
@@ -49,13 +51,13 @@ export function UpdatePasswordForm({
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">New password</CardTitle>
+          <CardTitle className="text-xl">{t("newPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleForgotPassword}>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
-                <Label htmlFor="password">New password</Label>
+                <Label htmlFor="password">{t("newPassword")}</Label>
                 <Input
                   id="password"
                   type="password"
@@ -67,11 +69,11 @@ export function UpdatePasswordForm({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                <p id="password-requirements" className="text-xs text-muted-foreground">Use 12–128 characters.</p>
+                <p id="password-requirements" className="text-xs text-muted-foreground">{t("passwordLengthHint")}</p>
               </div>
               {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Saving…' : 'Save password'}
+                {isLoading ? t("saving") : t("savePassword")}
               </Button>
             </div>
           </form>

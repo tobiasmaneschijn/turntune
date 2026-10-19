@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SoundSpinUserSettings } from "../playback-settings";
 import { requestJson } from "../lib/authenticated-http";
@@ -10,6 +11,7 @@ export function DirectorySettingsDialog({ accessToken, settings, onSettingsChang
   onSettingsChange: (settings: SoundSpinUserSettings) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("public");
   const [connections, setConnections] = useState<MusicConnections>({ loaded: false, spotifyConfigured: false, spotifyConnected: false, appleConfigured: false });
   const [connectionError, setConnectionError] = useState("");
   const connectionRequest = useRef<AbortController | null>(null);
@@ -22,15 +24,15 @@ export function DirectorySettingsDialog({ accessToken, settings, onSettingsChang
     connectionRequest.current = controller;
     setConnectionError("");
     void requestJson<{ spotify?: { configured?: boolean; connected?: boolean; profile?: MusicConnections["spotifyProfile"] }; apple?: { configured?: boolean } }>("/api/music/connections", {
-      accessToken, signal: controller.signal, errorMessage: "Could not load music connections."
+      accessToken, signal: controller.signal, errorMessage: t("musicConnectionsLoadError")
     }).then(payload => {
       if (controller.signal.aborted || tokenRef.current !== accessToken) return;
       setConnections({ loaded: true, spotifyConfigured: false, spotifyConnected: false,
         spotifyProfile: null, appleConfigured: Boolean(payload.apple?.configured) });
     }).catch(() => {
-      if (!controller.signal.aborted && tokenRef.current === accessToken) setConnectionError("Could not check your music connections. Try again.");
+      if (!controller.signal.aborted && tokenRef.current === accessToken) setConnectionError(t("musicConnectionsCheckError"));
     });
-  }, [accessToken]);
+  }, [accessToken, t]);
 
   useEffect(() => {
     setConnections({ loaded: false, spotifyConfigured: false, spotifyConnected: false, appleConfigured: false });

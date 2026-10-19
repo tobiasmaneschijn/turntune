@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express from "express";
 import { z } from "zod";
 import { BoundedCache } from "./bounded-cache.js";
@@ -16,10 +17,10 @@ export function mountSocialRoutes(app: express.Express, store: SocialStore, getU
   const handle = (kind: "read" | "write" | "invite", run: (request: express.Request, actor: string) => Promise<unknown>): express.RequestHandler => async (request, response) => {
     try {
       const actor = await getUserId(request);
-      if (!actor) return void response.status(401).json({ error: "Sign in to use friends." });
+      if (!actor) return void response.status(401).json({ error: serverT("sign_in_to_use_friends") });
       const limit = kind === "read" ? 120 : kind === "invite" ? 10 : 30;
       const key = `${kind}:${actor}`, attempt = attempts.get(key) || { count: 0, resetAt: now() + 60_000 };
-      if (attempt.count >= limit) { response.setHeader("Retry-After", String(Math.max(1, Math.ceil((attempt.resetAt - now()) / 1000)))); return void response.status(429).json({ error: "Too many requests. Try again in a minute." }); }
+      if (attempt.count >= limit) { response.setHeader("Retry-After", String(Math.max(1, Math.ceil((attempt.resetAt - now()) / 1000)))); return void response.status(429).json({ error: serverT("too_many_requests_try_again_in_a_minute") }); }
       attempt.count++; attempts.set(key, attempt);
       response.json(await run(request, actor));
     } catch (error) {

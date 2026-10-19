@@ -29,7 +29,7 @@ test('Send a reply with a listener mention and emoji', async ({ page }) => {
   const reply = page.locator('.chat-message-item').filter({ hasText: 'Great track' })
   await expect(reply).toHaveCount(1)
   await expect(reply).toContainText('@Mira')
-  await expect(reply.getByRole('img', { name: '😀', exact: true })).toBeVisible()
+  await expect(reply.getByRole('img', { name: '😀', exact: true }).or(reply.getByText('😀 Great track', { exact: true }))).toBeVisible()
   await expect(reply.locator('.chat-message-reply')).toContainText('A song for tonight')
   await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(1)
 })

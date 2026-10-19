@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPlayerApiLoader } from "../player-api-loader";
 import { playbackNeedsSeek, playbackTargetPosition, type CheckpointProviderPlaybackProps } from "../provider-playback";
@@ -52,7 +54,7 @@ declare global {
 
 const loadApi = createPlayerApiLoader({
   src: "https://w.soundcloud.com/player/api.js",
-  label: "the SoundCloud player",
+  label: () => i18n.t("music:soundcloud.sdkLabel"),
   readApi: () => window.SC?.Widget
 });
 const WIDGET_DEADLINE_MS = 15_000;
@@ -93,6 +95,7 @@ export function SoundCloudPlayer({
   onStatus,
   onError
 }: CheckpointProviderPlaybackProps) {
+  const { t } = useTranslation("music");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetRef = useRef<SoundCloudWidgetApi | null>(null);
   const aliveRef = useRef(false);
@@ -143,7 +146,7 @@ export function SoundCloudPlayer({
         failedInitializationRef.current = true;
         commandRevisionRef.current += 1;
         onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-        onErrorRef.current?.("The SoundCloud player took too long to become ready. Sync to try again.");
+        onErrorRef.current?.(i18n.t("music:soundcloud.readyTimeout"));
       }, WIDGET_DEADLINE_MS);
       widget.bind(events.READY, () => {
         // READY has no track identifier and can also fire during widget.load().
@@ -225,7 +228,7 @@ export function SoundCloudPlayer({
         pendingSeekRef.current = null;
         commandRevisionRef.current += 1;
         onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-        onErrorRef.current?.("This SoundCloud track could not be played. It may be unavailable in your region.");
+        onErrorRef.current?.(i18n.t("music:soundcloud.unavailable"));
         if (newerTrackWaiting) setLoadedRevision((revision) => revision + 1);
       });
     }).catch((cause) => {
@@ -233,7 +236,7 @@ export function SoundCloudPlayer({
       cancelDeadline();
       failedInitializationRef.current = true;
       onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-      onErrorRef.current?.(cause instanceof Error ? cause.message : "Could not initialize SoundCloud playback.");
+      onErrorRef.current?.(cause instanceof Error ? cause.message : i18n.t("music:soundcloud.initializeFailed"));
     });
 
     return () => {
@@ -290,7 +293,7 @@ export function SoundCloudPlayer({
         commandRevisionRef.current += 1;
         try { widget.pause(); } catch { /* The timed-out iframe may already be unreachable. */ }
         onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-        onErrorRef.current?.("This SoundCloud track took too long to load. Sync to try again.");
+        onErrorRef.current?.(i18n.t("music:soundcloud.trackTimeout"));
         // Do not leave a newer room track behind the abandoned load.
         if (playbackRef.current.track?.id !== track.id) setLoadedRevision(revision => revision + 1);
       }, WIDGET_DEADLINE_MS);
@@ -385,7 +388,7 @@ export function SoundCloudPlayer({
         key={widgetAttempt.revision}
         ref={iframeRef}
         src={widgetAttempt.url}
-        title={`SoundCloud player for ${playback.track?.title || "current track"}`}
+        title={t("soundcloud.playerTitle", { title: playback.track?.title || t("soundcloud.currentTrack") })}
         allow="autoplay"
         scrolling="no"
       />

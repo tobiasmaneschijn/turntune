@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { approvedImageUrl } from "../lib/remote-images"
 import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -11,7 +12,6 @@ import {
   reactionLabel,
   type ChatMessage,
 } from '@/chat/model'
-import { HIDDEN_MESSAGE_PREVIEW } from '@/chat/visibility'
 import { splitMentionText } from '@/chat/mentions'
 import { safeChatMediaUrl } from '@/chat/protocol'
 import { cn } from '@/lib/utils'
@@ -40,12 +40,13 @@ function MentionText({
   message: ChatMessage
   onOpenProfile?: (userId: string) => void
 }) {
+  const { t } = useTranslation('chat')
   return splitMentionText(message.content, message.mentions || []).map((part, index) =>
     part.mention ? (
       <button
         type="button"
         className="chat-mention"
-        title={`Open ${part.mention.userName}'s profile`}
+        title={t('openProfile', { name: part.mention.userName })}
         key={`${part.mention.userId}:${index}`}
         onClick={() => onOpenProfile?.(part.mention!.userId)}
       >
@@ -114,6 +115,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   pollVoteError,
   onRemove,onReport,participationDisabled=false,
 }: ChatMessageItemProps) {
+  const { t, i18n } = useTranslation('chat')
   isHidden=isHidden&&!message.removedAt
   const { resolvedTheme } = useTheme()
   const [localReactionPicker, setLocalReactionPicker] = useState(false)
@@ -176,12 +178,12 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           <Reply size={12} />
           <strong>{reply.user.name}</strong>
           {isReplyAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
-          <PlatformEmojiText text={isReplyHidden ? HIDDEN_MESSAGE_PREVIEW : getMessagePreview(reply)} />
+          <PlatformEmojiText text={isReplyHidden ? t('hidden') : getMessagePreview(reply)} />
         </button>
       )}
       <div className="chat-message-avatar">
         {showHeader && (
-          <button type="button" title={`Open ${message.user.name}'s profile`} onClick={() => onOpenProfile?.(message.user.id)}>
+          <button type="button" title={t('openProfile', { name: message.user.name })} onClick={() => onOpenProfile?.(message.user.id)}>
             <Avatar user={message.user} size={46} />
           </button>
         )}
@@ -191,24 +193,24 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           if (open) replyFromMenuRef.current = false
           onActionMenuOpenChange?.(message.id, open)
         }}>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="chat-message-more" aria-label={`Message actions for ${isOwnMessage ? 'your message' : message.user.name}`} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="chat-message-more" aria-label={isOwnMessage ? t('ownMessageActions') : t('namedMessageActions', { name: message.user.name })} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => replyFromMenuRef.current ? false : true}>
-            {!isHidden && !message.removedAt&&!participationDisabled&&<DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> Reply</DropdownMenuItem>}
-            {onReport&&!isOwnMessage&&<DropdownMenuItem onClick={()=>onReport(message)}><Flag/>Report</DropdownMenuItem>}
-            {onRemove&&!message.removedAt&&<DropdownMenuItem onClick={()=>onRemove(message)}><Trash2/>Remove message</DropdownMenuItem>}
+            {!isHidden && !message.removedAt&&!participationDisabled&&<DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> {t('reply')}</DropdownMenuItem>}
+            {onReport&&!isOwnMessage&&<DropdownMenuItem onClick={()=>onReport(message)}><Flag/>{t('report')}</DropdownMenuItem>}
+            {onRemove&&!message.removedAt&&<DropdownMenuItem onClick={()=>onRemove(message)}><Trash2/>{t('removeMessage')}</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => {
               setShowReactionPicker(false)
               onHiddenChange(message.id, !isHidden)
-            }}>{isHidden ? <Eye /> : <EyeOff />}{isHidden ? 'Unhide message' : 'Hide message'}</DropdownMenuItem>
+            }}>{isHidden ? <Eye /> : <EyeOff />}{isHidden ? t('unhideMessage') : t('hideMessage')}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {!isHidden&&!message.removedAt&&!participationDisabled && <div className="chat-message-actions" aria-label="Message actions">
+        {!isHidden&&!message.removedAt&&!participationDisabled && <div className="chat-message-actions" aria-label={t('messageActions')}>
           {QUICK_REACTIONS.map((emoji) => (
             <button
               key={emoji}
               type="button"
-              title={`React with ${emoji}`}
-              aria-label={`React with ${emoji}`}
+              title={t('reactWith', { emoji })}
+              aria-label={t('reactWith', { emoji })}
               onClick={() => onReact(message, emoji)}
             >
               <PlatformEmojiText text={emoji} />
@@ -218,34 +220,34 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             ref={reactionTriggerRef}
             className="chat-message-react"
             type="button"
-            title="More reactions"
-            aria-label="More reactions"
+            title={t('moreReactions')}
+            aria-label={t('moreReactions')}
             aria-haspopup="dialog"
             aria-expanded={showReactionPicker}
             onClick={() => setShowReactionPicker((current) => !current)}
           >
             <SmilePlus size={15} />
           </button>
-          <button type="button" title="Reply" aria-label="Reply" onClick={() => onReply(message)}>
+          <button type="button" title={t('reply')} aria-label={t('reply')} onClick={() => onReply(message)}>
             <Reply size={15} />
           </button>
         </div>}
         {!isHidden&&!message.removedAt&&!participationDisabled && showReactionPicker && createPortal(
-          <div ref={pickerRef} className="chat-reaction-picker" role="dialog" aria-label={`React to ${message.user.name}'s message`} style={{ position: 'fixed', ...pickerBounds, right: 'auto' }}
+          <div ref={pickerRef} className="chat-reaction-picker" role="dialog" aria-label={t('reactTo', { name: message.user.name })} style={{ position: 'fixed', ...pickerBounds, right: 'auto' }}
             onFocusCapture={() => { pickerOwnsFocusRef.current = true }}
             onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) pickerOwnsFocusRef.current = false }}
             onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowReactionPicker(false); reactionTriggerRef.current?.focus({ preventScroll: true }) } }}>
-            <div className="chat-reaction-picker-header"><span>React to {message.user.name}'s message</span>
+            <div className="chat-reaction-picker-header"><span>{t('reactTo', { name: message.user.name })}</span>
             <button
               type="button"
-              aria-label="Close reactions"
+              aria-label={t('closeReactions')}
               onClick={() => setShowReactionPicker(false)}
             >
               <X size={14} />
             </button>
             </div>
             <div className="chat-reaction-picker-body">
-            <Suspense fallback={<div className="chat-reaction-picker-loading">Loading emoji…</div>}>
+            <Suspense fallback={<div className="chat-reaction-picker-loading">{t('loadingEmoji')}</div>}>
               <EmojiPicker
                 autoFocusSearch={false}
                 theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
@@ -255,7 +257,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
                 emojiStyle={chatPickerEmojiStyle}
                 defaultSkinTone={skinTone}
                 previewConfig={{ showPreview: false }}
-                searchPlaceholder="Find an emoji"
+                searchPlaceholder={t('findEmoji')}
                 onSkinToneChange={(selectedSkinTone) => {
                   setSkinTone(selectedSkinTone)
                   saveEmojiSkinTone(selectedSkinTone)
@@ -271,32 +273,31 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         )}
         {showHeader && (
           <div className="chat-message-meta">
-            <strong>{isOwnMessage ? 'You' : message.user.name}</strong>
+            <strong>{isOwnMessage ? t('you') : message.user.name}</strong>
             {isAuthorAppAdmin && <DevFlair className="chat-dev-flair" />}
-            {isMentioned && <span className="chat-mentioned-badge">Mentioned you</span>}
+            {isMentioned && <span className="chat-mentioned-badge">{t('mentionedYou')}</span>}
             <time>
-              {new Date(message.createdAt).toLocaleTimeString('en-US', {
+              {new Date(message.createdAt).toLocaleTimeString(i18n.resolvedLanguage, {
                 hour: '2-digit',
                 minute: '2-digit',
-                hour12: true,
               })}
             </time>
           </div>
         )}
-        {message.removedAt?<div className="chat-message-body text-muted-foreground">Message removed</div>:isHidden ? <div className="chat-message-body chat-message-hidden-placeholder" aria-label="Message hidden on this device"><EyeOff size={14} aria-hidden="true" /><span>{HIDDEN_MESSAGE_PREVIEW}</span></div> : <div className="chat-message-body">
+        {message.removedAt?<div className="chat-message-body text-muted-foreground">{t('removed')}</div>:isHidden ? <div className="chat-message-body chat-message-hidden-placeholder" aria-label={t('hiddenOnDevice')}><EyeOff size={14} aria-hidden="true" /><span>{t('hidden')}</span></div> : <div className="chat-message-body">
           {mediaUrl && (
             <a href={mediaUrl} target="_blank" rel="noreferrer" className="chat-media-link">
               <img
                 src={approvedImageUrl(mediaUrl)}
                 referrerPolicy="no-referrer"
-                alt={message.type === 'gif' ? message.content || 'GIF' : message.content || 'Shared image'}
+                alt={message.type === 'gif' ? message.content || t('gif') : message.content || t('sharedImage')}
                 loading="lazy"
                 onError={media.onError}
                 onLoad={media.onLoad}
               />
             </a>
           )}
-          {media.failed && <Button size="sm" variant="ghost" onClick={media.retry}>Retry image</Button>}
+          {media.failed && <Button size="sm" variant="ghost" onClick={media.retry}>{t('retryImage')}</Button>}
           {message.content && message.type === 'text' && <MentionText message={message} onOpenProfile={onOpenProfile} />}
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
@@ -305,7 +306,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
         </div>}
         {saveStatus && saveStatus.state !== 'saved' && saveStatus.state !== 'sent-live' && !message.removedAt && (
           <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : undefined}>
-            {saveStatus.state === 'sending' ? 'Sending…' : saveStatus.state === 'send-failed' ? <><span>Could not confirm send</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>Retry send</Button></> : saveStatus.state === 'saving' ? 'Saving…' : <><span>Could not confirm save</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>Retry save</Button></>}
+            {saveStatus.state === 'sending' ? t('sending') : saveStatus.state === 'send-failed' ? <><span>{t('confirmSendFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>{t('retrySend')}</Button></> : saveStatus.state === 'saving' ? t('saving') : <><span>{t('confirmSaveFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>{t('retrySave')}</Button></>}
           </div>
         )}
         {!isHidden&&!message.removedAt && reactionGroups.length > 0 && (
@@ -318,13 +319,13 @@ export const ChatMessageItem = memo(function ChatMessageItem({
                   key={emoji}
                   type="button"
                   className={cn({ active: group.hasReacted })}
-                  aria-label={`${emoji} reacted by ${reactors}`}
+                  aria-label={t('reactedBy', { emoji, names: reactors })}
                   aria-describedby={tooltipId}
                   onClick={() => onReact(message, emoji)}
                   disabled={participationDisabled}
                 >
                   <PlatformEmojiText text={emoji} />
-                  <strong>{group.count}</strong>
+                  <strong>{group.count.toLocaleString(i18n.resolvedLanguage)}</strong>
                   <span id={tooltipId} role="tooltip" className="chat-reaction-tooltip">
                     {reactors}
                   </span>

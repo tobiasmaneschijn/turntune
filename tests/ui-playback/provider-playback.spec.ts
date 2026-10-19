@@ -91,12 +91,22 @@ test("SoundCloud follows room playback, pause and seek", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("pause");
 });
 
-test("listeners can recover a SoundCloud player that failed to start using Sync", async ({ page }) => {
+test("listeners can change language and recover a SoundCloud player using Sync", async ({ page }) => {
   await freezeProviderClock(page);
   await page.goto("/tests/playback-harness/provider-playback.html?provider=soundcloud&defer-ready=1");
   await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(1);
+  const localizedReadinessError = "Test locale: player startup timed out";
+  await page.evaluate(async (errorText) => {
+    const modulePath = "/src/i18n.ts";
+    const { default: i18n } = await import(modulePath);
+    i18n.options.supportedLngs.push("da");
+    i18n.addResourceBundle("da", "music", { soundcloud: { readyTimeout: errorText } });
+    await i18n.changeLanguage("da");
+  }, localizedReadinessError);
+  await page.clock.runFor(1);
+  expect(await page.evaluate(() => window.providerTest.widgetCreations)).toBe(1);
   await page.clock.fastForward(15_001);
-  await expect.poll(() => page.evaluate(() => window.providerTest.errors.at(-1))).toMatch(/took too long to become ready/);
+  await expect.poll(() => page.evaluate(() => window.providerTest.errors.at(-1))).toBe(localizedReadinessError);
   expect(await page.evaluate(() => window.providerTest.statusSamples.at(-1))).toMatchObject({ ready: false, buffering: false });
   await page.evaluate(() => window.providerTest.render({ syncRevision: 1 }));
   await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(2);

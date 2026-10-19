@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { ChatMessage, ChatPollVoteEvent } from './model'
 import { normalizeRealtimePollVote } from './protocol'
 import { chatHistoryCursorFilter, chatMessagesFromRows, type ChatHistoryCursor, type ChatHistoryPage, type ChatHistoryRow } from './persistence'
@@ -25,7 +26,7 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
   const request = async <T>(path: string, params = new URLSearchParams(), body?: unknown, signal?: AbortSignal): Promise<T> => {
     return requestJson<T>(`${prefix}${path}${params.size ? `?${params}` : ''}`, {
       accessToken, signal, method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      errorMessage: 'Room chat could not be loaded or saved. Try again.', validate: (value): value is T => value === null || typeof value === 'object'
+      errorMessage: i18n.t('chat:historyRequestFailed'), validate: (value): value is T => value === null || typeof value === 'object'
     }, fetchImpl)
   }
   const cursorParams = (cursor?: ChatHistoryCursor) => {
@@ -61,7 +62,7 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
       const key=`${messageId}:${optionIndex}`,id=pendingVotes.get(key)||crypto.randomUUID();pendingVotes.set(key,id)
       const payload = await request<unknown>(`/polls/${encodeURIComponent(messageId)}/vote`, undefined, { optionIndex,id })
       const event = normalizeRealtimePollVote(payload)
-      if (!event || event.messageId !== messageId) throw new Error('The vote could not be confirmed. Try again.')
+      if (!event || event.messageId !== messageId) throw new Error(i18n.t('chat:voteUnconfirmed'))
       if(pendingVotes.get(key)===id)pendingVotes.delete(key)
       return event
     },

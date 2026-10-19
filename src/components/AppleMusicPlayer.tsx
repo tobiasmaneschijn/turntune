@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProviderTrackMapping } from "../types";
 import { PlaybackCommandLifecycle, playbackTargetPosition, type CheckpointProviderPlaybackProps, type PlaybackCommandLease } from "../provider-playback";
@@ -39,7 +41,7 @@ let musicKitAuthorization: Promise<unknown> | null = null;
 
 const loadMusicKitScript = createPlayerApiLoader({
   src: "https://js-cdn.music.apple.com/musickit/v3/musickit.js",
-  label: "Apple MusicKit",
+  label: () => i18n.t("music:apple.sdkLabel"),
   readApi: () => window.MusicKit,
   readyEvent: "musickitloaded"
 });
@@ -47,9 +49,9 @@ const loadMusicKitScript = createPlayerApiLoader({
 const musicKitSession = createAppleMusicSession<MusicKitInstance>({
   requestToken: async (accessToken, signal) => {
     const payload = await requestJson<{ developerToken?: string; storefront?: string }>("/api/apple/token", {
-      accessToken, signal, errorMessage: "Apple Music is not configured."
+      accessToken, signal, errorMessage: i18n.t("music:apple.unconfigured")
     });
-    if (!payload.developerToken) throw new Error("Apple Music is not configured.");
+    if (!payload.developerToken) throw new Error(i18n.t("music:apple.unconfigured"));
     return { developerToken: payload.developerToken, storefront: payload.storefront };
   },
   dispose: async (music) => {
@@ -63,11 +65,11 @@ const musicKitSession = createAppleMusicSession<MusicKitInstance>({
     await sdk.configure({
       developerToken: payload.developerToken,
       storefrontId: payload.storefront || "us",
-      app: { name: "Lydman", build: "1.0.0" }
+      app: { name: i18n.t("music:apple.appName"), build: "1.0.0" }
     });
     const music = sdk.getInstance();
     // MusicKit persists its own authorization across page loads. Bind that
-    // consent to the SoundSpin account that granted it, including a new tab.
+    // consent to the turntune account that granted it, including a new tab.
     if (music.isAuthorized && readStoredValue("soundspin-apple-account-id") !== providerAccount()) {
       await music.pause(); await music.unauthorize();
     }
@@ -99,6 +101,7 @@ export function AppleMusicPlayer({
   accessToken: string;
   userId: string;
 }) {
+  const { t } = useTranslation("music");
   const musicRef = useRef<MusicKitInstance | null>(null);
   const leaseRef = useRef<PlaybackCommandLease | null>(null);
   const commandRef = useRef("");
@@ -154,7 +157,7 @@ export function AppleMusicPlayer({
       reportAppleAuthorization(isAuthorized);
       setReady(true);
     }).catch((cause) => {
-      if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Apple Music.");
+      if (alive) setError(cause instanceof Error ? cause.message : i18n.t("music:apple.initializeFailed"));
     });
     return () => {
       alive = false; removeReset();
@@ -192,7 +195,7 @@ export function AppleMusicPlayer({
         setReady(true);
         setError("");
       }).catch((cause) => {
-        if (alive) setError(cause instanceof Error ? cause.message : "Could not renew Apple Music playback.");
+        if (alive) setError(cause instanceof Error ? cause.message : i18n.t("music:apple.renewFailed"));
       }).finally(() => { refreshing = false; });
     };
     const wake = () => { if (document.visibilityState !== "hidden") renew(); };
@@ -221,7 +224,7 @@ export function AppleMusicPlayer({
       reportAppleAuthorization(true);
     }).catch((cause) => {
       if (musicRef.current !== music) return;
-      setError(cause instanceof Error ? cause.message : "Apple Music authorization failed.");
+      setError(cause instanceof Error ? cause.message : i18n.t("music:apple.authorizationFailed"));
     }).finally(() => { if (musicKitAuthorization === authorization) musicKitAuthorization = null; });
   }, []);
 
@@ -270,10 +273,10 @@ export function AppleMusicPlayer({
         else await music.pause();
         if (alive) setError("");
       } catch (cause) {
-        if (alive) setError(cause instanceof Error ? cause.message : "Apple Music playback failed.");
+        if (alive) setError(cause instanceof Error ? cause.message : i18n.t("music:apple.playbackFailed"));
       }
     }).catch((cause) => {
-      if (alive) setError(cause instanceof Error ? cause.message : "Apple Music playback failed.");
+      if (alive) setError(cause instanceof Error ? cause.message : i18n.t("music:apple.playbackFailed"));
     });
     return () => { alive = false; };
   }, [track?.id, playback.playing, playback.position, playback.updatedAt, mapping.providerId, authorized, ready, syncRevision, sessionRevision]);
@@ -301,11 +304,11 @@ export function AppleMusicPlayer({
 
   return (
     <div className="provider-player-shell apple-player-shell">
-      <strong>Apple Music</strong>
+      <strong>{t("apple.name")}</strong>
       {!authorized ? (
-        <button type="button" onClick={authorize} disabled={!ready}>Connect Apple Music</button>
+        <button type="button" onClick={authorize} disabled={!ready}>{t("apple.connect")}</button>
       ) : (
-        <><small>{error || "Connected and following the room"}</small><Button variant="ghost" size="sm" onClick={() => { void resetProviderSession("apple"); }}>Disconnect Apple Music</Button></>
+        <><small>{error || t("apple.connected")}</small><Button variant="ghost" size="sm" onClick={() => { void resetProviderSession("apple"); }}>{t("apple.disconnect")}</Button></>
       )}
       {!authorized && error && <small>{error}</small>}
     </div>

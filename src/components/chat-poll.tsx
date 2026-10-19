@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useId } from 'react'
 import { Check } from 'lucide-react'
 
@@ -21,12 +22,13 @@ export function ChatPollView({
   disabled = false,
   error,
 }: ChatPollViewProps) {
+  const { t, i18n } = useTranslation('chat')
   const id = useId()
   const { counts, totalVotes, selectedOption } = getPollResults(poll, currentUserId)
 
   return (
     <div className="chat-poll" aria-busy={voting || undefined}>
-      <div className="chat-poll-options" role="group" aria-label="Poll options" aria-describedby={`${id}-hint`}>
+      <div className="chat-poll-options" role="group" aria-label={t('pollOptions')} aria-describedby={`${id}-hint`}>
         {poll.options.map((option, index) => {
           const count = counts[index] || 0
           const selected = index === selectedOption
@@ -36,7 +38,7 @@ export function ChatPollView({
               className="chat-poll-option"
               key={index}
               aria-pressed={selected}
-              aria-label={`${option}, ${count} ${count === 1 ? 'vote' : 'votes'}${selected ? ', your vote' : ''}`}
+              aria-label={t(selected ? 'selectedPollOption' : 'pollOption', { option, count })}
               disabled={disabled || voting}
               onClick={() => { if (!selected) onVote(index) }}
             >
@@ -45,14 +47,14 @@ export function ChatPollView({
                 {selected && <Check size={16} aria-hidden="true" />}
                 <PlatformEmojiText text={option} />
               </span>
-              <span className="chat-poll-option-count" aria-hidden="true">{count}</span>
+              <span className="chat-poll-option-count" aria-hidden="true">{count.toLocaleString(i18n.resolvedLanguage)}</span>
             </button>
           )
         })}
       </div>
       <div className="chat-poll-footer">
-        <span className="chat-poll-total" aria-live="polite" aria-atomic="true">{totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}</span>
-        <p id={`${id}-hint`}>One vote per account. You can change your vote.</p>
+        <span className="chat-poll-total" aria-live="polite" aria-atomic="true">{t('votes', { count: totalVotes })}</span>
+        <p id={`${id}-hint`}>{t('voteHint')}</p>
       </div>
       {error && <p className="chat-poll-error" role="alert">{error}</p>}
     </div>

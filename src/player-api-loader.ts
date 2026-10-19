@@ -1,6 +1,8 @@
+import i18n from "./i18n";
+
 interface PlayerApiLoaderOptions<T> {
   src: string;
-  label: string;
+  label: string | (() => string);
   readApi: () => T | undefined;
   readyCallback?: "onYouTubeIframeAPIReady" | "onSpotifyWebPlaybackSDKReady";
   readyEvent?: string;
@@ -54,13 +56,14 @@ export function createPlayerApiLoader<T>(options: PlayerApiLoaderOptions<T>) {
           checkReady();
         }
       };
-      const failDownload = () => fail(`Could not load ${options.label}.`);
+      const label = () => typeof options.label === "function" ? options.label() : options.label;
+      const failDownload = () => fail(i18n.t("music:apiLoader.downloadFailed", { provider: label() }));
 
       if (callbackKey) window[callbackKey] = readyCallback;
       if (options.readyEvent) document.addEventListener(options.readyEvent, checkReady);
       script.addEventListener("load", checkReady);
       script.addEventListener("error", failDownload);
-      timeout = window.setTimeout(() => fail(`${options.label} took too long to load.`), options.timeoutMs ?? 15_000);
+      timeout = window.setTimeout(() => fail(i18n.t("music:apiLoader.timeout", { provider: label() })), options.timeoutMs ?? 15_000);
       // Also supports a script loaded by another part of the app and SDKs whose
       // readiness event fired immediately before listeners were attached.
       poll = window.setInterval(checkReady, 100);

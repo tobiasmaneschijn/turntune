@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { accessMode, hasRoomCapability, isRoomStaff } from "../shared/room-policy.js";
 import type { RoomCapability, RoomRole } from "../shared/types.js";
 import { RoomCommandError } from "./socket-handler.js";
@@ -29,11 +30,11 @@ export function activeRestriction(room: Room, userId: string, kind: RoomRestrict
 }
 export function isRoomBanned(room: Room, userId: string, now = Date.now()) { return Boolean(activeRestriction(room, userId, "room-ban", now)); }
 export function requireNotBanned(room: Room, userId: string, now = Date.now()) {
-  if (isRoomBanned(room, userId, now)) throw new RoomCommandError("You are banned from this room.");
+  if (isRoomBanned(room, userId, now)) throw new RoomCommandError(serverT("you_are_banned_from_this_room"));
 }
 export function requireRoomCapability(room: Room, userId: string, capability: RoomCapability, now = Date.now()) {
   requireNotBanned(room, userId, now);
-  if (!hasRoomCapability(room, userId, capability)) throw new RoomCommandError("You do not have permission to use this room tool.");
+  if (!hasRoomCapability(room, userId, capability)) throw new RoomCommandError(serverT("you_do_not_have_permission_to_use_this_room_tool"));
 }
 export function roleInRoom(room: Room, userId: string): RoomRole | null {
   return room.ownerUserId === userId ? "owner" : room.moderatorUserIds.includes(userId) ? "moderator" : room.djRoleUserIds.includes(userId) ? "dj" : room.moderation?.members && Object.hasOwn(room.moderation.members, userId) ? room.moderation.members[userId].role : null;
@@ -42,8 +43,8 @@ export function canAccessRoom(room: Room, userId: string, role = roleInRoom(room
   return !isRoomBanned(room, userId, now) && (accessMode(room) !== "members" || Boolean(role));
 }
 export function requireProtectedTarget(room: Room, actorId: string, targetId: string) {
-  if (targetId === room.ownerUserId) throw new RoomCommandError("The room owner cannot be the target of this action.");
-  if (room.ownerUserId !== actorId && isRoomStaff(room, targetId)) throw new RoomCommandError("Only the owner can moderate another moderator.");
+  if (targetId === room.ownerUserId) throw new RoomCommandError(serverT("the_room_owner_cannot_be_the_target_of_this_action"));
+  if (room.ownerUserId !== actorId && isRoomStaff(room, targetId)) throw new RoomCommandError(serverT("only_the_owner_can_moderate_another_moderator"));
 }
 export function canInviteRoom(room: Room, userId: string, now = Date.now(), role: RoomRole | null = roleInRoom(room, userId)) {
   if (!canAccessRoom(room, userId, role, now) || !role) return false;

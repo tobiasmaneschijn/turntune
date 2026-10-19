@@ -62,7 +62,7 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     server.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-4000); });
     server.stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString();
-      const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/turntune listening on (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     server.once("error", (error) => { clearTimeout(timer); reject(error); });

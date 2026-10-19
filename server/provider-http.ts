@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 /** Fixed provider names keep both admission state and metrics cardinality bounded. */
 export type ProviderService = "spotify" | "apple" | "soundcloud" | "mixcloud" | "youtube" | "giphy";
 
@@ -35,9 +36,9 @@ export function providerSignal(signal?: AbortSignal | null, timeoutMs = 10_000) 
 export async function readBoundedJson<T = unknown>(response: Response, maxBytes = 1_048_576, signal?: AbortSignal): Promise<T> {
   if (Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel();
-    throw new Error("Provider returned an oversized response.");
+    throw new Error(serverT("provider_returned_an_oversized_response"));
   }
-  if (!response.body) throw new Error("Provider returned an empty response.");
+  if (!response.body) throw new Error(serverT("provider_returned_an_empty_response"));
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -52,7 +53,7 @@ export async function readBoundedJson<T = unknown>(response: Response, maxBytes 
       bytes += next.value.byteLength;
       if (bytes > maxBytes) {
         await reader.cancel();
-        throw new Error("Provider returned an oversized response.");
+        throw new Error(serverT("provider_returned_an_oversized_response"));
       }
       chunks.push(next.value);
     }
@@ -62,7 +63,7 @@ export async function readBoundedJson<T = unknown>(response: Response, maxBytes 
     try { return JSON.parse(new TextDecoder().decode(combined)) as T; }
     catch {
       if (!response.ok) return {} as T;
-      throw new Error("Provider returned an invalid response.");
+      throw new Error(serverT("provider_returned_an_invalid_response"));
     }
   } finally {
     signal?.removeEventListener("abort", abort);
@@ -83,7 +84,7 @@ export async function providerJson<T>(provider: ProviderService, fetcher: typeof
   const window = windows.get(provider);
   const budget = !window || window.resetAt <= now ? { count: 0, resetAt: now + 60_000 } : window;
   if ((active.get(provider) || 0) >= providerConcurrent || totalActive >= globalConcurrent || budget.count >= maximumRequests) {
-    throw new Error("Provider request capacity reached. Try again shortly.");
+    throw new Error(serverT("provider_request_capacity_reached_try_again_shortly"));
   }
   budget.count++;
   windows.set(provider, budget);
@@ -98,7 +99,7 @@ export async function providerJson<T>(provider: ProviderService, fetcher: typeof
       await response.body?.cancel();
       const target = location ? new URL(location, url) : null;
       if (!target || target.protocol !== "https:" || target.username || target.password || !options.allowedRedirectOrigins.includes(target.origin) || budget.count >= maximumRequests) {
-        throw new Error("Provider returned an unsafe redirect.");
+        throw new Error(serverT("provider_returned_an_unsafe_redirect"));
       }
       budget.count++;
       response = await fetcher(target.href, { ...init, redirect: "error", signal });

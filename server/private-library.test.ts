@@ -27,7 +27,7 @@ test("picks and sets are idempotent, ordered, bounded and explicitly deletable",
   assert.deepEqual(changePrivateLibrary(library, { type: "clear-library" }), emptyLibrary());
   assert.equal(libraryMutationSchema.safeParse({ type: "save-set", id, name: "Too long", tracks: Array(101).fill(track) }).success, false);
   const smallerPlan={...DEFAULT_PLAN_LIMITS,libraryPicks:1};
-  assert.throws(()=>changePrivateLibrary(library,{type:"save-pick",track:other},30,smallerPlan),/saved picks are full/);
+  assert.throws(()=>changePrivateLibrary(library,{type:"save-pick",track:other},30,smallerPlan),/saved favorites are full/);
   assert.equal(changePrivateLibrary(library,{type:"delete-pick",id:library.picks[0].id},30,smallerPlan).picks.length,0);
   assert.equal(changePrivateLibrary(library,{type:"save-pick",track:other},30,{...smallerPlan,libraryPicks:2}).picks.length,2);
 });

@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { immutableMessageKey, type ChatMessageInput } from "./chat-validation.js";
 
 import { PublicRequestError } from "./public-request-error.js";
@@ -36,7 +37,7 @@ export function createChatWritePolicy(now = Date.now) {
         // The caller has verified the durable immutable original. Older retries
         // do not become new sends and never spend rate capacity again.
         if (storedOriginal) return;
-        if (Date.parse(input.createdAt) > now() + 5 * 60_000 || Date.parse(input.createdAt) < now() - CHAT_MESSAGE_RETRY_MS) throw new PublicRequestError("This message time is no longer valid. Send it as a new message.", 400);
+        if (Date.parse(input.createdAt) > now() + 5 * 60_000 || Date.parse(input.createdAt) < now() - CHAT_MESSAGE_RETRY_MS) throw new PublicRequestError(serverT("this_message_time_is_no_longer_valid_send_it_as_a_new_message"), 400);
         consume(`${roomId}:${userId}:message`, 20);
       });
     },

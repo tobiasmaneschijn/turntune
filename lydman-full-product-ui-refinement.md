@@ -1,8 +1,8 @@
-# Lydman Full-Product UI Refinement
+# turntune Full-Product UI Refinement
 
 ## Summary
 
-Refine the entire Lydman interface while preserving its dark, lime-accented music identity. Add a complete light theme, retain dark as the default, and rebuild inconsistent controls around the existing shadcn/Base UI foundation.
+Refine the entire turntune interface while preserving its dark, lime-accented music identity. Add a complete light theme, retain dark as the default, and rebuild inconsistent controls around the existing shadcn/Base UI foundation.
 
 The work will cover onboarding, authentication, room directory, listening room, player, queue, chat, profiles, settings, feedback, dialogs, error states, and administration. The listening workspace remains desktop-first, with a polished single-panel mobile experience.
 
@@ -37,7 +37,7 @@ Refactor `src/shadcn.css` into the single source of truth for semantic tokens.
 Define complete light and dark values for:
 
 - Background, foreground, card, popover, muted, secondary, accent, border, input, ring, and destructive colors.
-- Lydman brand lime and its readable foreground.
+- turntune brand lime and its readable foreground.
 - Success, warning, informational, live, Spotify, Apple Music, YouTube, and SoundCloud semantic colors.
 - Layered surfaces for page background, workspace panel, raised card, overlay, and inset controls.
 - Standard radii, shadows, spacing, motion duration, and focus-ring values.
@@ -344,7 +344,7 @@ Verify:
 ## Acceptance criteria
 
 - Every product surface has coherent dark and light presentations.
-- The existing Lydman name, logo, lime accent, and music-focused character remain recognizable.
+- The existing turntune name, logo, lime accent, and music-focused character remain recognizable.
 - All ordinary controls use shared shadcn primitives or documented product-specific wrappers.
 - The UI contains no competing legacy override layers.
 - Core text is readable without relying on sub-12px sizes.
@@ -358,7 +358,7 @@ Verify:
 
 ## Assumptions
 
-- The visible product brand remains “Lydman”; internal `soundspin-*` names and storage keys remain unchanged.
+- The visible product brand is “turntune”; internal `soundspin-*` names and storage keys remain unchanged.
 - This is a visual and interaction-system refinement, not a product-feature redesign.
 - Dark remains the default, while Light and System are opt-in browser-local preferences.
 - Desktop is the primary listening workspace; mobile receives a fully supported single-pane layout.

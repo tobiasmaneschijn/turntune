@@ -22,7 +22,7 @@ test("manage room settings and member roles, recovering a failed save", async ({
 });
 
 test("resolve a spam report and apply temporary slow mode", async ({ page }) => {
-  await page.goto(url); await page.getByRole("button", { name: "Open moderation" }).click(); await expect(page.getByText("Repeated spam")).toBeVisible(); await page.getByRole("button", { name: "Resolve", exact: true }).click(); await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+  await page.goto(url); await page.getByRole("button", { name: "Open moderation" }).click(); await expect(page.getByText("Repeated spam")).toBeVisible(); await page.getByRole("button", { name: "Resolve", exact: true }).click(); await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Session", exact: true }).click(); await page.getByLabel("Duration (minutes)").fill("15"); await page.getByRole("button", { name: "Apply temporarily" }).click();
   const action = await page.evaluate(() => window.roomManagementFixture.requests.filter(item => item.path.endsWith("/moderation/actions")).at(-1)?.body); expect(action).toMatchObject({ action: "session", kind: "slow-mode", value: 10, durationMinutes: 15 }); expect(action?.requestId).toMatch(/^[0-9a-f-]{36}$/);
 });

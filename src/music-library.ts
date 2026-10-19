@@ -1,3 +1,4 @@
+import i18n from "./i18n";
 import type { Provider, Track } from "./types";
 import { requestJson } from "./lib/authenticated-http";
 
@@ -21,7 +22,7 @@ export function libraryTrack(track: LibraryTrack | Track): LibraryTrack {
 }
 export async function requestPrivateLibrary(accessToken: string, mutation?: LibraryMutation, signal?: AbortSignal): Promise<PrivateLibrary> {
   const body = await requestJson<{ library: PrivateLibrary; limits?: LibraryResourceLimits }>("/api/library", { method: mutation ? "POST" : "GET", accessToken,
-    body: mutation ? JSON.stringify(mutation) : undefined, signal, errorMessage: "Could not load your private picks and sets.",
+    body: mutation ? JSON.stringify(mutation) : undefined, signal, errorMessage: i18n.t('music:library.loadError'),
     validate: (value): value is { library: PrivateLibrary } => Boolean(value && typeof value === "object" && "library" in value && value.library &&
       typeof value.library === "object" && "picks" in value.library && Array.isArray(value.library.picks) && "sets" in value.library && Array.isArray(value.library.sets)) });
   const limits = body.limits;
