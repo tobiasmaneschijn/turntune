@@ -6,12 +6,13 @@ there is no revision field to copy from a terminal.
 | Environment | Select branch | Dokploy service | Supabase project | Origin |
 | --- | --- | --- | --- | --- |
 | Staging | `develop` | Fun → staging → soundspin-staging | `mknqduphywlluihgxysg` | `https://beta.turntune.app` |
-| Production | `master` | Fun → production → soundspin | `xmutopoyxizxepkoshon` | `https://soundspin.tobiasmaneschijn.com` |
+| Production | `master` | Fun → production → soundspin | `xmutopoyxizxepkoshon` | `https://turntune.app` |
 
 [`deploy/targets.json`](../deploy/targets.json) contains the verified project,
 environment and Compose service IDs. The workflow reuses those services and
-checks their target configuration before deploying. Keep Dokploy automatic
-deployment disabled.
+checks their target configuration before deploying. Each target's
+`additionalOrigins` lists its retained legacy domain; `APP_ORIGINS` must match
+that list exactly. Keep Dokploy automatic deployment disabled.
 
 ## Setup
 

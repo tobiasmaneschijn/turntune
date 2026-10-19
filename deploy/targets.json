@@ -17,7 +17,8 @@
     "environmentId": "vH7qyivcot6pJqjoKFnvc",
     "composeId": "ZXfjmVIjsn7XwCqNzgzsF",
     "service": "soundspin",
-    "origin": "https://soundspin.tobiasmaneschijn.com",
+    "origin": "https://turntune.app",
+    "additionalOrigins": ["https://soundspin.tobiasmaneschijn.com"],
     "hostPort": "3000",
     "supabaseProjectRef": "xmutopoyxizxepkoshon"
   }
