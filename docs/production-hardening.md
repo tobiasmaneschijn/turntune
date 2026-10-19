@@ -78,7 +78,7 @@ The example is a list of names/placeholders, not deployable credentials.
 | `SPOTIFY_REDIRECT_URI` | Exact registered HTTPS callback under `APP_ORIGIN`, `/api/spotify/callback`. No development callback in public deployment. |
 | Provider credentials | Enable only providers with real configured credentials; use separate development/staging/production keys and restrict provider scopes/quotas. |
 | Provider admission budgets | `PROVIDER_REQUESTS_PER_MINUTE=300`, `SPOTIFY_REQUESTS_PER_MINUTE=1200`, `PROVIDER_MAX_CONCURRENT=12`, `PROVIDER_GLOBAL_MAX_CONCURRENT=48` are initial process-wide ceilings. Spotify polling can cost about 40 calls/minute per active listener. Measure actual normal concurrency before raising limits; provider-side spend/quota caps are still required. Validated maximums are 10000 requests/minute, 32 concurrent/provider and 96 concurrent globally. |
-| `SOUNDSPIN_PORT` | Host loopback binding for the edge. Keep the container's internal port 3000. |
+| `SOUNDSPIN_PORT` | Host loopback binding: `3001` for staging, `3002` for production on this Dokploy host. Dokploy itself publishes host port `3000`. Keep the container's internal port `3000`. |
 | `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: reviewed Git commit used for the OCI image revision label. The GitHub release workflow supplies the revision automatically. `unknown` is allowed for local testing only. |
 | `SOUNDSPIN_IMAGE` | Release Compose only: workflow-supplied `ghcr.io/...@sha256:...` reference. Production must use the digest verified in staging. |
 
@@ -141,7 +141,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
     client_max_body_size 6m;
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host turntune.app;
         proxy_set_header X-Forwarded-For $remote_addr;

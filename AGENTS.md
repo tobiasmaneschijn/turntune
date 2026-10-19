@@ -91,8 +91,9 @@ project or guessing IDs.
   deploys and rollbacks. Stop the target service and verify its process exited
   before starting its replacement.
 - Keep the app's `PORT` and the Dokploy domain's container target at `3000`.
-  Staging uses `SOUNDSPIN_PORT=3001` for `127.0.0.1:3001:3000`; that variable
-  changes only the host's loopback port. Route HTTPS and Socket.IO through the
+  Use `SOUNDSPIN_PORT=3001` for staging and `3002` for production, bound to
+  `127.0.0.1`; Dokploy itself publishes host port `3000`. This variable changes
+  only the host's loopback port. Route HTTPS and Socket.IO through the
   proxy, keep WebSockets enabled and prevent direct public backend access.
   Use `.env.example` for required settings; keep server credentials out of
   browser build variables.

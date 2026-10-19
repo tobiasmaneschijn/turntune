@@ -19,7 +19,7 @@
     "service": "soundspin",
     "origin": "https://turntune.app",
     "additionalOrigins": ["https://soundspin.tobiasmaneschijn.com"],
-    "hostPort": "3000",
+    "hostPort": "3002",
     "supabaseProjectRef": "xmutopoyxizxepkoshon"
   }
 }
