@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
-import { RoomAnnouncementBanner } from "../../src/components/RoomAnnouncementBanner";
-import { FeedbackButton } from "../../src/components/FeedbackDialog";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
+import { RoomAnnouncementBanner } from "../../src/features/rooms/components/RoomAnnouncementBanner";
+import { FeedbackButton } from "../../src/features/feedback/FeedbackDialog";
 import { Button } from "../../src/components/ui/button";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { RoomAnnouncement } from "../../src/types";
-import type { SocketReply } from "../../src/socket-request";
-import type { submitFeedbackRecord } from "../../src/feedback-submission";
+import type { SocketReply } from "../../src/lib/socket-request";
+import type { submitFeedbackRecord } from "../../src/features/feedback/feedback-submission";
 
 const initial: RoomAnnouncement = { id: "00000000-0000-4000-8000-000000000001", text: "Take turns; add one or two picks.", authorId: "host", updatedAt: Date.now(), expiresAt: null };
 const qa = { calls: [] as unknown[], reply: undefined as ((result: SocketReply) => void) | undefined,

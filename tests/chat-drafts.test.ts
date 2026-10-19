@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearUserChatDrafts, createChatDraftStore } from '../src/chat/drafts'
+import { clearUserChatDrafts, createChatDraftStore } from '../src/features/chat/drafts'
 
 function storage() {
   const data = new Map<string, string>()

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { createRealtimeChatSession } from '../src/chat/realtime.js'
-import { normalizeRealtimeMessage } from '../src/chat/protocol.js'
-import type { ChatMessage, ChatReactionEvent } from '../src/chat/model.js'
+import { createRealtimeChatSession } from '../src/features/chat/realtime.js'
+import { normalizeRealtimeMessage } from '../src/features/chat/protocol.js'
+import type { ChatMessage, ChatReactionEvent } from '../src/features/chat/model.js'
 
 const message: ChatMessage = {
   id: 'message-1', content: 'Hello', type: 'text',

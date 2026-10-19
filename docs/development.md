@@ -9,6 +9,10 @@ for development; never use production accounts or data in tests.
 | Path | Purpose |
 | --- | --- |
 | `src/` | React application, player adapters, and styles |
+| `src/app/` | Application composition, header, error boundaries, and route focus |
+| `src/features/` | Feature components, hooks, provider adapters, and supporting logic |
+| `src/components/`, `src/hooks/`, `src/lib/` | Shared UI, interaction hooks, and browser services |
+| `src/styles/` | Global stylesheet entry points, tokens, and product styles |
 | `src/locales/` | Shared language catalogs for app, server, protocol, and release copy |
 | `server/` | Express API, Socket.IO, room coordination, and provider integrations |
 | `shared/` | Client/server types, command schemas, and policies |
@@ -22,6 +26,8 @@ The frontend uses Vite, React, TypeScript, Tailwind CSS, and Base UI components.
 The server owns room decisions and uses Supabase for accounts and durable data.
 See [rooms and radio](rooms-and-radio.md) and [chat](chat.md) for the relevant
 contracts and code maps.
+
+See the [frontend folder guide](../src/README.md) for placement rules.
 
 ## Local configuration
 
@@ -135,7 +141,7 @@ The app version comes from `package.json`. Update it in both `package.json` and
 `package-lock.json`, then add a dated entry at the top of `releases` in
 [src/locales/en/changelog.json](../src/locales/en/changelog.json) using that
 literal version. Keep previous versions fixed and describe changes users can see.
-[src/changelog.ts](../src/changelog.ts) exposes the catalog to the app and release
+[src/features/public/changelog.ts](../src/features/public/changelog.ts) exposes the catalog to the app and release
 tooling.
 
 For deployment, follow [GitHub deployments](github-deployments.md). The manual

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPlayerApiLoader } from "../src/player-api-loader";
+import { createPlayerApiLoader } from "../src/features/playback/providers/player-api-loader";
 
 function useBrowser(t: { after: (callback: () => void) => void }) {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");

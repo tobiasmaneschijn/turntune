@@ -2,12 +2,12 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import '@fontsource-variable/geist'
-import '../../src/shadcn.css'
-import '../../src/styles.css'
-import { RealtimeChat } from '../../src/components/realtime-chat'
+import '../../src/styles/shadcn.css'
+import '../../src/styles/index.css'
+import { RealtimeChat } from '../../src/features/chat/components/realtime-chat'
 import { ThemeProvider } from '../../src/components/theme-provider'
-import type { ChatMessage } from '../../src/chat/model'
-import { clearUserChatDrafts } from '../../src/chat/drafts'
+import type { ChatMessage } from '../../src/features/chat/model'
+import { clearUserChatDrafts } from '../../src/features/chat/drafts'
 
 const alice = { id: 'alice', name: 'Alice', avatarSeed: 'alice' }
 const mira = { id: 'mira', name: 'Mira', avatarSeed: 'mira' }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createFeedbackAttempt, FeedbackOutcomeUnknownError, submitFeedbackRecord } from "../src/feedback-submission.js";
+import { createFeedbackAttempt, FeedbackOutcomeUnknownError, submitFeedbackRecord } from "../src/features/feedback/feedback-submission.js";
 
 const user = "11111111-1111-4111-8111-111111111111";
 const client = { auth: { getSession: async () => ({ data: { session: { user: { id: user }, access_token: "verified-token" } }, error: null }) } } as unknown as Pick<SupabaseClient, "auth">;

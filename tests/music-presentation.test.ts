@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectMusicProvider, youtubeId } from "../src/music-presentation";
+import { detectMusicProvider, youtubeId } from "../src/features/music/music-presentation";
 
 test("Pasting a music link cannot send a listener to an impersonated provider", () => {
   assert.equal(detectMusicProvider("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx"), "spotify");

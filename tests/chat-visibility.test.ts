@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createChatVisibilityState, createChatVisibilityStore } from '../src/chat/visibility'
-import type { ChatMessage } from '../src/chat/model'
+import { createChatVisibilityState, createChatVisibilityStore } from '../src/features/chat/visibility'
+import type { ChatMessage } from '../src/features/chat/model'
 
 const message: ChatMessage = {
   id: 'private-message', content: 'Private details', type: 'text',

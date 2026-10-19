@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RoomPlaybackClock } from "../src/playback-clock";
+import { RoomPlaybackClock } from "../src/features/playback/playback-clock";
 import type { Playback, RoomSnapshot } from "../src/types";
 
 function snapshot(): RoomSnapshot {

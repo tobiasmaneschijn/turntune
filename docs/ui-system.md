@@ -1,12 +1,12 @@
 # turntune UI system
 
-`src/shadcn.css` owns semantic tokens, the Geist type system, base focus treatment, and light/dark themes. `src/styles.css` is import-only; each file in `src/styles/` owns one product surface, with complex room, player, and chat layouts kept in plain CSS.
+`src/styles/shadcn.css` owns semantic tokens, the Geist type system, base focus treatment, and light/dark themes. `src/styles/index.css` is import-only; each file in `src/styles/` owns one product surface, with complex room, player, and chat layouts kept in plain CSS.
 
 ## Shared composition
 
-- `Brand`, `PageShell`, `AppHeader`, `SectionHeader`, `PanelHeader`, `StatusIndicator`, `IconAction`, and `AsyncState` live in `src/components/app-primitives.tsx`.
+- `Brand`, `PageShell`, `SectionHeader`, `PanelHeader`, `StatusIndicator`, `IconAction`, and `AsyncState` live in `src/components/app-primitives.tsx`. The application header lives in `src/app/components/AppHeader.tsx`.
 - `ThemeToggle` is the global Light/Dark/System control. `ThemeProvider` synchronizes browser color scheme, theme color, stored settings, operating-system changes, and reduced-motion preferences.
-- `AppErrorBoundary` and `PanelErrorBoundary` contain failures and expose recovery actions.
+- `AppErrorBoundary` and `PanelErrorBoundary` in `src/app/components/AppErrorBoundary.tsx` contain failures and expose recovery actions.
 - Ordinary buttons, fields, menus, tabs, selectors, sliders, toggles, dialogs, tooltips, alerts, skeletons, and transient messages use the shadcn components in `src/components/ui/`.
 
 ## Product-specific controls

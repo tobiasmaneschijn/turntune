@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createChatSaveTracker, type ChatSaveStates } from '../src/chat/delivery'
-import type { ChatMessage } from '../src/chat/model'
+import { createChatSaveTracker, type ChatSaveStates } from '../src/features/chat/delivery'
+import type { ChatMessage } from '../src/features/chat/model'
 
 const message: ChatMessage = { id: 'original-id', content: 'hello', type: 'text',
   user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' }, createdAt: '2026-10-06T10:00:00Z' }

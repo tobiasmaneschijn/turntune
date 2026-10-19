@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createChatAttentionTracker } from '../src/notifications'
+import { createChatAttentionTracker } from '../src/lib/notifications'
 
 test('Returning to chat does not replay alerts for old or repeated messages', () => {
   const joinedAt = Date.now(), tracker = createChatAttentionTracker('alice', joinedAt)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { validateChatImage, createChatStoragePath, CHAT_IMAGE_MAX_BYTES } from '../src/chat/media.js'
+import { validateChatImage, createChatStoragePath, CHAT_IMAGE_MAX_BYTES } from '../src/features/chat/media.js'
 
 test('Upload images with validated types and safe filenames', () => {
   assert.match(validateChatImage(new File(['svg'], 'photo.svg', { type: 'image/svg+xml' })) || '', /JPEG, PNG, WebP, or GIF/)

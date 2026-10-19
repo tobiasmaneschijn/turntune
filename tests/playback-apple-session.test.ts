@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAppleMusicSession } from "../src/apple-music-session.js";
+import { createAppleMusicSession } from "../src/features/playback/providers/apple-music-session.js";
 
 function token(expiresAt: number) {
   return `test.${Buffer.from(JSON.stringify({ exp: expiresAt / 1000 })).toString("base64url")}.test`;

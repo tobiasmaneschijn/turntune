@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { FriendsPanel } from "../../src/components/FriendsPanel";
-import { SignUpForm } from "../../src/components/sign-up-form";
+import { FriendsPanel } from "../../src/features/friends/FriendsPanel";
+import { SignUpForm } from "../../src/features/auth/components/sign-up-form";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { Button } from "../../src/components/ui/button";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
 
 const params = new URLSearchParams(location.search);
 const signupCalls: Array<{ email: string; password: string }> = [];

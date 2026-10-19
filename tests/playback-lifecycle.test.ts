@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PlaybackCommandLifecycle } from "../src/provider-playback.js";
+import { PlaybackCommandLifecycle } from "../src/features/playback/provider-playback.js";
 
 
 test("changing playback source keeps delayed cleanup from stopping the new audio", async () => {

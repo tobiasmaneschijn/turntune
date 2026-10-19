@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PlaybackEndTracker } from "../src/playback-progress";
+import { PlaybackEndTracker } from "../src/features/playback/playback-progress";
 
 
 test("finishing a recording advances the room once and the next track starts fresh", () => {

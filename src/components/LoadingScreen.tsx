@@ -1,4 +1,4 @@
-import { AppHeader } from "./AppHeader";
+import { AppHeader } from "../app/components/AppHeader";
 
 export function LoadingScreen({ label }: { label: string }) {
   return (

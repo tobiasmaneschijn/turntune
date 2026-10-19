@@ -1,9 +1,9 @@
 import { createRoot } from "react-dom/client";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
-import { SpotifyPlayer } from "../../src/components/SpotifyPlayer";
-import type { PlayerStatus } from "../../src/components/YouTubePlayer";
-import { resetProviderSession, setProviderAccount } from "../../src/provider-session";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
+import { SpotifyPlayer } from "../../src/features/playback/providers/SpotifyPlayer";
+import type { PlayerStatus } from "../../src/features/playback/providers/YouTubePlayer";
+import { resetProviderSession, setProviderAccount } from "../../src/features/playback/provider-session";
 import type { Playback, ProviderTrackMapping, Track } from "../../src/types";
 
 interface MockState {

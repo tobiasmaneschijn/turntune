@@ -1,9 +1,9 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { AppleMusicPlayer } from "../../src/components/AppleMusicPlayer";
-import { SoundCloudPlayer } from "../../src/components/SoundCloudPlayer";
+import { AppleMusicPlayer } from "../../src/features/playback/providers/AppleMusicPlayer";
+import { SoundCloudPlayer } from "../../src/features/playback/providers/SoundCloudPlayer";
 import type { Playback } from "../../src/types";
-import type { PlayerStatus } from "../../src/components/YouTubePlayer";
+import type { PlayerStatus } from "../../src/features/playback/providers/YouTubePlayer";
 
 const provider = new URLSearchParams(location.search).get("provider") === "apple" ? "apple" : "soundcloud";
 const root = createRoot(document.getElementById("root")!);

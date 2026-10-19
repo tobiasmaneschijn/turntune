@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { MixcloudPlayer } from "../../src/components/MixcloudPlayer";
+import { MixcloudPlayer } from "../../src/features/playback/providers/MixcloudPlayer";
 import type { Playback } from "../../src/types";
-import type { PlayerStatus } from "../../src/provider-playback";
+import type { PlayerStatus } from "../../src/features/playback/provider-playback";
 
 type Listener = (...values: number[]) => void;
 type WidgetState = { position: number; duration: number; paused: boolean };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeFeedbackDiagnosticText } from "../src/feedback-diagnostics";
+import { sanitizeFeedbackDiagnosticText } from "../src/features/feedback/feedback-diagnostics";
 
 test("Report an error without sharing credentials, personal identifiers or private URL parameters", () => {
   const report = sanitizeFeedbackDiagnosticText(

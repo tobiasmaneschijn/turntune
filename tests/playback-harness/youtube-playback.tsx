@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { YouTubePlayer, type PlayerStatus } from "../../src/components/YouTubePlayer";
+import { YouTubePlayer, type PlayerStatus } from "../../src/features/playback/providers/YouTubePlayer";
 import type { Playback } from "../../src/types";
 
 type Call = { method: string; videoId?: string; position?: number };

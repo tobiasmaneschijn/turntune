@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { prepareUploadedChatImage } from '../src/chat/image-upload'
+import { prepareUploadedChatImage } from '../src/features/chat/image-upload'
 
 const file = new File(['image'], 'draft.png', { type: 'image/png' })
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { persistReactionChange } from '../src/chat/persistence.js'
+import { persistReactionChange } from '../src/features/chat/persistence.js'
 
 function fakeDatabase(results: Array<{ data?: unknown; error?: unknown }>) {
   const calls: Array<{ table: string; operations: Array<[string, ...unknown[]]> }> = []

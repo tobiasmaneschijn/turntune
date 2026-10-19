@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MusicRail, type MusicRailAction, type MusicRailActionName, type MusicRailControls } from "../../src/components/MusicRail";
+import { MusicRail, type MusicRailAction, type MusicRailActionName, type MusicRailControls } from "../../src/features/music/components/MusicRail";
 import { ThemeProvider } from "../../src/components/theme-provider";
-import type { SocketReply } from "../../src/socket-request";
+import type { SocketReply } from "../../src/lib/socket-request";
 import type { Provider, RoomSnapshot, Track, User } from "../../src/types";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
 import "./music.css";
 
 const self: User = { id: "self", name: "Alex", avatarSeed: "alex", avatarKey: "pulse" };

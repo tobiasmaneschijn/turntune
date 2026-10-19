@@ -5,7 +5,7 @@ import {
   applyRemovalEvents,
   mergeChatMessages,
   type ChatMessage,
-} from '../src/chat/model.js'
+} from '../src/features/chat/model.js'
 
 const message: ChatMessage = {
   id: '60dc4785-4115-4ac3-b5ba-86a803b82b13',

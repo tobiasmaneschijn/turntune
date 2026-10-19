@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyPollVoteEvents, getPollResults, type ChatMessage } from '../src/chat/model'
-import { createChatHistorySource } from '../src/chat/history-reader'
+import { applyPollVoteEvents, getPollResults, type ChatMessage } from '../src/features/chat/model'
+import { createChatHistorySource } from '../src/features/chat/history-reader'
 
 const message: ChatMessage = {
   id: '00000000-0000-4000-8000-000000000001', content: 'What next?', type: 'text',

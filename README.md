@@ -83,6 +83,7 @@ verification. Keep Dokploy automatic deployment disabled.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Frontend source folders](src/README.md)
 - [Rooms and playback architecture](docs/rooms-and-radio.md)
 - [Chat architecture](docs/chat.md)
 - [Resource limits](docs/resource-limits.md)

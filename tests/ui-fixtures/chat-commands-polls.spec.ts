@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import type { ChatMessage, ChatPollVoteEvent } from '../../src/chat/model'
-import type { ChatHistoryRow } from '../../src/chat/persistence'
+import type { ChatMessage, ChatPollVoteEvent } from '../../src/features/chat/model'
+import type { ChatHistoryRow } from '../../src/features/chat/persistence'
 
 const pollId = '20000000-0000-4000-8000-000000000002'
 const noteId = '20000000-0000-4000-8000-000000000001'

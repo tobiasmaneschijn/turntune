@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rememberAuthDestination, safeAuthDestination, takeAuthDestination } from "../src/lib/auth-destination";
-import { recoveryAfterAuthEvent } from "../src/auth-state.js";
+import { rememberAuthDestination, safeAuthDestination, takeAuthDestination } from "../src/features/auth/auth-destination";
+import { recoveryAfterAuthEvent } from "../src/features/auth/auth-state.js";
 
 test("Sign up from a room invitation and return to that room once", () => {
   rememberAuthDestination("/room/friday-focus");

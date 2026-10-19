@@ -1,8 +1,8 @@
 import { createRoot } from "react-dom/client";
 import { useCallback, useState } from "react";
-import { useRoomConnection } from "../../src/hooks/use-room-connection";
+import { useRoomConnection } from "../../src/features/rooms/hooks/use-room-connection";
 import type { RoomSnapshot } from "../../src/types";
-import type { SocketReply } from "../../src/socket-request";
+import type { SocketReply } from "../../src/lib/socket-request";
 type Handler = (...args: any[]) => void;
 const callbacks = new Map<string, Set<Handler>>();
 const joins: Array<(error: Error | null, result?: SocketReply) => void> = [];

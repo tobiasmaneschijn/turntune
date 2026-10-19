@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { spotifySyncActions } from "../src/spotify-playback-sync";
+import { spotifySyncActions } from "../src/features/playback/providers/spotify-playback-sync";
 import type { Playback } from "../src/types";
 
 const playback: Playback = {

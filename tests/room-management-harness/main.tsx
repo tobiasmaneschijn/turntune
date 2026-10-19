@@ -1,10 +1,10 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
-import { RoomSettingsDialog } from "../../src/components/RoomSettingsDialog";
-import { RoomModerationDialog } from "../../src/components/RoomModerationDialog";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
+import { RoomSettingsDialog } from "../../src/features/rooms/components/RoomSettingsDialog";
+import { RoomModerationDialog } from "../../src/features/rooms/components/RoomModerationDialog";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { Button } from "../../src/components/ui/button";
 import type { RoomSnapshot } from "../../src/types";

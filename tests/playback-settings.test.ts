@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readUserSettings, saveUserSettings, USER_SETTINGS_STORAGE_KEY } from "../src/playback-settings";
+import { readUserSettings, saveUserSettings, USER_SETTINGS_STORAGE_KEY } from "../src/features/settings/user-settings";
 
 function useStorage(t: { after: (callback: () => void) => void }, stored?: string) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage");

@@ -15,11 +15,11 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 
 | File | Responsibility |
 | --- | --- |
-| `src/chat/model.ts` | Chat types and pure helpers for merging messages, applying reaction events, grouping reactions, and timeline layout. |
-| `src/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
-| `src/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
-| `src/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
-| `src/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
+| `src/features/chat/model.ts` | Chat types and pure helpers for merging messages, applying reaction events, grouping reactions, and timeline layout. |
+| `src/features/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
+| `src/features/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
+| `src/features/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
+| `src/features/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
 | `server/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
 | `server/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
 | `server/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
@@ -27,28 +27,28 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 | `server/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
 | `server/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
 | `server/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
-| `src/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
-| `src/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
-| `src/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
-| `src/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
-| `src/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
-| `src/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
-| `src/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
-| `src/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
-| `src/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
+| `src/features/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
+| `src/features/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
+| `src/features/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
+| `src/features/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
+| `src/features/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
+| `src/features/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
+| `src/features/chat/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
+| `src/features/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
+| `src/features/chat/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
 | `src/lib/authenticated-http.ts` | Shared HTTP deadlines, cancellation, JSON/error handling and caller-supplied response validation. |
-| `src/hooks/use-room-session.ts` | Single route state, navigation, underlying room lifetime, admission and reconnect coordination. |
-| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration without restarting room providers when credentials rotate. |
-| `src/hooks/use-chat-history.ts` | Independent live pagination, bounded saved-room search, chronological context pages, and stale-request guards. |
-| `src/hooks/use-chat-scroll.tsx` | Stable reader anchors across prepends and arrivals, unread positioning and effective motion scrolling. |
-| `src/hooks/use-chat-picker-bounds.ts` | Actual pane/visual-viewport/composer geometry for media and portaled reaction controls. |
-| `src/hooks/use-chat-media-url.ts` | Visible near-expiry image refresh, one automatic image-error recovery, explicit retry and scope guards. |
-| `src/notifications.ts` | Explicit permission request, one-route attention delivery, deduplication, room mute and history/replay baselines. |
-| `src/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
-| `src/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
-| `src/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
+| `src/features/rooms/hooks/use-room-session.ts` | Single route state, navigation, underlying room lifetime, admission and reconnect coordination. |
+| `src/features/profile/hooks/use-app-profile.ts` | Account-scoped profile restoration without restarting room providers when credentials rotate. |
+| `src/features/chat/hooks/use-chat-history.ts` | Independent live pagination, bounded saved-room search, chronological context pages, and stale-request guards. |
+| `src/features/chat/hooks/use-chat-scroll.tsx` | Stable reader anchors across prepends and arrivals, unread positioning and effective motion scrolling. |
+| `src/features/chat/hooks/use-chat-picker-bounds.ts` | Actual pane/visual-viewport/composer geometry for media and portaled reaction controls. |
+| `src/features/chat/hooks/use-chat-media-url.ts` | Visible near-expiry image refresh, one automatic image-error recovery, explicit retry and scope guards. |
+| `src/lib/notifications.ts` | Explicit permission request, one-route attention delivery, deduplication, room mute and history/replay baselines. |
+| `src/features/chat/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
+| `src/features/chat/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
+| `src/features/chat/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
 | `src/components/platform-emoji-text.tsx` | Platform-aware emoji rendering and the persisted skin-tone preference. |
-| `src/App.tsx` (`RoomChat`) | Loads room history, supplies it to the chat component, and persists newly sent messages. |
+| `src/app/RoomApplication.tsx` (`RoomChat`) | Loads room history, supplies it to the chat component, and persists newly sent messages. |
 | `src/styles/chat.css` | Chat layout and interaction styling under the `chat-*` selectors. |
 
 Keep privileged database access in the server modules and production API calls

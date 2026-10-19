@@ -1,10 +1,10 @@
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
-import { App } from "../../src/App";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
+import { App } from "../../src/app/App";
 import { ThemeProvider } from "../../src/components/theme-provider";
-import { socket } from "../../src/socket";
+import { socket } from "../../src/lib/socket";
 import type { RoomSnapshot } from "../../src/types";
 
 const user = { id: "00000000-0000-4000-8000-000000000001", name: "Alice", avatarSeed: "alice", avatarKey: "pulse" };

@@ -81,17 +81,17 @@ and durable grace scheduling before horizontally scaling the server.
 | `shared/types.ts`, `shared/room-protocol.ts` | Public snapshots, acknowledgements and runtime command schemas shared by client and server. |
 | `server/radio.test.ts` | Focused tests for rotation, privacy, legacy migration, and disconnect timers. |
 | `src/types.ts` | Re-exports shared public types, which have no `djQueues` map. |
-| `src/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
-| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
-| `src/provider-playback.ts`, `src/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
-| `src/App.tsx` | Screen composition, room view, player controls and DJ queue UI. |
-| `src/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
-| `src/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
-| `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
-| `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
-| `src/components/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
-| `src/components/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
-| `src/components/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
+| `src/features/rooms/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
+| `src/features/profile/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
+| `src/features/playback/provider-playback.ts`, `src/features/playback/providers/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
+| `src/app/RoomApplication.tsx` | Screen composition, room view, player controls and DJ queue UI. |
+| `src/features/rooms/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
+| `src/features/rooms/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
+| `src/features/playback/providers/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
+| `src/features/playback/providers/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
+| `src/features/playback/providers/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
+| `src/features/playback/providers/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
+| `src/features/playback/providers/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
 | `server/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
 | `server/spotify.ts` | Spotify catalog, OAuth token exchange, and Web API requests. |
 | `server/apple-music.ts` | Apple developer-token signing and catalog access. |

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { localPlaybackAligned, playbackFeedback } from "../src/playback-feedback.js";
+import { localPlaybackAligned, playbackFeedback } from "../src/features/playback/playback-feedback.js";
 
 const status = { ready: true, buffering: false, currentTime: 30, duration: 120 };
 const input = { connected: true, roomPlaying: true, status, provider: "Spotify" };

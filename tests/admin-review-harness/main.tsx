@@ -1,9 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
-import { AdminDashboard } from "../../src/components/AdminDashboard";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
+import { AdminDashboard } from "../../src/features/admin/AdminDashboard";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 

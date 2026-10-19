@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createSocketChatSessionFactory, type SocketChatTransport } from '../src/chat/socket-transport'
-import type { ChatMessage, ChatPollVoteEvent } from '../src/chat/model'
+import { createSocketChatSessionFactory, type SocketChatTransport } from '../src/features/chat/socket-transport'
+import type { ChatMessage, ChatPollVoteEvent } from '../src/features/chat/model'
 
 const message: ChatMessage = { id: '00000000-0000-4000-8000-000000000001', content: 'Hello room', type: 'text', user: { id: 'alice', name: 'Alice', avatarSeed: 'alice' }, createdAt: new Date().toISOString() }
 function harness() {

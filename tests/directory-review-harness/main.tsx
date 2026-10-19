@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { RoomLobby } from "../../src/components/RoomLobby";
+import { RoomLobby } from "../../src/features/rooms/components/RoomLobby";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { RoomDirectoryEntry } from "../../src/types";
-import { readUserSettings, USER_SETTINGS_STORAGE_KEY } from "../../src/playback-settings";
+import { readUserSettings, USER_SETTINGS_STORAGE_KEY } from "../../src/features/settings/user-settings";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
 
 const user = { id: "directory-review-user", name: "Directory Listener", avatarSeed: "directory" };
 const room = (slug: string, name: string, extra: Partial<RoomDirectoryEntry> = {}): RoomDirectoryEntry => ({

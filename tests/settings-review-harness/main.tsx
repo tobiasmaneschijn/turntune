@@ -1,13 +1,13 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 import "@fontsource-variable/geist";
-import "../../src/shadcn.css";
-import "../../src/styles.css";
+import "../../src/styles/shadcn.css";
+import "../../src/styles/index.css";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { Button } from "../../src/components/ui/button";
-import { UserSettingsDialog } from "../../src/components/UserSettingsDialog";
-import { readUserSettings, saveUserSettings } from "../../src/playback-settings";
+import { UserSettingsDialog } from "../../src/features/settings/UserSettingsDialog";
+import { readUserSettings, saveUserSettings } from "../../src/features/settings/user-settings";
 
 const parameters = new URLSearchParams(location.search);
 const accountRequests: unknown[] = [];
