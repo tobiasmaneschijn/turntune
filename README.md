@@ -255,6 +255,7 @@ projects and this integration work without the Pro branching feature. See the
 Both branches use the same append-only `supabase/migrations` directory. Add new
 timestamped migrations; do not edit an already-deployed migration. Merge feature
 branches into `develop`, verify staging, then merge `develop` into `master`.
+Keep `develop` after promotion; it remains the staging branch.
 
 Keep Dokploy automatic deployment disabled. Use the manual **Deploy** GitHub
 workflow after the intended commit's Supabase migration deployment and GitHub
@@ -361,10 +362,12 @@ and aggregate complete UTC activity totals for the dashboard.
 
 Use **Actions → Deploy → Run workflow** in GitHub. Select `develop` for staging
 or `master` for production and provide the release evidence URL. Production
-requires an approved, merged release PR and the successful staging run URL.
-Both the PR description and the approving review must link that run. No revision
-needs to be copied: staging builds and scans the selected commit, then production
-promotes that same image digest after verifying the source trees match.
+requires the merged release PR linking the successful staging run, that run's
+URL and `confirm_production` after reviewing its evidence. A solo maintainer
+with write access can deploy their own release PR. Start the production workflow
+after the merge and latest successful staging attempt. GitHub supplies the
+revision; production promotes the exact staged digest after verifying matching
+source trees.
 
 The existing Compose services are recorded in [`deploy/targets.json`](deploy/targets.json).
 The workflow uses [`compose.release.yaml`](compose.release.yaml), switches the

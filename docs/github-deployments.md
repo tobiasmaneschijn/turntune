@@ -24,11 +24,12 @@ Setup does not deploy the application.
 Create GitHub Environments named `staging` and `production`. Restrict deployment
 branches to exactly `develop` and `master`, respectively, with no tag rules.
 This private repository's plan does not support environment required reviewers.
-Production instead requires a native GitHub PR approval, checked through the
-API before deployment. Another collaborator with write access must approve the
-release PR's final head and include the staging run URL in the approval text;
-self-approval cannot satisfy the gate. Keep the manual
-Deploy action after that review and merge. See
+Production uses GitHub's native manual `workflow_dispatch` authorization: a
+maintainer with write access starts **Deploy** and selects `confirm_production`
+after reviewing the staging evidence. The maintainer may be the release PR's
+author. GitHub requires write access to
+[run a workflow manually](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+Keep the environment branch restrictions above; see
 [GitHub Environment configuration](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
 Configure these values in each GitHub Environment:
@@ -115,17 +116,16 @@ Docker documents why [digests identify immutable images](https://docs.docker.com
    description. Complete and review the hosted gates in
    [`SECURITY_RELEASE_STATUS.md`](../SECURITY_RELEASE_STATUS.md) and
    [`production-hardening.md`](production-hardening.md). Record the evidence,
-   reviewer and GO decision in that PR. Another collaborator with write access
-   must approve the final PR head after reviewing the linked staging evidence
-   and include that exact staging run URL in the native **Approve** review text.
-   After any staging rerun, wait for its latest attempt to succeed and obtain a
-   fresh approval naming the same run URL.
-2. Merge the approved PR into `master`. Wait for that exact merge commit's CI
-   and production Supabase migration deployment to succeed. New commits need
-   another approval; dismissed approvals or requested changes block release.
-3. Run **Deploy** on `master` with environment `production`, the evidence URL
-   and `staging_run` set to the successful staging deployment's GitHub run URL.
-   Use the merged release PR URL for `release_evidence`.
+   operator and GO decision in that PR. A solo maintainer can review and deploy
+   their own release.
+2. Merge the release PR into `master`. Keep `develop` as the persistent staging
+   branch; do not delete it after promotion. Wait for the exact merge commit's
+   CI and production Supabase migration deployment to succeed.
+3. After the merge and latest successful staging attempt, open **Deploy → Run
+   workflow**, select `master` and environment `production`, and select
+   `confirm_production` after reviewing the evidence. Set `release_evidence` to
+   the merged release PR URL and `staging_run` to the successful staging
+   deployment's GitHub run URL.
 4. Wait for deployment and ingress verification to finish.
 
 Production downloads the staging run's `deployment-evidence` artifact and
@@ -135,15 +135,16 @@ hosted checks. The production commit's Git tree must equal the staged commit's
 tree. A merge commit with identical source is accepted; new source requires
 another staging deployment. Production does not rebuild the image.
 
-The workflow verifies that the release PR merged into this repository's `master`
-at the selected commit and links the selected staging run. It checks the latest
-substantive reviews, approval of the final PR head, the exact staging run link in
-the approving review text and the reviewer's current repository permission.
-Editing the PR description after approval cannot substitute different staging
-evidence. The reviewer must still assess the full hosted release checklist;
-linking a run does not complete those gates. An evidence URL or a solo operator's comment cannot
-replace another collaborator's approval. This uses
-[native GitHub PR reviews](https://docs.github.com/en/pull-requests/reference/pull-request-reviews).
+The workflow verifies the merged release PR, its staging link and the native
+production dispatch actor's current write access. The original dispatch must
+postdate the merge and latest successful staging attempt; starting a queued job
+or rerunning it does not supply a new authorization. The selected staging
+attempt is checked again immediately before the active process is stopped.
+
+Unresolved changes-requested reviews from trusted collaborators still block
+release. A later approval or native dismissal can resolve them. A second
+reviewer is optional; the operator remains responsible for the full hosted
+release checklist. See [GitHub PR reviews](https://docs.github.com/en/pull-requests/reference/pull-request-reviews).
 
 Evidence artifacts are retained for 90 days.
 Missing or expired artifacts block promotion. Workflow reruns bind evidence to
@@ -152,6 +153,11 @@ the current attempt and replace earlier artifacts.
 To retry staging, select **Re-run all jobs**. **Re-run failed jobs** can retain a
 build manifest from the previous attempt and is deliberately blocked by the
 attempt binding. Review the completed new run before production promotion.
+After any new staging attempt, use a fresh production **Run workflow** action
+with confirmation. **Re-run failed jobs** preserves the original production
+dispatch and cannot authorize staging evidence completed after that dispatch.
+GitHub documents the retained actor and source context for
+[workflow reruns](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
 ## Verification and recovery
 

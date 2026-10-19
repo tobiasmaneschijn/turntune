@@ -100,7 +100,7 @@ export async function runPreflight(mode, env = process.env) {
   if (!imageOnly) {
     reviewUrl(env.RELEASE_EVIDENCE, context.repository);
     await verifyEnvironmentProtection(github, context.repository, context.environment);
-    context.review = await verifyReleaseReview({ github, repository: context.repository, sha: context.sha, environment: context.environment, releaseEvidenceUrl: env.RELEASE_EVIDENCE, stagingRunUrl: env.STAGING_RUN_URL });
+    context.review = await verifyReleaseReview({ github, repository: context.repository, sha: context.sha, environment: context.environment, releaseEvidenceUrl: env.RELEASE_EVIDENCE, stagingRunUrl: env.STAGING_RUN_URL, productionRunId: env.GITHUB_RUN_ID, productionRunAttempt: env.GITHUB_RUN_ATTEMPT, productionConfirmed: env.PRODUCTION_CONFIRMED });
     try { migrationContext = JSON.parse(env.MIGRATION_CHECK_JSON); } catch { throw new Error('Configure MIGRATION_CHECK_JSON from the observed Supabase GitHub check.'); }
     const expectedIdentity = `https://supabase.com/dashboard/project/${env.SUPABASE_PROJECT_REF}`;
     if (!env.SUPABASE_PROJECT_REF || migrationContext.identity?.field !== 'details_url' || ![expectedIdentity, `${expectedIdentity}/branches`].includes(migrationContext.identity.value)) throw new Error('The migration check identity must identify this environment’s Supabase dashboard project.');

@@ -77,7 +77,8 @@ project or guessing IDs.
   **SoundSpin** for `master`. Both GitHub integrations use working directory `.`
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
   deployment disabled; deploy manually only after that commit's migrations and
-  CI checks succeed.
+  CI checks succeed. Keep `develop` as the persistent staging branch after
+  promotion; do not delete it when merging the release PR.
 - Primary deployment origins are `https://beta.turntune.app` for staging and
   `https://turntune.app` for production. Verify each configured domain and keep
   `APP_ORIGIN`, Supabase Auth's Site URL and the exact `/update-password` redirect
@@ -108,11 +109,14 @@ project or guessing IDs.
   `docs/github-deployments.md`. It supplies the revision automatically, builds
   and scans the staging image, and promotes the same digest to production after
   verifying matching source trees and reviewed staging evidence. Production
-  requires an approved, merged release PR for the selected `master` commit;
-  another collaborator with write access must approve its final head and include
-  the selected staging run URL in the approval text. The PR description must also
-  link that run. This is the supported approval gate for the
-  repository's plan, which lacks private-environment required reviewers. For an
+  requires a merged release PR for the selected `master` commit, its linked
+  staging run and a native manual dispatch with `confirm_production` selected.
+  The maintainer with write access may be the PR author. The original dispatch
+  must follow the merge and latest successful staging attempt; a staging rerun
+  requires a fresh production **Run workflow** action. Unresolved trusted
+  changes-requested reviews still block release; native dismissal can resolve
+  them. This uses GitHub's manual workflow authorization on a plan without
+  private-environment required reviewers. For an
   explicitly requested source build with `compose.yaml`, set `SOUNDSPIN_REVISION`
   to the actual checked-out commit
   SHA for `BUILD_REVISION`; this label alone does not pin the source. Record the
