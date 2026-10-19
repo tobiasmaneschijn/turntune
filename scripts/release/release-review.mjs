@@ -1,4 +1,4 @@
-import { parseStagingRunUrl } from './promotion.mjs';
+import { parseStagingRunUrl, verifyStagingRun } from './promotion.mjs';
 
 const ASSOCIATIONS = new Set(['MEMBER', 'OWNER', 'COLLABORATOR']);
 const PERMISSIONS = new Set(['admin', 'maintain', 'write']);
@@ -32,9 +32,17 @@ function evidenceReference(repository, url) {
 function containsStagingLink(body, url) {
   if (typeof body !== 'string') return false;
   // Read visible prose, bare URLs and Markdown links without accepting a URL prefix.
-  const visible = body.replace(/<!--[\s\S]*?-->/g, '');
+  const visible = body.replace(new RegExp('<!--[^]*?-->', 'g'), '');
   const urls = visible.match(/https:\/\/[^\s<>()\[\]"'`]+/g) ?? [];
   return urls.some(value => value.replace(/[.,;:!?]+$/, '') === url);
+}
+
+function nativeTimestamp(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) return NaN;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return NaN;
+  const canonical = value.replace(/(?:\.(\d{1,3}))?Z$/, (_, fraction = '') => `.${fraction.padEnd(3, '0')}Z`);
+  return new Date(timestamp).toISOString() === canonical ? timestamp : NaN;
 }
 
 /** Native PR approval is the production gate; staging only records an evidence reference. */
@@ -77,6 +85,12 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
     fail('RELEASE_STAGING_LINK', 'The release PR description must link the selected staging deployment run.');
   }
 
+  const stagingRun = await verifyStagingRun({ github, repository, stagingRunUrl });
+  const stagingVerifiedAt = nativeTimestamp(stagingRun.updated_at);
+  if (!Number.isFinite(stagingVerifiedAt)) {
+    fail('RELEASE_REVIEW_RESPONSE', 'GitHub returned no valid completion timestamp for the latest staging attempt.');
+  }
+
   const reviews = [];
   for (let page = 1; ; page += 1) {
     if (page > 10) fail('RELEASE_REVIEW_RESPONSE', 'Release review evidence exceeded the read limit.');
@@ -109,12 +123,14 @@ export async function verifyReleaseReview({ github, repository, sha, releaseEvid
     fail('RELEASE_REVIEW_BLOCKED', 'Resolve requested changes or dismissed reviews with a new approval before release.');
   }
   const approvers = trusted.filter(({ review }) => review.commit_id === pull.head.sha
-    && containsStagingLink(review.body, stagingRunUrl));
+    && containsStagingLink(review.body, stagingRunUrl)
+    && nativeTimestamp(review.submitted_at) >= stagingVerifiedAt);
   if (!approvers.length) {
-    fail('RELEASE_APPROVAL_MISSING', 'Another collaborator with write access must approve the final release PR head and include the selected staging run URL in the approval text.');
+    fail('RELEASE_APPROVAL_MISSING', 'Another collaborator with write access must approve the final release PR head after the latest successful staging attempt and include its run URL in the approval text.');
   }
   return { type: 'pull_request', url: releaseEvidenceUrl, number: reference.number,
     headSha: pull.head.sha, mergeSha: sha, stagingRunUrl,
+    stagingRunAttempt: stagingRun.run_attempt, stagingVerifiedAt: stagingRun.updated_at,
     reviewers: approvers.map(({ review, access }) => ({ login: review.user.login,
       reviewId: review.id, permission: access.permission })) };
 }

@@ -124,6 +124,7 @@ export async function deployRelease({
     initial = await inspect(dokploy, context, env.SUPABASE_PROJECT_REF);
     if (!isDeepStrictEqual(sourceSnapshot(initial.compose), original)) throw new Error('Dokploy configuration changed during release preparation; review it and retry.');
     if (!gates?.gates) throw new Error('Release preflight did not return verified CI and migration gates.');
+    if (context.environment === 'production' && gates.gates.releaseReview?.stagingRunAttempt !== promotion.stagingRun.attempt) throw new Error('The approved staging attempt changed during release preparation; review the latest attempt and retry.');
     const compose = initial.compose;
     const oldIds = new Set(previous.map(item => item.Id));
     phase = 'stopping';

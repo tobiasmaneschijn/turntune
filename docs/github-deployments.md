@@ -117,6 +117,8 @@ Docker documents why [digests identify immutable images](https://docs.docker.com
    reviewer and GO decision in that PR. Another collaborator with write access
    must approve the final PR head after reviewing the linked staging evidence
    and include that exact staging run URL in the native **Approve** review text.
+   After any staging rerun, wait for its latest attempt to succeed and obtain a
+   fresh approval naming the same run URL.
 2. Merge the approved PR into `master`. Wait for that exact merge commit's CI
    and production Supabase migration deployment to succeed. New commits need
    another approval; dismissed approvals or requested changes block release.
