@@ -118,8 +118,7 @@ Docker documents why [digests identify immutable images](https://docs.docker.com
 ## Deploy production
 
 1. Complete and review the hosted gates in
-   [`SECURITY_RELEASE_STATUS.md`](../SECURITY_RELEASE_STATUS.md) and
-   [`production-hardening.md`](production-hardening.md), including the successful
+   [production hardening](production-hardening.md), including the successful
    staging deployment and its generated evidence.
 2. Merge the staged source into `master` without changing its Git tree. Keep
    `develop` as the persistent staging branch. Wait for the selected `master`
