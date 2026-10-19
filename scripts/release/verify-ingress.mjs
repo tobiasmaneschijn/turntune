@@ -1,6 +1,37 @@
 import WebSocket from "ws";
 
 const hostileOrigin = "https://soundspin-release-check.invalid";
+const maximumDenialBytes = 4096;
+
+async function readDenialBody(stream) {
+  const chunks = [];
+  let length = 0;
+  if (!stream) return "";
+  for await (const chunk of stream) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.length;
+    if (length > maximumDenialBytes) throw new Error("Hostile Origin refusal exceeded the response size limit.");
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function verifyOriginRefusal(status, stream, { websocket = false, contentType = "" } = {}) {
+  if (status !== 400) throw new Error("Hostile Origin request did not return an HTTP 403 or Engine.IO refusal.");
+  const body = await readDenialBody(stream);
+  if (websocket) {
+    // Engine.IO abortUpgrade returns its native error message as text/html,
+    // while abortRequest serializes the polling error as JSON.
+    if (/^text\/html(?:\s*;\s*charset=(?:"[a-z0-9._-]+"|[a-z0-9._-]+))?\s*$/i.test(contentType)
+      && ["Bad request", "Forbidden"].includes(body)) return;
+  } else {
+    try {
+      const denial = JSON.parse(body);
+      if ([3, 4].includes(denial?.code) && typeof denial.message === "string" && denial.message) return;
+    } catch {}
+  }
+  throw new Error("Hostile Origin request did not return a recognized Engine.IO refusal.");
+}
 
 function socketUrl(origin, transport, sid) {
   const url = new URL("/socket.io/", origin);
@@ -30,13 +61,18 @@ function checkSocket(url, { origin, WebSocketImpl, timeoutMs, rejectOrigin = fal
     const timer = setTimeout(() => finish(new Error(rejectOrigin ? "Hostile Origin WebSocket check timed out." : "Socket.IO WebSocket verification timed out.")), timeoutMs);
     try {
       socket = new WebSocketImpl(url, { headers: { Origin: origin }, handshakeTimeout: timeoutMs, followRedirects: false, maxPayload: 64 * 1024 });
-      socket.on("error", () => finish(new Error(rejectOrigin ? "Hostile Origin WebSocket request failed without an HTTP 403 rejection." : "Socket.IO WebSocket connection failed.")));
+      socket.on("error", () => finish(new Error(rejectOrigin ? "Hostile Origin WebSocket request failed without an explicit refusal." : "Socket.IO WebSocket connection failed.")));
       socket.on("close", () => finish(new Error("Socket.IO closed before verification completed.")));
       socket.on("unexpected-response", (request, response) => {
-        response.resume();
-        if (rejectOrigin && response.statusCode === 403) finish();
-        else finish(new Error(`WebSocket request returned HTTP ${response.statusCode}; expected ${rejectOrigin ? 403 : 101}.`));
-        request.destroy();
+        if (rejectOrigin && response.statusCode === 400) {
+          verifyOriginRefusal(response.statusCode, response, { websocket: true, contentType: response.headers["content-type"] || "" })
+            .then(() => finish(), error => finish(error)).finally(() => request.destroy());
+        } else {
+          response.resume();
+          if (rejectOrigin && response.statusCode === 403) finish();
+          else finish(new Error(`WebSocket request returned HTTP ${response.statusCode}; expected ${rejectOrigin ? "an explicit Origin refusal" : 101}.`));
+          request.destroy();
+        }
       });
       socket.on("upgrade", response => {
         switchingProtocols = response.statusCode === 101;
@@ -113,8 +149,10 @@ export async function verifyIngress(origin, { fetchImpl = fetch, WebSocketImpl =
   }
 
   const hostilePolling = await request(socketUrl(origin, "polling"), { headers: { Origin: hostileOrigin } });
-  await hostilePolling.body?.cancel();
-  if (hostilePolling.status !== 403) throw new Error(`Hostile Origin polling returned HTTP ${hostilePolling.status}; expected 403.`);
+  if (hostilePolling.status === 403) await hostilePolling.body?.cancel();
+  else await verifyOriginRefusal(hostilePolling.status, hostilePolling.body);
+  // Attribute native upgrade refusals to the hostile Origin only after the
+  // same-session upgrade succeeded and hostile polling was explicitly denied.
   await checkSocket(socketUrl(origin, "websocket"), { origin: hostileOrigin, WebSocketImpl, timeoutMs, rejectOrigin: true });
 
   return { health: true, ready: true, socketPolling: true, websocketUpgrade: true, hostileOrigin: true, missingCredential: true };
