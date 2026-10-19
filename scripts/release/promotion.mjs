@@ -86,6 +86,81 @@ export async function verifyStagingRun({ github, repository, stagingRunUrl }) {
   return run;
 }
 
+function timestamp(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) return NaN;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return NaN;
+  const canonical = value.replace(/(?:\.(\d{1,3}))?Z$/, (_, fraction = '') => `.${fraction.padEnd(3, '0')}Z`);
+  return new Date(parsed).toISOString() === canonical ? parsed : NaN;
+}
+
+/** Find a verified staging deployment of this Git tree, without operator-supplied URLs. */
+export async function discoverStagingRun({ github, repository, sha, before }) {
+  if (!SHA.test(sha ?? '') || (before !== undefined && !Number.isFinite(timestamp(before)))) {
+    fail('PROMOTION_CONFIGURATION', 'Staging discovery requires a full production revision and valid dispatch timestamp.');
+  }
+  const cutoff = before === undefined ? Infinity : timestamp(before);
+  const get = client(github, repository);
+  const trees = new Map();
+  async function tree(ref) {
+    if (!trees.has(ref)) {
+      const commit = await get('GET /repos/{owner}/{repo}/commits/{ref}', { ref });
+      if (commit?.sha !== ref || !SHA.test(commit.commit?.tree?.sha ?? '')) {
+        fail('PROMOTION_SOURCE_MISMATCH', 'Could not verify the Git tree of the selected release or staging revision.');
+      }
+      trees.set(ref, commit.commit.tree.sha);
+    }
+    return trees.get(ref);
+  }
+  const treeSha = await tree(sha);
+  const seen = new Set();
+  let selected;
+  // GitHub caps filtered workflow-run searches at 1,000 results. Commit trees
+  // are cached because multiple attempts/runs often test the same source SHA.
+  for (let page = 1; page <= 10; page += 1) {
+    const data = await get('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
+      workflow_id: 'deploy.yml', branch: 'develop', event: 'workflow_dispatch',
+      status: 'success', per_page: 100, page,
+    });
+    if (!Array.isArray(data?.workflow_runs)) {
+      fail('STAGING_DISCOVERY_RESPONSE', 'GitHub returned incomplete staging deployment history.');
+    }
+    for (const listed of data.workflow_runs) {
+      if (!Number.isSafeInteger(listed?.id) || listed.id <= 0 || !SHA.test(listed.head_sha ?? '')) {
+        fail('STAGING_DISCOVERY_RESPONSE', 'GitHub returned an invalid staging deployment revision.');
+      }
+      if (seen.has(listed.id)) continue;
+      seen.add(listed.id);
+      if (await tree(listed.head_sha) !== treeSha) continue;
+      const url = `https://github.com/${repository}/actions/runs/${listed.id}`;
+      let run;
+      try {
+        run = await verifyStagingRun({ github, repository, stagingRunUrl: url });
+      } catch (error) {
+        if (['STAGING_RUN_UNTRUSTED', 'STAGING_JOB_MISSING'].includes(error.code)) continue;
+        throw error;
+      }
+      if (run.head_sha !== listed.head_sha) {
+        fail('STAGING_DISCOVERY_RESPONSE', 'The staging deployment revision changed while reading its evidence.');
+      }
+      const completed = timestamp(run.updated_at);
+      if (!Number.isFinite(completed)) {
+        fail('STAGING_DISCOVERY_RESPONSE', 'GitHub returned no valid staging completion timestamp.');
+      }
+      if (completed > cutoff) continue;
+      if (!selected || completed > selected.completed || (completed === selected.completed && run.id > selected.id)) {
+        selected = { id: run.id, attempt: run.run_attempt, revision: run.head_sha, treeSha, url, completed };
+      }
+    }
+    if (data.workflow_runs.length < 100) break;
+  }
+  if (!selected) {
+    fail('STAGING_DISCOVERY_MISSING', 'No successful staging deployment of this source was found before this dispatch in the recent deployment history. Deploy this source to staging, then start a new production deployment.');
+  }
+  const { completed, ...result } = selected;
+  return result;
+}
+
 function validMigrations(migrations) {
   if (!Array.isArray(migrations) || migrations.length === 0) return false;
   let previous = '';

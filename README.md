@@ -260,8 +260,9 @@ Keep `develop` after promotion; it remains the staging branch.
 Keep Dokploy automatic deployment disabled. Use the manual **Deploy** GitHub
 workflow after the intended commit's Supabase migration deployment and GitHub
 Actions checks succeed. It verifies those results for the exact revision.
-Production promotes the image verified in staging and requires the reviewed
-release evidence described in `SECURITY_RELEASE_STATUS.md`. See
+Production automatically finds the latest successful staging deployment with
+the same source tree and promotes its verified image digest. Complete the
+hosted release gates in `SECURITY_RELEASE_STATUS.md`. See
 [`docs/github-deployments.md`](docs/github-deployments.md) for setup and use.
 
 Chat is delivered through authenticated, room-admitted Socket.IO. Message history is
@@ -360,14 +361,13 @@ and aggregate complete UTC activity totals for the dashboard.
 
 ## Dokploy deployment
 
-Use **Actions → Deploy → Run workflow** in GitHub. Select `develop` for staging
-or `master` for production and provide the release evidence URL. Production
-requires the merged release PR linking the successful staging run, that run's
-URL and `confirm_production` after reviewing its evidence. A solo maintainer
-with write access can deploy their own release PR. Start the production workflow
-after the merge and latest successful staging attempt. GitHub supplies the
-revision; production promotes the exact staged digest after verifying matching
-source trees.
+Use **Actions → Deploy → Run workflow** in GitHub. Set **Use workflow from** to
+`develop` for staging or `master` for production, choose the matching **Target**,
+and select **Confirm deployment**. GitHub supplies the revision and authorizes
+manual dispatch through repository write access. Production automatically finds
+the latest successful manual staging deployment with the same source tree and
+promotes its exact image digest. Start a fresh production workflow after that
+staging attempt completes. The workflow records deployment evidence automatically.
 
 The existing Compose services are recorded in [`deploy/targets.json`](deploy/targets.json).
 The workflow uses [`compose.release.yaml`](compose.release.yaml), switches the
