@@ -132,9 +132,9 @@ features, proposal-by-proposal status, verification results, and remaining work.
 ## Release notes
 
 The app version comes from `package.json`; the in-app changelog is maintained in
-[`src/changelog.ts`](src/changelog.ts). For the next release, update the package
+[`src/locales/en/changelog.json`](src/locales/en/changelog.json). For the next release, update the package
 version in `package.json` and `package-lock.json`, then add a dated entry at the
-top of `CHANGELOG` with that literal version number. Keep every release entry's
+top of `releases` with that literal version number. Keep every release entry's
 version fixed so package version changes preserve the history. Keep notes brief
 and describe changes users can see.
 

@@ -1,6 +1,27 @@
 {
   "releases": [
     {
+      "version": "0.1.10",
+      "date": "2026-10-19",
+      "title": "Introducing turntune",
+      "sections": [
+        {
+          "title": "Improved",
+          "items": [
+            "SoundSpin / Lydman is now turntune. Take turns. Pick the Tunes",
+            "Updated copy throughout the app, with consistent Favorites, My queue, and DJ rotation labels."
+          ]
+        },
+        {
+          "title": "Added",
+          "items": [
+            "Support for existing domains during the move to turntune.app.",
+            "A language setup ready for future translations. English remains the available language."
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.1.9",
       "date": "2026-10-18",
       "title": "Player and room reactions",
