@@ -1,8 +1,9 @@
+import { serverT } from "./i18n.js";
 /** Capacity and expiry apply independently: old keys cannot accumulate forever. */
 export class BoundedCache<V extends { expiresAt?: number; resetAt?: number }> extends Map<string, V> {
   constructor(private readonly capacity: number, private readonly now: () => number = Date.now) {
     super();
-    if (!Number.isInteger(capacity) || capacity < 1) throw new Error("Cache capacity must be positive.");
+    if (!Number.isInteger(capacity) || capacity < 1) throw new Error(serverT("cache_capacity_must_be_positive"));
   }
   override get(key: string): V | undefined {
     const value = super.get(key);

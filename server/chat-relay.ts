@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { z } from 'zod'
 import { canonicalMessage, chatMessageSchema, chatReactionSchema, immutableMessageKey, type ChatReply, type RelayMessage } from './chat-validation.js'
 import type { User } from './types.js'
@@ -30,7 +31,7 @@ export function createChatRelay(options: ChatRelayOptions) {
   const publishOnce = async (id: string, roomId: string, userId: string, key: string, event: `chat:${EventKind}`, socketId: string, createPayload: () => Promise<unknown>) => {
     const existing = accepted.get(id)
     if (existing && existing.expiresAt > now()) {
-      if (existing.roomId !== roomId || existing.userId !== userId || existing.key !== key) throw new PublicRequestError('This message ID was already used for different content.', 409)
+      if (existing.roomId !== roomId || existing.userId !== userId || existing.key !== key) throw new PublicRequestError(serverT("this_message_id_was_already_used_for_different_content"), 409)
       await existing.pending
       return
     }
@@ -47,10 +48,10 @@ export function createChatRelay(options: ChatRelayOptions) {
       try {
         const envelope = z.object({ roomId: z.string().regex(/^[a-z0-9-]{3,48}$/), message: z.unknown().optional(), reaction: z.unknown().optional(), typing: z.unknown().optional() }).parse(value)
         const membership = options.getMembership(socketId)
-        if (!membership || membership.room.id !== envelope.roomId || !await options.canWriteRoom(membership.user.id, envelope.roomId)) return { ok: false, error: 'Join this room before using its chat.' }
+        if (!membership || membership.room.id !== envelope.roomId || !await options.canWriteRoom(membership.user.id, envelope.roomId)) return { ok: false, error: serverT("join_this_room_before_using_its_chat") }
         // An admission query may yield while the socket leaves or changes room.
         const latest = options.getMembership(socketId)
-        if (!latest || latest.room.id !== envelope.roomId || latest.user.id !== membership.user.id) return { ok: false, error: 'This room session has ended.' }
+        if (!latest || latest.room.id !== envelope.roomId || latest.user.id !== membership.user.id) return { ok: false, error: serverT("this_room_session_has_ended") }
         const roomId = envelope.roomId
         const user = latest.user
         if (options.commands && kind === 'message') {
@@ -71,30 +72,30 @@ export function createChatRelay(options: ChatRelayOptions) {
             // Lookup errors propagate: database outage is not proof that the UUID is unused.
             const stored = await options.loadMessageById(input.id)
             if (stored) {
-              if (stored.roomId !== roomId || stored.userId !== user.id || immutableMessageKey(stored.message) !== key) throw new PublicRequestError('This message ID already belongs to different content, account, or room.', 409)
+              if (stored.roomId !== roomId || stored.userId !== user.id || immutableMessageKey(stored.message) !== key) throw new PublicRequestError(serverT("this_message_id_already_belongs_to_different_content_account_or_room"), 409)
               writePolicy.message(roomId, user.id, input, true)
               const current = options.getMembership(socketId)
-              if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
+              if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError(serverT("this_room_session_has_ended"), 403)
               return null // The durable original proves acceptance; uncertain ACK retry must not rebroadcast it.
             }
             writePolicy.message(roomId, user.id, input)
             const reply = input.replyTo ? await options.loadReply(roomId, input.replyTo.id) : undefined
-            if (input.replyTo && !reply) throw new PublicRequestError('The message you replied to is unavailable.', 400)
+            if (input.replyTo && !reply) throw new PublicRequestError(serverT("the_message_you_replied_to_is_unavailable"), 400)
             if (input.storagePath) {
-              if (!options.resolveMediaUrl) throw new PublicRequestError('Private chat images are unavailable.', 503)
+              if (!options.resolveMediaUrl) throw new PublicRequestError(serverT("private_chat_images_are_unavailable"), 503)
               message.mediaUrl = await options.resolveMediaUrl(roomId, input.storagePath, user.id)
             }
             const current = options.getMembership(socketId)
-            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
+            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError(serverT("this_room_session_has_ended"), 403)
             return { roomId, message: { ...message, replyTo: reply || undefined } satisfies RelayMessage }
           })
         } else if (kind === 'reaction') {
           const input = z.object({ ...chatReactionSchema.shape, id: z.string().uuid() }).parse(envelope.reaction)
           await publishOnce(input.id, roomId, user.id, JSON.stringify([input.action, input.messageId, input.emoji]), 'chat:reaction', socketId, async () => {
             writePolicy.reaction(roomId, user.id, input)
-            if (!await options.loadReply(roomId, input.messageId)) throw new PublicRequestError('This room message is unavailable.', 404)
+            if (!await options.loadReply(roomId, input.messageId)) throw new PublicRequestError(serverT("this_room_message_is_unavailable"), 404)
             const current = options.getMembership(socketId)
-            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError('This room session has ended.', 403)
+            if (!current || current.room.id !== roomId || current.user.id !== user.id || !await options.canWriteRoom(user.id, roomId)) throw new PublicRequestError(serverT("this_room_session_has_ended"), 403)
             return { roomId, reaction: { ...input, userId: user.id } }
           })
         } else {
@@ -105,7 +106,7 @@ export function createChatRelay(options: ChatRelayOptions) {
         }
         return { ok: true }
       } catch (error) {
-        return { ok: false, error: error instanceof z.ZodError ? 'Invalid chat event.' : publicRequestFailure(error, 'Chat could not be delivered. Try again.').message }
+        return { ok: false, error: error instanceof z.ZodError ? serverT("invalid_chat_event") : publicRequestFailure(error, serverT("chat_could_not_be_delivered_try_again")).message }
       }
     },
   }

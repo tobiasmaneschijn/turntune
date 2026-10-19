@@ -57,7 +57,7 @@ The enforced catalog contains **85 rules: 74 upstream and 11 local rules**.
   in `licenses/soundspin-MIT.txt`.
 - Semgrep CE's wheel metadata declares **LGPL-2.1-or-later**; a copy is in
   `licenses/semgrep-LGPL-2.1.txt`. Scanner and rule licenses apply to these
-  separate development tools, not a new license declaration for SoundSpin.
+  separate development tools, not a new license declaration for turntune.
 
 The catalog covers request-to-command/code/SQL/HTML/URL/filesystem flows,
 SQL/NoSQL injection patterns, DOM/React XSS, unsafe deserialization, path/archive

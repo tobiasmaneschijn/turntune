@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { providerDuration, providerHttpsUrl, providerJson } from "./provider-http.js";
 import type { CatalogTrack } from "./music.js";
@@ -57,11 +58,11 @@ export class SpotifyApi {
   }
 
   private basicAuthorization() {
-    return `Basic ${Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64")}`;
+    return serverT("basic_value1", { value1: Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64") });
   }
 
   private async tokenRequest(body: URLSearchParams, signal?: AbortSignal) {
-    if (!this.configured) throw new Error("Spotify is not configured yet.");
+    if (!this.configured) throw new Error(serverT("spotify_is_not_configured_yet"));
     const { response, payload } = await providerJson<SpotifyTokenResponse>("spotify", this.fetcher, "https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
@@ -72,7 +73,7 @@ export class SpotifyApi {
       signal
     }, { maxBytes: 16_384 });
     if (!response.ok || !payload.access_token) {
-      throw new Error(payload.error_description || payload.error || "Spotify authorization failed.");
+      throw new Error(payload.error_description || payload.error || serverT("spotify_authorization_failed"));
     }
     return payload;
   }
@@ -109,7 +110,7 @@ export class SpotifyApi {
   }
 
   authorizationUrl(redirectUri: string, state: string) {
-    if (!this.clientId) throw new Error("Spotify is not configured yet.");
+    if (!this.clientId) throw new Error(serverT("spotify_is_not_configured_yet"));
     const params = new URLSearchParams({
       client_id: this.clientId,
       response_type: "code",
@@ -133,7 +134,7 @@ export class SpotifyApi {
     if (response.status === 204) return null as T;
     if (!response.ok) {
       const message = typeof payload.error === "string" ? payload.error : payload.error?.message;
-      const error = new Error(message || `Spotify request failed (${response.status}).`);
+      const error = new Error(message || serverT("spotify_request_failed_value1", { value1: response.status }));
       Object.assign(error, { status: response.status });
       throw error;
     }
@@ -152,7 +153,7 @@ export class SpotifyApi {
   async getTrack(id: string, signal?: AbortSignal) {
     const token = await this.getAppToken(signal);
     const track = mapSpotifyTrack(await this.request<SpotifyTrack>(token, `/tracks/${encodeURIComponent(id)}?market=${encodeURIComponent(this.market)}`, { signal }));
-    if (!track) throw new Error("That Spotify track could not be found.");
+    if (!track) throw new Error(serverT("that_spotify_track_could_not_be_found"));
     return track;
   }
 

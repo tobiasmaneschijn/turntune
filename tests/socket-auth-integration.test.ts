@@ -45,7 +45,7 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
     const timer = setTimeout(() => reject(new Error(`Socket auth fixture did not start: ${errors}`)), 20_000);
     server.stdout.on("data", chunk => {
       output += chunk.toString();
-      const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/turntune listening on (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     server.once("error", error => { clearTimeout(timer); reject(error); });

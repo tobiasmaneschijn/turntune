@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ChatMessage, ChatPollVoteEvent, ChatReactionEvent,ChatRemovedEvent } from './model'
 import { normalizeRealtimeMessage, normalizeRealtimePollVote, normalizeRealtimeReaction, normalizeTypingEvent } from './protocol'
@@ -35,9 +36,9 @@ export function createRealtimeChatSession(
   }
 
   const send = async (event: string, payload: unknown) => {
-    if (!active || !connected) throw new Error('Chat is reconnecting. Try again.')
+    if (!active || !connected) throw new Error(i18n.t('chat:reconnecting'))
     const result = await channel.send({ type: 'broadcast', event, payload })
-    if (result !== 'ok') throw new Error('Could not confirm delivery. Try again.')
+    if (result !== 'ok') throw new Error(i18n.t('chat:deliveryUnconfirmed'))
   }
 
   channel

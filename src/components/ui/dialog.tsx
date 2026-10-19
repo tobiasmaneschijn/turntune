@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../../i18n";
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { X } from "lucide-react"
@@ -15,6 +17,7 @@ function DialogContent({
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & { showCloseButton?: boolean }) {
+  useTranslation();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
@@ -33,7 +36,7 @@ function DialogContent({
               render={<Button variant="ghost" size="icon-sm" className="absolute right-4 top-4 z-10 text-muted-foreground" />}
             >
               <X />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{i18n.t("common:dialog_close")}</span>
             </DialogPrimitive.Close>
           )}
         </DialogPrimitive.Popup>
@@ -43,18 +46,22 @@ function DialogContent({
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+  useTranslation();
   return <div className={cn("grid gap-1.5 pr-8", className)} {...props} />
 }
 
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+  useTranslation();
   return <DialogPrimitive.Title className={cn("text-lg font-semibold leading-none", className)} {...props} />
 }
 
 function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
+  useTranslation();
   return <DialogPrimitive.Description className={cn("text-sm leading-relaxed text-muted-foreground", className)} {...props} />
 }
 
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+  useTranslation();
   return <div className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />
 }
 

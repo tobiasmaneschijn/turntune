@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const fixtureUrl = "/tests/directory-review-harness/index.html";
 async function openDirectory(page: Page) {
   await page.goto(fixtureUrl);
-  await expect(page.getByRole("button", { name: "New room", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create a room", exact: true })).toBeVisible();
 }
 
 test("change personal settings before joining a room and recover music connections", async ({ page }) => {
@@ -45,9 +45,9 @@ test("reach directory filters and account actions on a phone without overflowing
   const actions = page.getByRole("button", { name: "Account menu", exact: true });
   const filters = page.getByRole("button", { name: "Filter & sort", exact: true });
   for (const control of [actions, filters,
-    page.getByRole("link", { name: "Lydman home", exact: true }),
+    page.getByRole("link", { name: "turntune home", exact: true }),
     page.getByRole("link", { name: "Rooms", exact: true }),
-    page.getByRole("button", { name: "New room", exact: true }),
+    page.getByRole("button", { name: "Create a room", exact: true }),
     page.getByRole("button", { name: "Refresh rooms", exact: true }),
     page.getByRole("button", { name: "All rooms", exact: true }),
     page.getByRole("button", { name: "Favorites", exact: true }),
@@ -162,10 +162,10 @@ test("enter password-protected rooms and retry creation without losing its detai
   const protectedEntry = { slug: "protected", password: "room-password" };
   expect(await page.evaluate(() => (window as any).directoryReviewFixture.navigations)).toEqual([protectedEntry]);
   await page.evaluate(() => (window as any).directoryReviewFixture.showLobby());
-  await expect(page.getByRole("button", { name: "New room", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create a room", exact: true })).toBeVisible();
   await page.evaluate(() => { (window as any).directoryReviewFixture.delayCreation = true; });
-  await page.getByRole("button", { name: "New room", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Create a room", exact: true });
+  await page.getByRole("button", { name: "Create a room", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Let's make some noise.", exact: true });
   await dialog.getByRole("textbox", { name: "Room name", exact: true }).fill("  New radio  ");
   await dialog.locator("#room-password").fill("submitted-password");
   await dialog.getByRole("button", { name: "Create room", exact: true }).click();

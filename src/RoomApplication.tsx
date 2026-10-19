@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "./i18n";
 import { NowPlaying, type NowPlayingControls, type NowPlayingLocalState } from "./components/NowPlaying";
 import { FormEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -63,13 +65,14 @@ function slugify(value: string) {
 }
 
 export function RoomApplication({ auth, userSettings, changeUserSettings, focusOnEntry = false }: { auth: AppAuth; userSettings: SoundSpinUserSettings; changeUserSettings: (next: SoundSpinUserSettings) => void; focusOnEntry?: boolean }) {
+  useTranslation();
   const compactPlayer = userSettings.playback.compactPlayer;
   const roomPanelGroupRef = useGroupRef();
   const roomLayouts = useRoomLayoutPresets(roomPanelGroupRef);
   const musicControls = useRef<MusicRailControls>(null);
   const playerControls = useRef<NowPlayingControls>(null);
   const chatControls = useRef<RealtimeChatHandle>(null);
-  const [localPlayback, setLocalPlayback] = useState<NowPlayingLocalState>({ providerName: "Player", providerState: "loading", audioState: "loading", statusText: "Preparing local playback…", statusTone: "pending", muted: false });
+  const [localPlayback, setLocalPlayback] = useState<NowPlayingLocalState>({ providerName: i18n.t("common:RoomApplication_player"), providerState: "loading", audioState: "loading", statusText: i18n.t("common:RoomApplication_preparing_local_playback"), statusTone: "pending", muted: false });
   const [mobileRoomPane, setMobileRoomPane] = useState<"radio" | "player" | "chat">("player");
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const isNarrowRoomLayout = useMediaQuery("(max-width: 1024px)");
@@ -113,7 +116,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
 
   const resetRoomLayout = () => {
     roomLayouts.resetLayout();
-    setNotice("Room layout reset");
+    setNotice(i18n.t("common:RoomApplication_room_layout_reset"));
   };
 
   useEffect(() => {
@@ -133,14 +136,14 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
       previousDjUserIdRef.current !== profile.id &&
       userSettings.notifications.djTurn
     ) {
-      notifyWithAttention({ key: `${context}:dj-turn:${snapshot.room.playback.track?.id || snapshot.room.playback.updatedAt}`, title: "You’re on air", body: "Your DJ turn has started.", backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted, onInApp: () => setNotice("You’re on air") });
+      notifyWithAttention({ key: `${context}:dj-turn:${snapshot.room.playback.track?.id || snapshot.room.playback.updatedAt}`, title: i18n.t("common:RoomApplication_you_re_on_air"), body: i18n.t("common:RoomApplication_your_dj_turn_has_started"), backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted, onInApp: () => setNotice(i18n.t("common:RoomApplication_you_re_on_air")) });
     }
     previousDjUserIdRef.current = djUserId;
   }, [snapshot?.room.djUserId, profile.id, roomId, userSettings.notifications.djTurn, userSettings.notifications.backgroundOnly, roomNotificationsMuted]);
 
   useEffect(() => {
     if (!notice) return;
-    const options = { id: `lydman-notice:${notice}`, duration: 5000 };
+    const options = { id: `turntune-notice:${notice}`, duration: 5000 };
     if (/could not|unable|failed|error|unavailable|not allowed|denied/i.test(notice)) toast.error(notice, options);
     else if (/copied|reset|saved|added|removed|left|joined|updated/i.test(notice)) toast.success(notice, options);
     else toast.info(notice, options);
@@ -179,18 +182,18 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
     invitationRequests.current.set(userId, controller);
     try {
       await requestJson("/api/room-invitations", { accessToken: auth.session.access_token, method: "POST", signal: controller.signal, body: JSON.stringify({ userId, roomSlug: roomId }) });
-      if (!controller.signal.aborted) setNotice("Invitation sent");
-    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Could not invite. Try again."); }
+      if (!controller.signal.aborted) setNotice(i18n.t("common:RoomApplication_invitation_sent"));
+    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : i18n.t("common:RoomApplication_could_not_invite_try_again")); }
     finally { if (invitationRequests.current.get(userId) === controller) invitationRequests.current.delete(userId); }
   };
 
   if (auth.enabled && auth.session && (profile.id !== auth.session.user.id || !profileReady)) {
-    return <LoadingScreen label="Restoring your session…" />;
+    return <LoadingScreen label={i18n.t("common:RoomApplication_restoring_your_session")} />;
   }
 
   if (adminPage && auth.session && profile.isAppAdmin) {
     return (
-      <Suspense fallback={<LoadingScreen label="Loading admin console…" />}>
+      <Suspense fallback={<LoadingScreen label={i18n.t("common:RoomApplication_loading_admin_console")} />}>
         <AdminDashboard
           accessToken={auth.session.access_token}
           currentUser={profile}
@@ -211,9 +214,9 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
       <main className="room-access-screen" id="main-content" tabIndex={-1}>
         <Card className="room-access-error">
           <CardHeader>
-            <CardTitle role="heading" aria-level={1}>Admin access required</CardTitle>
+            <CardTitle role="heading" aria-level={1}>{i18n.t("common:RoomApplication_admin_access_required")}</CardTitle>
           </CardHeader>
-          <CardContent><Button onClick={goHome}>Back to rooms</Button></CardContent>
+          <CardContent><Button onClick={goHome}>{i18n.t("common:RoomApplication_back_to_rooms")}</Button></CardContent>
         </Card>
       </main></>
     );
@@ -221,7 +224,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
 
   if (profilePageId && auth.session && !roomId) {
     return (
-      <Suspense fallback={<LoadingScreen label="Loading profile…" />}>
+      <Suspense fallback={<LoadingScreen label={i18n.t("common:RoomApplication_loading_profile")} />}>
         <ProfilePage
           key={profilePageId}
           profileId={profilePageId}
@@ -288,17 +291,17 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
       <main className="room-access-screen" id="main-content" tabIndex={-1}>
         <Card className="room-access-error">
           <CardHeader>
-            <CardTitle>Couldn’t join this room</CardTitle>
+            <CardTitle>{i18n.t("common:RoomApplication_couldn_t_join_this_room")}</CardTitle>
             <CardDescription>{roomJoinError}</CardDescription>
           </CardHeader>
-          <CardContent><Button onClick={() => { setRoomJoinError(""); retryRoom(); }}>Try again</Button> <Button variant="ghost" onClick={goHome}>Back to rooms</Button></CardContent>
+          <CardContent><Button onClick={() => { setRoomJoinError(""); retryRoom(); }}>{i18n.t("common:RoomApplication_try_again")}</Button> <Button variant="ghost" onClick={goHome}>{i18n.t("common:RoomApplication_back_to_rooms")}</Button></CardContent>
         </Card>
       </main></>
     );
   }
 
   if (!snapshot) {
-    return <LoadingScreen label={notice || (connected ? "Loading room…" : "Connecting…")} />;
+    return <LoadingScreen label={notice || (connected ? i18n.t("common:RoomApplication_loading_room") : i18n.t("common:connecting"))} />;
   }
 
   // Being allowed to DJ, joining the lineup, and currently being on air are
@@ -363,7 +366,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
               controlsRef={musicControls}
             />}
           player={<div className="player-column">
-              <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Player"><NowPlaying
+              <PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName={i18n.t("common:RoomApplication_player")}><NowPlaying
                 key={`${snapshot.room.id}:${profile.id}`}
                 snapshot={snapshot}
                 isDj={isDj}
@@ -385,7 +388,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
                 controlsRef={playerControls} onLocalStateChange={setLocalPlayback}
               /></PanelErrorBoundary>
             </div>}
-          chat={<PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName="Chat"><RoomChat
+          chat={<PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName={i18n.t("common:RoomApplication_chat")}><RoomChat
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
               currentUser={profile}
@@ -402,14 +405,14 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
             /></PanelErrorBoundary>}
       />
       {roomSettingsOpen && auth.session && (
-        <DeferredDialog title="Room settings" load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, isAppAdmin: Boolean(profile.isAppAdmin), accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
+        <DeferredDialog title={i18n.t("common:RoomApplication_room_settings")} load={loadRoomSettings} componentProps={{ snapshot, currentUserId: profile.id, isAppAdmin: Boolean(profile.isAppAdmin), accessToken: auth.session.access_token, connected, onClose: () => setRoomSettingsOpen(false), onNotice: setNotice }} />
       )}
       {moderationOpen && auth.session && <RoomModerationDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} currentUserId={profile.id} accessToken={auth.session.access_token} connected={connected} onClose={() => setModerationOpen(false)} onNotice={setNotice} onOpenProfile={id => { setModerationOpen(false); openProfile(id); }} />}
       {rulesOpen && auth.session && <RoomRulesDialog key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onClose={() => setRulesOpen(false)} onNotice={setNotice} />}
       {auth.session && <RoomProfileDialog spotifyEnabled={snapshot.room.settings.spotifyEnabled === true} profileId={profilePageId} accessToken={auth.session.access_token}
         currentUser={profile} onClose={backFromProfile} onUpdate={updateOwnProfile} onInvite={userId => { void inviteFriend(userId); }} />}
       {friendsOpen && auth.session && <Dialog open onOpenChange={setFriendsOpen}>
-        <DialogContent className="room-friends-dialog"><DialogTitle className="sr-only">Friends</DialogTitle>
+        <DialogContent className="room-friends-dialog"><DialogTitle className="sr-only">{i18n.t("common:RoomApplication_friends")}</DialogTitle>
           <FriendsPanel accessToken={auth.session.access_token} currentUser={profile}
             currentRoomSlug={roomId} onOpenPerson={id => { setFriendsOpen(false); openProfile(id); }}
             onOpenRoom={id => { setFriendsOpen(false); openRoom(id); }} />
@@ -431,8 +434,9 @@ function Welcome({
   joining: boolean;
   onEnter: (name: string, roomName?: string) => void;
 }) {
+  useTranslation();
   const [name, setName] = useState(initialName);
-  const [roomName, setRoomName] = useState("Friday Focus");
+  const [roomName, setRoomName] = useState(i18n.t("common:RoomApplication_friday_focus"));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -444,23 +448,23 @@ function Welcome({
       <AppHeader publicActions={<ThemeToggle compact />} />
       <section className="welcome-content" id="main-content" tabIndex={-1}>
         <div className="welcome-copy">
-          <h1>Listen together.</h1>
+          <h1>{i18n.t("common:RoomApplication_listen_together")}</h1>
         </div>
         <Card className="welcome-card">
-          <CardHeader><CardTitle>{joining ? "Join room" : "Create room"}</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{joining ? i18n.t("common:RoomApplication_join_room") : i18n.t("common:RoomApplication_create_room")}</CardTitle></CardHeader>
           <CardContent>
           <form className="grid gap-4" onSubmit={submit}>
           <div className="grid gap-2">
-            <Label htmlFor="welcome-name">Display name</Label>
-            <Input id="welcome-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex" maxLength={32} autoFocus />
+            <Label htmlFor="welcome-name">{i18n.t("common:RoomApplication_display_name")}</Label>
+            <Input id="welcome-name" value={name} onChange={(event) => setName(event.target.value)} placeholder={i18n.t("common:RoomApplication_alex")} maxLength={32} autoFocus />
           </div>
           {!joining && (
             <div className="grid gap-2">
-              <Label htmlFor="welcome-room">Room name</Label>
-              <Input id="welcome-room" value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="Friday focus" maxLength={48} />
+              <Label htmlFor="welcome-room">{i18n.t("common:RoomApplication_room_name")}</Label>
+              <Input id="welcome-room" value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder={i18n.t("common:RoomApplication_friday_focus_2")} maxLength={48} />
             </div>
           )}
-            <Button type="submit" size="lg">{joining ? "Join room" : "Create room"}</Button>
+            <Button type="submit" size="lg">{joining ? i18n.t("common:RoomApplication_join_room") : i18n.t("common:RoomApplication_create_room")}</Button>
           </form>
           </CardContent>
         </Card>
@@ -498,6 +502,7 @@ function RoomChat({
   onOpenQueue: () => void;
   controlsRef?: RefObject<RealtimeChatHandle | null>;
 }) {
+  useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
   const historySource = useMemo(() => createChatHistorySource(accessToken, snapshot.room.id), [accessToken, snapshot.room.id]);
@@ -534,7 +539,7 @@ function RoomChat({
         setError("");
       } catch {
         if (activeRef.current && request === historyRequestRef.current) {
-          setError("Chat history could not be loaded.");
+          setError(i18n.t("common:RoomApplication_chat_history_could_not_be_loaded"));
         }
       } finally {
         if (activeRef.current && request === historyRequestRef.current) setLoadingHistory(false);
@@ -557,22 +562,22 @@ function RoomChat({
   const requestIdFor = (key: string) => { if (!managementRequestIds.current.has(key)) managementRequestIds.current.set(key, crypto.randomUUID()); return managementRequestIds.current.get(key)!; };
   const removeMessage = async (message: ChatMessage, reason: string) => { const key = `remove:${message.id}:${reason}`; await roomModerationAction(snapshot.room.id, accessToken, { action: "remove-message", messageId: message.id, reason }, requestIdFor(key)); managementRequestIds.current.delete(key); };
   const reportMessage = async (message: ChatMessage, reason: string) => { const key = `report:${message.id}:${reason}`; await roomManagementRequest(snapshot.room.id, "reports", accessToken, { method: "POST", body: JSON.stringify({ requestId: requestIdFor(key), messageId: message.id, targetUserId: message.user.id, reason }) }); managementRequestIds.current.delete(key); };
-  const restrictionMessage = capabilities.chat ? undefined : snapshot.room.ownStatus?.chatTimeoutUntil !== undefined ? `Chat timeout${snapshot.room.ownStatus.chatTimeoutUntil ? ` until ${new Date(snapshot.room.ownStatus.chatTimeoutUntil).toLocaleString()}` : ""}.` : snapshot.room.settings.requireRulesAcceptance && !snapshot.room.ownStatus?.rulesAccepted ? "Accept the room rules before participating." : "Chat is limited to room staff.";
+  const restrictionMessage = capabilities.chat ? undefined : snapshot.room.ownStatus?.chatTimeoutUntil !== undefined ? (snapshot.room.ownStatus.chatTimeoutUntil ? i18n.t("common:chatTimeoutUntil", { time: new Date(snapshot.room.ownStatus.chatTimeoutUntil).toLocaleString(i18n.resolvedLanguage) }) : i18n.t("common:chatTimeout")) : snapshot.room.settings.requireRulesAcceptance && !snapshot.room.ownStatus?.rulesAccepted ? i18n.t("common:RoomApplication_accept_the_room_rules_before_participating") : i18n.t("common:RoomApplication_chat_is_limited_to_room_staff");
 
   return (
     <aside className="chat panel">
       <div className="chat-header">
         <div>
           <MessageIcon size={20} />
-          <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: 700 }}>Room chat</h2>
+          <h2 style={{ margin: 0, fontSize: "inherit", fontWeight: 700 }}>{i18n.t("common:RoomApplication_room_chat")}</h2>
         </div>
         <div className="chat-presence">
-          <Button ref={peopleButtonRef} variant="ghost" size="sm" onClick={() => setPeopleOpen(true)} aria-label={`Show all ${snapshot.users.length} room listeners`}><UsersIcon size={16} /> {snapshot.users.length}</Button>
+          <Button ref={peopleButtonRef} variant="ghost" size="sm" onClick={() => setPeopleOpen(true)} aria-label={i18n.t("common:roomListeners", { count: snapshot.users.length })}><UsersIcon size={16} /> {snapshot.users.length}</Button>
           <div className="chat-header-actions" ref={setChatHeaderActions} />
         </div>
       </div>
       <div className="supabase-chat-body">
-        {error && <div className="chat-error" role="alert">{error} <Button size="sm" variant="ghost" onClick={refreshHistory} disabled={loadingHistory}>{loadingHistory ? "Loading…" : "Retry history"}</Button></div>}
+        {error && <div className="chat-error" role="alert">{error} <Button size="sm" variant="ghost" onClick={refreshHistory} disabled={loadingHistory}>{loadingHistory ? i18n.t("common:RoomApplication_loading") : i18n.t("common:RoomApplication_retry_history")}</Button></div>}
         <RealtimeChat
           ref={controlsRef || chatRef}
           headerActionsContainer={chatHeaderActions}

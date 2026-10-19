@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import type express from "express";
@@ -46,7 +47,7 @@ function proxyTrust(env: NodeJS.ProcessEnv): TrustProxy {
     // proxy-addr >= 2.0.8 also fixes GHSA-jqcg-44mw-7w3h.
     if (!family || extra.length || (family === 6 && isIP(canonicalIp(address)) === 4) ||
       (prefix !== undefined && (!/^\d+$/.test(prefix) || Number(prefix) < 1 || Number(prefix) > bits))) {
-      throw new Error("TRUSTED_PROXY_CIDRS must contain explicit IP addresses or nonzero CIDRs; mapped IPv6 CIDRs and proxy aliases are not permitted.");
+      throw new Error(serverT("trusted_proxy_cidrs_must_contain_explicit_ip_addresses_or_nonzero_cidrs_mapped_ipv6_c"));
     }
   }
   return entries.length ? proxyaddr.compile(entries) : () => false;
@@ -55,25 +56,31 @@ function proxyTrust(env: NodeJS.ProcessEnv): TrustProxy {
 function appOrigin(env: NodeJS.ProcessEnv): URL | null {
   const raw = env.APP_ORIGIN?.trim();
   if (!raw) {
-    if (env.NODE_ENV === "production") throw new Error("Production requires APP_ORIGIN set to the public HTTPS origin.");
+    if (env.NODE_ENV === "production") throw new Error(serverT("production_requires_app_origin_set_to_the_public_https_origin"));
     return null;
   }
   let url: URL;
-  try { url = new URL(raw); } catch { throw new Error("APP_ORIGIN must be a valid HTTP(S) origin."); }
-  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/") {
-    throw new Error("APP_ORIGIN must contain only scheme, hostname and optional port.");
+  try { url = new URL(raw); } catch { throw new Error(serverT("app_origin_must_be_a_valid_http_s_origin")); }
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/" || url.hostname.includes("*")) {
+    throw new Error(serverT("app_origin_must_contain_only_scheme_hostname_and_optional_port"));
   }
   if (env.NODE_ENV === "production" && url.protocol !== "https:") {
-    throw new Error("Production APP_ORIGIN must use HTTPS.");
+    throw new Error(serverT("production_app_origin_must_use_https"));
   }
   return url;
 }
 
-function contentSecurityPolicy(env: NodeJS.ProcessEnv): string {
+function additionalAppOrigins(env: NodeJS.ProcessEnv): URL[] {
+  return (env.APP_ORIGINS ?? "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
+    try { return appOrigin({ ...env, APP_ORIGIN: value })!; }
+    catch { throw new Error(serverT("app_origins_must_contain_valid_exact_origins")); }
+  });
+}
+
+function contentSecurityPolicy(env: NodeJS.ProcessEnv, publicOrigins: URL[]): string {
   let supabase = "";
   let supabaseImages = "";
-  let appSocketOrigin = "";
-  try { appSocketOrigin = new URL(env.APP_ORIGIN ?? "").origin.replace(/^http/, "ws"); } catch { /* Development does not require a configured public origin. */ }
+  const appSocketOrigin = [...new Set(publicOrigins.map(url => url.origin.replace(/^http/, "ws")))].join(" ");
   try {
     const url = new URL(env.SUPABASE_URL ?? "");
     if (url.protocol === "https:" || (env.NODE_ENV !== "production" && url.protocol === "http:")) {
@@ -115,12 +122,15 @@ export function configureHttpSecurity(app: express.Express, env: NodeJS.ProcessE
 } {
   const production = env.NODE_ENV === "production";
   const origin = appOrigin(env);
+  const publicOrigins = [...(origin ? [origin] : []), ...additionalAppOrigins(env)];
+  const publicHosts = new Set(publicOrigins.map(url => url.host.toLowerCase()));
   const trust = proxyTrust(env);
-  const origins = production ? [origin!.origin] : [...new Set([
-    ...(origin ? [origin.origin] : []), "http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3000", "http://localhost:3000"
+  const origins = [...new Set([
+    ...publicOrigins.map(url => url.origin),
+    ...(!production ? ["http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:3000", "http://localhost:3000"] : [])
   ])];
   if (env.CSP_MODE && !["enforce", "report-only"].includes(env.CSP_MODE)) {
-    throw new Error("CSP_MODE must be enforce or report-only.");
+    throw new Error(serverT("csp_mode_must_be_enforce_or_report_only"));
   }
   app.disable("x-powered-by");
   app.set("trust proxy", trust);
@@ -128,13 +138,13 @@ export function configureHttpSecurity(app: express.Express, env: NodeJS.ProcessE
   function requestError(request: IncomingMessage): string | null {
     const peer = canonicalIp(proxyaddr(request, trust));
     peerAddresses.set(request, peer);
-    if (peer === "unknown") return "Client address unavailable.";
+    if (peer === "unknown") return serverT("client_address_unavailable");
     const requestOrigin = request.headers.origin;
     if (requestOrigin !== undefined && (!origins.includes(requestOrigin) || requestOrigin === "null")) {
-      return "Origin not allowed.";
+      return serverT("origin_not_allowed");
     }
     if (!production || isLoopbackHealth(request)) return null;
-    if ((request.headers.host ?? "").toLowerCase() !== origin!.host.toLowerCase()) return "Host not allowed.";
+    if (!publicHosts.has((request.headers.host ?? "").toLowerCase())) return serverT("host_not_allowed");
     const encrypted = Boolean((request.socket as typeof request.socket & { encrypted?: boolean }).encrypted);
     // Forwarded protocol is authoritative only when the direct peer is trusted.
     const forwardedProto = request.headers["x-forwarded-proto"];
@@ -143,10 +153,10 @@ export function configureHttpSecurity(app: express.Express, env: NodeJS.ProcessE
       request.headers.connection?.split(",").some(token => token.trim().toLowerCase() === "upgrade");
     const forwardedSecure = forwardedProto === "https" || (forwardedProto === "wss" && websocketUpgrade);
     const https = encrypted || (trust(request.socket.remoteAddress ?? "", 0) && forwardedSecure);
-    return https ? null : "HTTPS required.";
+    return https ? null : serverT("https_required");
   }
 
-  const csp = contentSecurityPolicy(env);
+  const csp = contentSecurityPolicy(env, publicOrigins);
   app.use((request, response, next) => {
     response.setHeader("X-Frame-Options", "DENY");
     response.setHeader("X-Content-Type-Options", "nosniff");

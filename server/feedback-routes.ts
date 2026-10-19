@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express, { type Express, type Request } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createHash } from 'node:crypto'
@@ -23,18 +24,18 @@ function boundedDiagnostics(value: unknown, depth = 0): boolean {
 }
 export function validateFeedbackSubmission(body: unknown, userId: string) {
   const parsed = schema.safeParse(body)
-  if (!parsed.success) throw new PublicRequestError('Invalid feedback fields. Check the message and attachments.')
+  if (!parsed.success) throw new PublicRequestError(serverT("invalid_feedback_fields_check_the_message_and_attachments"))
   const value = parsed.data
-  if (JSON.stringify(value.diagnostics).length > 16384 || !boundedDiagnostics(value.diagnostics)) throw new PublicRequestError('Feedback diagnostics are too large.')
-  if (new Set(value.screenshot_paths).size !== value.screenshot_paths.length || value.screenshot_paths.some(path => !new RegExp(`^${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`, 'i').test(path))) throw new PublicRequestError('Feedback attachments must belong to your account.')
+  if (JSON.stringify(value.diagnostics).length > 16384 || !boundedDiagnostics(value.diagnostics)) throw new PublicRequestError(serverT("feedback_diagnostics_are_too_large"))
+  if (new Set(value.screenshot_paths).size !== value.screenshot_paths.length || value.screenshot_paths.some(path => !new RegExp(`^${userId}/[0-9a-f-]{36}\\.(jpg|png|webp)$`, 'i').test(path))) throw new PublicRequestError(serverT("feedback_attachments_must_belong_to_your_account"))
   return value
 }
 export function mountFeedbackRoutes(app: Express, options: { client: SupabaseClient | null; getUserId: (request: Request) => Promise<string | null> }) {
   const authenticate = async (request: Request, response: express.Response, next: express.NextFunction) => {
     try {
       const actor = await options.getUserId(request)
-      if (!actor) { response.status(401).json({ error: 'Sign in to send feedback.' }); return }
-      if (!options.client) { response.status(503).json({ error: 'Feedback is unavailable.' }); return }
+      if (!actor) { response.status(401).json({ error: serverT("sign_in_to_send_feedback") }); return }
+      if (!options.client) { response.status(503).json({ error: serverT("feedback_is_unavailable") }); return }
       response.locals.feedbackActor = actor; next()
     } catch (error) { const failure = publicRequestFailure(error, 'Feedback is unavailable. Try again later.'); response.status(failure.status).json({ error: failure.message }) }
   }

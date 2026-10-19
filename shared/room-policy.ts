@@ -1,3 +1,4 @@
+import { protocolT } from "./i18n.js";
 import type { RoomBase, RoomSettings, RoomCapability, FeaturePermission, ModeratorPermissions, RoomCapabilities } from "./types.js";
 
 export const DEFAULT_MODERATOR_PERMISSIONS: ModeratorPermissions = { chatParticipants: true, djsPlayback: true, roomDetailsMusic: true, accessInvites: true };
@@ -20,12 +21,12 @@ export function featureAllowed(permission: FeaturePermission | undefined, staff:
 interface RestrictedRoom extends RoomBase { moderation?: {restrictions?: Array<{userId:string;kind:string;expiresAt:number|null;revokedAt:number|null}>;rulesAcceptance?:Record<string,number>} }
 export function chatParticipationError(room: RestrictedRoom, userId: string, kind: "message"|"media"|"links"|"poll"|"reaction"|"typing", now = Date.now()) {
   const restriction = room.moderation?.restrictions?.find(r => r.userId === userId && r.revokedAt === null && (r.expiresAt === null || r.expiresAt > now) && (r.kind === "room-ban" || r.kind === "chat-timeout"));
-  if (restriction) return restriction.kind === "room-ban" ? "You are banned from this room." : "Your chat timeout is still active.";
-  if (room.settings.requireRulesAcceptance && room.moderation?.rulesAcceptance?.[userId] !== (room.settings.rulesVersion ?? 1)) return "Read and accept the room rules before participating.";
+  if (restriction) return restriction.kind === "room-ban" ? protocolT("you_are_banned_from_this_room") : protocolT("your_chat_timeout_is_still_active");
+  if (room.settings.requireRulesAcceptance && room.moderation?.rulesAcceptance?.[userId] !== (room.settings.rulesVersion ?? 1)) return protocolT("read_and_accept_the_room_rules_before_participating");
   const policy = effectiveRoomPolicy(room, now), staff = isRoomStaff(room,userId);
-  if (policy.chatMode === "staff" && !staff) return "Chat is limited to room staff.";
+  if (policy.chatMode === "staff" && !staff) return protocolT("chat_is_limited_to_room_staff");
   const permission = kind === "media" ? policy.mediaPermission : kind === "links" ? policy.linksPermission : kind === "poll" ? policy.pollsPermission : undefined;
-  if (!featureAllowed(permission,staff)) return `This room does not allow you to ${kind === "media" ? "send media" : kind === "links" ? "send links" : "create polls"}.`;
+  if (!featureAllowed(permission,staff)) return protocolT(kind === "media" ? "media_not_allowed" : kind === "links" ? "links_not_allowed" : "polls_not_allowed");
   return null;
 }
 export function roomCapabilities(room: RestrictedRoom,userId:string,now=Date.now()):RoomCapabilities {

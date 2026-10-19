@@ -1,4 +1,4 @@
-# Lydman: quality-of-life and product feel suggestions
+# turntune: quality-of-life and product feel suggestions
 
 Reviewed 6 October 2026 · Source baseline: `2450dfb` · Proposal document
 
@@ -411,7 +411,7 @@ Add room-scoped message search later if actual history usage warrants it. Query 
 
 **P2 · M · UI · Partial foundation; attention rules are a hypothesis**
 
-DJ-turn, provider, playback-error, and mention preferences already exist. Refine them with **Notify when Lydman is in the background**, clear permission state, and optionally a per-room mute. Keep in-app critical errors visible even if system notifications are off. Evidence: [notification preferences](C:/Users/tfrom/Documents/SoundSpin/src/components/UserSettingsDialog.tsx:224) and [mention handling](C:/Users/tfrom/Documents/SoundSpin/src/App.tsx:2023).
+DJ-turn, provider, playback-error, and mention preferences already exist. Refine them with **Notify when turntune is in the background**, clear permission state, and optionally a per-room mute. Keep in-app critical errors visible even if system notifications are off. Evidence: [notification preferences](C:/Users/tfrom/Documents/SoundSpin/src/components/UserSettingsDialog.tsx:224) and [mention handling](C:/Users/tfrom/Documents/SoundSpin/src/App.tsx:2023).
 
 Preserve and test the existing history hydration safeguard that seeds seen mention IDs before displaying history. Extend it to older-page loads and reconnect races so old messages do not generate fresh alerts. Deduplicate across reconnects, and avoid simultaneous toast plus system notification for the same low-importance event. A subtle document-title unread count can help desktop users without audio effects.
 

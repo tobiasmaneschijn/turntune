@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { BoundedCache } from './bounded-cache.js'
 import { defaultResourcePolicy, resolvedResourcePolicySchema, type ResolvedResourcePolicy, type GlobalResourceLimits } from '../shared/resource-policy.js'
@@ -22,11 +23,11 @@ export class ResourcePolicyStore {
     if (cached) return structuredClone(cached.policy)
     const underway = this.pending.get(key)
     if (underway) return structuredClone(await underway)
-    if (this.pending.size >= 1000) throw new Error('Resource policy lookup is busy. Try again shortly.')
+    if (this.pending.size >= 1000) throw new Error(serverT("resource_policy_lookup_is_busy_try_again_shortly"))
     const generation = this.generation
     const lookup = (async () => {
       const { data, error } = await this.client!.rpc('soundspin_resource_policy', { p_actor: actorId ?? null }).abortSignal(AbortSignal.timeout(5000))
-      if (error) throw new Error('Resource limits are unavailable. Try again shortly.')
+      if (error) throw new Error(serverT("resource_limits_are_unavailable_try_again_shortly"))
       const policy = resolvedResourcePolicySchema.parse(data)
       if (generation === this.generation) this.cache.set(key, { policy, expiresAt: this.now() + this.ttlMs })
       return policy
@@ -39,7 +40,7 @@ export class ResourcePolicyStore {
   async getRoom(roomId: string, ownerId?: string): Promise<ResolvedResourcePolicy> {
     if (ownerId || !this.client) return this.get(ownerId)
     const { data, error } = await this.client.from('soundspin_rooms').select('owner_id').eq('slug', roomId).abortSignal(AbortSignal.timeout(5000)).maybeSingle()
-    if (error || !data?.owner_id) throw new Error('Room resource limits are unavailable.')
+    if (error || !data?.owner_id) throw new Error(serverT("room_resource_limits_are_unavailable"))
     return this.get(data.owner_id)
   }
   invalidate(actorId?: string) { this.generation++; if (actorId) this.cache.delete(actorId); else this.cache.clear() }

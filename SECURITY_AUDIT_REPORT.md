@@ -5,7 +5,7 @@
 > changes, verification results and remaining deployment gates; the original
 > evidence and assessment below are preserved.
 
-**Application:** Lydman / SoundSpin 0.1.7  
+**Application:** turntune (reviewed as Lydman / SoundSpin 0.1.7)
 **Repository:** `/workspace/SoundSpin`  
 **Reviewed revision:** `42d46102c80e37e4cf5d67cab57a1929d476941b`  
 **Assessment date:** 13 October 2026 (Europe/Copenhagen)  

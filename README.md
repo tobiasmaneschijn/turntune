@@ -1,8 +1,15 @@
-# Lydman
+# turntune
 
-A private, self-hosted shared radio for teams. Lydman synchronizes playback
-across a room, lets each listener use their preferred configured music service,
-and includes round-robin DJ turns, real-time chat, presence, and generated avatars.
+turntune is a shared music room where friends take turns choosing the soundtrack. Create a room, queue your picks, and listen together.
+
+**Take turns. Pick the Tunes**
+
+The official hosted domain will be [turntune.app](https://turntune.app) once its DNS
+is configured. Existing domains can continue serving the app during the transition;
+keep the active domain in `APP_ORIGIN` and list additional approved origins in
+`APP_ORIGINS`. For self-hosting, use your own origin and provider callbacks.
+
+See [localization and brand copy](docs/localization.md) for the shared language catalogs.
 
 ## Features
 
@@ -169,20 +176,24 @@ database.
    the Supabase GitHub integration to apply them automatically from the
    production branch.
 3. In **Authentication → General Configuration**, turn off **Allow new users
-   to sign up**. Lydman creates users through its invite-protected server
+   to sign up**. turntune creates users through its invite-protected server
    endpoint; leaving public signup enabled would let callers bypass the invite
    password by calling Supabase Auth directly.
 4. In **Authentication → URL Configuration**, set the site URL to your
-   production Lydman URL.
+   production turntune URL.
 5. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
 6. Allow the exact production `/update-password` activation/reset destination;
    restrict development redirects to a separate development project where
-   practical. Configure a custom SMTP provider for invitations and password-reset emails. Supabase's
+   practical. Keep every active domain’s exact `/update-password` URL in the redirect allowlist
+   during the domain transition. Configure a custom SMTP provider for invitations
+   and password-reset emails. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
 7. Set the following environment variables:
 
 ```dotenv
-APP_ORIGIN=https://soundspin.example
+APP_ORIGIN=https://turntune.app
+# Optional additional HTTPS origins, comma-separated during the domain transition.
+APP_ORIGINS=
 TRUSTED_PROXY_CIDRS=
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-publishable-key
@@ -195,7 +206,7 @@ SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
 SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=https://soundspin.example/api/spotify/callback
+SPOTIFY_REDIRECT_URI=https://turntune.app/api/spotify/callback
 SPOTIFY_MARKET=US
 PROVIDER_TOKEN_ENCRYPTION_KEY=generate-a-long-random-secret
 APPLE_MUSIC_TEAM_ID=your-apple-developer-team-id
@@ -207,18 +218,18 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
-`SUPABASE_SECRET_KEY` must only be available to the Lydman server.
+`SUPABASE_SECRET_KEY` must only be available to the turntune server.
 `SIGNUP_INVITE_PASSWORD` must also remain server-only. Use a long, randomly
 generated value and share it only with people you want to invite. If it is not
 set, the signup endpoint fails closed and no accounts can be created through
-Lydman.
+turntune.
 The server uses Supabase's supported invitation-email API. Signup asks for name,
 email and the shared invite password; it does not accept an account password or
 auto-confirm email ownership. The invitation's activation link verifies the
 email and opens `/update-password`, where the user chooses a password. Pending
 or restricted accounts cannot use normal app or direct data/Storage paths.
 The `VITE_` variables configure the local Vite client. In production, the
-client can also receive the same public values from Lydman's runtime config
+client can also receive the same public values from turntune's runtime config
 endpoint, so Dokploy does not need to bake them into the frontend bundle.
 
 Supabase Auth stores the browser session persistently and refreshes access
@@ -261,7 +272,7 @@ troubleshooting guide.
 
 Profiles are created by `20260716220100_profiles_and_progression.sql` and
 simplified by `20260720110538_simplify_profiles.sql`. Every account receives a
-public Lydman profile with a display name, bio, avatar, and theme. Available
+public turntune profile with a display name, bio, avatar, and theme. Available
 avatars and themes are validated server-side before a profile is updated.
 
 Application admins are marked on `soundspin_profiles` by the
@@ -294,18 +305,18 @@ stored in the private `chat-media` Supabase Storage bucket and are limited to
 6 MB. Later authorization migrations make the originally public bucket private;
 the server signs five-minute image URLs after checking room access. GIF search requires a
 GIPHY developer key in the server-side `GIPHY_API_KEY`; without it, the GIF
-button remains disabled. Lydman proxies GIF searches so the key is never
+button remains disabled. turntune proxies GIF searches so the key is never
 returned to the browser and browser CORS policy does not apply to GIPHY's API
 response.
 
 YouTube keyword search requires a YouTube Data API v3 key in
 `YOUTUBE_API_KEY`. Keep this server-side variable in `.env` locally and in
-Dokploy's environment settings in production. The browser calls Lydman's
+Dokploy's environment settings in production. The browser calls turntune's
 authenticated search endpoint; the key is never returned to the client.
 
 SoundCloud search requires the `client_id` and `client_secret` from a registered
 SoundCloud application in `SOUNDCLOUD_CLIENT_ID` and
-`SOUNDCLOUD_CLIENT_SECRET`. Lydman exchanges them server-side for a cached
+`SOUNDCLOUD_CLIENT_SECRET`. turntune exchanges them server-side for a cached
 client-credentials token; neither the credentials nor the token are returned to
 the browser. Playback uses SoundCloud's official embedded widget and is limited
 to public tracks SoundCloud reports as playable.
@@ -371,7 +382,7 @@ network and recheck it after recreating the proxy.
 
 After changing a domain port on Dokploy v0.29.12, use a fresh **Deploy** from
 Git. **Redeploy** reuses the generated Compose file and can retain old routing
-labels. Stop the active SoundSpin service before either operation.
+labels. Stop the active `soundspin` Compose service before either operation.
 
 ## Playback providers
 
@@ -380,11 +391,11 @@ mappings. Tracks waiting in a DJ's queue are only sent to that listener; the DJ 
 currently playing track remain visible to the room.
 YouTube and SoundCloud play through their embedded players. A listener can link
 Spotify when an application administrator enables it for the room, then choose
-either the Lydman Web Playback device or their Spotify Desktop/Connect device.
+either the turntune Web Playback device or their Spotify Desktop/Connect device.
 Spotify starts disabled for every room; the administrator control requires
 MFA/AAL2 and is separate from room-owner permissions. Apple Music listeners
 authorize MusicKit in the player.
-Lydman tries to resolve the same recording across catalogs by ISRC, then by
+turntune tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
 
 The adapters share measured playback status and lifecycle contracts. Explicit
@@ -398,13 +409,19 @@ autoplay and OAuth checks still require configured accounts.
 Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
 configured. Spotify does not accept `localhost`: use the explicit loopback
 address `http://127.0.0.1:5173/api/spotify/callback` for local development, and
-open Lydman at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
-domain in production. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
+open turntune at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
+domain in production. Start Spotify Connect from the host configured in
+`SPOTIFY_REDIRECT_URI`: its authorization cookie belongs to that host, so a flow
+started on a legacy domain cannot finish on a different callback host. Migrate
+the active origin, Supabase Auth redirect allowlist, and provider callback
+allowlists together. This branch does not change live DNS or environment settings.
+
+Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
 cryptographically secure random generator; changing it invalidates stored
 Spotify refresh tokens. Apple Music requires a MusicKit media identifier and
 private key. The private key accepts escaped `\n` line breaks in environment
 configuration.
 
-Important: Lydman coordinates playback but does not grant rights to music.
+Important: turntune coordinates playback but does not grant rights to music.
 Every adapter remains subject to its provider's availability, account rules,
 geographic restrictions, developer terms, and user playback entitlements.

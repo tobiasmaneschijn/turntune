@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -31,7 +32,7 @@ export class SocialError extends Error {
 const idSchema = z.string().uuid();
 const checkedId = (id: string) => {
   const parsed = idSchema.safeParse(id);
-  if (!parsed.success) throw new SocialError("Invalid listener.");
+  if (!parsed.success) throw new SocialError(serverT("invalid_listener"));
   return parsed.data.toLowerCase();
 };
 const pair = (a: string, b: string) => a < b ? [a, b] : [b, a];
@@ -46,7 +47,7 @@ const profileUser = (profile: SoundSpinProfile | User): User => "user_id" in pro
 const socialMutationError = (error: { code?: string; message: string }): Error => {
   // PL/pgSQL consent/limit rejections have explicit short user-facing messages.
   // Database, permission and transport diagnostics stay on the server.
-  if (error.code !== "P0001" || error.message.length > 200 || /[\r\n]/.test(error.message)) return new Error("Social database operation failed.");
+  if (error.code !== "P0001" || error.message.length > 200 || /[\r\n]/.test(error.message)) return new Error(serverT("social_database_operation_failed"));
   const status = /^Too many/.test(error.message) ? 429 : /not found/i.test(error.message) ? 404 : /cannot|unavailable|Only|recipient|removed|cancelled/i.test(error.message) ? 403 : /expired/i.test(error.message) ? 410 : 400;
   return new SocialError(error.message, status);
 };
@@ -76,7 +77,7 @@ export class SocialStore {
       const users = new Map<string, User>();
       for (let offset = 0; offset < uniqueIds.length; offset += 500) {
         const { data, error } = await this.options.supabase.rpc("soundspin_social_profiles", { p_ids: uniqueIds.slice(offset, offset + 500) });
-        if (error) throw new Error("Could not load listeners.");
+        if (error) throw new Error(serverT("could_not_load_listeners"));
         for (const profile of (data || []) as SoundSpinProfile[]) {
           const user = profileUser(profile); users.set(user.id, user);
         }
@@ -93,7 +94,7 @@ export class SocialStore {
   private async roomName(slug: string): Promise<string | null> {
     if (this.options.supabase) {
       const { data, error } = await this.options.supabase.from("soundspin_rooms").select("name").eq("slug", slug).maybeSingle();
-      if (error) throw new Error(`Could not load room: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_load_room_value1", { value1: error.message }));
       return data?.name || null;
     }
     return (await this.options.getRoom?.(slug))?.name || null;
@@ -102,12 +103,12 @@ export class SocialStore {
     const actor = checkedId(a), target = checkedId(b);
     if (!this.options.supabase) return this.blocks.has(`${actor}:${target}`) || this.blocks.has(`${target}:${actor}`);
     const { data, error } = await this.options.supabase.rpc("soundspin_users_blocked", { p_a: actor, p_b: target });
-    if (error) throw new Error("Could not check listener restrictions.");
+    if (error) throw new Error(serverT("could_not_check_listener_restrictions"));
     return data === true;
   }
   async setBlocked(actorId: string, targetId: string, blocked: boolean): Promise<void> {
     const actor = checkedId(actorId), target = checkedId(targetId);
-    if (actor === target) throw new SocialError("Choose another listener.");
+    if (actor === target) throw new SocialError(serverT("choose_another_listener"));
     if (this.options.supabase) {
       const { error } = await this.options.supabase.rpc("soundspin_set_user_block", { p_actor: actor, p_target: target, p_blocked: blocked });
       if (error) throw socialMutationError(error);
@@ -115,10 +116,10 @@ export class SocialStore {
     }
     await this.serialLocal(async () => {
       const users = await this.profiles(blocked ? [actor, target] : [actor]);
-      if (!users.has(actor) || (blocked && !users.has(target))) throw new SocialError("Listener not found.", 404);
+      if (!users.has(actor) || (blocked && !users.has(target))) throw new SocialError(serverT("listener_not_found"), 404);
       const blockKey = `${actor}:${target}`;
       if (blocked) {
-        if (!this.blocks.has(blockKey) && [...this.blocks].filter(value => value.startsWith(`${actor}:`)).length >= 500) throw new SocialError("The blocked listeners limit has been reached.");
+        if (!this.blocks.has(blockKey) && [...this.blocks].filter(value => value.startsWith(`${actor}:`)).length >= 500) throw new SocialError(serverT("the_blocked_listeners_limit_has_been_reached"));
         this.blocks.add(blockKey); this.relationships.delete(key(actor, target));
         for (const [id, row] of this.invitations) if (key(row.sender_id, row.recipient_id) === key(actor, target)) this.invitations.delete(id);
       } else this.blocks.delete(blockKey);
@@ -127,7 +128,7 @@ export class SocialStore {
   private async ownSettings(actor: string): Promise<{ shareActivity: boolean; receiveRequests: boolean }> {
     if (!this.options.supabase) return { shareActivity: this.activitySettings.get(actor) || false, receiveRequests: this.requestSettings.get(actor) !== false };
     const { data, error } = await this.options.supabase.from("soundspin_social_settings").select("share_activity, receive_requests").eq("user_id", actor).maybeSingle();
-    if (error) throw new Error("Could not load social settings.");
+    if (error) throw new Error(serverT("could_not_load_social_settings"));
     return { shareActivity: data?.share_activity === true, receiveRequests: data?.receive_requests !== false };
   }
   private async blockedPeople(actor: string): Promise<User[]> {
@@ -135,7 +136,7 @@ export class SocialStore {
     if (!this.options.supabase) ids = [...this.blocks].filter(value => value.startsWith(`${actor}:`)).map(value => value.split(":")[1]);
     else {
       const { data, error } = await this.options.supabase.from("soundspin_user_blocks").select("blocked_id").eq("blocker_id", actor).limit(500);
-      if (error) throw new Error("Could not load blocked listeners.");
+      if (error) throw new Error(serverT("could_not_load_blocked_listeners"));
       ids = (data || []).map(row => row.blocked_id as string);
     }
     const visible = await this.profiles(ids);
@@ -149,7 +150,7 @@ export class SocialStore {
     const results = await Promise.all((["accepted", "pending"] as const).map(status => this.options.supabase!.from("soundspin_friendships")
       .select("user_low, user_high, requested_by, status, updated_at").or(`user_low.eq.${userId},user_high.eq.${userId}`).eq("status", status)
       .order("updated_at", { ascending: false }).limit(status === "accepted" ? SOCIAL_LIMITS.people : SOCIAL_LIMITS.pendingSent + SOCIAL_LIMITS.pendingReceived)));
-    for (const result of results) if (result.error) throw new Error(`Could not load friends: ${result.error.message}`);
+    for (const result of results) if (result.error) throw new Error(serverT("could_not_load_friends_value1", { value1: result.error.message }));
     return results.flatMap(result => (result.data || []) as Relationship[]).filter(row => !this.expired(row));
   }
   async getRelationship(viewerId: string, targetId: string): Promise<FriendState> {
@@ -162,7 +163,7 @@ export class SocialStore {
     const [low, high] = pair(viewer, target);
     const { data, error } = await this.options.supabase.from("soundspin_friendships")
       .select("requested_by, status, updated_at").eq("user_low", low).eq("user_high", high).maybeSingle();
-    if (error) throw new Error(`Could not check friendship: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_check_friendship_value1", { value1: error.message }));
     const row = data as Relationship | null;
     return stateFor(row && !this.expired(row) ? row : null, viewer);
   }
@@ -171,7 +172,7 @@ export class SocialStore {
     if (!ids.length) return new Set();
     const { data, error } = await this.options.supabase.from("soundspin_social_settings").select("user_id")
       .in("user_id", ids).eq("share_activity", true);
-    if (error) throw new Error(`Could not load activity settings: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_activity_settings_value1", { value1: error.message }));
     return new Set((data || []).map(row => row.user_id as string));
   }
   private async pendingInvitations(userId: string): Promise<Invitation[]> {
@@ -180,7 +181,7 @@ export class SocialStore {
       .select("id, sender_id, recipient_id, room_slug, created_at, expires_at, accepted_at")
       .eq("recipient_id", userId).is("accepted_at", null).is("cancelled_at",null).gt("expires_at", new Date(this.now()).toISOString())
       .order("created_at", { ascending: false }).limit(SOCIAL_LIMITS.invitations);
-    if (error) throw new Error(`Could not load invitations: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_invitations_value1", { value1: error.message }));
     return (data || []) as Invitation[];
   }
   async snapshot(viewerId: string): Promise<SocialSnapshot> {
@@ -227,7 +228,7 @@ export class SocialStore {
   async searchPeople(viewerId: string, query: string): Promise<User[]> {
     const viewer = checkedId(viewerId), text = query.trim();
     if (text.length < 2) return [];
-    if (text.length > 48) throw new SocialError("Search is limited to 48 characters.");
+    if (text.length > 48) throw new SocialError(serverT("search_is_limited_to_48_characters"));
     if (!this.options.supabase) {
       const results: User[] = [];
       for (const user of await this.options.searchProfiles?.(text) || []) {
@@ -242,7 +243,7 @@ export class SocialStore {
   }
   async actOnFriend(actorId: string, targetId: string, action: FriendAction): Promise<FriendState> {
     const actor = checkedId(actorId), target = checkedId(targetId);
-    if (actor === target) throw new SocialError("Choose another listener.");
+    if (actor === target) throw new SocialError(serverT("choose_another_listener"));
     if (this.options.supabase) {
       const { data, error } = await this.options.supabase.rpc("soundspin_friend_action", { p_actor: actor, p_target: target, p_action: action });
       if (error) throw socialMutationError(error);
@@ -250,28 +251,28 @@ export class SocialStore {
     }
     return this.serialLocal(async () => {
       const users = await this.profiles([actor, target]);
-      if (!users.has(actor) || !users.has(target)) throw new SocialError("Listener not found.", 404);
+      if (!users.has(actor) || !users.has(target)) throw new SocialError(serverT("listener_not_found"), 404);
       const relationKey = key(actor, target);
       let current = this.relationships.get(relationKey);
       if (current && this.expired(current)) { this.relationships.delete(relationKey); current = undefined; }
-      if ((action === "request" || action === "accept") && await this.isBlocked(actor, target)) throw new SocialError("This listener cannot receive this request.", 403);
+      if ((action === "request" || action === "accept") && await this.isBlocked(actor, target)) throw new SocialError(serverT("this_listener_cannot_receive_this_request"), 403);
       if (action === "request" && !current) {
-        if (this.requestSettings.get(target) === false || (this.cooldowns.get(`${actor}:${target}`) || 0) > this.now()) throw new SocialError("This listener cannot receive this request.", 403);
+        if (this.requestSettings.get(target) === false || (this.cooldowns.get(`${actor}:${target}`) || 0) > this.now()) throw new SocialError(serverT("this_listener_cannot_receive_this_request"), 403);
         const live = [...this.relationships.values()].filter(row => !this.expired(row));
         if (live.filter(row => row.status === "pending" && row.requested_by === actor).length >= SOCIAL_LIMITS.pendingSent ||
-          live.filter(row => row.status === "pending" && row.requested_by !== target && (row.user_low === target || row.user_high === target)).length >= SOCIAL_LIMITS.pendingReceived) throw new SocialError("Too many pending friend requests.", 429);
+          live.filter(row => row.status === "pending" && row.requested_by !== target && (row.user_low === target || row.user_high === target)).length >= SOCIAL_LIMITS.pendingReceived) throw new SocialError(serverT("too_many_pending_friend_requests"), 429);
         this.requestUsage = this.requestUsage.filter(row => row.at > this.now() - 86_400_000);
-        if (this.requestUsage.filter(row => row.actor === actor).length >= SOCIAL_LIMITS.requestDaily || this.requestUsage.filter(row => row.recipient === target).length >= SOCIAL_LIMITS.recipientDaily || this.requestUsage.length >= SOCIAL_LIMITS.requestGlobalDaily) throw new SocialError("Too many friend requests. Try again later.", 429);
+        if (this.requestUsage.filter(row => row.actor === actor).length >= SOCIAL_LIMITS.requestDaily || this.requestUsage.filter(row => row.recipient === target).length >= SOCIAL_LIMITS.recipientDaily || this.requestUsage.length >= SOCIAL_LIMITS.requestGlobalDaily) throw new SocialError(serverT("too_many_friend_requests_try_again_later"), 429);
         this.requestUsage.push({ actor, recipient: target, at: this.now() });
         const [low, high] = pair(actor, target);
         this.relationships.set(relationKey, { user_low: low, user_high: high, requested_by: actor, status: "pending", updated_at: new Date(this.now()).toISOString() });
       } else if (action === "accept") {
-        if (!current) throw new SocialError("Friend request not found.", 404);
-        if (current.status === "pending" && current.requested_by === actor) throw new SocialError("Only the recipient can accept this request.", 403);
-        if (current.status === "pending" && [actor, target].some(id => [...this.relationships.values()].filter(row => row.status === "accepted" && (row.user_low === id || row.user_high === id)).length >= SOCIAL_LIMITS.people)) throw new SocialError("The friends limit has been reached.");
+        if (!current) throw new SocialError(serverT("friend_request_not_found"), 404);
+        if (current.status === "pending" && current.requested_by === actor) throw new SocialError(serverT("only_the_recipient_can_accept_this_request"), 403);
+        if (current.status === "pending" && [actor, target].some(id => [...this.relationships.values()].filter(row => row.status === "accepted" && (row.user_low === id || row.user_high === id)).length >= SOCIAL_LIMITS.people)) throw new SocialError(serverT("the_friends_limit_has_been_reached"));
         this.relationships.set(relationKey, { ...current, status: "accepted", updated_at: new Date(this.now()).toISOString() });
       } else if (action === "decline" || action === "remove") {
-        if (action === "decline" && current?.status === "accepted") throw new SocialError("Use Remove friend for an accepted friendship.");
+        if (action === "decline" && current?.status === "accepted") throw new SocialError(serverT("use_remove_friend_for_an_accepted_friendship"));
         if (current?.status === "pending" && current.requested_by !== actor) this.cooldowns.set(`${current.requested_by}:${actor}`, this.now() + SOCIAL_LIMITS.declineMs);
         this.relationships.delete(relationKey); return "none";
       }
@@ -283,17 +284,17 @@ export class SocialStore {
     if (!this.options.supabase) { this.activitySettings.set(actor, shareActivity); return; }
     const { error } = await this.options.supabase.from("soundspin_social_settings")
       .upsert({ user_id: actor, share_activity: shareActivity, updated_at: new Date(this.now()).toISOString() }, { onConflict: "user_id" });
-    if (error) throw new Error(`Could not save activity sharing: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_save_activity_sharing_value1", { value1: error.message }));
   }
   async setReceiveRequests(actorId: string, receiveRequests: boolean): Promise<void> {
     const actor = checkedId(actorId);
     if (!this.options.supabase) { this.requestSettings.set(actor, receiveRequests); return; }
     const { error } = await this.options.supabase.from("soundspin_social_settings").upsert({ user_id: actor, receive_requests: receiveRequests, updated_at: new Date(this.now()).toISOString() }, { onConflict: "user_id" });
-    if (error) throw new Error("Could not save friend request settings.");
+    if (error) throw new Error(serverT("could_not_save_friend_request_settings"));
   }
   async createInvitation(actorId: string, recipientId: string, roomSlug: string): Promise<string> {
     const actor = checkedId(actorId), recipient = checkedId(recipientId);
-    if (actor === recipient) throw new SocialError("Choose another listener.");
+    if (actor === recipient) throw new SocialError(serverT("choose_another_listener"));
     if (this.options.supabase) {
       const { data, error } = await this.options.supabase.rpc("soundspin_create_room_invitation", { p_actor: actor, p_recipient: recipient, p_room: roomSlug });
       if (error) throw socialMutationError(error);
@@ -305,19 +306,19 @@ export class SocialStore {
       if (existing && !existing.accepted_at && Date.parse(existing.expires_at) > this.now()) return existing.id;
       for (const [id, row] of this.invitations) if (row.sender_id === actor && (Date.parse(row.expires_at) <= this.now() || id === existing?.id)) this.invitations.delete(id);
       const pending = [...this.invitations.values()].filter(row => !row.accepted_at && Date.parse(row.expires_at) > this.now());
-      if (pending.filter(row => row.sender_id === actor).length >= SOCIAL_LIMITS.invitations || pending.filter(row => row.recipient_id === recipient).length >= SOCIAL_LIMITS.invitations) throw new SocialError("Too many pending room invitations.");
+      if (pending.filter(row => row.sender_id === actor).length >= SOCIAL_LIMITS.invitations || pending.filter(row => row.recipient_id === recipient).length >= SOCIAL_LIMITS.invitations) throw new SocialError(serverT("too_many_pending_room_invitations"));
       const invitation: Invitation = { id: randomUUID(), sender_id: actor, recipient_id: recipient, room_slug: roomSlug,
         created_at: new Date(this.now()).toISOString(), expires_at: new Date(this.now() + SOCIAL_LIMITS.invitationMs).toISOString(), accepted_at: null };
       this.invitations.set(invitation.id, invitation); return invitation.id;
     });
   }
   private async checkInvitationAccess(actor: string, recipient: string, roomSlug: string) {
-    if (await this.getRelationship(actor, recipient) !== "friends") throw new SocialError("Only accepted friends can receive room invitations.", 403);
+    if (await this.getRelationship(actor, recipient) !== "friends") throw new SocialError(serverT("only_accepted_friends_can_receive_room_invitations"), 403);
     const [inviterAccess, recipientAccess] = await Promise.all([this.options.getRoomAccess(roomSlug, actor), this.options.getRoomAccess(roomSlug, recipient)]);
-    if (!inviterAccess.exists || !recipientAccess.exists) throw new SocialError("Room not found.", 404);
-    if (!inviterAccess.role) throw new SocialError("Join this room before inviting friends.", 403);
-    if(inviterAccess.banned||recipientAccess.banned||inviterAccess.canInvite===false)throw new SocialError("You cannot invite this listener to this room.",403);
-    if (inviterAccess.canInvite===undefined&&!recipientAccess.isPublic && !recipientAccess.role && inviterAccess.role !== "owner" && inviterAccess.role !== "moderator") throw new SocialError("Only the owner or a moderator can invite a new member to this private room.", 403);
+    if (!inviterAccess.exists || !recipientAccess.exists) throw new SocialError(serverT("room_not_found"), 404);
+    if (!inviterAccess.role) throw new SocialError(serverT("join_this_room_before_inviting_friends"), 403);
+    if(inviterAccess.banned||recipientAccess.banned||inviterAccess.canInvite===false)throw new SocialError(serverT("you_cannot_invite_this_listener_to_this_room"),403);
+    if (inviterAccess.canInvite===undefined&&!recipientAccess.isPublic && !recipientAccess.role && inviterAccess.role !== "owner" && inviterAccess.role !== "moderator") throw new SocialError(serverT("only_the_owner_or_a_moderator_can_invite_a_new_member_to_this_private_room"), 403);
     return recipientAccess;
   }
   async acceptInvitation(actorId: string, invitationId: string): Promise<{ roomSlug: string; passwordRequired: boolean }> {
@@ -329,12 +330,12 @@ export class SocialStore {
     }
     return this.serialLocal(async () => {
       const row = this.invitations.get(invitation);
-      if (!row || row.recipient_id !== actor) throw new SocialError("Invitation not found.", 404);
-      if (Date.parse(row.expires_at) <= this.now()) throw new SocialError("This invitation has expired.", 410);
+      if (!row || row.recipient_id !== actor) throw new SocialError(serverT("invitation_not_found"), 404);
+      if (Date.parse(row.expires_at) <= this.now()) throw new SocialError(serverT("this_invitation_has_expired"), 410);
       const access = await this.checkInvitationAccess(row.sender_id, actor, row.room_slug);
       if (!access.isPublic && !access.role) {
-        if (row.accepted_at) throw new SocialError("Your room access was removed.", 403);
-        if (!this.options.grantRoomMember) throw new Error("Private room membership is unavailable.");
+        if (row.accepted_at) throw new SocialError(serverT("your_room_access_was_removed"), 403);
+        if (!this.options.grantRoomMember) throw new Error(serverT("private_room_membership_is_unavailable"));
         await this.options.grantRoomMember(row.room_slug, actor);
       }
       row.accepted_at ||= new Date(this.now()).toISOString();

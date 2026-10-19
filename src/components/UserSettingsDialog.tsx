@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, CircleCheck, Link2, MonitorSpeaker, Music2, Palette, Radio, RefreshCw, ShieldCheck, Unplug } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -35,16 +36,7 @@ export interface MusicConnections {
   appleConfigured: boolean;
 }
 
-const playbackOptions: Array<{
-  value: PlaybackPreference;
-  title: string;
-  icon: typeof Radio;
-}> = [
-  { value: "source", title: "Room source", icon: Radio },
-  { value: "spotify-web", title: "Spotify in browser", icon: Music2 },
-  { value: "spotify-desktop", title: "Spotify Connect", icon: MonitorSpeaker },
-  { value: "apple", title: "Apple Music", icon: Music2 }
-];
+
 
 function readAppleAuthorization(): boolean | null {
   // A configured provider is authoritative; storage is only a previous-session hint.
@@ -83,6 +75,17 @@ export function UserSettingsDialog({
   onRetryConnections?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("rooms");
+  const playbackOptions: Array<{
+    value: PlaybackPreference;
+    title: string;
+    icon: typeof Radio;
+  }> = [
+    { value: "source", title: t("userSettingsDialog.roomSource"), icon: Radio },
+    { value: "spotify-web", title: t("userSettingsDialog.spotifyInBrowser"), icon: Music2 },
+    { value: "spotify-desktop", title: t("userSettingsDialog.spotifyConnect"), icon: MonitorSpeaker },
+    { value: "apple", title: t("userSettingsDialog.appleMusic"), icon: Music2 }
+  ];
   const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance" | "account">("playback");
   const isMobile = useMediaQuery("(max-width: 600px)");
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -107,31 +110,31 @@ export function UserSettingsDialog({
   const accountOperation = async (operation: () => Promise<string>) => {
     setAccountBusy(true); setAccountError(""); setAccountStatus("");
     try { const status = await operation(); if (accountActiveRef.current) setAccountStatus(status); }
-    catch (error) { if (accountActiveRef.current) setAccountError(error instanceof Error ? error.message : "Could not complete the request. Try again."); }
+    catch (error) { if (accountActiveRef.current) setAccountError(error instanceof Error ? error.message : t("userSettingsDialog.couldNotCompleteTheRequestTryAgain")); }
     finally { if (accountActiveRef.current) setAccountBusy(false); }
   };
   const startMfa = () => accountOperation(async () => {
     const client = await getSupabaseClient();
     const factors = await client.auth.mfa.listFactors();
-    if (factors.error) throw new Error("Could not load authentication factors. Sign in again.");
+    if (factors.error) throw new Error(t("userSettingsDialog.couldNotLoadAuthenticationFactorsSignInAgain"));
     const verified = factors.data.totp.find((factor) => factor.status === "verified");
-    if (verified) { setMfaFactor({ id: verified.id }); return "Enter the code from your authenticator."; }
-    for (const factor of factors.data.all.filter((factor) => factor.status === "unverified" && factor.friendly_name === "SoundSpin")) {
+    if (verified) { setMfaFactor({ id: verified.id }); return t("userSettingsDialog.enterTheCodeFromYourAuthenticator"); }
+    for (const factor of factors.data.all.filter((factor) => factor.status === "unverified" && ["SoundSpin", "turntune"].includes(factor.friendly_name ?? ""))) {
       const removed = await client.auth.mfa.unenroll({ factorId: factor.id });
-      if (removed.error) throw new Error("Could not clear an unfinished setup. Try again after signing in.");
+      if (removed.error) throw new Error(t("userSettingsDialog.couldNotClearAnUnfinishedSetupTryAgain"));
     }
-    const enrollment = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "SoundSpin" });
-    if (enrollment.error) throw new Error("Could not set up an authenticator. Check your account factors in Supabase.");
+    const enrollment = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "turntune" });
+    if (enrollment.error) throw new Error(t("userSettingsDialog.couldNotSetUpAnAuthenticatorCheckYour"));
     if (accountActiveRef.current) setMfaFactor({ id: enrollment.data.id, qrCode: enrollment.data.totp.qr_code, secret: enrollment.data.totp.secret });
-    return "Add this account to your authenticator, then enter its code.";
+    return t("userSettingsDialog.addThisAccountToYourAuthenticatorThenEnter");
   });
   const verifyMfa = () => accountOperation(async () => {
-    if (!mfaFactor || !/^\d{6}$/.test(mfaCode)) throw new Error("Enter a six-digit authenticator code.");
+    if (!mfaFactor || !/^\d{6}$/.test(mfaCode)) throw new Error(t("userSettingsDialog.enterASixDigitAuthenticatorCode"));
     const client = await getSupabaseClient();
     const verified = await client.auth.mfa.challengeAndVerify({ factorId: mfaFactor.id, code: mfaCode });
-    if (verified.error) throw new Error("Code was not accepted. Enter the current code.");
+    if (verified.error) throw new Error(t("userSettingsDialog.codeWasNotAcceptedEnterTheCurrentCode"));
     if (accountActiveRef.current) { setMfaFactor(null); setMfaCode(""); }
-    return "Authenticator verified for this session.";
+    return t("userSettingsDialog.authenticatorVerifiedForThisSession");
   });
   const requestDeletion = () => accountOperation(async () => {
     const result = await requestJson<{ request: { id: string } }>("/api/account/deletion-request", {
@@ -140,7 +143,7 @@ export function UserSettingsDialog({
         typeof value.request === "object" && "id" in value.request && typeof value.request.id === "string" && /^[0-9a-f-]{36}$/i.test(value.request.id))
     });
     setConfirmation("");
-    return `Deletion requested. Reference: ${result.request.id}. An operator will verify your identity before deleting the account.`;
+    return t("userSettingsDialog.deletionRequestedReferenceIdAnOperatorWillVerify", { id: result.request.id });
   });
   const exportAccount = () => accountOperation(async () => {
     const categories = ["profile", "library", "feedback", "messages", "reactions", "votes", "memberships", "roomFavorites", "ownedRooms", "friendships", "invitations", "blocks", "providerConnections"];
@@ -152,15 +155,15 @@ export function UserSettingsDialog({
         const payload = await requestJson<{ data: unknown[]; hasMore: boolean }>(`/api/account/export/${category}?page=${page}`, { accessToken,
           validate: (value): value is { data: unknown[]; hasMore: boolean } => Boolean(value && typeof value === "object" && "data" in value && Array.isArray(value.data) && "hasMore" in value && typeof value.hasMore === "boolean") });
         size += JSON.stringify(payload.data).length;
-        if (size > 20_000_000 || page > 1000) throw new Error("This export needs operator assistance. Contact the privacy support channel.");
+        if (size > 20_000_000 || page > 1000) throw new Error(t("userSettingsDialog.thisExportNeedsOperatorAssistanceContactThePrivacy"));
         exportData[category].push(...payload.data);
         if (!payload.hasMore) break;
       }
     }
     if (!accountActiveRef.current) return "";
     const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" }));
-    const link = document.createElement("a"); link.href = url; link.download = "soundspin-account-data.json"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return "Account data downloaded. Keep this file private.";
+    const link = document.createElement("a"); link.href = url; link.download = "turntune-account-data.json"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return t("userSettingsDialog.accountDataDownloadedKeepThisFilePrivate");
   });
   useEffect(() => {
     const refresh = () => setNotificationPermission(readNotificationPermission());
@@ -200,12 +203,12 @@ export function UserSettingsDialog({
     void fetch("/api/spotify/devices", { headers: { Authorization: `Bearer ${accessToken}`, "x-soundspin-room": roomSlug ?? "" }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) })
       .then(async (response) => {
         const payload = await response.json() as { devices?: SpotifyDevice[]; error?: string };
-        if (!response.ok) throw new Error(payload.error || "Could not load Spotify devices.");
+        if (!response.ok) throw new Error(payload.error || t("userSettingsDialog.couldNotLoadSpotifyDevices"));
         if (controller.signal.aborted) return;
         setDevices((payload.devices || []).filter((device) => device.id && !device.is_restricted));
         setDevicesLoaded(true);
       })
-      .catch((error) => { if (!controller.signal.aborted) setDeviceError(error instanceof Error ? error.message : "Could not load Spotify devices."); })
+      .catch((error) => { if (!controller.signal.aborted) setDeviceError(error instanceof Error ? error.message : t("userSettingsDialog.couldNotLoadSpotifyDevices")); })
       .finally(() => { if (deviceRequest.current === controller) { deviceRequest.current = null; setLoadingDevices(false); } });
   }, [accessToken, spotifyEnabled, roomSlug, connections.spotifyConnected]);
 
@@ -234,44 +237,44 @@ export function UserSettingsDialog({
           : document.querySelector<HTMLButtonElement>(".shared-account-trigger, .room-more-actions") ?? true;
       }}>
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription className="sr-only">Playback, connections, notifications, and appearance.</DialogDescription>
+          <DialogTitle>{t("userSettingsDialog.settings")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("userSettingsDialog.playbackConnectionsNotificationsAndAppearance")}</DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} orientation={isMobile ? "horizontal" : "vertical"} className="user-settings-layout">
-          <TabsList className="settings-tabs" aria-label="Setting categories" activateOnFocus>
-            <TabsTrigger value="playback" data-settings-category="playback"><Radio /> Playback</TabsTrigger>
-            <TabsTrigger value="connections" data-settings-category="connections"><Link2 /> Connections</TabsTrigger>
-            <TabsTrigger value="notifications" data-settings-category="notifications"><Bell /> Notifications</TabsTrigger>
-            <TabsTrigger value="appearance" data-settings-category="appearance"><Palette /> Appearance</TabsTrigger>
-            <TabsTrigger value="account" data-settings-category="account"><ShieldCheck /> Account</TabsTrigger>
+          <TabsList className="settings-tabs" aria-label={t("userSettingsDialog.settingCategories")} activateOnFocus>
+            <TabsTrigger value="playback" data-settings-category="playback"><Radio />{t("userSettingsDialog.playback")}</TabsTrigger>
+            <TabsTrigger value="connections" data-settings-category="connections"><Link2 />{t("userSettingsDialog.connections")}</TabsTrigger>
+            <TabsTrigger value="notifications" data-settings-category="notifications"><Bell />{t("userSettingsDialog.notifications")}</TabsTrigger>
+            <TabsTrigger value="appearance" data-settings-category="appearance"><Palette />{t("userSettingsDialog.appearance")}</TabsTrigger>
+            <TabsTrigger value="account" data-settings-category="account"><ShieldCheck />{t("userSettingsDialog.account")}</TabsTrigger>
           </TabsList>
 
           <div className="settings-tab-panel">
             <TabsContent value="account">
               <div className="settings-panel-stack">
                 <section className="settings-control-group">
-                  <strong>Authenticator</strong>
-                  <p>Administrator actions require an authenticator code for the current session.</p>
-                  {!mfaFactor ? <Button variant="outline" onClick={() => void startMfa()} disabled={accountBusy || !accessToken}>Set up or verify authenticator</Button> : <>
-                    {mfaFactor.qrCode && <img src={mfaFactor.qrCode} alt="Authenticator setup QR code" width={180} height={180} />}
-                    {mfaFactor.secret && <p>Setup key: <code className="break-all">{mfaFactor.secret}</code></p>}
-                    <Label htmlFor="authenticator-code">Authenticator code</Label>
+                  <strong>{t("userSettingsDialog.authenticator")}</strong>
+                  <p>{t("userSettingsDialog.administratorActionsRequireAnAuthenticatorCodeForThe")}</p>
+                  {!mfaFactor ? <Button variant="outline" onClick={() => void startMfa()} disabled={accountBusy || !accessToken}>{t("userSettingsDialog.setUpOrVerifyAuthenticator")}</Button> : <>
+                    {mfaFactor.qrCode && <img src={mfaFactor.qrCode} alt={t("userSettingsDialog.authenticatorSetupQRCode")} width={180} height={180} />}
+                    {mfaFactor.secret && <p>{t("userSettingsDialog.setupKey")}{" "}<code className="break-all">{mfaFactor.secret}</code></p>}
+                    <Label htmlFor="authenticator-code">{t("userSettingsDialog.authenticatorCode")}</Label>
                     <Input id="authenticator-code" inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} />
-                    <Button onClick={() => void verifyMfa()} disabled={accountBusy || mfaCode.length !== 6}>Verify code</Button>
+                    <Button onClick={() => void verifyMfa()} disabled={accountBusy || mfaCode.length !== 6}>{t("userSettingsDialog.verifyCode")}</Button>
                   </>}
                 </section>
                 <section className="settings-control-group">
-                  <strong>Account data</strong>
-                  <Button variant="outline" disabled={accountBusy || !accessToken} onClick={() => void exportAccount()}>Download account data</Button>
+                  <strong>{t("userSettingsDialog.accountData")}</strong>
+                  <Button variant="outline" disabled={accountBusy || !accessToken} onClick={() => void exportAccount()}>{t("userSettingsDialog.downloadAccountData")}</Button>
                 </section>
                 <section className="settings-control-group">
-                  <strong>Delete account</strong>
-                  <p>Deletion removes your account, uploads, and every room you own, including other listeners’ room history. An operator verifies your identity before processing the request.</p>
-                  <SettingSwitch title="Delete all rooms I own" checked={deleteOwnedRooms} onChange={setDeleteOwnedRooms} />
-                  <Label htmlFor="delete-account-confirmation">Type DELETE to request deletion</Label>
+                  <strong>{t("userSettingsDialog.deleteAccount")}</strong>
+                  <p>{t("userSettingsDialog.deletionRemovesYourAccountUploadsAndEveryRoom")}</p>
+                  <SettingSwitch title={t("userSettingsDialog.deleteAllRoomsIOwn")} checked={deleteOwnedRooms} onChange={setDeleteOwnedRooms} />
+                  <Label htmlFor="delete-account-confirmation">{t("userSettingsDialog.typeDELETEToRequestDeletion")}</Label>
                   <Input id="delete-account-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} maxLength={6} />
-                  <Button variant="destructive" disabled={accountBusy || !accessToken || confirmation !== "DELETE" || !deleteOwnedRooms} onClick={() => void requestDeletion()}>Request account deletion</Button>
+                  <Button variant="destructive" disabled={accountBusy || !accessToken || confirmation !== "DELETE" || !deleteOwnedRooms} onClick={() => void requestDeletion()}>{t("userSettingsDialog.requestAccountDeletion")}</Button>
                 </section>
                 {accountError && <p role="alert" className="settings-field-error">{accountError}</p>}
                 {accountStatus && <p role="status">{accountStatus}</p>}
@@ -280,8 +283,8 @@ export function UserSettingsDialog({
             <TabsContent value="playback">
               <div className="settings-panel-stack">
                 <section>
-                  <div className="settings-section-heading"><strong>Default playback</strong></div>
-                  <ToggleGroup className="playback-option-list" aria-label="Default playback provider" orientation="vertical" value={[playbackPreference]} onValueChange={(value) => {
+                  <div className="settings-section-heading"><strong>{t("userSettingsDialog.defaultPlayback")}</strong></div>
+                  <ToggleGroup className="playback-option-list" aria-label={t("userSettingsDialog.defaultPlaybackProvider")} orientation="vertical" value={[playbackPreference]} onValueChange={(value) => {
                     if (value[0]) updatePlayback({ preference: value[0] as PlaybackPreference });
                   }}>
                     {playbackOptions.filter(option => spotifyEnabled || !option.value.startsWith("spotify")).map((option) => {
@@ -291,80 +294,80 @@ export function UserSettingsDialog({
                       return (
                         <ToggleGroupItem key={option.value} value={option.value} className={selected ? "playback-option selected" : "playback-option"} disabled={unavailable}>
                           <span className="playback-option-icon"><Icon /></span>
-                          <span><strong>{option.title}</strong>{unavailable && <small>Not configured</small>}</span>
+                          <span><strong>{option.title}</strong>{unavailable && <small>{t("userSettingsDialog.notConfigured")}</small>}</span>
                           {selected && <CircleCheck className="playback-option-check" />}
                         </ToggleGroupItem>
                       );
                     })}
                   </ToggleGroup>
-                  {playbackPreference !== "source" && <small>Requires a matching track.</small>}
+                  {playbackPreference !== "source" && <small>{t("userSettingsDialog.requiresAMatchingTrack")}</small>}
                   {spotifyEnabled && playbackPreference.startsWith("spotify") && !connections.spotifyConnected && (
                     <div className="settings-inline-notice">
-                      <span>Spotify connection required.</span>
-                      <Button size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>Connect Spotify</Button>
+                      <span>{t("userSettingsDialog.spotifyConnectionRequired")}</span>
+                      <Button size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>{t("userSettingsDialog.connectSpotify")}</Button>
                     </div>
                   )}
                 </section>
 
                 <section className="settings-control-group">
-                  <Label htmlFor="default-volume">Default volume <strong>{settings.playback.defaultVolume}%</strong></Label>
-                  <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label="Default volume" getAriaValueText={(_formatted, value) => `${value} percent`} />
+                  <Label htmlFor="default-volume">{t("userSettingsDialog.defaultVolume")}{" "}<strong>{t("userSettingsDialog.volumePercentSymbol", { value: settings.playback.defaultVolume })}</strong></Label>
+                  <Slider id="default-volume" min={0} max={100} value={[settings.playback.defaultVolume]} onValueChange={(value) => updatePlayback({ defaultVolume: typeof value === "number" ? value : value[0] })} aria-label={t("userSettingsDialog.defaultVolume")} getAriaValueText={(_formatted, value) => t("userSettingsDialog.volumePercent", { value })} />
                 </section>
 
                 {spotifyEnabled && playbackPreference === "spotify-desktop" && (
                   <section className="settings-control-group">
-                    <Label htmlFor="spotify-device">Spotify Connect device</Label>
+                    <Label htmlFor="spotify-device">{t("userSettingsDialog.spotifyConnectDevice")}</Label>
                     <div className="settings-select-row">
                       <Select value={settings.playback.spotifyDeviceId || "automatic"} onValueChange={(value) => updatePlayback({ spotifyDeviceId: !value || value === "automatic" ? "" : value })}>
-                        <SelectTrigger id="spotify-device" className="w-full"><SelectValue>{settings.playback.spotifyDeviceId ? devices.find(device => device.id === settings.playback.spotifyDeviceId)?.name || "Selected device unavailable" : "Automatic selection"}</SelectValue></SelectTrigger>
+                        <SelectTrigger id="spotify-device" className="w-full"><SelectValue>{settings.playback.spotifyDeviceId ? devices.find(device => device.id === settings.playback.spotifyDeviceId)?.name || t("userSettingsDialog.selectedDeviceUnavailable") : t("userSettingsDialog.automaticSelection")}</SelectValue></SelectTrigger>
                         <SelectContent><SelectGroup>
-                          <SelectItem value="automatic">Automatic selection</SelectItem>
-                          {devices.map((device) => <SelectItem key={device.id!} value={device.id!}>{device.name} · {device.type}{device.is_active ? " · Active" : ""}</SelectItem>)}
+                          <SelectItem value="automatic">{t("userSettingsDialog.automaticSelection")}</SelectItem>
+                          {devices.map((device) => <SelectItem key={device.id!} value={device.id!}>{t(device.is_active ? "userSettingsDialog.activeDevice" : "userSettingsDialog.device", { name: device.name, type: t(`devices.${device.type}`, { defaultValue: device.type }) })}</SelectItem>)}
                         </SelectGroup></SelectContent>
                       </Select>
-                      <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title="Refresh Spotify devices" aria-label="Refresh Spotify devices"><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
+                      <Button variant="outline" size="icon" onClick={refreshDevices} disabled={loadingDevices} title={t("userSettingsDialog.refreshSpotifyDevices")} aria-label={t("userSettingsDialog.refreshSpotifyDevices")}><RefreshCw className={loadingDevices ? "spin" : ""} /></Button>
                     </div>
                     {deviceError && <small className="settings-field-error">{deviceError}</small>}
-                    {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
+                    {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">{t("userSettingsDialog.noSpotifyDevicesAvailableOpenSpotifyOnA")}</p>}
                   </section>
                 )}
 
                 {playbackPreference !== "source" && <section className="settings-control-group">
-                  <Label htmlFor="fallback-behavior">When the preferred provider has no match</Label>
+                  <Label htmlFor="fallback-behavior">{t("userSettingsDialog.whenThePreferredProviderHasNoMatch")}</Label>
                   <Select value={settings.playback.fallback} onValueChange={(value) => updatePlayback({ fallback: value as SoundSpinUserSettings["playback"]["fallback"] })}>
-                    <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue>{settings.playback.fallback === "ask" ? "Ask for each unavailable track" : settings.playback.fallback === "silent" ? "Keep local playback silent" : "Use the room source automatically"}</SelectValue></SelectTrigger>
+                    <SelectTrigger id="fallback-behavior" className="w-full"><SelectValue>{settings.playback.fallback === "ask" ? t("userSettingsDialog.askForEachUnavailableTrack") : settings.playback.fallback === "silent" ? t("userSettingsDialog.keepLocalPlaybackSilent") : t("userSettingsDialog.useTheRoomSourceAutomatically")}</SelectValue></SelectTrigger>
                     <SelectContent><SelectGroup>
-                      <SelectItem value="source">Use the room source automatically</SelectItem>
-                      <SelectItem value="ask">Ask for each unavailable track</SelectItem>
-                      <SelectItem value="silent">Keep local playback silent</SelectItem>
+                      <SelectItem value="source">{t("userSettingsDialog.useTheRoomSourceAutomatically")}</SelectItem>
+                      <SelectItem value="ask">{t("userSettingsDialog.askForEachUnavailableTrack")}</SelectItem>
+                      <SelectItem value="silent">{t("userSettingsDialog.keepLocalPlaybackSilent")}</SelectItem>
                     </SelectGroup></SelectContent>
                   </Select>
                 </section>}
 
-                {spotifyEnabled && playbackPreference === "spotify-web" && <SettingSwitch title="Resume when Spotify reconnects" description="Catch up to the room's current position." checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />}
+                {spotifyEnabled && playbackPreference === "spotify-web" && <SettingSwitch title={t("userSettingsDialog.resumeWhenSpotifyReconnects")} description={t("userSettingsDialog.catchUpToTheRoomSCurrentPosition")} checked={settings.playback.resumeAfterReconnect} onChange={(checked) => updatePlayback({ resumeAfterReconnect: checked })} />}
               </div>
             </TabsContent>
 
             <TabsContent value="connections">
               <div className="connection-list">
-                {connectionError && <div className="settings-inline-notice" role="alert"><span>{connectionError}</span>{onRetryConnections && <Button size="sm" variant="outline" onClick={onRetryConnections}>Retry connection check</Button>}</div>}
+                {connectionError && <div className="settings-inline-notice" role="alert"><span>{connectionError}</span>{onRetryConnections && <Button size="sm" variant="outline" onClick={onRetryConnections}>{t("userSettingsDialog.retryConnectionCheck")}</Button>}</div>}
                 {spotifyEnabled && <div className="connection-row connection-row-expanded">
-                  <span className="connection-logo spotify">S</span>
-                  <span><strong>{connections.spotifyProfile?.displayName || "Spotify"}</strong>{(connections.spotifyConnected || spotifyUnavailable) && <small>{connections.spotifyConnected ? [connections.spotifyProfile?.product === "premium" ? "Premium" : "Connected", selectedSpotifyDevice?.name].filter(Boolean).join(" · ") : "Not configured"}</small>}</span>
+                  <span className="connection-logo spotify">{t("userSettingsDialog.s")}</span>
+                  <span><strong>{connections.spotifyProfile?.displayName || t("userSettingsDialog.spotify")}</strong>{(connections.spotifyConnected || spotifyUnavailable) && <small>{connections.spotifyConnected ? [connections.spotifyProfile?.product === "premium" ? t("userSettingsDialog.premium") : t("userSettingsDialog.connected"), selectedSpotifyDevice?.name].filter(Boolean).join(" · ") : t("userSettingsDialog.notConfigured")}</small>}</span>
                   <span className="connection-actions">
-                    {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={refreshDevices}><RefreshCw /> Refresh</Button>}
-                    <Button variant="outline" size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>{connections.spotifyConnected ? "Reconnect" : "Connect"}</Button>
-                    {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={onDisconnectSpotify}><Unplug /> Disconnect</Button>}
+                    {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={refreshDevices}><RefreshCw />{t("userSettingsDialog.refresh")}</Button>}
+                    <Button variant="outline" size="sm" onClick={onConnectSpotify} disabled={!accessToken || spotifyUnavailable}>{connections.spotifyConnected ? t("userSettingsDialog.reconnect") : t("userSettingsDialog.connect")}</Button>
+                    {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={onDisconnectSpotify}><Unplug />{t("userSettingsDialog.disconnect")}</Button>}
                   </span>
                 </div>}
                 <div className="connection-row">
-                  <span className="connection-logo apple">A</span>
-                  <span><strong>Apple Music</strong></span>
-                  <Badge variant="outline">{appleUnavailable ? "Unavailable" : appleAuthorized ? "Authorized" : "Available"}</Badge>
-                  {appleAuthorized && <Button variant="ghost" size="sm" aria-label="Disconnect Apple Music" onClick={() => void resetProviderSession("apple")}><Unplug /> Disconnect</Button>}
+                  <span className="connection-logo apple">{t("userSettingsDialog.a")}</span>
+                  <span><strong>{t("userSettingsDialog.appleMusic")}</strong></span>
+                  <Badge variant="outline">{appleUnavailable ? t("userSettingsDialog.unavailable") : appleAuthorized ? t("userSettingsDialog.authorized") : t("userSettingsDialog.available")}</Badge>
+                  {appleAuthorized && <Button variant="ghost" size="sm" aria-label={t("userSettingsDialog.disconnectAppleMusic")} onClick={() => void resetProviderSession("apple")}><Unplug />{t("userSettingsDialog.disconnect")}</Button>}
                 </div>
                 {spotifyEnabled && deviceError && <div className="dialog-error">{deviceError}</div>}
-                {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">No Spotify devices available. Open Spotify on a device, then refresh.</p>}
+                {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">{t("userSettingsDialog.noSpotifyDevicesAvailableOpenSpotifyOnA")}</p>}
               </div>
             </TabsContent>
 
@@ -373,29 +376,29 @@ export function UserSettingsDialog({
                 <div className="settings-inline-notice"><span>{notificationPermissionDescription(notificationPermission)}</span>{notificationPermission === "default" && <Button size="sm" disabled={requestingPermission} onClick={() => {
                   setRequestingPermission(true);
                   void requestNotificationPermission().then(setNotificationPermission).finally(() => setRequestingPermission(false));
-                }}>{requestingPermission ? "Requesting permission…" : "Enable notifications"}</Button>}</div>
-                <SettingSwitch title="Background notifications only" description="Only when this tab is inactive." checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
-                <SettingSwitch title="DJ turn" checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
-                <SettingSwitch title="Unavailable tracks" description="No match on your provider." checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
-                <SettingSwitch title="Chat mentions" checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
-                <SettingSwitch title="Playback errors" checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
+                }}>{requestingPermission ? t("userSettingsDialog.requestingPermission") : t("userSettingsDialog.enableNotifications")}</Button>}</div>
+                <SettingSwitch title={t("userSettingsDialog.backgroundNotificationsOnly")} description={t("userSettingsDialog.onlyWhenThisTabIsInactive")} checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
+                <SettingSwitch title={t("userSettingsDialog.dJTurn")} checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
+                <SettingSwitch title={t("userSettingsDialog.unavailableTracks")} description={t("userSettingsDialog.noMatchOnYourProvider")} checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
+                <SettingSwitch title={t("userSettingsDialog.chatMentions")} checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />
+                <SettingSwitch title={t("userSettingsDialog.playbackErrors")} checked={settings.notifications.playbackErrors} onChange={(checked) => void updateNotification("playbackErrors", checked)} />
               </div>
             </TabsContent>
 
             <TabsContent value="appearance">
               <div className="settings-panel-stack">
                 <section className="settings-control-group">
-                  <Label htmlFor="color-theme">Color theme</Label>
+                  <Label htmlFor="color-theme">{t("userSettingsDialog.colorTheme")}</Label>
                   <Select value={theme} onValueChange={(value) => updateTheme(value as SoundSpinUserSettings["appearance"]["theme"])}>
-                    <SelectTrigger id="color-theme" className="w-full"><SelectValue>{theme === "system" ? "System" : theme === "light" ? "Light" : "Dark"}</SelectValue></SelectTrigger>
-                    <SelectContent><SelectGroup><SelectItem value="dark">Dark</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="system">System</SelectItem></SelectGroup></SelectContent>
+                    <SelectTrigger id="color-theme" className="w-full"><SelectValue>{theme === "system" ? t("userSettingsDialog.system") : theme === "light" ? t("userSettingsDialog.light") : t("userSettingsDialog.dark")}</SelectValue></SelectTrigger>
+                    <SelectContent><SelectGroup><SelectItem value="dark">{t("userSettingsDialog.dark")}</SelectItem><SelectItem value="light">{t("userSettingsDialog.light")}</SelectItem><SelectItem value="system">{t("userSettingsDialog.system")}</SelectItem></SelectGroup></SelectContent>
                   </Select>
                 </section>
-                <SettingSwitch title="Compact player by default" checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
-                <SettingSwitch title="Reduced motion" checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
+                <SettingSwitch title={t("userSettingsDialog.compactPlayerByDefault")} checked={settings.playback.compactPlayer} onChange={(checked) => updatePlayback({ compactPlayer: checked })} />
+                <SettingSwitch title={t("userSettingsDialog.reducedMotion")} checked={settings.appearance.reducedMotion} onChange={(checked) => updateAppearance({ reducedMotion: checked })} />
                 <section className="settings-control-group">
-                  <Label htmlFor="artwork-blur">Artwork background blur <strong>{settings.appearance.artworkBlur}px</strong></Label>
-                  <Slider id="artwork-blur" min={0} max={60} value={[settings.appearance.artworkBlur]} onValueChange={(value) => updateAppearance({ artworkBlur: typeof value === "number" ? value : value[0] })} aria-label="Artwork background blur" />
+                  <Label htmlFor="artwork-blur">{t("userSettingsDialog.artworkBackgroundBlur")}{" "}<strong>{t("userSettingsDialog.blurPixels", { value: settings.appearance.artworkBlur })}</strong></Label>
+                  <Slider id="artwork-blur" min={0} max={60} value={[settings.appearance.artworkBlur]} onValueChange={(value) => updateAppearance({ artworkBlur: typeof value === "number" ? value : value[0] })} aria-label={t("userSettingsDialog.artworkBackgroundBlur")} />
                 </section>
               </div>
             </TabsContent>

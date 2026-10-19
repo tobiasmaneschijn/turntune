@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { RequestHandler } from "express";
 import { RoomCommandError } from "./socket-handler.js";
 
@@ -8,11 +9,11 @@ interface ConnectionLeaseTarget {
 /** An Engine.IO close can precede namespace acceptance, when disconnect never
  * fires. Both lifecycle signals release the same idempotent account lease. */
 export function claimSocketAccount(budget:SecurityBudget,socket:ConnectionLeaseTarget,userId:string,maximum=5):()=>void {
-  if(socket.conn.readyState!=="open")throw new RoomCommandError("This connection has ended.");
+  if(socket.conn.readyState!=="open")throw new RoomCommandError(serverT("this_connection_has_ended"));
   const release=budget.acquire(`socket-user:${userId}`,maximum);
   if(!release)throw new SecurityLimitError();
   socket.conn.once("close",release);socket.once("disconnect",release);
-  if(socket.conn.readyState!=="open"){release();throw new RoomCommandError("This connection has ended.");}
+  if(socket.conn.readyState!=="open"){release();throw new RoomCommandError(serverT("this_connection_has_ended"));}
   return release;
 }
 
@@ -92,10 +93,10 @@ export function peerRequestBudget(budget: SecurityBudget, peer: (request: Parame
     const rules = [{key:`http-peer:${identity}`,maximum:600,windowMs:60_000}];
     if (ready) rules.push({key:`http-ready-peer:${identity}`,maximum:60,windowMs:60_000});
     if (!budget.consume(rules)) {
-      response.set("Retry-After","60").status(429).json({error:"Too many requests. Wait a minute before trying again."}); return;
+      response.set("Retry-After","60").status(429).json({error:serverT("too_many_requests_wait_a_minute_before_trying_again")}); return;
     }
     const release = budget.acquire(`http-peer-flight:${identity}`,24);
-    if (!release) { response.set("Retry-After","60").status(429).json({error:"Too many concurrent requests."}); return; }
+    if (!release) { response.set("Retry-After","60").status(429).json({error:serverT("too_many_concurrent_requests")}); return; }
     response.once("finish",release); response.once("close",release);
     next();
   };

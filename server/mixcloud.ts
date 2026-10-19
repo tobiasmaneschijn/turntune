@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { providerJson } from "./provider-http.js";
 import { formatDuration } from "./music.js";
@@ -37,7 +38,7 @@ function mapShow(value: unknown): MixcloudSearchResult | null {
     provider: "mixcloud",
     id: show.key,
     title: show.name.trim().slice(0, 120),
-    artist: uploader.trim().slice(0, 120) || "Mixcloud creator",
+    artist: uploader.trim().slice(0, 120) || serverT("mixcloud_creator"),
     thumbnail: approvedRemoteImageUrl(show.pictures?.large) || approvedRemoteImageUrl(show.pictures?.medium),
     duration: formatDuration(durationMs),
     durationMs,
@@ -59,8 +60,8 @@ export class MixcloudApi {
     if (!response.ok) {
       await response.body?.cancel();
       throw new Error(response.status === 403 || response.status === 429
-        ? "Mixcloud is unavailable or its request limit was reached. Try again later."
-        : "Could not load this Mixcloud show.");
+        ? serverT("mixcloud_is_unavailable_or_its_request_limit_was_reached_try_again_later")
+        : serverT("could_not_load_this_mixcloud_show"));
     }
     return payload;
   }
@@ -75,9 +76,9 @@ export class MixcloudApi {
 
   async resolveTrack(value: string, signal?: AbortSignal): Promise<MixcloudSearchResult> {
     const key = mixcloudShowKey(value);
-    if (!key) throw new Error("Enter a valid Mixcloud show URL.");
+    if (!key) throw new Error(serverT("enter_a_valid_mixcloud_show_url"));
     const show = mapShow(await this.request(key, signal));
-    if (!show || show.id !== key) throw new Error("That Mixcloud URL is not an available show.");
+    if (!show || show.id !== key) throw new Error(serverT("that_mixcloud_url_is_not_an_available_show"));
     return show;
   }
 }

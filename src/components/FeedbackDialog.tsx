@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { approvedImageUrl } from "../lib/remote-images";
 import { FormEvent, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, ImagePlus, Info, Lightbulb, Paperclip, X } from "lucide-react";
@@ -55,6 +56,7 @@ export function FeedbackButton({
   clientLoader?: () => Promise<Parameters<typeof submitFeedbackRecord>[0]>;
   operationClientFactory?: (source: Parameters<typeof submitFeedbackRecord>[0], expectedUserId: string, signal: AbortSignal) => Promise<Parameters<typeof submitFeedbackRecord>[0]>;
 }) {
+  const { t, i18n } = useTranslation("rooms");
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = (nextOpen: boolean) => {
@@ -119,20 +121,20 @@ export function FeedbackButton({
 
     const invalid = files.find((file) => !SCREENSHOT_TYPES.includes(file.type));
     if (invalid) {
-      setError("Screenshots must be PNG, JPEG, or WebP images.");
+      setError(t("socialScreenshotsMustBePNGJPEGOrWebPImages"));
       return;
     }
 
     const tooLarge = files.find((file) => file.size > MAX_SCREENSHOT_BYTES);
     if (tooLarge) {
-      setError("Each screenshot must be 5 MB or smaller.");
+      setError(t("socialEachScreenshotMustBe5MBOrSmaller"));
       return;
     }
 
     setScreenshots((current) => {
       const availableSlots = MAX_SCREENSHOTS - current.length;
       if (files.length > availableSlots) {
-        setError(`Attach up to ${MAX_SCREENSHOTS} screenshots.`);
+        setError(t("socialScreenshotLimit", { count: MAX_SCREENSHOTS }));
       }
       return [
         ...current,
@@ -143,7 +145,7 @@ export function FeedbackButton({
         }))
       ];
     });
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!open || sent) return;
@@ -183,7 +185,7 @@ export function FeedbackButton({
     event.preventDefault();
     if (submittingRef.current) return;
     if (!message.trim() && !screenshots.length) {
-      setError("Add a description or at least one screenshot.");
+      setError(t("socialAddADescriptionOrAtLeastOneScreenshot"));
       return;
     }
 
@@ -223,13 +225,13 @@ export function FeedbackButton({
       setOutcomeUnknown(false);
       clearForm();
       setSent(true);
-      toast.success("Feedback sent");
+      toast.success(t("socialFeedbackSent"));
     } catch (submitError) {
       const unknown = submitError instanceof FeedbackOutcomeUnknownError || Boolean(submittedAttempt?.outcomeUnknown);
       if (!unknown && attemptsRef.current.get(identity) === submittedAttempt) attemptsRef.current.delete(identity);
       if (isCurrent()) {
         setOutcomeUnknown(unknown);
-        setError(unknown ? new FeedbackOutcomeUnknownError().message : controller.signal.aborted ? 'Cancelled. Your draft and screenshots are kept.' : submitError instanceof Error ? submitError.message : "Couldn't send feedback. Try again.");
+        setError(unknown ? new FeedbackOutcomeUnknownError().message : controller.signal.aborted ? t("socialCancelledYourDraftAndScreenshotsAreKept") : submitError instanceof Error ? submitError.message : t("socialCouldnTSendFeedbackTryAgain"));
       }
     } finally {
       if (submissionAbortRef.current === controller) {
@@ -250,8 +252,8 @@ export function FeedbackButton({
             surface: roomSlug ? "room" : "room-directory"
           }));
         }}
-        title="Send feedback"
-        aria-label="Send feedback"
+        title={t("socialSendFeedback")}
+        aria-label={t("socialSendFeedback")}
       >
         <Lightbulb />
       </DialogTrigger>}
@@ -261,48 +263,48 @@ export function FeedbackButton({
             <div className="feedback-success">
               <span className="feedback-success-icon"><CheckCircle2 /></span>
               <DialogHeader className="pr-0 text-center">
-                <DialogTitle>Feedback sent</DialogTitle>
-                <DialogDescription className="sr-only">Sent to the Lydman team.</DialogDescription>
+                <DialogTitle>{t("socialFeedbackSent")}</DialogTitle>
+                <DialogDescription className="sr-only">{t("socialSentToTheTurntuneTeam")}</DialogDescription>
               </DialogHeader>
-              <Button onClick={() => setOpen(false)}>Done</Button>
+              <Button onClick={() => setOpen(false)}>{t("socialDone")}</Button>
             </div>
           ) : (
             <form onSubmit={submitFeedback} className="feedback-form" aria-busy={submitting}>
               <DialogHeader>
-                <DialogTitle className="feedback-title"><Lightbulb /> Send feedback</DialogTitle>
-                <DialogDescription className="sr-only">Report a problem or suggest a change.</DialogDescription>
+                <DialogTitle className="feedback-title"><Lightbulb /> {t("socialSendFeedback")}</DialogTitle>
+                <DialogDescription className="sr-only">{t("socialReportAProblemOrSuggestAChange")}</DialogDescription>
               </DialogHeader>
 
               <div className="feedback-classification">
                 <div className="feedback-field">
-                  <Label htmlFor="feedback-category">Category</Label>
+                  <Label htmlFor="feedback-category">{t("socialCategory")}</Label>
                   <Select value={category} disabled={submitting || outcomeUnknown} onValueChange={(value) => setCategory(value as typeof category)}>
                     <SelectTrigger id="feedback-category" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
-                      <SelectItem value="bug">Bug</SelectItem>
-                      <SelectItem value="idea">Idea</SelectItem>
-                      <SelectItem value="playback">Playback</SelectItem>
-                      <SelectItem value="chat">Chat</SelectItem>
-                      <SelectItem value="account">Account</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="bug">{t("socialBug")}</SelectItem>
+                      <SelectItem value="idea">{t("socialIdea")}</SelectItem>
+                      <SelectItem value="playback">{t("socialPlayback")}</SelectItem>
+                      <SelectItem value="chat">{t("socialChat")}</SelectItem>
+                      <SelectItem value="account">{t("socialAccount")}</SelectItem>
+                      <SelectItem value="other">{t("socialOther")}</SelectItem>
                     </SelectGroup></SelectContent>
                   </Select>
                 </div>
                 <div className="feedback-field">
-                  <Label htmlFor="feedback-impact">Impact</Label>
+                  <Label htmlFor="feedback-impact">{t("socialImpact")}</Label>
                   <Select value={impact} disabled={submitting || outcomeUnknown} onValueChange={(value) => setImpact(value as typeof impact)}>
                     <SelectTrigger id="feedback-impact" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectGroup>
-                      <SelectItem value="minor">Minor</SelectItem>
-                      <SelectItem value="blocking">Blocking</SelectItem>
-                      <SelectItem value="unusable">App unusable</SelectItem>
+                      <SelectItem value="minor">{t("socialMinor")}</SelectItem>
+                      <SelectItem value="blocking">{t("socialBlocking")}</SelectItem>
+                      <SelectItem value="unusable">{t("socialAppUnusable")}</SelectItem>
                     </SelectGroup></SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div className="feedback-field">
-                <Label htmlFor="feedback-message">Description</Label>
+                <Label htmlFor="feedback-message">{t("socialDescription")}</Label>
                 <Textarea
                   id="feedback-message"
                   disabled={submitting || outcomeUnknown}
@@ -312,26 +314,26 @@ export function FeedbackButton({
                   maxLength={4000}
                   autoFocus
                 />
-                <small>{message.length.toLocaleString()} / 4,000</small>
+                <small>{t("socialCountLimit", { current: message.length.toLocaleString(i18n.resolvedLanguage), limit: (4000).toLocaleString(i18n.resolvedLanguage) })}</small>
               </div>
 
               <div className="feedback-field">
                 <div className="feedback-attachment-heading">
-                  <Label htmlFor="feedback-screenshots">Screenshots</Label>
-                  <span>{screenshots.length} / {MAX_SCREENSHOTS}</span>
+                  <Label htmlFor="feedback-screenshots">{t("socialScreenshots")}</Label>
+                  <span>{t("socialCountLimit", { current: screenshots.length, limit: MAX_SCREENSHOTS })}</span>
                 </div>
 
                 {screenshots.length > 0 && (
-                  <div className="feedback-previews" aria-label="Attached screenshots">
+                  <div className="feedback-previews" aria-label={t("socialAttachedScreenshots")}>
                     {screenshots.map((attachment, index) => (
                       <div className="feedback-preview" key={attachment.id}>
-                        <img referrerPolicy="no-referrer" src={approvedImageUrl(attachment.previewUrl)} alt={`Screenshot ${index + 1}`} />
+                        <img referrerPolicy="no-referrer" src={approvedImageUrl(attachment.previewUrl)} alt={t("socialScreenshotNumber", { number: index + 1 })} />
                         <Button
                           type="button"
                           variant="secondary"
                           size="icon-xs"
                           onClick={() => removeScreenshot(attachment.id)}
-                          aria-label={`Remove screenshot ${index + 1}`}
+                          aria-label={t("socialRemoveScreenshot", { number: index + 1 })}
                           disabled={submitting || outcomeUnknown}
                         >
                           <X />
@@ -352,9 +354,9 @@ export function FeedbackButton({
                     }}
                   >
                     <span className="feedback-dropzone-icon"><ImagePlus /></span>
-                    <span><strong>Paste with Ctrl+V</strong></span>
-                    <span className="feedback-divider">or</span>
-                    <span className="feedback-browse"><Paperclip /> Choose files</span>
+                    <span><strong>{t("socialPasteWithCtrlV")}</strong></span>
+                    <span className="feedback-divider">{t("socialOr")}</span>
+                    <span className="feedback-browse"><Paperclip /> {t("socialChooseFiles")}</span>
                     <input
                       id="feedback-screenshots"
                       type="file"
@@ -368,19 +370,19 @@ export function FeedbackButton({
                     />
                   </label>
                 )}
-                <small>PNG, JPEG, or WebP · 5 MB max per image</small>
+                <small>{t("socialPNGJPEGOrWebP5MBMaxPerImage")}</small>
               </div>
 
               <div className="feedback-diagnostics">
                 <div className="feedback-diagnostics-toggle">
                   <span className="feedback-diagnostics-icon"><Info /></span>
-                  <span><strong>Include technical diagnostics</strong><small>Browser, device, app state, performance, and recent sanitized errors.</small></span>
-                  <Switch checked={includeDiagnostics} disabled={submitting || outcomeUnknown} onCheckedChange={setIncludeDiagnostics} aria-label="Include technical diagnostics" />
+                  <span><strong>{t("socialIncludeTechnicalDiagnostics")}</strong><small>{t("socialBrowserDeviceAppStatePerformanceAndRecentSanitizedErrors")}</small></span>
+                  <Switch checked={includeDiagnostics} disabled={submitting || outcomeUnknown} onCheckedChange={setIncludeDiagnostics} aria-label={t("socialIncludeTechnicalDiagnostics")} />
                 </div>
                 {includeDiagnostics && (
                   <details>
-                    <summary>View included data</summary>
-                    <p>No cookies, tokens, query strings, clipboard text, chat history, or precise location are included.</p>
+                    <summary>{t("socialViewIncludedData")}</summary>
+                    <p>{t("socialNoCookiesTokensQueryStringsClipboardTextChatHistoryOr")}</p>
                     <pre>{JSON.stringify(diagnosticPreview, null, 2)}</pre>
                   </details>
                 )}
@@ -393,9 +395,9 @@ export function FeedbackButton({
                 <Button type="button" variant="outline" onClick={() => {
                   if (submitting) submissionAbortRef.current?.abort();
                   else setOpen(false);
-                }}>{submitting ? 'Cancel sending' : 'Cancel'}</Button>
+                }}>{submitting ? t("socialCancelSending") : t("socialCancel")}</Button>
                 <Button type="submit" disabled={submitting || (!message.trim() && !screenshots.length)}>
-                  {submitting ? "Working…" : outcomeUnknown ? "Check submission" : "Send feedback"}
+                  {submitting ? t("socialWorking") : outcomeUnknown ? t("socialCheckSubmission") : t("socialSendFeedback")}
                 </Button>
               </DialogFooter>
             </form>

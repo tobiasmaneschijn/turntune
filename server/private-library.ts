@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
@@ -14,7 +15,7 @@ export const libraryTrackSchema = z.object({
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
-  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), "Artwork must use a supported image host.").optional(),
+  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), serverT("artwork_must_use_a_supported_image_host")).optional(),
   permalinkUrl: z.string().url().startsWith("https://").max(2048).optional(),
   durationMs: z.number().int().positive().max(86_400_000).optional()
 }).superRefine((track, context) => {
@@ -23,9 +24,9 @@ export const libraryTrackSchema = z.object({
     : track.provider === "apple" ? /^\d+$/.test(track.providerId)
     : track.provider === "mixcloud" ? isMixcloudShowKey(track.providerId)
     : /^soundcloud:tracks:\d+$/.test(track.providerId);
-  if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid individual track identifier." });
+  if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: serverT("invalid_individual_track_identifier") });
   if (track.provider === "mixcloud" && (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId)) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A matching Mixcloud show URL is required." });
+    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: serverT("a_matching_mixcloud_show_url_is_required") });
   }
 });
 const id = z.string().uuid();
@@ -58,7 +59,7 @@ export function changePrivateLibrary(current: PrivateLibrary, mutation: LibraryM
       const found = library.picks.find((pick) => pick.track.provider === mutation.track.provider && pick.track.providerId === mutation.track.providerId);
       if (found) found.track = mutation.track;
       else {
-        if (library.picks.length >= limits.libraryPicks) throw new PublicRequestError(`Your ${limits.libraryPicks} saved picks are full. Delete a pick before saving another.`,429);
+        if (library.picks.length >= limits.libraryPicks) throw new PublicRequestError(serverT("your_value1_saved_picks_are_full_delete_a_pick_before_saving_another", { value1: limits.libraryPicks }),429);
         library.picks.unshift({ id: randomUUID(), track: mutation.track, savedAt: now });
       }
       break;
@@ -67,17 +68,17 @@ export function changePrivateLibrary(current: PrivateLibrary, mutation: LibraryM
     case "save-set": {
       const existing = library.sets.find((set) => set.id === mutation.id);
       const tracks = mutation.tracks.filter((track, index, all) => all.findIndex((item) => item.provider === track.provider && item.providerId === track.providerId) === index);
-      if(tracks.length>limits.librarySetTracks&&tracks.length>(existing?.tracks.length??0))throw new PublicRequestError(`Sets can contain up to ${limits.librarySetTracks} tracks.`,429);
+      if(tracks.length>limits.librarySetTracks&&tracks.length>(existing?.tracks.length??0))throw new PublicRequestError(serverT("sets_can_contain_up_to_value1_tracks", { value1: limits.librarySetTracks }),429);
       if (existing) { existing.name = mutation.name; existing.tracks = tracks; }
       else {
-        if (library.sets.length >= limits.librarySets) throw new PublicRequestError(`Your ${limits.librarySets} saved sets are full. Delete a set before saving another.`,429);
+        if (library.sets.length >= limits.librarySets) throw new PublicRequestError(serverT("your_value1_saved_sets_are_full_delete_a_set_before_saving_another", { value1: limits.librarySets }),429);
         library.sets.unshift({ id: mutation.id, name: mutation.name, tracks, savedAt: now });
       }
       break;
     }
     case "rename-set": {
       const existing = library.sets.find((set) => set.id === mutation.id);
-      if (!existing) throw new Error("That set was deleted. Refresh your picks and sets.");
+      if (!existing) throw new Error(serverT("that_set_was_deleted_refresh_your_picks_and_sets"));
       existing.name = mutation.name;
       break;
     }

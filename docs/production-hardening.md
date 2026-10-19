@@ -15,7 +15,7 @@ moderation, export/deletion steps and the detailed data/retention inventory.
   The project and JWKS endpoint must describe the same HTTPS project. Production
   rejects inline JWKS overrides and credentials embedded in the key URL.
 - HTTP requests and Engine.IO handshakes require the configured Host and HTTPS.
-  Browser Origin must match the public origin. Native clients can omit Origin;
+  Browser Origin must match `APP_ORIGIN` or an explicit `APP_ORIGINS` entry. Native clients can omit Origin;
   bearer authentication is still required at the application boundary.
 - Forwarded headers have no authority by default. `TRUSTED_PROXY_CIDRS` accepts
   explicit addresses/nonzero networks, never a hop count, an alias or a catch-all
@@ -64,7 +64,8 @@ The example is a list of names/placeholders, not deployable credentials.
 
 | Setting | Required value / verification |
 | --- | --- |
-| `APP_ORIGIN` | Exact public origin, e.g. `https://soundspin.example`; no path/query, credentials or trailing application route. |
+| `APP_ORIGIN` | Exact active public origin, e.g. `https://turntune.app` after DNS is configured; no path/query, credentials or trailing application route. |
+| `APP_ORIGINS` | Optional comma-separated additional approved origins. Retain old domains here while they still serve the app. |
 | `TRUSTED_PROXY_CIDRS` | Exact immediate ingress addresses and any additional legitimate forwarding hops. Empty trusts nobody. Record every HTTP/WS/health path and its real direct peer before setting this. |
 | `CSP_MODE` | `enforce` at launch. `report-only` is available temporarily in private staging; baseline anti-framing remains enforced. |
 | `SUPABASE_URL` | HTTPS origin of the intended production project. |
@@ -127,12 +128,12 @@ map $http_upgrade $soundspin_connection {
 }
 server {
     listen 80;
-    server_name soundspin.example;
-    return 308 https://soundspin.example$request_uri;
+    server_name turntune.app;
+    return 308 https://turntune.app$request_uri;
 }
 server {
     listen 443 ssl;
-    server_name soundspin.example;
+    server_name turntune.app;
     ssl_certificate /etc/ssl/soundspin/fullchain.pem;
     ssl_certificate_key /etc/ssl/soundspin/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -141,7 +142,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Host soundspin.example;
+        proxy_set_header Host turntune.app;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-Host "";

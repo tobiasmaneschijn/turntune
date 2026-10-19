@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { Request } from "express";
 
 export type SpotifyAccessCheck = (request: Request, userId: string, roomSlug?: string) => Promise<boolean>;
@@ -7,7 +8,7 @@ export function spotifyRoomContext(request: Request): string | undefined {
   const header = request.get("x-soundspin-room");
   const query = request.query.roomSlug;
   const valid = (value: unknown): value is string => typeof value === "string" && /^[a-z0-9-]{3,48}$/.test(value);
-  if (header !== undefined && !valid(header) || query !== undefined && !valid(query) || header && query && header !== query) throw new Error("Invalid room context.");
+  if (header !== undefined && !valid(header) || query !== undefined && !valid(query) || header && query && header !== query) throw new Error(serverT("invalid_room_context"));
   return header ?? query as string | undefined;
 }
 

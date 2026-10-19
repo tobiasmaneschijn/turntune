@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Check, ChevronDown, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -21,6 +22,7 @@ export interface MusicLibraryPanelProps {
 }
 
 export function MusicLibraryPanel({ library, loading, error, busy, signedIn, canEnqueue, allowsProvider, queue, refresh, mutate, enqueue, addSet, details, isQueued, saveSetOpen, onSaveSetOpenChange, active = true, saveSetInputRef }: MusicLibraryPanelProps) {
+  const { t } = useTranslation('music');
   const [filter, setFilter] = useState("");
   const [setName, setSetName] = useState("");
   const [localSaveSetOpen, setLocalSaveSetOpen] = useState(false);
@@ -75,7 +77,7 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
     restoreActionFocus(() => setActionsRefs.current.get(setId) || filterRef.current, owners);
   };
 
-  if (!signedIn) return <div className="rail-empty"><p>Sign in to save picks and sets.</p></div>;
+  if (!signedIn) return <div className="rail-empty"><p>{t('library.signIn')}</p></div>;
   const limits = libraryLimits(library);
   const needle = filter.trim().toLocaleLowerCase();
   const picks = library?.picks.filter((pick) => [pick.track.title, pick.track.artist].some((value) => value?.toLocaleLowerCase().includes(needle))) || [];
@@ -83,18 +85,18 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
 
   return <div className="music-library-content">
     <div className="music-library-toolbar">
-      <Input ref={filterRef} aria-label="Filter private picks and sets" placeholder="Filter picks and sets" value={filter} disabled={!library} onChange={(event) => setFilter(event.target.value)} />
-      <Button className="music-library-refresh" variant="ghost" size="icon" aria-label="Refresh private picks and sets" disabled={busy || loading} onClick={refresh}><RefreshCw size={16} /></Button>
+      <Input ref={filterRef} aria-label={t('library.filterLabel')} placeholder={t('library.filterPlaceholder')} value={filter} disabled={!library} onChange={(event) => setFilter(event.target.value)} />
+      <Button className="music-library-refresh" variant="ghost" size="icon" aria-label={t('library.refresh')} disabled={busy || loading} onClick={refresh}><RefreshCw size={16} /></Button>
     </div>
-    {loading && <p role="status">Loading picks and sets…</p>}
-    {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>Retry</Button></div>}
+    {loading && <p role="status">{t('library.loading')}</p>}
+    {error && <div role="alert"><p>{error}</p><Button variant="outline" size="sm" disabled={busy || loading} onClick={refresh}>{t('library.retry')}</Button></div>}
     {!library && error.includes("Clear your library") && <div className="music-library-delete">{confirmClear ? <>
-      <p>Delete all saved picks and sets? Queued tracks will remain.</p>
-      <Button variant="destructive" disabled={busy || loading} onClick={async () => { if (await mutate({ type: "clear-library" })) setConfirmClear(false); }}>Delete all picks and sets</Button>
-      <Button variant="ghost" disabled={busy || loading} onClick={() => setConfirmClear(false)}>Cancel</Button>
-    </> : <Button variant="ghost" size="sm" disabled={busy || loading} onClick={() => setConfirmClear(true)}>Clear library…</Button>}</div>}
+      <p>{t('library.confirmDelete')}</p>
+      <Button variant="destructive" disabled={busy || loading} onClick={async () => { if (await mutate({ type: "clear-library" })) setConfirmClear(false); }}>{t('library.deleteAll')}</Button>
+      <Button variant="ghost" disabled={busy || loading} onClick={() => setConfirmClear(false)}>{t('library.cancel')}</Button>
+    </> : <Button variant="ghost" size="sm" disabled={busy || loading} onClick={() => setConfirmClear(true)}>{t('library.clearLibrary')}</Button>}</div>}
     {library && <>
-      <h3>Picks {library.picks.length >= limits.libraryPicks * 0.9 && <small>{library.picks.length}/{limits.libraryPicks}</small>}</h3>
+      <h3>{t('library.favorites')} {library.picks.length >= limits.libraryPicks * 0.9 && <small>{library.picks.length}/{limits.libraryPicks}</small>}</h3>
       {picks.map((pick, index) => {
         const queued = isQueued(pick.track);
         const providerDisabled = !allowsProvider(pick.track.provider);
@@ -102,67 +104,67 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
           <TrackArtwork track={pick.track} compact active={active} />
           <div className="music-library-pick-copy">
             <strong title={pick.track.title}>{pick.track.title}</strong><small title={pick.track.artist || providerLabel(pick.track.provider)}>{pick.track.artist || providerLabel(pick.track.provider)}</small>
-            {providerDisabled && <small>Disabled in this room</small>}
+            {providerDisabled && <small>{t('library.providerDisabled')}</small>}
           </div>
-          <Button className="music-library-add" variant="ghost" size="icon" aria-label={`Add saved pick ${pick.track.title} to my queue`} title={providerDisabled ? "Disabled in this room" : queued ? "Already in room" : "Add to queue"} disabled={busy || !canEnqueue || queued || providerDisabled} onClick={() => enqueue(pick.track)}>{queued ? <Check /> : <Plus />}</Button>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label={t('library.addFavoriteToQueue', { title: pick.track.title })} title={providerDisabled ? t('library.providerDisabled') : queued ? t('library.alreadyQueued') : t('library.addToQueue')} disabled={busy || !canEnqueue || queued || providerDisabled} onClick={() => enqueue(pick.track)}>{queued ? <Check /> : <Plus />}</Button>
           <DropdownMenu>
-            <DropdownMenuTrigger ref={(button) => { if (button) pickActionsRefs.current.set(pick.id, button); else pickActionsRefs.current.delete(pick.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved pick ${pick.track.title}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
+            <DropdownMenuTrigger ref={(button) => { if (button) pickActionsRefs.current.set(pick.id, button); else pickActionsRefs.current.delete(pick.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={t('library.favoriteActions', { title: pick.track.title })} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? pickActionsRefs.current.get(pick.id) || filterRef.current || true : false}>
-              <DropdownMenuItem onClick={() => details(pick.track, pickActionsRefs.current.get(pick.id))}><Info />Track details</DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" aria-label={`Delete saved pick ${pick.track.title}`} disabled={busy} onClick={async (event) => {
+              <DropdownMenuItem onClick={() => details(pick.track, pickActionsRefs.current.get(pick.id))}><Info />{t('library.trackDetails')}</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" aria-label={t('library.deleteFavoriteLabel', { title: pick.track.title })} disabled={busy} onClick={async (event) => {
                 const nextId = picks[index + 1]?.id || picks[index - 1]?.id;
                 const owners = [event.currentTarget, pickActionsRefs.current.get(pick.id)];
                 if (await mutate({ type: "delete-pick", id: pick.id })) restoreActionFocus(() => (nextId ? pickActionsRefs.current.get(nextId) : undefined) || filterRef.current, owners);
-              }}><Trash2 />Delete pick</DropdownMenuItem>
+              }}><Trash2 />{t('library.deleteFavorite')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>;
       })}
-      {picks.length === 0 && <p className="music-library-empty">{needle ? "No matching picks." : "Save picks from a track’s menu."}</p>}
-      <h3>Sets {library.sets.length >= limits.librarySets * 0.8 && <small>{library.sets.length}/{limits.librarySets}</small>}</h3>
+      {picks.length === 0 && <p className="music-library-empty">{needle ? t('library.noMatchingFavorites') : t('library.emptyFavorites')}</p>}
+      <h3>{t('library.sets')} {library.sets.length >= limits.librarySets * 0.8 && <small>{library.sets.length}/{limits.librarySets}</small>}</h3>
       <details className="music-create-set" open={createSetOpen} onToggle={(event) => {
         if (event.currentTarget.open !== createSetOpen) changeSaveSetOpen(event.currentTarget.open);
       }}>
-        <summary ref={saveSetSummaryRef}>Save queue as set<ChevronDown size={15} aria-hidden="true" /></summary>
+        <summary ref={saveSetSummaryRef}>{t('library.saveQueueAsSet')}<ChevronDown size={15} aria-hidden="true" /></summary>
         <form className="music-save-set" onSubmit={async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
-          if (!setName.trim()) { setFormError("Enter a set name."); setNameRef.current?.focus(); return; }
-          if (!queue.length || queue.length > limits.librarySetTracks) { setFormError(`A set needs 1–${limits.librarySetTracks} waiting tracks.`); return; }
+          if (!setName.trim()) { setFormError(t('library.nameRequired')); setNameRef.current?.focus(); return; }
+          if (!queue.length || queue.length > limits.librarySetTracks) { setFormError(t('library.setSizeRequired', { limit: limits.librarySetTracks })); return; }
           draftId.current ||= crypto.randomUUID();
           if (await mutate({ type: "save-set", id: draftId.current, name: setName.trim(), tracks: queue.map(libraryTrack) })) {
             setSetName(""); draftId.current = null; setFormError(""); changeSaveSetOpen(false);
             restoreActionFocus(() => saveSetSummaryRef.current, [form]);
           }
         }}>
-          <label>Set name<Input ref={setNameRef} value={setName} disabled={busy} maxLength={60} onChange={(event) => { setSetName(event.target.value); draftId.current = null; setFormError(""); }} placeholder="Friday focus" /></label>
-          <div className="music-library-form-actions"><Button type="submit" disabled={busy || !queue.length || queue.length > limits.librarySetTracks || library.sets.length >= limits.librarySets}>Save set</Button><Button variant="ghost" type="button" disabled={busy} onClick={(event) => { changeSaveSetOpen(false); restoreActionFocus(() => saveSetSummaryRef.current, [event.currentTarget]); }}>Cancel</Button></div>
-          {!queue.length && <small>Add a track to your queue first.</small>}
-          {queue.length > limits.librarySetTracks && <small>{limits.librarySetTracks}-track limit. Shorten your queue first.</small>}
-          {library.sets.length >= limits.librarySets && <small>{limits.librarySets}-set limit. Delete a set first.</small>}
+          <label>{t('library.setName')}<Input ref={setNameRef} value={setName} disabled={busy} maxLength={60} onChange={(event) => { setSetName(event.target.value); draftId.current = null; setFormError(""); }} placeholder={t('library.exampleName')} /></label>
+          <div className="music-library-form-actions"><Button type="submit" disabled={busy || !queue.length || queue.length > limits.librarySetTracks || library.sets.length >= limits.librarySets}>{t('library.saveSet')}</Button><Button variant="ghost" type="button" disabled={busy} onClick={(event) => { changeSaveSetOpen(false); restoreActionFocus(() => saveSetSummaryRef.current, [event.currentTarget]); }}>{t('library.cancel')}</Button></div>
+          {!queue.length && <small>{t('library.queueRequired')}</small>}
+          {queue.length > limits.librarySetTracks && <small>{t('library.setTrackLimit', { count: limits.librarySetTracks })}</small>}
+          {library.sets.length >= limits.librarySets && <small>{t('library.setLimit', { count: limits.librarySets })}</small>}
           {formError && <p role="alert">{formError}</p>}
         </form>
       </details>
       {sets.map((set, index) => <section key={set.id} className="music-saved-set">
         <details className="music-set-tracks">
-          <summary><h4><span title={set.name}>{set.name}</span><small>{set.tracks.length} {set.tracks.length === 1 ? "track" : "tracks"}</small></h4><ChevronDown size={15} aria-hidden="true" /></summary>
-          <ol>{set.tracks.map((track, trackIndex) => <li key={`${track.provider}:${track.providerId}:${trackIndex}`}>{track.title}{track.artist ? ` — ${track.artist}` : ""} · {providerLabel(track.provider)}{!allowsProvider(track.provider) ? " · Disabled in this room" : ""}</li>)}</ol>
-          <p>Playing, queued, and disabled tracks are skipped.</p>
+          <summary><h4><span title={set.name}>{set.name}</span><small>{t('library.trackCount', { count: set.tracks.length })}</small></h4><ChevronDown size={15} aria-hidden="true" /></summary>
+          <ol>{set.tracks.map((track, trackIndex) => <li key={`${track.provider}:${track.providerId}:${trackIndex}`}>{t(!allowsProvider(track.provider) ? 'library.setTrackDisabled' : 'library.setTrack', { title: track.title, artist: track.artist, provider: providerLabel(track.provider), context: track.artist ? 'withArtist' : undefined })}</li>)}</ol>
+          <p>{t('library.skippedTracks')}</p>
         </details>
         <div className="music-library-row-actions">
-          <Button className="music-library-add" variant="ghost" size="icon" aria-label="Append set to my queue" title={`Append ${set.name} to queue`} disabled={busy || !canEnqueue || !set.tracks.some((track) => allowsProvider(track.provider))} onClick={() => addSet(set)}><Plus /></Button>
+          <Button className="music-library-add" variant="ghost" size="icon" aria-label={t('library.appendSet')} title={t('library.appendSetLabel', { name: set.name })} disabled={busy || !canEnqueue || !set.tracks.some((track) => allowsProvider(track.provider))} onClick={() => addSet(set)}><Plus /></Button>
           <DropdownMenu>
-            <DropdownMenuTrigger ref={(button) => { if (button) setActionsRefs.current.set(set.id, button); else setActionsRefs.current.delete(set.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={`Actions for saved set ${set.name}`} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
+            <DropdownMenuTrigger ref={(button) => { if (button) setActionsRefs.current.set(set.id, button); else setActionsRefs.current.delete(set.id); }} render={<Button className="music-library-more" variant="ghost" size="icon" aria-label={t('library.setActions', { name: set.name })} />}><MoreHorizontal size={16} /></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="music-library-menu" finalFocus={() => activeRef.current ? (renameSetIdRef.current === set.id && renameRef.current) || setActionsRefs.current.get(set.id) || filterRef.current || true : false}>
-              <DropdownMenuItem disabled={busy} onClick={() => { renameSetIdRef.current = set.id; setEditSet(set); setRename(set.name); }}><Pencil />Rename set</DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" aria-label={`Delete saved set ${set.name}`} disabled={busy} onClick={async (event) => {
+              <DropdownMenuItem disabled={busy} onClick={() => { renameSetIdRef.current = set.id; setEditSet(set); setRename(set.name); }}><Pencil />{t('library.renameSet')}</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" aria-label={t('library.deleteSetLabel', { name: set.name })} disabled={busy} onClick={async (event) => {
                 const nextId = sets[index + 1]?.id || sets[index - 1]?.id;
                 const owners = [event.currentTarget, setActionsRefs.current.get(set.id)];
                 if (await mutate({ type: "delete-set", id: set.id })) {
                   if (editSet?.id === set.id) { renameSetIdRef.current = null; setEditSet(null); }
                   restoreActionFocus(() => (nextId ? setActionsRefs.current.get(nextId) : undefined) || filterRef.current, owners);
                 }
-              }}><Trash2 />Delete set</DropdownMenuItem>
+              }}><Trash2 />{t('library.deleteSet')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -171,18 +173,18 @@ export function MusicLibraryPanel({ library, loading, error, busy, signedIn, can
           const form = event.currentTarget;
           if (rename.trim() && await mutate({ type: "rename-set", id: set.id, name: rename.trim() })) closeRename(set.id, [form]);
         }}>
-          <Input ref={renameRef} aria-label={`New name for ${set.name}`} value={rename} disabled={busy} maxLength={60} onChange={(event) => setRename(event.target.value)} />
-          <div className="music-library-form-actions"><Button type="submit" size="sm" disabled={busy || !rename.trim()}>Save name</Button><Button variant="ghost" size="sm" type="button" disabled={busy} onClick={(event) => closeRename(set.id, [event.currentTarget])}>Cancel rename</Button></div>
+          <Input ref={renameRef} aria-label={t('library.renameSetLabel', { name: set.name })} value={rename} disabled={busy} maxLength={60} onChange={(event) => setRename(event.target.value)} />
+          <div className="music-library-form-actions"><Button type="submit" size="sm" disabled={busy || !rename.trim()}>{t('library.saveName')}</Button><Button variant="ghost" size="sm" type="button" disabled={busy} onClick={(event) => closeRename(set.id, [event.currentTarget])}>{t('library.cancelRename')}</Button></div>
         </form>}
       </section>)}
-      {sets.length === 0 && <p className="music-library-empty">{needle ? "No matching sets." : "No saved sets."}</p>}
+      {sets.length === 0 && <p className="music-library-empty">{needle ? t('library.noMatchingSets') : t('library.emptySets')}</p>}
       {(library.picks.length > 0 || library.sets.length > 0) && <div className="music-library-delete">{confirmClear ? <>
-        <p>Delete all saved picks and sets? Queued tracks will remain.</p>
+        <p>{t('library.confirmDelete')}</p>
         <Button ref={clearConfirmRef} variant="destructive" disabled={busy} onClick={async (event) => {
           const button = event.currentTarget;
           if (await mutate({ type: "clear-library" })) { setConfirmClear(false); renameSetIdRef.current = null; setEditSet(null); restoreActionFocus(() => filterRef.current, [button]); }
-        }}>Delete all picks and sets</Button><Button variant="ghost" disabled={busy} onClick={(event) => { setConfirmClear(false); restoreActionFocus(() => clearButtonRef.current, [event.currentTarget]); }}>Cancel</Button>
-      </> : <Button ref={clearButtonRef} variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmClear(true)}>Clear library…</Button>}</div>}
+        }}>{t('library.deleteAll')}</Button><Button variant="ghost" disabled={busy} onClick={(event) => { setConfirmClear(false); restoreActionFocus(() => clearButtonRef.current, [event.currentTarget]); }}>{t('library.cancel')}</Button>
+      </> : <Button ref={clearButtonRef} variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmClear(true)}>{t('library.clearLibrary')}</Button>}</div>}
     </>}
   </div>;
 }

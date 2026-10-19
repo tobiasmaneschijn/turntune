@@ -57,7 +57,7 @@ test("the compiled production entrypoint serves the SPA, assets and readiness", 
     const timer = setTimeout(() => reject(new Error(`The compiled server did not start. ${errors}`)), 15_000);
     server.stdout.on("data", chunk => {
       output += chunk.toString();
-      const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/turntune listening on (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     server.once("error", error => { clearTimeout(timer); reject(error); });

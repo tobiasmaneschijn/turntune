@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "./i18n";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useAppAuth } from "./hooks/use-app-auth";
 import { clearUserChatDrafts } from "./chat/drafts";
@@ -13,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./com
 const RoomApplication = lazy(() => import("./RoomApplication").then(module => ({ default: module.RoomApplication })));
 
 export function App() {
+  useTranslation();
   const { auth, setAuth, retryAuth } = useAppAuth();
   const [userSettings, setUserSettings] = useState<SoundSpinUserSettings>(readUserSettings);
   const draftOwnerRef = useRef(auth.session?.user.id);
@@ -39,10 +42,10 @@ export function App() {
   }, []);
 
   if (auth.error) return <><AppHeader publicActions={null} /><main className="room-access-screen" id="main-content" tabIndex={-1}><Card className="room-access-error">
-    <CardHeader><CardTitle>Could not connect</CardTitle><CardDescription>{auth.error}</CardDescription></CardHeader>
-    <CardContent><Button onClick={retryAuth}>Try again</Button></CardContent>
+    <CardHeader><CardTitle>{i18n.t("common:App_could_not_connect")}</CardTitle><CardDescription>{auth.error}</CardDescription></CardHeader>
+    <CardContent><Button onClick={retryAuth}>{i18n.t("common:App_try_again")}</Button></CardContent>
   </Card></main></>;
-  if (auth.loading) return <LoadingScreen label="Restoring your session…" />;
+  if (auth.loading) return <LoadingScreen label={i18n.t("common:App_restoring_your_session")} />;
   if (auth.enabled && !auth.session) {
     focusOnEntry.current = true;
     return <PublicEntry client={auth.client!} />;
@@ -53,7 +56,7 @@ export function App() {
     setAuth(current => ({ ...current, recovery: false }));
   }} />;
 
-  return <Suspense fallback={<LoadingScreen label="Loading your rooms…" />}>
+  return <Suspense fallback={<LoadingScreen label={i18n.t("common:App_loading_your_rooms")} />}>
     <RoomApplication auth={auth} userSettings={userSettings} changeUserSettings={changeUserSettings} focusOnEntry={focusOnEntry.current} />
   </Suspense>;
 }

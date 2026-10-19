@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import crypto from "node:crypto";
 import type { Store } from "./store.js";
 import type { SpotifyApi } from "./spotify.js";
@@ -28,7 +29,7 @@ export class SpotifyAccounts {
   }
 
   private encrypt(value: SpotifySecret) {
-    if (!this.key) throw new Error("Provider token encryption is not configured.");
+    if (!this.key) throw new Error(serverT("provider_token_encryption_is_not_configured"));
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv("aes-256-gcm", this.key, iv);
     const ciphertext = Buffer.concat([
@@ -39,9 +40,9 @@ export class SpotifyAccounts {
   }
 
   private decrypt(value: string) {
-    if (!this.key) throw new Error("Provider token encryption is not configured.");
+    if (!this.key) throw new Error(serverT("provider_token_encryption_is_not_configured"));
     const [version, iv, tag, ciphertext] = value.split(".");
-    if (version !== "v1" || !iv || !tag || !ciphertext) throw new Error("Stored Spotify credentials are invalid.");
+    if (version !== "v1" || !iv || !tag || !ciphertext) throw new Error(serverT("stored_spotify_credentials_are_invalid"));
     const decipher = crypto.createDecipheriv("aes-256-gcm", this.key, Buffer.from(iv, "base64url"));
     decipher.setAuthTag(Buffer.from(tag, "base64url"));
     const plaintext = Buffer.concat([
@@ -56,11 +57,11 @@ export class SpotifyAccounts {
   }
 
   async connect(userId: string, code: string, redirectUri: string, authorizeCurrent?: () => Promise<void>) {
-    if (!this.configured) throw new Error("Spotify accounts are not configured yet.");
+    if (!this.configured) throw new Error(serverT("spotify_accounts_are_not_configured_yet"));
     await this.changeConnection(userId, async () => {
       await authorizeCurrent?.();
       const token = await this.spotify.exchangeAuthorizationCode(code, redirectUri);
-      if (!token.refresh_token) throw new Error("Spotify did not issue a refresh token.");
+      if (!token.refresh_token) throw new Error(serverT("spotify_did_not_issue_a_refresh_token"));
       await authorizeCurrent?.();
       await this.store.saveMusicConnection({
         userId,
@@ -100,7 +101,7 @@ export class SpotifyAccounts {
   }
 
   async getAccessToken(userId: string) {
-    if (this.connectionChanges.has(userId)) throw new Error("Spotify connection is being updated. Try again.");
+    if (this.connectionChanges.has(userId)) throw new Error(serverT("spotify_connection_is_being_updated_try_again"));
     const cached = this.accessTokens.get(userId);
     if (cached && cached.expiresAt > Date.now() + 30_000) return cached.value;
     const pending = this.refreshes.get(userId);
@@ -115,10 +116,10 @@ export class SpotifyAccounts {
 
   private async refreshAccessToken(userId: string, revision: number) {
     const connection = await this.store.getMusicConnection(userId, "spotify");
-    if (!connection) throw new Error("Connect Spotify first.");
+    if (!connection) throw new Error(serverT("connect_spotify_first"));
     const currentSecret = this.decrypt(connection.refreshTokenCiphertext);
     const token = await this.spotify.refreshUserToken(currentSecret.refreshToken);
-    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error("Spotify connection changed. Try again.");
+    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error(serverT("spotify_connection_changed_try_again"));
     if (token.refresh_token) {
       await this.store.saveMusicConnection({
         userId,
@@ -128,7 +129,7 @@ export class SpotifyAccounts {
         metadata: connection.metadata
       });
     }
-    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error("Spotify connection changed. Try again.");
+    if ((this.credentialRevisions.get(userId) || 0) !== revision) throw new Error(serverT("spotify_connection_changed_try_again"));
     this.accessTokens.set(userId, {
       value: token.access_token,
       expiresAt: Date.now() + token.expires_in * 1000

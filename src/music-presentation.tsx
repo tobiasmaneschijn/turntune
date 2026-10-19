@@ -1,6 +1,6 @@
+import i18n from "./i18n";
 import { readStoredValue } from "./lib/browser-storage";
 import type { Provider, Track } from "./types";
-import { PROVIDER_LABELS } from "../shared/providers";
 import { isMixcloudShowKey, mixcloudShowKey, mixcloudShowUrl } from "../shared/mixcloud";
 
 export const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
@@ -17,7 +17,7 @@ export interface ProviderSearchResult {
 }
 
 export function providerLabel(provider: Provider) {
-  return PROVIDER_LABELS[provider];
+  return i18n.t(`music:providers.${provider}`);
 }
 
 export function readSearchProvider(): Provider {
@@ -69,35 +69,35 @@ export type MusicLink = { provider: Provider; url: string; providerId?: string }
 
 export function parseMusicLink(value: string, selectedProvider: Provider): MusicLink | { error: string } {
   const input = value.trim();
-  if (!input) return { error: "Paste a track link." };
-  if (input.length > 2048) return { error: "That link is too long. Paste a track link under 2,048 characters." };
+  if (!input) return { error: i18n.t("music:links.required") };
+  if (input.length > 2048) return { error: i18n.t("music:links.tooLong") };
   if (/^spotify:track:[A-Za-z0-9]{22}$/.test(input)) return { provider: "spotify", url: input };
   if (/^[A-Za-z0-9_-]{11}$/.test(input)) {
     return selectedProvider === "youtube"
       ? { provider: "youtube", providerId: input, url: `https://www.youtube.com/watch?v=${input}` }
-      : { error: "Choose YouTube for a video ID, or paste the full link." };
+      : { error: i18n.t("music:links.chooseYoutube") };
   }
   if (/^[A-Za-z0-9]{22}$/.test(input) && selectedProvider === "spotify") return { provider: "spotify", url: input };
   const provider = detectMusicProvider(input);
-  if (!provider) return { error: "Use a link from an available music service." };
+  if (!provider) return { error: i18n.t("music:links.unsupported") };
   const url = new URL(input);
   if (provider === "youtube") {
     const id = youtubeId(input);
-    if (!id) return { error: "Paste a YouTube video link, not a channel or playlist link." };
+    if (!id) return { error: i18n.t("music:links.youtubeTrack") };
     return { provider, url: `https://www.youtube.com/watch?v=${id}`, providerId: id };
   }
   if (provider === "spotify" && !/^\/(?:intl-[a-z]{2}\/)?track\/[A-Za-z0-9]{22}(?:\/|$)/i.test(url.pathname)) {
-    return { error: "Paste a Spotify track link. Albums and playlists cannot be added here." };
+    return { error: i18n.t("music:links.spotifyTrack") };
   }
   if (provider === "soundcloud" && /\/sets(?:\/|$)/.test(url.pathname)) {
-    return { error: "Paste an individual SoundCloud track link, rather than a set or playlist." };
+    return { error: i18n.t("music:links.soundcloudTrack") };
   }
   if (provider === "apple" && !/^\d+$/.test(url.searchParams.get("i") || "") && !/\/song\/[^/]+\/\d+\/?$/.test(url.pathname)) {
-    return { error: "Paste an Apple Music song link. Album links need the selected song’s i= parameter." };
+    return { error: i18n.t("music:links.appleTrack") };
   }
   if (provider === "mixcloud") {
     const providerId = mixcloudShowKey(input);
-    if (!providerId) return { error: "Paste a secure Mixcloud show link, not a profile or playlist link." };
+    if (!providerId) return { error: i18n.t("music:links.mixcloudShow") };
     return { provider, providerId, url: mixcloudShowUrl(providerId) };
   }
   return { provider, url: input };
@@ -119,7 +119,7 @@ export function formatTrackDuration(durationMs?: number) {
 
 export function formatPlayedAt(playedAt?: number) {
   if (typeof playedAt !== "number" || !Number.isFinite(playedAt) || playedAt <= 0 || !Number.isFinite(new Date(playedAt).getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(playedAt);
+  return new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(playedAt);
 }
 
 export function trackSourceUrl(track: Pick<Track, "provider" | "providerId" | "permalinkUrl">) {

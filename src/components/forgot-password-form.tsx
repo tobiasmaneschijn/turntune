@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -22,6 +23,7 @@ export function ForgotPasswordForm({
   client: SupabaseClient
   onNavigate: (path: string) => void
 }) {
+  const { t } = useTranslation("public");
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -55,7 +57,7 @@ export function ForgotPasswordForm({
       const response = await Promise.race([
         client.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/update-password` }),
         new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error('Could not confirm the reset email. Check your email or try again.')), 15_000)
+          deadline = setTimeout(() => reject(new Error(t("resetConfirmationError"))), 15_000)
         }),
       ])
       if (!active.current || request.current !== attempt) return
@@ -64,7 +66,7 @@ export function ForgotPasswordForm({
       setResendAt(Date.now() + 60_000)
       setNow(Date.now())
     } catch (error: unknown) {
-      if (active.current && request.current === attempt) setError(error instanceof Error ? error.message : 'Could not send reset link. Try again.')
+      if (active.current && request.current === attempt) setError(error instanceof Error ? error.message : t("resetLinkError"))
     } finally {
       clearTimeout(deadline)
       if (active.current && request.current === attempt) setIsLoading(false)
@@ -80,32 +82,32 @@ export function ForgotPasswordForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle ref={resultHeading} role="heading" aria-level={2} tabIndex={-1} className="text-xl">Check your email</CardTitle>
-            <CardDescription>If this email has an account, it will receive a reset link.</CardDescription>
+            <CardTitle ref={resultHeading} role="heading" aria-level={2} tabIndex={-1} className="text-xl">{t("checkEmail")}</CardTitle>
+            <CardDescription>{t("resetLinkSent")}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             {error && <p role="alert" className="dialog-error">{error}</p>}
-            <Button onClick={() => onNavigate('/login')}>Sign in</Button>
-            <Button variant="outline" disabled={isLoading} onClick={() => { setSuccess(false); setError(null); setResendAt(0) }}>Use another email</Button>
-            <Button variant="ghost" disabled={isLoading || remaining > 0} onClick={() => void sendResetLink()}>{isLoading ? 'Sending…' : remaining > 0 ? `Resend in ${remaining}s` : 'Resend reset link'}</Button>
+            <Button onClick={() => onNavigate('/login')}>{t("signIn")}</Button>
+            <Button variant="outline" disabled={isLoading} onClick={() => { setSuccess(false); setError(null); setResendAt(0) }}>{t("useAnotherEmail")}</Button>
+            <Button variant="ghost" disabled={isLoading || remaining > 0} onClick={() => void sendResetLink()}>{isLoading ? t("sending") : remaining > 0 ? t("resendIn", { count: remaining }) : t("resendResetLink")}</Button>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Reset password</CardTitle>
+            <CardTitle className="text-xl">{t("resetPassword")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleForgotPassword}>
               <div className="flex flex-col gap-6">
                 <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email">{t("email")}</Label>
                   <Input
                     id="email"
                     type="email"
                     autoComplete="email"
                     disabled={isLoading}
-                    placeholder="you@example.com"
+                    placeholder={t("emailPlaceholder")}
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -113,11 +115,11 @@ export function ForgotPasswordForm({
                 </div>
                 {error && <p role="alert" className="dialog-error">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading || remaining > 0}>
-                  {isLoading ? 'Sending…' : remaining > 0 ? `Resend in ${remaining}s` : 'Send reset link'}
+                  {isLoading ? t("sending") : remaining > 0 ? t("resendIn", { count: remaining }) : t("sendResetLink")}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>Sign in</Button>
+                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>{t("signIn")}</Button>
               </div>
             </form>
           </CardContent>

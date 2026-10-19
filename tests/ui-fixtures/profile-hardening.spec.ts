@@ -78,7 +78,7 @@ test('edit a profile and avatar, then retry a failed save without losing the dra
   expect(removed).toEqual([])
   await page.getByRole('button', { name: 'Edit profile', exact: true }).click()
   await page.getByLabel('Bio', { exact: true }).fill('Unsaved replacement')
-  await page.getByRole('link', { name: 'Lydman home', exact: true }).click()
+  await page.getByRole('link', { name: 'turntune home', exact: true }).click()
   await discard.getByRole('button', { name: 'Discard changes', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: /^Profile closed$/ })).toBeVisible()
   await expect(page.getByLabel('Bio', { exact: true })).toHaveCount(0)

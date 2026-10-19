@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { providerSignal } from "./provider-http.js";
 import type { AppleMusicApi } from "./apple-music.js";
 import { bestCertainCatalogMatch, type CatalogTrack, type ProviderTrackMapping } from "./music.js";
@@ -45,7 +46,7 @@ export async function resolveTrackMappings(
 ): Promise<Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>> {
   signal = providerSignal(signal);
   signal.throwIfAborted();
-  if (input.provider === "spotify" && options.allowSpotify !== true) throw new Error("Spotify is disabled in this room.");
+  if (input.provider === "spotify" && options.allowSpotify !== true) throw new Error(serverT("spotify_is_disabled_in_this_room"));
   const mappings: NonNullable<Track["mappings"]> = {
     [input.provider]: sourceMapping(input)
   };

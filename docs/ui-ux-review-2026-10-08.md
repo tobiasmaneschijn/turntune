@@ -1,4 +1,4 @@
-# Lydman full application UI and UX review
+# turntune full application UI and UX review
 
 Reviewed 8 October 2026 against `a71dfeb059cdbf5f3a8962572e633756de7acf96` after a successful fast-forward pull from `origin/master`. The checkout's branch remains `work`. This is a review and improvement plan; application code was not changed.
 

@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { ChatMedia } from '@/chat/model'
 
 export const CHAT_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif'
@@ -18,9 +19,9 @@ export type PastedChatMedia =
   | { kind: 'remote'; media: ChatMedia & { content: string } }
 
 export function validateChatImage(file: File): string | null {
-  if (!CHAT_IMAGE_EXTENSIONS[file.type]) return 'Choose a JPEG, PNG, WebP, or GIF image.'
-  if (file.size === 0) return 'Image is empty. Choose another file.'
-  if (file.size > CHAT_IMAGE_MAX_BYTES) return 'Images must be 6 MB or smaller.'
+  if (!CHAT_IMAGE_EXTENSIONS[file.type]) return i18n.t('chat:imageFormat')
+  if (file.size === 0) return i18n.t('chat:imageEmpty')
+  if (file.size > CHAT_IMAGE_MAX_BYTES) return i18n.t('chat:imageTooLarge')
   return null
 }
 
@@ -57,7 +58,7 @@ export function readPastedChatMedia(clipboard: DataTransfer): PastedChatMedia | 
       media: {
         type: isGif ? 'gif' : 'image',
         mediaUrl: url.href,
-        content: isGif ? 'Pasted GIF' : 'Pasted image',
+        content: isGif ? i18n.t('chat:pastedGif') : i18n.t('chat:pastedImage'),
       },
     }
   } catch {
@@ -77,6 +78,6 @@ export async function fetchGiphyGifs(query = '', accessToken?: string, signal?: 
     error?: string
     results?: GiphyGif[]
   }
-  if (!response.ok) throw new Error(payload.error || 'Could not load GIFs.')
+  if (!response.ok) throw new Error(payload.error || i18n.t('chat:gifsLoadFailed'))
   return payload.results || []
 }

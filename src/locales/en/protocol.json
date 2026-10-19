@@ -1,0 +1,18 @@
+{
+  "you_are_banned_from_this_room": "You are banned from this room.",
+  "your_chat_timeout_is_still_active": "Your chat timeout is still active.",
+  "read_and_accept_the_room_rules_before_participating": "Read and accept the room rules before participating.",
+  "chat_is_limited_to_room_staff": "Chat is limited to room staff.",
+  "artwork_must_use_a_supported_image_host": "Artwork must use a supported image host.",
+  "artwork_must_use_https": "Artwork must use HTTPS.",
+  "invalid_spotify_track_id": "Invalid Spotify track ID.",
+  "invalid_apple_music_song_id": "Invalid Apple Music song ID.",
+  "invalid_mixcloud_show_key": "Invalid Mixcloud show key.",
+  "a_matching_mixcloud_show_url_is_required": "A matching Mixcloud show URL is required.",
+  "invalid_soundcloud_track_urn": "Invalid SoundCloud track URN.",
+  "a_soundcloud_permalink_is_required": "A SoundCloud permalink is required.",
+  "invalid_soundcloud_permalink": "Invalid SoundCloud permalink.",
+  "media_not_allowed": "This room does not allow you to send media.",
+  "links_not_allowed": "This room does not allow you to send links.",
+  "polls_not_allowed": "This room does not allow you to create polls."
+}

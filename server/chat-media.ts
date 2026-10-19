@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PublicRequestError } from './public-request-error.js'
 import { cleanupManagedUploads, queueManagedUpload, reserveManagedUpload, uploadReservedImage, type UploadLease } from './managed-uploads.js'
@@ -21,8 +22,8 @@ export async function resolveChatMediaUrl(
   registeredUploadsOnly = false,
   allowPending = false
 ) {
-  if (!client) throw new PublicRequestError('Chat image uploads are unavailable.', 503)
-  if (!validChatStoragePath(path)) throw new PublicRequestError('This chat image is unavailable.', 404)
+  if (!client) throw new PublicRequestError(serverT("chat_image_uploads_are_unavailable"), 503)
+  if (!validChatStoragePath(path)) throw new PublicRequestError(serverT("this_chat_image_is_unavailable"), 404)
   const [owner, folder] = path.split('/')
   const ownedNewUpload = ownerId === owner && folder === roomId
   let registeredPending = false
@@ -34,14 +35,14 @@ export async function resolveChatMediaUrl(
       .maybeSingle()
     if (error) throw error
     if (data) {
-      if (data.room_slug !== roomId || data.removed_at) throw new PublicRequestError('This chat image is unavailable.')
+      if (data.room_slug !== roomId || data.removed_at) throw new PublicRequestError(serverT("this_chat_image_is_unavailable"))
       registeredPending =
         allowPending &&
         ownedNewUpload &&
         data.user_id === ownerId &&
         !data.message_id &&
         Date.parse(data.expires_at) > Date.now()
-      if (!data.message_id && !registeredPending) throw new PublicRequestError('This uploaded image has not been sent.')
+      if (!data.message_id && !registeredPending) throw new PublicRequestError(serverT("this_uploaded_image_has_not_been_sent"))
     }
   }
   if ((registeredUploadsOnly && !registeredPending) || !ownedNewUpload) {
@@ -52,10 +53,10 @@ export async function resolveChatMediaUrl(
       .eq('storage_path', path)
       .limit(1)
     if (error) throw error
-    if (!data?.some((row) => !row.removed_at)) throw new PublicRequestError('This chat image does not belong to this room.')
+    if (!data?.some((row) => !row.removed_at)) throw new PublicRequestError(serverT("this_chat_image_does_not_belong_to_this_room"))
   }
   const { data, error } = await client.storage.from('chat-media').createSignedUrl(path, CHAT_MEDIA_URL_TTL_SECONDS)
-  if (error || !data?.signedUrl) throw error || new Error('This chat image is unavailable.')
+  if (error || !data?.signedUrl) throw error || new Error(serverT("this_chat_image_is_unavailable"))
   return { url: data.signedUrl, expiresAt: Date.now() + CHAT_MEDIA_URL_TTL_SECONDS * 1000 }
 }
 
@@ -91,11 +92,11 @@ export async function uploadChatMedia(
   reserved?: UploadLease
 ) {
   const mime = contentType.split(';')[0].trim().toLowerCase()
-  if (!client) throw new PublicRequestError('Chat image uploads are unavailable.', 503)
-  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 6 * 1024 * 1024) throw new PublicRequestError('Choose a valid image of 6 MB or less.')
+  if (!client) throw new PublicRequestError(serverT("chat_image_uploads_are_unavailable"), 503)
+  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 6 * 1024 * 1024) throw new PublicRequestError(serverT("choose_a_valid_image_of_6_mb_or_less"))
   await check()
   const lease = reserved || await reserveManagedUpload(client, userId, 'chat', bytes.length, mime, roomId)
-  if (lease.actor_id !== userId || lease.room_slug !== roomId || lease.purpose !== 'chat') throw new PublicRequestError('Chat image uploads are unavailable.', 503)
+  if (lease.actor_id !== userId || lease.room_slug !== roomId || lease.purpose !== 'chat') throw new PublicRequestError(serverT("chat_image_uploads_are_unavailable"), 503)
   const storagePath = lease.storage_path
   try {
     await uploadReservedImage(client, lease, bytes, mime, check)
@@ -128,7 +129,7 @@ export async function cleanupChatUpload(
   storagePath: unknown
 ) {
   if (!client || !validChatStoragePath(storagePath) || !storagePath.startsWith(`${userId}/${roomId}/`))
-    throw new PublicRequestError('This uploaded image is unavailable.')
+    throw new PublicRequestError(serverT("this_uploaded_image_is_unavailable"))
   const { data, error } = await client
     .from('soundspin_chat_uploads')
     .update({ removed_at: new Date().toISOString() })

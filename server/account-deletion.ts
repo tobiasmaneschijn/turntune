@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enqueueAccountUploadDeletion, enqueueRoomUploadDeletion, cleanupManagedUploads } from "./managed-uploads.js";
 import { securityEvent } from "./security-events.js";
@@ -15,7 +16,7 @@ export class AccountDeletionService {
 
   async runNext(): Promise<{ jobId: string; complete: boolean } | null> {
     const claimed = await this.client.rpc("soundspin_claim_account_deletion");
-    if (claimed.error) throw new Error("Deletion queue could not be read.");
+    if (claimed.error) throw new Error(serverT("deletion_queue_could_not_be_read"));
     const job = claimed.data as DeletionJob | null;
     if (!job) return null;
     try {
@@ -25,7 +26,7 @@ export class AccountDeletionService {
     } catch {
       // Retain no provider/DB exception text, request content, or object URLs.
       const failed = await this.client.from("soundspin_account_deletion_jobs").update({ state: "failed", last_error: "A deletion step failed. Retry after checking service health.", updated_at: new Date().toISOString() }).eq("id", job.id);
-      if (failed.error) throw new Error("Deletion failure could not be recorded.");
+      if (failed.error) throw new Error(serverT("deletion_failure_could_not_be_recorded"));
       securityEvent("account_deletion", "failed", { targetId: job.id });
       return { jobId: job.id, complete: false };
     }
@@ -33,18 +34,18 @@ export class AccountDeletionService {
 
   private async stage(job: DeletionJob, stage: string) {
     const result = await this.client.from("soundspin_account_deletion_jobs").update({ stage, updated_at: new Date().toISOString() }).eq("id", job.id);
-    if (result.error) throw new Error("Deletion progress could not be saved.");
+    if (result.error) throw new Error(serverT("deletion_progress_could_not_be_saved"));
   }
 
   private async advance(job: DeletionJob) {
     const restricted = await this.client.rpc("soundspin_restrict_deletion_account", { p_job: job.id });
-    if (restricted.error) throw new Error("Account could not be restricted.");
+    if (restricted.error) throw new Error(serverT("account_could_not_be_restricted"));
     await this.options.onAccountRestricted(job.user_id);
     const roomResult = await this.client.from("soundspin_rooms").select("slug").eq("owner_id", job.user_id);
-    if (roomResult.error) throw new Error("Owned rooms could not be inventoried.");
+    if (roomResult.error) throw new Error(serverT("owned_rooms_could_not_be_inventoried"));
     const rooms = [...new Set([...(job.owned_room_slugs || []), ...(roomResult.data || []).map(room=>String(room.slug))])].map(slug=>({slug}));
     const roomInventory = await this.client.from("soundspin_account_deletion_jobs").update({ owned_room_slugs: rooms.map(room=>room.slug), updated_at: new Date().toISOString() }).eq("id",job.id);
-    if (roomInventory.error) throw new Error("Owned room inventory could not be saved.");
+    if (roomInventory.error) throw new Error(serverT("owned_room_inventory_could_not_be_saved"));
     await enqueueAccountUploadDeletion(this.client, job.user_id);
     for (const room of rooms) {
       await enqueueRoomUploadDeletion(this.client, room.slug);
@@ -54,15 +55,15 @@ export class AccountDeletionService {
     // This waits for any in-flight refresh and clears the in-memory token too.
     await this.options.disconnectProviders(job.user_id);
     const connections = await this.client.from("soundspin_music_connections").delete().eq("user_id", job.user_id);
-    if (connections.error) throw new Error("Provider credentials could not be removed.");
+    if (connections.error) throw new Error(serverT("provider_credentials_could_not_be_removed"));
     await this.stage(job, "providers-disconnected");
     await cleanupManagedUploads(this.client, { maxBatches: 10, batchSize: 100, maxMs: 20_000 });
     let pending = this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("actor_id", job.user_id);
     const accountPending = await pending;
-    if (accountPending.error || accountPending.count) throw new Error("Storage cleanup is still pending.");
+    if (accountPending.error || accountPending.count) throw new Error(serverT("storage_cleanup_is_still_pending"));
     for (const room of rooms) {
       const roomPending = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("room_slug", room.slug);
-      if (roomPending.error || roomPending.count) throw new Error("Room storage cleanup is still pending.");
+      if (roomPending.error || roomPending.count) throw new Error(serverT("room_storage_cleanup_is_still_pending"));
     }
     await this.stage(job, "storage-deleted");
     // Parent serializes SQL scrubbing with each room's live command queue and
@@ -71,30 +72,30 @@ export class AccountDeletionService {
     let archiveComplete = false;
     for (let batch=0; batch<20; batch++) {
       const scrubbed = await this.client.rpc("soundspin_erase_archived_account", { p_user: job.user_id, p_limit: 1000 });
-      if (scrubbed.error) throw new Error("Retained evidence could not be minimized.");
+      if (scrubbed.error) throw new Error(serverT("retained_evidence_could_not_be_minimized"));
       await this.stage(job, "minimizing-retained-evidence");
       if (!scrubbed.data?.remaining) { archiveComplete=true; break; }
     }
-    if (!archiveComplete) throw new Error("Retained evidence minimization is still pending.");
+    if (!archiveComplete) throw new Error(serverT("retained_evidence_minimization_is_still_pending"));
     await this.stage(job, "retained-evidence-minimized");
     const existing = await this.client.auth.admin.getUserById(job.user_id);
-    if (existing.error && existing.error.status !== 404) throw new Error("Account existence could not be verified.");
+    if (existing.error && existing.error.status !== 404) throw new Error(serverT("account_existence_could_not_be_verified"));
     if (existing.data.user) {
       const removed = await this.client.auth.admin.deleteUser(job.user_id);
-      if (removed.error) throw new Error("Authentication account could not be removed.");
+      if (removed.error) throw new Error(serverT("authentication_account_could_not_be_removed"));
     }
     await this.options.onAccountRestricted(job.user_id);
     // Cascade cleanup triggers may safely requeue already removed keys. Drain
     // these durable references before recording the final completion receipt.
     await cleanupManagedUploads(this.client, { maxBatches: 10, batchSize: 100, maxMs: 20_000 });
     const afterCascade = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("actor_id", job.user_id);
-    if (afterCascade.error || afterCascade.count) throw new Error("Final storage cleanup is still pending.");
+    if (afterCascade.error || afterCascade.count) throw new Error(serverT("final_storage_cleanup_is_still_pending"));
     for (const room of rooms) {
       const roomPending = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("room_slug", room.slug);
-      if (roomPending.error || roomPending.count) throw new Error("Final room storage cleanup is still pending.");
+      if (roomPending.error || roomPending.count) throw new Error(serverT("final_room_storage_cleanup_is_still_pending"));
     }
     const completed = await this.client.rpc("soundspin_complete_account_deletion", { p_job: job.id });
-    if (completed.error) throw new Error("Deletion receipt could not be saved.");
+    if (completed.error) throw new Error(serverT("deletion_receipt_could_not_be_saved"));
   }
 }
 

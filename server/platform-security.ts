@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Service-side gates are deliberately uncached: an operator action applies to
@@ -17,7 +18,7 @@ export class PlatformSecurity {
         this.confirmed.set(userId, { allowed: false, expiresAt: Date.now() + 30_000 });
         return false;
       }
-      throw new Error("Account identity could not be verified.");
+      throw new Error(serverT("account_identity_could_not_be_verified"));
     }
     const allowed = Boolean(data.user?.email_confirmed_at);
     if (this.confirmed.size >= 5000) this.confirmed.clear();
@@ -28,14 +29,14 @@ export class PlatformSecurity {
   async activeAccount(userId: string): Promise<boolean> {
     if (!this.client) return this.localFixture;
     const { data, error } = await this.client.from("soundspin_account_restrictions").select("state").eq("user_id", userId).maybeSingle();
-    if (error) throw new Error("Account access could not be verified.");
+    if (error) throw new Error(serverT("account_access_could_not_be_verified"));
     return (!data || data.state === "active") && await this.verifiedAccount(userId);
   }
 
   async activeRoom(slug: string): Promise<boolean> {
     if (!this.client) return this.localFixture;
     const { data, error } = await this.client.rpc("soundspin_room_enabled", { p_room_slug: slug });
-    if (error) throw new Error("Room access could not be verified.");
+    if (error) throw new Error(serverT("room_access_could_not_be_verified"));
     return data === true;
   }
 

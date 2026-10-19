@@ -1,3 +1,5 @@
+import i18n from "../i18n";
+import { Trans, useTranslation } from "react-i18next";
 import { approvedImageUrl } from "../lib/remote-images";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestJson } from "../lib/authenticated-http";
@@ -81,13 +83,6 @@ interface AdminDashboardData {
   }>;
 }
 
-const statusLabels: Record<FeedbackStatus, string> = {
-  new: "New",
-  reviewing: "Reviewing",
-  planned: "Planned",
-  resolved: "Resolved",
-  closed: "Closed"
-};
 
 const feedbackStatuses: FeedbackStatus[] = ["new", "reviewing", "planned", "resolved", "closed"];
 
@@ -99,23 +94,9 @@ const statusIcons = {
   closed: Archive
 } satisfies Record<FeedbackStatus, typeof Inbox>;
 
-const categoryLabels: Record<AdminFeedback["category"], string> = {
-  bug: "Bug",
-  idea: "Idea",
-  playback: "Playback",
-  chat: "Chat",
-  account: "Account",
-  other: "Other"
-};
-
-const impactLabels: Record<AdminFeedback["impact"], string> = {
-  minor: "Minor impact",
-  blocking: "Blocking",
-  unusable: "App unusable"
-};
 
 function formatDate(value: string, includeTime = true) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(i18n.resolvedLanguage, {
     month: "short",
     day: "numeric",
     ...(includeTime ? { hour: "numeric", minute: "2-digit" } : {})
@@ -123,7 +104,7 @@ function formatDate(value: string, includeTime = true) {
 }
 
 function feedbackExcerpt(item: AdminFeedback) {
-  return item.message?.trim() || `${item.screenshots.length} screenshot${item.screenshots.length === 1 ? "" : "s"}`;
+  return item.message?.trim() || i18n.t("rooms:socialScreenshotCount", { count: item.screenshots.length });
 }
 
 export function AdminDashboard({
@@ -145,6 +126,28 @@ export function AdminDashboard({
   userSettings?: SoundSpinUserSettings;
   onSettingsChange?: (settings: SoundSpinUserSettings) => void;
 }) {
+  const { t, i18n } = useTranslation("rooms");
+  const statusLabels: Record<FeedbackStatus, string> = {
+    new: t("socialNew"),
+    reviewing: t("socialReviewing"),
+    planned: t("socialPlanned"),
+    resolved: t("socialResolved"),
+    closed: t("socialClosed")
+  };
+  const categoryLabels: Record<AdminFeedback["category"], string> = {
+    bug: t("socialBug"),
+    idea: t("socialIdea"),
+    playback: t("socialPlayback"),
+    chat: t("socialChat"),
+    account: t("socialAccount"),
+    other: t("socialOther")
+  };
+  const impactLabels: Record<AdminFeedback["impact"], string> = {
+    minor: t("socialMinorImpact"),
+    blocking: t("socialBlocking"),
+    unusable: t("socialAppUnusable")
+  };
+
   const [tab, setTab] = useState<AdminTab>("overview");
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -179,7 +182,7 @@ export function AdminDashboard({
       setFeedbackPage(payload.pagination?.page || 0);
       setSelectedId((current) => current && payload.feedback.some((item) => item.id === current) ? current : null);
     } catch (loadError) {
-      if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load the admin dashboard.");
+      if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setError(loadError instanceof Error ? loadError.message : t("socialCouldNotLoadTheAdminDashboard"));
     } finally {
       if (activeRef.current && accountScope === accountScopeRef.current && controller === loadControllerRef.current) setLoading(false);
     }
@@ -268,7 +271,7 @@ export function AdminDashboard({
       }>(`/api/admin/feedback/${id}`, {
         accessToken: tokenRef.current,
         signal: controller.signal,
-        errorMessage: "Could not save changes. Try again.",
+        errorMessage: t("socialCouldNotSaveChangesTryAgain"),
         method: "PATCH",
         body: JSON.stringify({ status: submitted.status, adminNote: submitted.note }),
         validate: (value): value is { feedback: { id: string; status: FeedbackStatus; adminNote: string; updatedAt: string } } => {
@@ -305,7 +308,7 @@ export function AdminDashboard({
       });
     } catch (saveError) {
       if (activeRef.current && accountScope === accountScopeRef.current && controller === saveControllersRef.current.get(id)) {
-        setDrafts((current) => ({ ...current, [id]: { ...(current[id] || submitted), saving: false, error: saveError instanceof Error ? saveError.message : "Could not save changes. Try again." } }));
+        setDrafts((current) => ({ ...current, [id]: { ...(current[id] || submitted), saving: false, error: saveError instanceof Error ? saveError.message : t("socialCouldNotSaveChangesTryAgain") } }));
       }
     } finally {
       if (controller === saveControllersRef.current.get(id)) saveControllersRef.current.delete(id);
@@ -319,47 +322,47 @@ export function AdminDashboard({
         settings={userSettings && onSettingsChange ? { accessToken, userSettings, onSettingsChange } : undefined} />
       <div className="admin-page">
       <aside className="admin-sidebar">
-        <div className="admin-console-label">Admin</div>
-        <nav className="admin-nav" aria-label="Admin dashboard">
-          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">Overview</span></button>
-          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">Feedback</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
-          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /><span className="admin-nav-label">Rooms</span></button>
-          <button type="button" aria-current={tab === "platform" ? "page" : undefined} className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}><LockKeyhole /><span className="admin-nav-label">Platform controls</span></button>
+        <div className="admin-console-label">{t("socialAdmin")}</div>
+        <nav className="admin-nav" aria-label={t("socialAdminDashboard")}>
+          <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">{t("socialOverview")}</span></button>
+          <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">{t("socialFeedback")}</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
+          <button type="button" aria-current={tab === "rooms" ? "page" : undefined} className={tab === "rooms" ? "active" : ""} onClick={() => setTab("rooms")}><Radio /><span className="admin-nav-label">{t("socialRooms")}</span></button>
+          <button type="button" aria-current={tab === "platform" ? "page" : undefined} className={tab === "platform" ? "active" : ""} onClick={() => setTab("platform")}><LockKeyhole /><span className="admin-nav-label">{t("socialPlatformControls")}</span></button>
         </nav>
       </aside>
 
       <main className="admin-main" id="admin-main" tabIndex={-1}>
         <header className="admin-topbar">
           <div>
-            <h1>{tab === "overview" ? "Overview" : tab === "feedback" ? "Feedback inbox" : tab === "platform" ? "Platform controls" : "Rooms"}</h1>
+            <h1>{tab === "overview" ? t("socialOverview") : tab === "feedback" ? t("socialFeedbackInbox") : tab === "platform" ? t("socialPlatformControls") : t("socialRooms")}</h1>
           </div>
           <div className="admin-topbar-actions">
-            <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> Refresh</Button>
+            <Button variant="outline" size="sm" onClick={() => void loadDashboard()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} /> {t("socialRefresh")}</Button>
           </div>
         </header>
 
         {error && <div className="admin-error" role="alert">{error}</div>}
 
         {loading && !data ? (
-          <div className="admin-loading"><div className="equalizer"><i /><i /><i /><i /></div><span>Loading admin data…</span></div>
+          <div className="admin-loading"><div className="equalizer"><i /><i /><i /><i /></div><span>{t("socialLoadingAdminData")}</span></div>
         ) : data && tab === "overview" ? (
           <OverviewPanel data={data} onOpenFeedback={(id) => { setSelectedId(id); setTab("feedback"); }} />
         ) : data && tab === "feedback" ? (
           <>
-            <section className="admin-feedback-workspace" aria-label="Feedback workflow board">
+            <section className="admin-feedback-workspace" aria-label={t("socialFeedbackWorkflowBoard")}>
               <div className="admin-feedback-tools">
-                <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search feedback…" aria-label="Search feedback" /></div>
+                <div className="admin-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("socialSearchFeedback")} aria-label={t("socialSearchFeedback2")} /></div>
                 <Select value={statusFilter} onValueChange={(value) => { const status = value as FeedbackStatus | "all"; setStatusFilter(status); void loadDashboard(0, status); }}>
-                  <SelectTrigger aria-label="Filter feedback lanes"><SelectValue>{statusFilter === "all" ? "All lanes" : statusLabels[statusFilter]}</SelectValue></SelectTrigger>
+                  <SelectTrigger aria-label={t("socialFilterFeedbackLanes")}><SelectValue>{statusFilter === "all" ? t("socialAllLanes") : statusLabels[statusFilter]}</SelectValue></SelectTrigger>
                   <SelectContent><SelectGroup>
-                    <SelectItem value="all">All lanes</SelectItem>
+                    <SelectItem value="all">{t("socialAllLanes")}</SelectItem>
                     {feedbackStatuses.map((status) => <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>)}
                   </SelectGroup></SelectContent>
                 </Select>
-                <Badge variant="secondary">{filteredFeedback.length} shown</Badge>
-                <Button variant="outline" size="sm" disabled={loading || feedbackPage === 0} onClick={() => void loadDashboard(feedbackPage - 1)}>Previous</Button>
-                <span>Page {feedbackPage + 1}</span>
-                <Button variant="outline" size="sm" disabled={loading || !data.pagination?.hasMore} onClick={() => void loadDashboard(feedbackPage + 1)}>Next</Button>
+                <Badge variant="secondary">{t("socialFeedbackShown", { count: filteredFeedback.length })}</Badge>
+                <Button variant="outline" size="sm" disabled={loading || feedbackPage === 0} onClick={() => void loadDashboard(feedbackPage - 1)}>{t("socialPrevious")}</Button>
+                <span>{t("socialPageNumber", { number: feedbackPage + 1 })}</span>
+                <Button variant="outline" size="sm" disabled={loading || !data.pagination?.hasMore} onClick={() => void loadDashboard(feedbackPage + 1)}>{t("socialNext")}</Button>
               </div>
 
               {filteredFeedback.length ? (
@@ -386,7 +389,7 @@ export function AdminDashboard({
                                   key={item.id}
                                   role="button"
                                   tabIndex={0}
-                                  aria-label={`Open feedback: ${feedbackExcerpt(item)}`}
+                                  aria-label={t("socialOpenFeedbackExcerpt", { excerpt: feedbackExcerpt(item) })}
                                   className={cn("admin-feedback-card", selectedId === item.id && "active")}
                                   onClick={() => setSelectedId(item.id)}
                                   onKeyDown={(event) => {
@@ -410,7 +413,7 @@ export function AdminDashboard({
                                 <Empty className="admin-feedback-column-empty">
                                   <EmptyHeader>
                                     <EmptyMedia variant="icon"><StatusIcon /></EmptyMedia>
-                                    <EmptyTitle>No feedback</EmptyTitle>
+                                    <EmptyTitle>{t("socialNoFeedback")}</EmptyTitle>
                                   </EmptyHeader>
                                 </Empty>
                               )}
@@ -425,8 +428,8 @@ export function AdminDashboard({
                 <Empty className="admin-feedback-board-empty">
                   <EmptyHeader>
                     <EmptyMedia variant="icon"><Inbox /></EmptyMedia>
-                    <EmptyTitle>No feedback found</EmptyTitle>
-                    <EmptyDescription>Try another search or show all lanes.</EmptyDescription>
+                    <EmptyTitle>{t("socialNoFeedbackFound")}</EmptyTitle>
+                    <EmptyDescription>{t("socialTryAnotherSearchOrShowAllLanes")}</EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               )}
@@ -445,43 +448,43 @@ export function AdminDashboard({
                         </div>
                         <time>{formatDate(selectedFeedback.createdAt)}</time>
                       </div>
-                      <SheetTitle>{categoryLabels[selectedFeedback.category]} feedback from {selectedFeedback.userName}</SheetTitle>
-                      <SheetDescription>Feedback #{selectedFeedback.id.slice(0, 8)} · {selectedFeedback.pagePath}</SheetDescription>
+                      <SheetTitle>{t("socialFeedbackFromUser", { category: categoryLabels[selectedFeedback.category], name: selectedFeedback.userName })}</SheetTitle>
+                      <SheetDescription>{t("socialFeedbackReference", { id: selectedFeedback.id.slice(0, 8), path: selectedFeedback.pagePath })}</SheetDescription>
                     </SheetHeader>
 
                     <div className="admin-feedback-detail-scroll">
                       <div className="admin-feedback-author">
                         <Avatar user={{ id: selectedFeedback.userId, name: selectedFeedback.userName, avatarSeed: selectedFeedback.userId, avatarUrl: selectedFeedback.userAvatarUrl || undefined }} size={40} />
-                        <span><strong>{selectedFeedback.userName}</strong><small>{selectedFeedback.roomSlug ? `Room: ${selectedFeedback.roomSlug}` : selectedFeedback.pagePath}</small></span>
+                        <span><strong>{selectedFeedback.userName}</strong><small>{selectedFeedback.roomSlug ? t("socialRoomName", { room: selectedFeedback.roomSlug }) : selectedFeedback.pagePath}</small></span>
                       </div>
-                      <div className="admin-feedback-message">{selectedFeedback.message || <em>No written description.</em>}</div>
+                      <div className="admin-feedback-message">{selectedFeedback.message || <em>{t("socialNoWrittenDescription")}</em>}</div>
                       {selectedFeedback.screenshots.length > 0 && (
                         <div className="admin-screenshot-grid">
                           {selectedFeedback.screenshots.map((screenshot, index) => screenshot.url ? (
-                            <a href={screenshot.url} target="_blank" rel="noreferrer" key={screenshot.path} title="Open full screenshot">
-                              <img referrerPolicy="no-referrer" src={approvedImageUrl(screenshot.url)} alt={`Feedback screenshot ${index + 1}`} />
-                              <span><ExternalLink /> Open</span>
+                            <a href={screenshot.url} target="_blank" rel="noreferrer" key={screenshot.path} title={t("socialOpenFullScreenshot")}>
+                              <img referrerPolicy="no-referrer" src={approvedImageUrl(screenshot.url)} alt={t("socialFeedbackScreenshot", { number: index + 1 })} />
+                              <span><ExternalLink /> {t("socialOpen")}</span>
                             </a>
-                          ) : <div className="admin-screenshot-missing" key={screenshot.path}>Preview unavailable</div>)}
+                          ) : <div className="admin-screenshot-missing" key={screenshot.path}>{t("socialPreviewUnavailable")}</div>)}
                         </div>
                       )}
                       <div className="admin-feedback-context">
-                        <span><strong>Account ID</strong><code className="break-all">{selectedFeedback.userId}</code></span>
-                        <span><strong>Page</strong>{selectedFeedback.pagePath}</span>
-                        <span><strong>Viewport</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : "Unknown"}</span>
-                        <span><strong>Submitted</strong>{new Date(selectedFeedback.createdAt).toLocaleString()}</span>
+                        <span><strong>{t("socialAccountID")}</strong><code className="break-all">{selectedFeedback.userId}</code></span>
+                        <span><strong>{t("socialPage")}</strong>{selectedFeedback.pagePath}</span>
+                        <span><strong>{t("socialViewport")}</strong>{selectedFeedback.viewport?.width && selectedFeedback.viewport?.height ? `${selectedFeedback.viewport.width} × ${selectedFeedback.viewport.height}` : t("socialUnknown")}</span>
+                        <span><strong>{t("socialSubmitted")}</strong>{new Date(selectedFeedback.createdAt).toLocaleString(i18n.resolvedLanguage)}</span>
                       </div>
                       {Object.keys(selectedFeedback.diagnostics || {}).length > 0 ? (
                         <details className="admin-feedback-diagnostics">
-                          <summary>Technical diagnostics</summary>
+                          <summary>{t("socialTechnicalDiagnostics")}</summary>
                           <pre>{JSON.stringify(selectedFeedback.diagnostics, null, 2)}</pre>
                         </details>
                       ) : (
-                        <div className="admin-diagnostics-empty">No diagnostics included.</div>
+                        <div className="admin-diagnostics-empty">{t("socialNoDiagnosticsIncluded")}</div>
                       )}
                       <FieldGroup className="admin-feedback-workflow">
                         <Field>
-                          <FieldLabel htmlFor="admin-feedback-status">Status</FieldLabel>
+                          <FieldLabel htmlFor="admin-feedback-status">{t("socialStatus")}</FieldLabel>
                           <Select value={draft.status} onValueChange={(value) => updateDraft({ status: value as FeedbackStatus })}>
                             <SelectTrigger id="admin-feedback-status" className="w-full"><SelectValue>{statusLabels[draft.status]}</SelectValue></SelectTrigger>
                             <SelectContent><SelectGroup>
@@ -490,21 +493,21 @@ export function AdminDashboard({
                           </Select>
                         </Field>
                         <Field>
-                          <FieldLabel htmlFor="admin-feedback-note">Private admin note</FieldLabel>
+                          <FieldLabel htmlFor="admin-feedback-note">{t("socialPrivateAdminNote")}</FieldLabel>
                           <Textarea id="admin-feedback-note" value={draft.note} onChange={(event) => updateDraft({ note: event.target.value })} maxLength={2000} />
                         </Field>
                       </FieldGroup>
                     </div>
                     <SheetFooter>
                       {draft.error && <div className="admin-error admin-save-error" role="alert">{draft.error}</div>}
-                      <p className="admin-save-status" role="status">{draft.saving ? "Saving…" : dirty ? "Unsaved changes" : draft.saved ? "Saved" : ""}</p>
+                      <p className="admin-save-status" role="status">{draft.saving ? t("socialSaving") : dirty ? t("socialUnsavedChanges") : draft.saved ? t("socialSaved") : ""}</p>
                       <div className="admin-feedback-actions">
-                        {dirty && <Button variant="ghost" onClick={() => setDrafts((current) => ({ ...current, [selectedFeedback.id]: feedbackDraft(selectedFeedback) }))} disabled={draft.saving}>Discard changes</Button>}
+                        {dirty && <Button variant="ghost" onClick={() => setDrafts((current) => ({ ...current, [selectedFeedback.id]: feedbackDraft(selectedFeedback) }))} disabled={draft.saving}>{t("socialDiscardChanges")}</Button>}
                         <Button variant="outline" onClick={() => void copyFeedbackPrompt()}>
                           {copyState === "copied" ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                          {copyState === "copied" ? "Prompt copied" : copyState === "error" ? "Copy failed — retry" : "Copy AI prompt"}
+                          {copyState === "copied" ? t("socialPromptCopied") : copyState === "error" ? t("socialCopyFailedRetry") : t("socialCopyAIPrompt")}
                         </Button>
-                        <Button onClick={() => void saveFeedback()} disabled={draft.saving || !dirty}>{draft.saving ? "Saving…" : draft.error ? "Retry save" : "Save changes"}</Button>
+                        <Button onClick={() => void saveFeedback()} disabled={draft.saving || !dirty}>{draft.saving ? t("socialSaving") : draft.error ? t("socialRetrySave") : t("socialSaveChanges")}</Button>
                       </div>
                     </SheetFooter>
                   </>
@@ -522,7 +525,15 @@ export function AdminDashboard({
 }
 
 function PlatformPanel({ accessToken }: { accessToken: string }) {
-  const actionLabels: Record<string, string> = { "suspend-account": "Suspend account", "restore-account": "Restore account", "disable-room": "Disable room", "restore-room": "Restore room", "clear-avatar": "Remove profile avatar", "clear-profile": "Remove public profile content" };
+  const { t, i18n } = useTranslation("rooms");
+  const deletionStateLabels: Record<string, string> = {
+    requested: t("socialDeletionStateRequested"),
+    approved: t("socialDeletionStateApproved"),
+    running: t("socialDeletionStateRunning"),
+    failed: t("socialDeletionStateFailed"),
+    complete: t("socialDeletionStateComplete")
+  };
+  const actionLabels: Record<string, string> = { "suspend-account": t("socialSuspendAccount"), "restore-account": t("socialRestoreAccount"), "disable-room": t("socialDisableRoom"), "restore-room": t("socialRestoreRoom"), "clear-avatar": t("socialRemoveProfileAvatar"), "clear-profile": t("socialRemovePublicProfileContent") };
   type Request = { id: string; user_id: string; state: string; owned_room_count: number; requested_at: string; stage: string; last_error: string | null };
   const [action, setAction] = useState("suspend-account");
   const [target, setTarget] = useState("");
@@ -541,7 +552,7 @@ function PlatformPanel({ accessToken }: { accessToken: string }) {
     try {
       const payload = await requestJson<{ requests: Request[] }>("/api/admin/deletion-requests", { accessToken: token.current });
       if (active.current) setRequests(payload.requests);
-    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : "Could not load account requests."); }
+    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : t("socialCouldNotLoadAccountRequests")); }
   };
   useEffect(() => { active.current = true; void loadRequests(); return () => { active.current = false; }; }, []);
   const perform = async (url: string, body: unknown, result: string) => {
@@ -549,40 +560,40 @@ function PlatformPanel({ accessToken }: { accessToken: string }) {
     try {
       await requestJson(url, { accessToken: token.current, method: "POST", body: JSON.stringify(body), timeoutMs: 30_000 });
       if (active.current) { setStatus(result); setSelected(null); setDeleteConfirmation(""); setApprovalReason(""); setIdentityVerified(false); await loadRequests(); }
-    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : "Action failed. Try again."); }
+    } catch (error) { if (active.current) setError(error instanceof Error ? error.message : t("socialActionFailedTryAgain")); }
     finally { if (active.current) setBusy(false); }
   };
   return <div className="admin-overview">
     <section className="settings-panel-stack max-w-2xl">
       <FieldGroup>
-        <Field><FieldLabel htmlFor="platform-action">Action</FieldLabel><Select value={action} onValueChange={(value) => setAction(value || "suspend-account")}>
+        <Field><FieldLabel htmlFor="platform-action">{t("socialAction")}</FieldLabel><Select value={action} onValueChange={(value) => setAction(value || "suspend-account")}>
           <SelectTrigger id="platform-action"><SelectValue>{actionLabels[action]}</SelectValue></SelectTrigger><SelectContent><SelectGroup>
-            <SelectItem value="suspend-account">Suspend account</SelectItem><SelectItem value="restore-account">Restore account</SelectItem>
-            <SelectItem value="disable-room">Disable room</SelectItem><SelectItem value="restore-room">Restore room</SelectItem><SelectItem value="clear-avatar">Remove profile avatar</SelectItem><SelectItem value="clear-profile">Remove public profile content</SelectItem>
+            <SelectItem value="suspend-account">{t("socialSuspendAccount")}</SelectItem><SelectItem value="restore-account">{t("socialRestoreAccount")}</SelectItem>
+            <SelectItem value="disable-room">{t("socialDisableRoom")}</SelectItem><SelectItem value="restore-room">{t("socialRestoreRoom")}</SelectItem><SelectItem value="clear-avatar">{t("socialRemoveProfileAvatar")}</SelectItem><SelectItem value="clear-profile">{t("socialRemovePublicProfileContent")}</SelectItem>
           </SelectGroup></SelectContent></Select></Field>
-        <Field><FieldLabel htmlFor="platform-target">{action.includes("room") ? "Room slug" : "Account UUID"}</FieldLabel><Input id="platform-target" value={target} onChange={(event) => setTarget(event.target.value)} maxLength={100} /></Field>
-        <Field><FieldLabel htmlFor="platform-reason">Reason</FieldLabel><Textarea id="platform-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /></Field>
+        <Field><FieldLabel htmlFor="platform-target">{action.includes("room") ? t("socialRoomSlug") : t("socialAccountUUID")}</FieldLabel><Input id="platform-target" value={target} onChange={(event) => setTarget(event.target.value)} maxLength={100} /></Field>
+        <Field><FieldLabel htmlFor="platform-reason">{t("socialReason")}</FieldLabel><Textarea id="platform-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} /></Field>
       </FieldGroup>
-      <p>Suspension stops the account and its owned rooms. Profile removal clears text, handle, tracks, and image; suspend the account first to prevent republishing. Removed content cannot be restored here. Every action records your identity and reason.</p>
-      <Button disabled={busy || !target.trim() || !reason.trim()} onClick={() => void perform("/api/admin/platform-action", { action, target: target.trim(), reason: reason.trim() }, "Platform action applied.")}>Apply action</Button>
+      <p>{t("socialSuspensionStopsTheAccountAndItsOwnedRoomsProfileRemoval")}</p>
+      <Button disabled={busy || !target.trim() || !reason.trim()} onClick={() => void perform("/api/admin/platform-action", { action, target: target.trim(), reason: reason.trim() }, t("socialPlatformActionApplied"))}>{t("socialApplyAction")}</Button>
     </section>
     <section className="settings-panel-stack max-w-2xl">
-      <h2>Account deletion requests</h2>
-      <Button variant="outline" disabled={busy} onClick={() => void loadRequests()}>Refresh requests</Button>
-      {!requests.length && <p>No pending requests.</p>}
+      <h2>{t("socialAccountDeletionRequests")}</h2>
+      <Button variant="outline" disabled={busy} onClick={() => void loadRequests()}>{t("socialRefreshRequests")}</Button>
+      {!requests.length && <p>{t("socialNoPendingRequests")}</p>}
       {requests.map((request) => <div key={request.id}>
-        <p><code className="break-all">{request.user_id}</code> · {request.state} · {request.owned_room_count} owned rooms</p>
+        <p><Trans t={t} i18nKey="socialDeletionRequest" count={request.owned_room_count} values={{ account: request.user_id, state: deletionStateLabels[request.state] || t("socialUnknown") }} components={{ code: <code className="break-all" /> }} /></p>
         {request.last_error && <p>{request.last_error}</p>}
-        <Button variant="outline" disabled={busy} onClick={() => { setSelected(request); setIdentityVerified(false); setDeleteConfirmation(""); setApprovalReason(""); }}>Review deletion</Button>
+        <Button variant="outline" disabled={busy} onClick={() => { setSelected(request); setIdentityVerified(false); setDeleteConfirmation(""); setApprovalReason(""); }}>{t("socialReviewDeletion")}</Button>
       </div>)}
       {selected && <FieldGroup>
-        <p>Delete account <code className="break-all">{selected.user_id}</code>, its uploads, and {selected.owned_room_count} owned rooms. This cannot be undone.</p>
-        <label className="flex min-h-11 items-center gap-2"><input className="size-4 accent-primary" type="checkbox" checked={identityVerified} onChange={(event) => setIdentityVerified(event.target.checked)} /> I verified the requester’s identity using the privacy runbook.</label>
-        <Field><FieldLabel htmlFor="deletion-approval-reason">Deletion reason</FieldLabel><Textarea id="deletion-approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} maxLength={500} /></Field>
-        <Field><FieldLabel htmlFor="deletion-approval-confirmation">Type DELETE ACCOUNT AND OWNED ROOMS</FieldLabel><Input id="deletion-approval-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} maxLength={30} /></Field>
+        <p><Trans t={t} i18nKey="socialDeleteAccountConfirm" count={selected.owned_room_count} values={{ account: selected.user_id }} components={{ code: <code className="break-all" /> }} /></p>
+        <label className="flex min-h-11 items-center gap-2"><input className="size-4 accent-primary" type="checkbox" checked={identityVerified} onChange={(event) => setIdentityVerified(event.target.checked)} /> {t("socialIVerifiedTheRequesterSIdentityUsingThePrivacyRunbook")}</label>
+        <Field><FieldLabel htmlFor="deletion-approval-reason">{t("socialDeletionReason")}</FieldLabel><Textarea id="deletion-approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} maxLength={500} /></Field>
+        <Field><FieldLabel htmlFor="deletion-approval-confirmation">{t("socialTypeDELETEACCOUNTANDOWNEDROOMS")}</FieldLabel><Input id="deletion-approval-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} maxLength={30} /></Field>
         <Button variant="destructive" disabled={busy || !identityVerified || !approvalReason.trim() || deleteConfirmation !== "DELETE ACCOUNT AND OWNED ROOMS"} onClick={() => void perform(`/api/admin/deletion-requests/${selected.id}/approve`, {
           userId: selected.user_id, ownedRoomCount: selected.owned_room_count, identityVerified, confirmation: deleteConfirmation, reason: approvalReason.trim()
-        }, "Deletion approved. Check the request state for cleanup completion.")}>Approve deletion</Button>
+        }, t("socialDeletionApprovedCheckTheRequestStateForCleanupCompletion"))}>{t("socialApproveDeletion")}</Button>
       </FieldGroup>}
     </section>
     {error && <p role="alert" className="admin-error">{error}</p>}{status && <p role="status">{status}</p>}
@@ -590,11 +601,12 @@ function PlatformPanel({ accessToken }: { accessToken: string }) {
 }
 
 function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onOpenFeedback: (id: string) => void }) {
+  const { t, i18n } = useTranslation("rooms");
   const metricCards = [
-    { label: "Total listeners", value: data.metrics.users, icon: Users },
-    { label: "Rooms", value: data.metrics.rooms, icon: Radio },
-    { label: "Messages sent", value: data.metrics.messages, icon: MessageSquareText },
-    { label: "Open feedback", value: data.metrics.openFeedback, icon: Inbox, attention: data.metrics.openFeedback > 0 }
+    { label: t("socialTotalListeners"), value: data.metrics.users, icon: Users },
+    { label: t("socialRooms"), value: data.metrics.rooms, icon: Radio },
+    { label: t("socialMessagesSent"), value: data.metrics.messages, icon: MessageSquareText },
+    { label: t("socialOpenFeedback"), value: data.metrics.openFeedback, icon: Inbox, attention: data.metrics.openFeedback > 0 }
   ];
   const maxActivity = Math.max(1, ...data.activity.flatMap((item) => [item.users, item.feedback, item.messages]));
 
@@ -605,7 +617,7 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
           <Card key={label} className={attention ? "attention" : ""}>
             <CardContent>
               <span className="admin-metric-icon"><Icon /></span>
-              <span><small>{label}</small><strong>{value.toLocaleString()}</strong></span>
+              <span><small>{label}</small><strong>{value.toLocaleString(i18n.resolvedLanguage)}</strong></span>
             </CardContent>
           </Card>
         ))}
@@ -613,37 +625,37 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
 
       <div className="admin-overview-grid">
         <Card className="admin-activity-card">
-          <CardHeader><div><CardTitle>Activity</CardTitle><CardDescription>Last 14 days</CardDescription></div><BarChart3 /></CardHeader>
+          <CardHeader><div><CardTitle>{t("socialActivity")}</CardTitle><CardDescription>{t("socialLast14Days")}</CardDescription></div><BarChart3 /></CardHeader>
           <CardContent>
-            <div className="admin-chart-legend"><span className="users">New users</span><span className="messages">Messages</span><span className="feedback">Feedback</span></div>
+            <div className="admin-chart-legend"><span className="users">{t("socialNewUsers")}</span><span className="messages">{t("socialMessages")}</span><span className="feedback">{t("socialFeedback")}</span></div>
             <div className="admin-activity-chart" aria-hidden="true">
               {data.activity.map((item) => (
-                <div className="admin-activity-day" key={item.date} title={`${item.date}: ${item.users} users, ${item.messages} messages, ${item.feedback} feedback`}>
+                <div className="admin-activity-day" key={item.date} title={t("socialActivitySummary", { date: item.date, users: item.users, messages: item.messages, feedback: item.feedback })}>
                   <div className="admin-activity-bars">
                     <i className="users" style={{ height: `${Math.max(item.users ? 8 : 2, (item.users / maxActivity) * 100)}%` }} />
                     <i className="messages" style={{ height: `${Math.max(item.messages ? 8 : 2, (item.messages / maxActivity) * 100)}%` }} />
                     <i className="feedback" style={{ height: `${Math.max(item.feedback ? 8 : 2, (item.feedback / maxActivity) * 100)}%` }} />
                   </div>
-                  <span>{new Date(`${item.date}T00:00:00Z`).toLocaleDateString(undefined, { weekday: "narrow" })}</span>
+                  <span>{new Date(`${item.date}T00:00:00Z`).toLocaleDateString(i18n.resolvedLanguage, { weekday: "narrow" })}</span>
                 </div>
               ))}
             </div>
             <details className="admin-activity-data">
-              <summary>Daily activity data</summary>
+              <summary>{t("socialDailyActivityData")}</summary>
               <table>
-                <caption className="sr-only">Daily activity: new users, messages, and feedback</caption>
-                <thead><tr><th scope="col">Date</th><th scope="col">New users</th><th scope="col">Messages</th><th scope="col">Feedback</th></tr></thead>
+                <caption className="sr-only">{t("socialDailyActivityNewUsersMessagesAndFeedback")}</caption>
+                <thead><tr><th scope="col">{t("socialDate")}</th><th scope="col">{t("socialNewUsers")}</th><th scope="col">{t("socialMessages")}</th><th scope="col">{t("socialFeedback")}</th></tr></thead>
                 <tbody>{data.activity.map((item) => (
-                  <tr key={item.date}><th scope="row"><time dateTime={item.date}>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${item.date}T00:00:00Z`))}</time></th><td>{item.users.toLocaleString()}</td><td>{item.messages.toLocaleString()}</td><td>{item.feedback.toLocaleString()}</td></tr>
+                  <tr key={item.date}><th scope="row"><time dateTime={item.date}>{new Intl.DateTimeFormat(i18n.resolvedLanguage, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${item.date}T00:00:00Z`))}</time></th><td>{item.users.toLocaleString(i18n.resolvedLanguage)}</td><td>{item.messages.toLocaleString(i18n.resolvedLanguage)}</td><td>{item.feedback.toLocaleString(i18n.resolvedLanguage)}</td></tr>
                 ))}</tbody>
               </table>
-              {!data.activity.length && <p>No activity data.</p>}
+              {!data.activity.length && <p>{t("socialNoActivityData")}</p>}
             </details>
           </CardContent>
         </Card>
 
         <Card className="admin-recent-feedback">
-          <CardHeader><div><CardTitle>Recent feedback</CardTitle><CardDescription>{data.metrics.feedback} submissions total</CardDescription></div><Inbox /></CardHeader>
+          <CardHeader><div><CardTitle>{t("socialRecentFeedback")}</CardTitle><CardDescription>{t("socialSubmissionTotal", { count: data.metrics.feedback })}</CardDescription></div><Inbox /></CardHeader>
           <CardContent>
             {data.feedback.slice(0, 5).map((item) => (
               <button type="button" key={item.id} onClick={() => onOpenFeedback(item.id)}>
@@ -652,16 +664,16 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
                 <ChevronRight />
               </button>
             ))}
-            {!data.feedback.length && <div className="admin-empty compact"><CheckCircle2 /><strong>No feedback yet</strong></div>}
+            {!data.feedback.length && <div className="admin-empty compact"><CheckCircle2 /><strong>{t("socialNoFeedbackYet")}</strong></div>}
           </CardContent>
         </Card>
       </div>
 
       <Card className="admin-live-rooms">
-        <CardHeader><CardTitle>Recently active rooms</CardTitle><Radio /></CardHeader>
+        <CardHeader><CardTitle>{t("socialRecentlyActiveRooms")}</CardTitle><Radio /></CardHeader>
         <CardContent>
           {data.rooms.slice(0, 6).map((room) => (
-            <div key={room.slug}><span className={room.listenerCount > 0 ? "room-pulse live" : "room-pulse"} /><span><strong>{room.name}</strong><small>{room.slug}</small></span><Badge variant="outline">{room.listenerCount} listening</Badge><time>{formatDate(room.updatedAt, false)}</time></div>
+            <div key={room.slug}><span className={room.listenerCount > 0 ? "room-pulse live" : "room-pulse"} /><span><strong>{room.name}</strong><small>{room.slug}</small></span><Badge variant="outline">{t("socialListeningCount", { count: room.listenerCount })}</Badge><time>{formatDate(room.updatedAt, false)}</time></div>
           ))}
         </CardContent>
       </Card>
@@ -670,21 +682,22 @@ function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onO
 }
 
 function RoomsPanel({ data, onOpenRoom }: { data: AdminDashboardData; onOpenRoom: (slug: string) => void }) {
+  const { t, i18n } = useTranslation("rooms");
   return (
     <Card className="admin-rooms-table">
-      <CardHeader><div><CardTitle>All rooms</CardTitle><CardDescription>{data.rooms.length} rooms · Sorted by recent activity</CardDescription></div><Radio /></CardHeader>
+      <CardHeader><div><CardTitle>{t("socialAllRooms")}</CardTitle><CardDescription>{t("socialRoomCountSorted", { count: data.rooms.length })}</CardDescription></div><Radio /></CardHeader>
       <CardContent>
-        <div className="admin-table-header"><span>Room</span><span>Visibility</span><span>Listeners</span><span>Updated</span><span /></div>
+        <div className="admin-table-header"><span>{t("socialRoom")}</span><span>{t("socialVisibility")}</span><span>{t("socialListeners")}</span><span>{t("socialUpdated")}</span><span /></div>
         {data.rooms.map((room) => (
           <div className="admin-room-row" key={room.slug}>
             <span><strong>{room.name}</strong><small>{room.slug}</small></span>
-            <span>{room.isPublic ? <><Globe2 /> Public</> : <><LockKeyhole /> Private</>}</span>
+            <span>{room.isPublic ? <><Globe2 /> {t("socialPublic")}</> : <><LockKeyhole /> {t("socialPrivate")}</>}</span>
             <span><span className={room.listenerCount > 0 ? "room-pulse live" : "room-pulse"} />{room.listenerCount}</span>
             <time>{formatDate(room.updatedAt)}</time>
-            <Button variant="ghost" size="sm" aria-label={`Open ${room.name}`} onClick={() => onOpenRoom(room.slug)}>Open <ExternalLink /></Button>
+            <Button variant="ghost" size="sm" aria-label={t("socialOpenRoom", { room: room.name })} onClick={() => onOpenRoom(room.slug)}>{t("socialOpen")} <ExternalLink /></Button>
           </div>
         ))}
-        {!data.rooms.length && <div className="admin-empty"><Radio /><strong>No rooms yet</strong></div>}
+        {!data.rooms.length && <div className="admin-empty"><Radio /><strong>{t("socialNoRoomsYet")}</strong></div>}
       </CardContent>
     </Card>
   );

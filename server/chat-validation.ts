@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { z } from 'zod'
 import type { User } from './types.js'
 import { canonicalReactionEmoji } from './chat-reaction-catalog.js'
@@ -12,28 +13,28 @@ export const CHAT_MAX_HISTORY_CHILDREN = 6000
 const mediaUrl = z.string().max(4096).url().refine((value) => {
   const url = new URL(value)
   return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password
-}, 'Invalid chat image.')
+}, serverT("invalid_chat_image"))
 const mention = z.object({ userId: z.string().min(1).max(100), userName: z.string().min(1).max(32), handle: z.string().min(1).max(64) })
 const poll = z.object({ options: z.array(z.string().trim().min(1).max(80)).min(2).max(4) }).superRefine((value, context) => {
   if (new Set(value.options.map((option) => option.toLowerCase())).size !== value.options.length) {
-    context.addIssue({ code: 'custom', message: 'Use different poll options.' })
+    context.addIssue({ code: 'custom', message: serverT("use_different_poll_options") })
   }
 })
 export const chatMessageSchema = z.object({
   id: z.string().uuid(), content: z.string().max(500), type: z.enum(['text', 'image', 'gif']),
-  createdAt: z.string().max(64).refine((value) => Number.isFinite(Date.parse(value)), 'Invalid message time.'),
+  createdAt: z.string().max(64).refine((value) => Number.isFinite(Date.parse(value)), serverT("invalid_message_time")),
   mediaUrl: mediaUrl.optional(), storagePath: z.string().max(1024).optional(), mentions: z.array(mention).max(20).default([]),
   replyTo: z.object({ id: z.string().uuid() }).optional(),
   poll: poll.optional(),
 }).superRefine((message, context) => {
-  if (message.type === 'text' ? !message.content.trim() : !message.mediaUrl) context.addIssue({ code: 'custom', message: 'Enter a message or choose an image.' })
+  if (message.type === 'text' ? !message.content.trim() : !message.mediaUrl) context.addIssue({ code: 'custom', message: serverT("enter_a_message_or_choose_an_image") })
   if (message.poll && (message.type !== 'text' || message.content.trim().length > 200)) {
-    context.addIssue({ code: 'custom', message: 'Polls need a question of 1–200 characters.' })
+    context.addIssue({ code: 'custom', message: serverT("polls_need_a_question_of_1_200_characters") })
   }
 })
 export const chatReactionSchema = z.object({ id: z.string().uuid().optional(), action: z.enum(['add', 'remove']), messageId: z.string().uuid(), emoji: z.string().min(1).max(32).transform((value, context) => {
   const canonical = canonicalReactionEmoji(value)
-  if (!canonical) { context.addIssue({ code: 'custom', message: 'Choose a supported emoji.' }); return z.NEVER }
+  if (!canonical) { context.addIssue({ code: 'custom', message: serverT("choose_a_supported_emoji") }); return z.NEVER }
   return canonical
 }) })
 export const chatPollVoteSchema = z.object({ optionIndex: z.number().int().min(0).max(3) })
@@ -66,7 +67,7 @@ export function resolveVisibleMentions(input: ChatMessageInput, audience: User[]
 }
 
 export function canonicalMessage(input: ChatMessageInput, user: User, reply?: ChatReply, audience: User[] = []): RelayMessage {
-  if (input.storagePath && !input.storagePath.startsWith(`${user.id}/`)) throw new PublicRequestError('This uploaded image belongs to another account.', 403)
+  if (input.storagePath && !input.storagePath.startsWith(`${user.id}/`)) throw new PublicRequestError(serverT("this_uploaded_image_belongs_to_another_account"), 403)
   return { ...input, content: input.poll ? input.content.trim() : input.content, poll: input.poll ? { options: input.poll.options, votes: [] } : undefined,
     createdAt: new Date(input.createdAt).toISOString(), mediaUrl: input.type === 'text' ? undefined : input.mediaUrl,
     storagePath: input.type === 'text' ? undefined : input.storagePath, user, replyTo: reply,

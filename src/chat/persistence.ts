@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import {
@@ -22,7 +23,7 @@ export const chatHistoryCursor = (message: Pick<ChatMessage, 'createdAt' | 'id'>
 export function chatHistoryCursorFilter(cursor: ChatHistoryCursor, direction: 'older' | 'newer' = 'older') {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(cursor.createdAt) ||
     !Number.isFinite(Date.parse(cursor.createdAt)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cursor.id)) {
-    throw new Error('The history position is invalid. Reload chat and try again.')
+    throw new Error(i18n.t('chat:historyCursorInvalid'))
   }
   const operator = direction === 'older' ? 'lt' : 'gt'
   return `created_at.${operator}.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.${operator}.${cursor.id})`
@@ -30,7 +31,7 @@ export function chatHistoryCursorFilter(cursor: ChatHistoryCursor, direction: 'o
 
 export function chatSearchPattern(query: string) {
   const term = query.trim().slice(0, 100)
-  if (term.length < 2) throw new Error('Enter at least two characters to search room messages.')
+  if (term.length < 2) throw new Error(i18n.t('chat:searchTooShort'))
   return `%${term.replace(/[\\%_]/g, (character) => `\\${character}`)}%`
 }
 

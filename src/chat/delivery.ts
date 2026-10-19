@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { ChatMessage } from './model'
 
 export type ChatSaveState = 'sending' | 'send-failed' | 'sent-live' | 'saving' | 'saved' | 'failed'
@@ -31,7 +32,7 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
     record.pending = Promise.resolve().then(() => record.persist(record.message)).then(() => {
       states[id] = { state: 'saved' }
     }, (error: unknown) => {
-      states[id] = { state: 'failed', error: error instanceof Error ? error.message : 'History could not be saved.' }
+      states[id] = { state: 'failed', error: error instanceof Error ? error.message : i18n.t('chat:historySaveFailed') }
     }).finally(() => { record.pending = undefined; releaseCompleted(id); publish() })
     return record.pending
   }
@@ -47,7 +48,7 @@ export function createChatSaveTracker(onChange: (states: ChatSaveStates) => void
       } else { states[id] = { state: 'sent-live' }; releaseCompleted(id); publish() }
       return true
     }, (error: unknown) => {
-      states[id] = { state: 'send-failed', error: error instanceof Error ? error.message : 'Could not confirm this send.' }; publish()
+      states[id] = { state: 'send-failed', error: error instanceof Error ? error.message : i18n.t('chat:sendUnconfirmed') }; publish()
       return false
     }).finally(() => { record.pending = undefined; releaseCompleted(id) })
     return record.pending
