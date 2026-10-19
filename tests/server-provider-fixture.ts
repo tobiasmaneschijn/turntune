@@ -1,5 +1,5 @@
 // Child-process integration instrumentation; production never imports this file.
-import { ResourcePolicyStore } from '../server/resource-policy.js';
+import { ResourcePolicyStore } from '../server/resources/resource-policy.js';
 const defaultPolicy = ResourcePolicyStore.prototype.get;
 // The long saved-work workflow runs many actions without human delays. Give
 // its account a trusted fixture plan; the quota listener keeps free defaults.

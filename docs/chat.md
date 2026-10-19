@@ -20,13 +20,13 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 | `src/features/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
 | `src/features/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
 | `src/features/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
-| `server/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
-| `server/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
-| `server/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
-| `server/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
-| `server/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
-| `server/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
-| `server/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
+| `server/features/chat/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
+| `server/features/chat/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
+| `server/features/chat/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
+| `server/features/chat/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
+| `server/features/chat/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
+| `server/features/chat/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
+| `server/features/chat/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
 | `src/features/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
 | `src/features/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
 | `src/features/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |

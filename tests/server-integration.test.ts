@@ -7,7 +7,7 @@ import { once } from "node:events";
 import test from "node:test";
 import { io, type Socket } from "socket.io-client";
 import type { RoomPresence, RoomSnapshot } from "../src/types.js";
-import { hashRoomPassword } from "../server/room-password.js";
+import { hashRoomPassword } from "../server/features/rooms/room-password.js";
 
 function waitForSnapshot(socket: Socket, matches: (snapshot: RoomSnapshot) => boolean) {
   return new Promise<RoomSnapshot>((resolve, reject) => {

@@ -18,7 +18,7 @@ function run(args, input) {
   return result;
 }
 if (process.argv.includes("--self-test")) {
-  assert.deepEqual(unexpectedEnvironmentFiles([".env.example", "server/config.ts"]), []);
+  assert.deepEqual(unexpectedEnvironmentFiles([".env.example", "server/lib/config.ts"]), []);
   assert.deepEqual(unexpectedEnvironmentFiles([".env", ".env.test", ".env.test-users.local", "nested/.env.local"]),
     [".env", ".env.test", ".env.test-users.local", "nested/.env.local"], "Local environment files must be rejected even without a recognized credential pattern.");
   // Construct a well-known NONVALID credential shape in memory; never commit a key.

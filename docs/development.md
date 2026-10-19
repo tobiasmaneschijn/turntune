@@ -15,6 +15,9 @@ for development; never use production accounts or data in tests.
 | `src/styles/` | Global stylesheet entry points, tokens, and product styles |
 | `src/locales/` | Shared language catalogs for app, server, protocol, and release copy |
 | `server/` | Express API, Socket.IO, room coordination, and provider integrations |
+| `server/features/` | Server routes, services, and tests grouped by feature |
+| `server/persistence/`, `server/integrations/` | Shared persistence and external service clients |
+| `server/security/`, `server/realtime/`, `server/resources/`, `server/lib/` | Shared server infrastructure |
 | `shared/` | Client/server types, command schemas, and policies |
 | `supabase/migrations/` | Append-only database migration chain |
 | `tests/` | Integration, SQL, browser, and frontend helper tests |
@@ -27,7 +30,8 @@ The server owns room decisions and uses Supabase for accounts and durable data.
 See [rooms and radio](rooms-and-radio.md) and [chat](chat.md) for the relevant
 contracts and code maps.
 
-See the [frontend folder guide](../src/README.md) for placement rules.
+See the [frontend folder guide](../src/README.md) and
+[server folder guide](../server/README.md) for placement rules.
 
 ## Local configuration
 

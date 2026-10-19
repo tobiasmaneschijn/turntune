@@ -18,7 +18,7 @@ test("every focused test group uses fixed local fixtures and production smoke us
     assert.ok(args.some(value => /\.test\.ts$|\.mjs$/.test(value)));
     assert.equal(args.includes("tsx"), group !== "sql" && group !== "production");
   }
-  assert.ok(testArguments("signup").map(path => path.replaceAll("\\", "/")).includes("server/signup-routes.test.ts"));
+  assert.ok(testArguments("signup").map(path => path.replaceAll("\\", "/")).includes("server/features/auth/signup-routes.test.ts"));
   assert.ok(testArguments("integration").map(path => path.replaceAll("\\", "/")).includes("tests/socket-auth-integration.test.ts"));
   assert.deepEqual(testArguments("production").map(path => path.replaceAll("\\", "/")), ["--test", "--test-concurrency=1", "tests/production-entrypoint-smoke.mjs"]);
 });

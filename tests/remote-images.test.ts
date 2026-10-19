@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {approvedLocalImageUrl,approvedRemoteImageUrl} from '../shared/remote-images.js';
-import {libraryMutationSchema} from '../server/private-library.js';
+import {libraryMutationSchema} from '../server/features/music/private-library.js';
 import {trackSchema} from '../shared/room-protocol.js';
 
 test('View shared artwork without loading an external tracking image',()=>{

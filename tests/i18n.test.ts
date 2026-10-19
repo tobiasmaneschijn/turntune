@@ -6,7 +6,7 @@ import test from "node:test";
 import ts from "typescript";
 import { createInstance } from "i18next";
 import i18n, { resources } from "../src/i18n";
-import { serverT } from "../server/i18n.js";
+import { serverT } from "../server/lib/i18n.js";
 import { getChangelog } from "../src/features/public/changelog";
 
 const root = fileURLToPath(new URL("../", import.meta.url));

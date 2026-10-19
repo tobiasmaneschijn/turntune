@@ -173,7 +173,7 @@ manual penetration testing remain launch requirements.
   artifact retention and the weekly pip update entry were also checked.
 - Two TypeScript constructs required equivalent parser-compatible spelling:
   `RoomMemberRecord` is now a top-level type-only import in `server/index.ts`,
-  and the local `unique` array in `server/social-store.ts` is named `uniqueIds`.
+  and the local `unique` array in `server/features/social/social-store.ts` is named `uniqueIds`.
   Neither changes runtime behavior. Parser errors and legacy rule timeouts were
   rejected by the gate during verification; they were not treated as clean.
 
