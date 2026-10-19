@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express, { type Express, type Request, type Response } from 'express'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ChatRateLimit, ChatWriteConflict, createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
@@ -6,6 +7,7 @@ import type { User } from './types.js'
 import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
 import type { ChatCommandService } from './chat-command-service.js'
 import { mountDurableChatRoutes } from './chat-command-routes.js'
+import type { ResolvedResourcePolicy } from '../shared/resource-policy.js'
 
 interface Cursor { createdAt: string; id: string }
 interface HistoryRow {
@@ -17,6 +19,7 @@ interface HistoryRow {
   soundspin_poll_votes?: Array<{ user_id: string; option_index: number; revision: number }>
 }
 export interface ChatHistoryRouteOptions {
+  getResourcePolicy?: (actor:string)=>Promise<ResolvedResourcePolicy>
   client: SupabaseClient | null
   getUserId: (request: Request) => Promise<string | null | undefined>
   canReadRoom: (userId: string, roomSlug: string) => Promise<boolean>
@@ -41,7 +44,7 @@ class Conflict extends Error {}
 export interface StoredChatMessage { roomId: string; userId: string; message: ChatMessageInput }
 /** Global UUID lookup is used only after relay admission, to reject collisions across rooms/authors. */
 export async function loadStoredChatMessage(client: SupabaseClient | null, id: string): Promise<StoredChatMessage | null> {
-  if (!client) throw new Error('Chat storage is unavailable. Please try again.')
+  if (!client) throw new Error(serverT("chat_storage_is_unavailable_please_try_again"))
   if (!UUID.test(id)) throw new BadRequest('Invalid message.')
   const { data, error } = await client.from('soundspin_messages')
     .select('room_slug, user_id, id, content, message_type, media_url, storage_path, mentions, reply_to_id, created_at, poll_options').eq('id', id).maybeSingle()
@@ -104,23 +107,23 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
   if(options.commands){mountDurableChatRoutes(app,options,options.commands);return}
   const writePolicy = options.writePolicy || createChatWritePolicy()
   const replyWithReadCheck = async (userId: string, room: string, response: Response, payload: unknown) => {
-    if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     response.json(payload)
   }
   const authorized = (run: (client: SupabaseClient, roomSlug: string, request: Request, response: Response, userId: string) => Promise<void>, write = false) => async (request: Request, response: Response) => {
     response.setHeader('Cache-Control', 'no-store')
     let userId: string | null | undefined
-    try { userId = await options.getUserId(request) } catch { response.status(401).json({ error: 'Sign in to read room chat.' }); return }
-    if (!userId) { response.status(401).json({ error: 'Sign in to read room chat.' }); return }
+    try { userId = await options.getUserId(request) } catch { response.status(401).json({ error: serverT("sign_in_to_read_room_chat") }); return }
+    if (!userId) { response.status(401).json({ error: serverT("sign_in_to_read_room_chat") }); return }
     const roomSlug = request.params.roomSlug
-    if (typeof roomSlug !== 'string' || !/^[a-z0-9-]{3,48}$/.test(roomSlug)) { response.status(400).json({ error: 'Invalid room.' }); return }
-    if (!options.client) { response.status(503).json({ error: 'Chat history is unavailable.' }); return }
+    if (typeof roomSlug !== 'string' || !/^[a-z0-9-]{3,48}$/.test(roomSlug)) { response.status(400).json({ error: serverT("invalid_room") }); return }
+    if (!options.client) { response.status(503).json({ error: serverT("chat_history_is_unavailable") }); return }
     try {
       const allowed = write ? await options.canWriteRoom?.(userId, roomSlug) : await options.canReadRoom(userId, roomSlug)
-      if (!allowed) { response.status(403).json({ error: write ? 'Join this room before saving chat messages or reactions.' : 'Join this room before reading its chat history.' }); return }
+      if (!allowed) { response.status(403).json({ error: write ? serverT("join_this_room_before_saving_chat_messages_or_reactions") : serverT("join_this_room_before_reading_its_chat_history") }); return }
       await run(options.client, roomSlug, request, response, userId)
     } catch (error) {
-      response.status(error instanceof ChatRateLimit ? 429 : error instanceof Conflict || error instanceof ChatWriteConflict ? 409 : error instanceof BadRequest ? 400 : 503).json({ error: error instanceof BadRequest || error instanceof Conflict || error instanceof ChatRateLimit || error instanceof ChatWriteConflict ? error.message : write ? 'Chat could not be saved. Try again.' : 'Chat history could not be loaded. Try again.' })
+      response.status(error instanceof ChatRateLimit ? 429 : error instanceof Conflict || error instanceof ChatWriteConflict ? 409 : error instanceof BadRequest ? 400 : 503).json({ error: error instanceof BadRequest || error instanceof Conflict || error instanceof ChatRateLimit || error instanceof ChatWriteConflict ? error.message : write ? serverT("chat_could_not_be_saved_try_again") : serverT("chat_history_could_not_be_loaded_try_again") })
     }
   }
   app.get('/api/rooms/:roomSlug/chat/history', authorized(async (client, room, request, response, userId) => {
@@ -164,7 +167,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     if (stored) {
       if (stored.roomId !== room || stored.userId !== userId || immutableMessageKey(stored.message) !== immutableMessageKey(parsed.data)) throw new Conflict('This message ID already belongs to different content, account, or room.')
       writePolicy.message(room, userId, parsed.data, true)
-      if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+      if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
       response.json({ ok: true }); return
     }
     try { writePolicy.message(room, userId, parsed.data) } catch (error) {
@@ -184,7 +187,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     const values = { id: message.id, room_slug: room, user_id: userId, user_name: user.name, avatar_seed: user.avatarSeed,
       content: message.content, message_type: message.type, media_url: message.mediaUrl || null, storage_path: message.storagePath || null,
       mentions: message.mentions, reply_to_id: message.replyTo?.id || null, created_at: message.createdAt, poll_options: message.poll?.options || null }
-    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     const { error } = await client.from('soundspin_messages').insert(values)
     if (error) {
       if (error.code !== '23505') throw error
@@ -204,7 +207,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     writePolicy.reaction(room, userId, parsed.data)
     if (!await loadChatReply(client, room, parsed.data.messageId)) throw new BadRequest('This room message is unavailable.')
     const values = { message_id: parsed.data.messageId, user_id: userId, emoji: parsed.data.emoji }
-    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     const { error } = parsed.data.action === 'add'
       ? await client.from('soundspin_message_reactions').upsert(values, { onConflict: 'message_id,user_id,emoji', ignoreDuplicates: true })
       : await client.from('soundspin_message_reactions').delete().eq('message_id', values.message_id).eq('user_id', userId).eq('emoji', values.emoji)
@@ -219,13 +222,13 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     if (!row || row.message_type !== 'text' || !row.poll_options || parsed.data.optionIndex >= row.poll_options.length) {
       throw new BadRequest('This poll option is unavailable.')
     }
-    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     const { data, error } = await client.from('soundspin_poll_votes')
       .upsert({ message_id: row.id, room_slug: room, user_id: userId, option_index: parsed.data.optionIndex }, { onConflict: 'message_id,user_id' })
       .select('message_id, user_id, option_index, revision').single()
-    if (error || !data) throw error || new Error('Poll vote was not saved.')
+    if (error || !data) throw error || new Error(serverT("poll_vote_was_not_saved"))
     const event: ChatPollVoteEvent = { messageId: data.message_id, userId: data.user_id, optionIndex: data.option_index, revision: data.revision }
-    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canWriteRoom?.(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     await options.onPollVote?.(room, event, userId)
     await replyWithReadCheck(userId, room, response, event)
   }, true))
@@ -233,7 +236,7 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
     if (typeof request.body?.storagePath !== 'string') throw new BadRequest('Invalid chat image.')
     let result: Awaited<ReturnType<typeof resolveChatMediaUrl>>
     try { result = await resolveChatMediaUrl(client, room, request.body.storagePath, userId) } catch (error) { throw new BadRequest(error instanceof Error ? error.message : 'Chat image is unavailable.') }
-    if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: 'This room session has ended.' }); return }
+    if (!await options.canReadRoom(userId, room)) { response.status(403).json({ error: serverT("this_room_session_has_ended") }); return }
     response.json(result)
   }))
 }

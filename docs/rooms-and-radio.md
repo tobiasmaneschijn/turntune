@@ -56,7 +56,7 @@ Failed persistence leaves the authoritative room and playback unchanged.
 This is currently a **single active Node instance** design. Presence maps,
 cached DJ identities, disconnect timers, and Socket.IO fan-out live in one
 process. Supabase makes room state durable, but does not coordinate multiple
-Lydman server replicas. Add a shared Socket.IO adapter, distributed locks,
+turntune server replicas. Add a shared Socket.IO adapter, distributed locks,
 and durable grace scheduling before horizontally scaling the server.
 
 ## Code map
@@ -325,7 +325,7 @@ position at updatedAt + elapsed wall-clock time (when playing)
 ```
 
 Clients use the checkpoint to seek their selected provider player into sync.
-Each listener may use the room source, Spotify in Lydman, Spotify Desktop,
+Each listener may use the room source, Spotify in turntune, Spotify Desktop,
 or Apple Music. Provider mappings are stored with the track; missing mappings
 fall back to the source provider. Only the current DJ's active adapter reports
 a natural end. Manual pause/seek/skip follows the room's Current DJ and staff or
@@ -373,7 +373,7 @@ natural completion also checks a supplied revision and known duration. This make
 idempotent: retries, delayed events, or another tab cannot accidentally skip
 the next song too.
 
-Do not use a provider video ID for this check. The Lydman track UUID
+Do not use a provider video ID for this check. The turntune track UUID
 identifies one play instance, even if the same provider track appears later.
 
 Unknown/live natural completion retains trust in the authorized current DJ;
@@ -638,7 +638,7 @@ Run the radio privacy test immediately.
 
 ### The radio skips two songs
 
-Confirm every manual/natural completion sender includes the current Lydman track
+Confirm every manual/natural completion sender includes the current turntune track
 UUID and that the server still compares it before advancing. Check whether more than the
 on-air browser reports natural YouTube completion.
 

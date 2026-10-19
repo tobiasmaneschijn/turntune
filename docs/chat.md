@@ -1,6 +1,6 @@
 # Chat architecture
 
-Lydman chat delivers live events through the app's authenticated, room-admitted
+turntune chat delivers live events through the app's authenticated, room-admitted
 Socket.IO connection. The server checks fresh room access before accepting a
 message, reaction, or typing event and again before delivering it to current
 authorized recipients. Production chat never opens a public Supabase Broadcast

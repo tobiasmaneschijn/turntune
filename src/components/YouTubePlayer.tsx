@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { createPlayerApiLoader } from "../player-api-loader";
 import { requestJson } from "../lib/authenticated-http";
@@ -38,7 +39,7 @@ interface YouTubePlayerApi {
 
 const loadApi = createPlayerApiLoader({
   src: "https://www.youtube.com/iframe_api",
-  label: "the YouTube player",
+  label: () => i18n.t("music:youtube.sdkLabel"),
   readApi: () => window.YT?.Player ? window.YT : undefined,
   readyCallback: "onYouTubeIframeAPIReady"
 });
@@ -187,14 +188,14 @@ export function YouTubePlayer({
           onError: () => {
             if (!active) return;
             onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-            onErrorRef.current?.("This YouTube track could not be played. It may be unavailable or blocked from embedding.");
+            onErrorRef.current?.(i18n.t("music:youtube.unavailable"));
           }
         }
       });
     }).catch((cause) => {
       if (!active) return;
       onStatusRef.current({ ready: false, buffering: false, currentTime: 0, duration: 0 });
-      onErrorRef.current?.(cause instanceof Error ? cause.message : "Could not initialize YouTube playback.");
+      onErrorRef.current?.(cause instanceof Error ? cause.message : i18n.t("music:youtube.initializeFailed"));
     });
     return () => {
       active = false;

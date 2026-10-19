@@ -15,7 +15,7 @@ moderation, export/deletion steps and the detailed data/retention inventory.
   The project and JWKS endpoint must describe the same HTTPS project. Production
   rejects inline JWKS overrides and credentials embedded in the key URL.
 - HTTP requests and Engine.IO handshakes require the configured Host and HTTPS.
-  Browser Origin must match the public origin. Native clients can omit Origin;
+  Browser Origin must match `APP_ORIGIN` or an explicit `APP_ORIGINS` entry. Native clients can omit Origin;
   bearer authentication is still required at the application boundary.
 - Forwarded headers have no authority by default. `TRUSTED_PROXY_CIDRS` accepts
   explicit addresses/nonzero networks, never a hop count, an alias or a catch-all
@@ -64,7 +64,8 @@ The example is a list of names/placeholders, not deployable credentials.
 
 | Setting | Required value / verification |
 | --- | --- |
-| `APP_ORIGIN` | Exact public origin, e.g. `https://soundspin.example`; no path/query, credentials or trailing application route. |
+| `APP_ORIGIN` | Exact active public origin, e.g. `https://turntune.app` after DNS is configured; no path/query, credentials or trailing application route. |
+| `APP_ORIGINS` | Optional comma-separated additional approved origins. Retain old domains here while they still serve the app. |
 | `TRUSTED_PROXY_CIDRS` | Exact immediate ingress addresses and any additional legitimate forwarding hops. Empty trusts nobody. Record every HTTP/WS/health path and its real direct peer before setting this. |
 | `CSP_MODE` | `enforce` at launch. `report-only` is available temporarily in private staging; baseline anti-framing remains enforced. |
 | `SUPABASE_URL` | HTTPS origin of the intended production project. |
@@ -78,7 +79,8 @@ The example is a list of names/placeholders, not deployable credentials.
 | Provider credentials | Enable only providers with real configured credentials; use separate development/staging/production keys and restrict provider scopes/quotas. |
 | Provider admission budgets | `PROVIDER_REQUESTS_PER_MINUTE=300`, `SPOTIFY_REQUESTS_PER_MINUTE=1200`, `PROVIDER_MAX_CONCURRENT=12`, `PROVIDER_GLOBAL_MAX_CONCURRENT=48` are initial process-wide ceilings. Spotify polling can cost about 40 calls/minute per active listener. Measure actual normal concurrency before raising limits; provider-side spend/quota caps are still required. Validated maximums are 10000 requests/minute, 32 concurrent/provider and 96 concurrent globally. |
 | `SOUNDSPIN_PORT` | Host loopback binding for the edge. Keep the container's internal port 3000. |
-| `SOUNDSPIN_REVISION` | Reviewed Git commit used for the OCI image revision label. `unknown` is allowed for local testing only; release artifacts must have a recorded revision and digest. |
+| `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: reviewed Git commit used for the OCI image revision label. The GitHub release workflow supplies the revision automatically. `unknown` is allowed for local testing only. |
+| `SOUNDSPIN_IMAGE` | Release Compose only: workflow-supplied `ghcr.io/...@sha256:...` reference. Production must use the digest verified in staging. |
 
 If frontend `VITE_SUPABASE_*` values are baked into a build, they must identify
 the same production project as `/api/config`. Prefer the runtime configuration
@@ -127,12 +129,12 @@ map $http_upgrade $soundspin_connection {
 }
 server {
     listen 80;
-    server_name soundspin.example;
-    return 308 https://soundspin.example$request_uri;
+    server_name turntune.app;
+    return 308 https://turntune.app$request_uri;
 }
 server {
     listen 443 ssl;
-    server_name soundspin.example;
+    server_name turntune.app;
     ssl_certificate /etc/ssl/soundspin/fullchain.pem;
     ssl_certificate_key /etc/ssl/soundspin/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -141,7 +143,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Host soundspin.example;
+        proxy_set_header Host turntune.app;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-Host "";
@@ -175,8 +177,12 @@ Staging completion evidence:
 Before deployment, apply **all** committed migrations in timestamp order to an
 isolated staging project. The security release adds platform/privacy, managed
 upload/feedback, chat moderation, social/library, and ordered room admission
-migrations dated 2026-10-13. Do not cherry-pick only a new file; they rely on the
-preceding schema. Use the migration tool's recorded history, review the exact
+migrations dated 2026-10-13, followed by
+`20261017174956_configurable_resource_limits.sql`. There are 31 committed
+migrations. The latest adds service-only plans/configuration, quota enforcement,
+bounded chat retention, and the administrator-only room Spotify capability.
+Do not cherry-pick only a new file; they rely on the preceding schema.
+Use the migration tool's recorded history, review the exact
 pending migration list, and take a recovery snapshot before production apply.
 This work does not apply migrations to the configured live project.
 
@@ -208,6 +214,15 @@ After migrating, verify with the real Supabase gateway:
 - Review database console/SQL access, project members and service-key consumers.
   The database need not have a public unrestricted SQL port because the app uses
   the Supabase API. Restrict direct SQL access to required operators/tools.
+- Verify resource configuration, plans, and assignments reject direct browser
+  reads/writes and privileged policy RPC calls. Accounts default to `free`;
+  operators alone assign future plans. Read back effective policies after changes
+  and test both quota rejection and removal of existing over-limit saved work.
+  See [resource limits](resource-limits.md) for the configuration contract.
+- Spotify starts disabled for rooms. An active application administrator with
+  MFA/AAL2 can enable it through the dedicated control; an owner/moderator settings
+  update must not change that capability. Verify direct RPC denial and the SQL
+  guard for both persisted settings representations.
 
 ## Capacity, containers and one active process
 
@@ -218,9 +233,17 @@ testing shared coordination first. Replacing the process disconnects sockets;
 the client reconnects and loads durable state.
 
 Build once from a reviewed revision and record the image digest, migration
-history, dependency lock hash and runtime configuration version. The base-image
-digest is reviewed, not permanently frozen: merge verified update proposals and
-rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
+history, dependency lock hash and runtime configuration version. The manual
+[GitHub deployment workflow](github-deployments.md) builds and scans in staging,
+then promotes that exact digest to production. It checks CI and Supabase results
+for the selected commit, binds evidence to the run and attempt, and requires
+an approved release PR for production. The approving review and PR description
+must both link the selected staging run. A merge commit may have a different SHA only
+when its Git tree equals the staged source tree. The full hosted release gates
+in this runbook still apply.
+
+The base-image digest is reviewed, not permanently frozen: merge verified update
+proposals and rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
 additional public CA as a BuildKit `proxy_ca` secret; it is mounted only during
 dependency installation. Keep certificate verification enabled.
 
@@ -294,12 +317,24 @@ Feedback resolved/closed for 90 days is deleted after screenshot keys are queued
 admin/chat-removal audits and completed deletion jobs expire after 180 days.
 The separate `soundspin_purge_security_archives()` RPC removes at most 1,000
 expired rows from each of its moderation and chat-child archive tables per batch.
+`soundspin_prune_chat_history(500)` removes chat outside the latest 10,000 messages
+per room or older than 90 days by default. Limits are operator configurable.
+The worker processes at most 20 rooms and 500 parent messages per call; a durable
+cursor advances even when a room fills the batch so other rooms receive cleanup.
+Reply lookups use the reply index. Each call clears at most 500 incoming reply
+references; a still-referenced parent waits for another pass. This avoids an
+unbounded FK update for a popular message. Deleting a parent cascades its bounded
+reactions/poll votes. Owned attachments enter
+the existing outbox with a five-minute signed-URL delay. Migration installation
+does not trim messages. Review and publish this policy before deploying its worker.
 The app runs retention at startup and hourly, at most 20 batches or 20 seconds
 per maintenance run. Storage cleanup runs every 60 seconds with
 at most 20 batches of 100 objects or 20 seconds. Monitor cleanup until the queue
 drains, and verify the schedules actually execute on the deployed process.
-Live room history/private libraries persist until owner/room
-deletion, and active feedback persists until resolution. UUID/slug restriction
+Private libraries persist until owner deletion, and active feedback persists
+until resolution. Chat backlogs drain over multiple bounded runs; review age/count
+backlog and actual hosting throughput rather than assuming immediate deletion.
+UUID/slug restriction
 tombstones remain until an explicit reviewed backup-replay policy permits their
 removal. Verify these actual periods match the notice/legal requirements and
 that scheduled runs occur; a document alone does not prune data.
@@ -391,7 +426,7 @@ explicit `--workers`/`-j` choices override that default. `CI` disables fixture
 server reuse but does not itself limit Playwright's CPU-based worker default.
 `test:ui:live` and user-seeding commands are separate
 manual operations requiring an explicitly authorized environment. The required
-CI behavior job has a 120-minute timeout for the complete one-worker suite;
+CI behavior job has a 20-minute timeout for the reduced one-worker use-case suite;
 failures still fail the gate.
 Fixture-suite failure diagnostics retain a final failure screenshot, test
 sources/API-call records, console output and the reporter's accessible error context. Its

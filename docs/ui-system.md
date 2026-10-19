@@ -1,4 +1,4 @@
-# Lydman UI system
+# turntune UI system
 
 `src/shadcn.css` owns semantic tokens, the Geist type system, base focus treatment, and light/dark themes. `src/styles.css` is import-only; each file in `src/styles/` owns one product surface, with complex room, player, and chat layouts kept in plain CSS.
 

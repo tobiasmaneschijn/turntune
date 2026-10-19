@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
@@ -6,12 +7,16 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card"
 export class AppErrorBoundary extends Component<{ children: ReactNode; onRetry?: () => void }, { error: Error | null }> {
   state = { error: null as Error | null };
 
+  private updateLanguage = () => this.forceUpdate();
+  componentDidMount() { i18n.on("languageChanged", this.updateLanguage); }
+  componentWillUnmount() { i18n.off("languageChanged", this.updateLanguage); }
+
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Lydman UI crashed", error, info);
+    console.error("turntune UI crashed", error, info);
   }
 
   render() {
@@ -21,14 +26,14 @@ export class AppErrorBoundary extends Component<{ children: ReactNode; onRetry?:
         <Card className="app-error-card">
           <CardHeader>
             <span className="app-error-icon"><AlertTriangle /></span>
-            <CardTitle><h1>Couldn't load the app</h1></CardTitle>
+            <CardTitle><h1>{i18n.t("public:appLoadError")}</h1></CardTitle>
           </CardHeader>
           <CardContent>
             <code>{this.state.error.message}</code>
           </CardContent>
           <CardFooter className="gap-2">
-            <Button onClick={() => { this.props.onRetry?.(); this.setState({ error: null }); }}><RefreshCw data-icon="inline-start" />Retry</Button>
-            <Button variant="outline" onClick={() => location.assign("/")}><ArrowLeft data-icon="inline-start" />Back to rooms</Button>
+            <Button onClick={() => { this.props.onRetry?.(); this.setState({ error: null }); }}><RefreshCw data-icon="inline-start" />{i18n.t("public:retry")}</Button>
+            <Button variant="outline" onClick={() => location.assign("/")}><ArrowLeft data-icon="inline-start" />{i18n.t("public:backToRooms")}</Button>
           </CardFooter>
         </Card>
       </main>
@@ -41,6 +46,10 @@ export class PanelErrorBoundary extends Component<
   { error: Error | null }
 > {
   state = { error: null as Error | null };
+
+  private updateLanguage = () => this.forceUpdate();
+  componentDidMount() { i18n.on("languageChanged", this.updateLanguage); }
+  componentWillUnmount() { i18n.off("languageChanged", this.updateLanguage); }
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -57,12 +66,12 @@ export class PanelErrorBoundary extends Component<
       <Card className="panel-error-card">
         <CardHeader>
           <span className="app-error-icon"><AlertTriangle /></span>
-          <CardTitle><h2>Couldn't load {this.props.panelName.toLowerCase()}</h2></CardTitle>
+          <CardTitle><h2>{i18n.t("public:panelLoadError", { panel: this.props.panelName })}</h2></CardTitle>
         </CardHeader>
         <CardContent><code>{this.state.error.message}</code></CardContent>
         <CardFooter className="gap-2">
-          <Button onClick={() => this.setState({ error: null })}><RefreshCw data-icon="inline-start" />Retry</Button>
-          <Button variant="outline" onClick={() => location.assign("/")}>Back to rooms</Button>
+          <Button onClick={() => this.setState({ error: null })}><RefreshCw data-icon="inline-start" />{i18n.t("public:retry")}</Button>
+          <Button variant="outline" onClick={() => location.assign("/")}>{i18n.t("public:backToRooms")}</Button>
         </CardFooter>
       </Card>
     );

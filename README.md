@@ -1,8 +1,15 @@
-# Lydman
+# turntune
 
-A private, self-hosted shared radio for teams. Lydman synchronizes playback
-across a room, lets each listener use their preferred configured music service,
-and includes round-robin DJ turns, real-time chat, presence, and generated avatars.
+turntune is a shared music room where friends take turns choosing the soundtrack. Create a room, queue your picks, and listen together.
+
+**Take turns. Pick the Tunes**
+
+The production deployment target is [turntune.app](https://turntune.app).
+Existing domains can continue serving the app during the transition;
+keep the active domain in `APP_ORIGIN` and list additional approved origins in
+`APP_ORIGINS`. For self-hosting, use your own origin and provider callbacks.
+
+See [localization and brand copy](docs/localization.md) for the shared language catalogs.
 
 ## Features
 
@@ -77,6 +84,12 @@ addresses; the example environment's provider callbacks are production values.
 For local development, use the separate HTTP callback/origin instructions in
 [`docs/production-hardening.md`](docs/production-hardening.md).
 
+Apply all 31 committed migrations, through
+`20261017174956_configurable_resource_limits.sql`. Resource plans and server caps
+are service-only configuration; every account defaults to `free`. See
+[`docs/resource-limits.md`](docs/resource-limits.md) for defaults, safe operator
+updates, saved-work recovery, and chat retention.
+
 [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md) maps the audit findings
 to implemented changes, verification and remaining external release gates.
 [`SECURITY_AUDIT_REPORT.md`](SECURITY_AUDIT_REPORT.md) preserves the original audit.
@@ -119,9 +132,9 @@ features, proposal-by-proposal status, verification results, and remaining work.
 ## Release notes
 
 The app version comes from `package.json`; the in-app changelog is maintained in
-[`src/changelog.ts`](src/changelog.ts). For the next release, update the package
+[`src/locales/en/changelog.json`](src/locales/en/changelog.json). For the next release, update the package
 version in `package.json` and `package-lock.json`, then add a dated entry at the
-top of `CHANGELOG` with that literal version number. Keep every release entry's
+top of `releases` with that literal version number. Keep every release entry's
 version fixed so package version changes preserve the history. Keep notes brief
 and describe changes users can see.
 
@@ -141,16 +154,16 @@ and server types before producing assets. SQL checks run the actual migrations
 against disposable PGlite databases. The production smoke launches the compiled
 server with fake configuration and blocks external requests.
 
-GitHub Actions runs once per pull-request update and on pushes to `master`,
-cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
-shares one Linux installation across the fixture, playback, music and player
-checks. `npm run test:ui:visual` keeps the authentication and surface screenshot
-baselines on Windows. Both use two workers. The focused browser commands remain
-available for local debugging.
+GitHub Actions runs once per pull-request update and on pushes to `master` and
+`develop`, cancelling older runs for the same PR or branch. `npm run test:ui:behavior`
+shares one Linux installation across room, chat, playback and music use cases.
+`npm run test:ui` covers public entry and account recovery. Each workflow runs
+once; phone sizes and keyboard access are exercised within the workflows that
+need them. The focused browser commands remain available for local debugging.
 
-Tag fixture cases that set their own viewport with `@fixed-viewport` so they run
-once. The player suite covers phone sizes within its scenarios. Tag music
-responsive and touch cases with `@mobile` to include them in the phone project.
+Frontend helper tests cover consequential outcomes that need direct control,
+such as account isolation and uncertain delivery. Avoid duplicate checks across
+layers, implementation permutations, and cosmetic screenshot matrices.
 
 For focused checks use `test:radio`, `test:chat`, `test:playback`, or
 `test:integration`. Integration tests never load `.env` or contact the configured
@@ -163,20 +176,24 @@ database.
    the Supabase GitHub integration to apply them automatically from the
    production branch.
 3. In **Authentication → General Configuration**, turn off **Allow new users
-   to sign up**. Lydman creates users through its invite-protected server
+   to sign up**. turntune creates users through its invite-protected server
    endpoint; leaving public signup enabled would let callers bypass the invite
    password by calling Supabase Auth directly.
 4. In **Authentication → URL Configuration**, set the site URL to your
-   production Lydman URL.
+   production turntune URL.
 5. Add `http://127.0.0.1:5173/**` as a redirect URL for local development.
 6. Allow the exact production `/update-password` activation/reset destination;
    restrict development redirects to a separate development project where
-   practical. Configure a custom SMTP provider for invitations and password-reset emails. Supabase's
+   practical. Keep every active domain’s exact `/update-password` URL in the redirect allowlist
+   during the domain transition. Configure a custom SMTP provider for invitations
+   and password-reset emails. Supabase's
    built-in email sender is intended for testing and has restrictive limits.
 7. Set the following environment variables:
 
 ```dotenv
-APP_ORIGIN=https://soundspin.example
+APP_ORIGIN=https://turntune.app
+# Optional additional HTTPS origins, comma-separated during the domain transition.
+APP_ORIGINS=
 TRUSTED_PROXY_CIDRS=
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=your-publishable-key
@@ -189,7 +206,7 @@ SOUNDCLOUD_CLIENT_ID=your-soundcloud-client-id
 SOUNDCLOUD_CLIENT_SECRET=your-soundcloud-client-secret
 SPOTIFY_CLIENT_ID=your-spotify-client-id
 SPOTIFY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIFY_REDIRECT_URI=https://soundspin.example/api/spotify/callback
+SPOTIFY_REDIRECT_URI=https://turntune.app/api/spotify/callback
 SPOTIFY_MARKET=US
 PROVIDER_TOKEN_ENCRYPTION_KEY=generate-a-long-random-secret
 APPLE_MUSIC_TEAM_ID=your-apple-developer-team-id
@@ -201,18 +218,18 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` is sent to the browser and is expected to be public.
-`SUPABASE_SECRET_KEY` must only be available to the Lydman server.
+`SUPABASE_SECRET_KEY` must only be available to the turntune server.
 `SIGNUP_INVITE_PASSWORD` must also remain server-only. Use a long, randomly
 generated value and share it only with people you want to invite. If it is not
 set, the signup endpoint fails closed and no accounts can be created through
-Lydman.
+turntune.
 The server uses Supabase's supported invitation-email API. Signup asks for name,
 email and the shared invite password; it does not accept an account password or
 auto-confirm email ownership. The invitation's activation link verifies the
 email and opens `/update-password`, where the user chooses a password. Pending
 or restricted accounts cannot use normal app or direct data/Storage paths.
 The `VITE_` variables configure the local Vite client. In production, the
-client can also receive the same public values from Lydman's runtime config
+client can also receive the same public values from turntune's runtime config
 endpoint, so Dokploy does not need to bake them into the frontend bundle.
 
 Supabase Auth stores the browser session persistently and refreshes access
@@ -221,12 +238,30 @@ restarts until they explicitly sign out or the session is revoked.
 
 ### GitHub database deployments
 
-The Supabase GitHub integration should use `.` as its working directory because
-the `supabase/` directory is at the repository root. With **Deploy to
-production** enabled, pushing or merging a new timestamped migration into the
-configured production branch applies it automatically. Keep all future schema
-changes as new files in `supabase/migrations`; do not edit an already-deployed
-migration.
+Connect both Supabase projects to this repository with these branch settings:
+
+| Git branch | Supabase project | Dokploy service |
+| --- | --- | --- |
+| `develop` | SoundSpin Staging | Fun → staging → soundspin-staging |
+| `master` | SoundSpin | Fun → production → soundspin |
+
+In each Supabase project's GitHub integration, use `.` as the working directory
+and select its branch from the table as the **Production branch**. Enable
+**Deploy to production** in each integration; this label refers to that Supabase
+project, so `develop` applies migrations only to SoundSpin Staging. Separate
+projects and this integration work without the Pro branching feature. See the
+[Supabase deployment guide](https://supabase.com/docs/guides/deployment).
+
+Both branches use the same append-only `supabase/migrations` directory. Add new
+timestamped migrations; do not edit an already-deployed migration. Merge feature
+branches into `develop`, verify staging, then merge `develop` into `master`.
+
+Keep Dokploy automatic deployment disabled. Use the manual **Deploy** GitHub
+workflow after the intended commit's Supabase migration deployment and GitHub
+Actions checks succeed. It verifies those results for the exact revision.
+Production promotes the image verified in staging and requires the reviewed
+release evidence described in `SECURITY_RELEASE_STATUS.md`. See
+[`docs/github-deployments.md`](docs/github-deployments.md) for setup and use.
 
 Chat is delivered through authenticated, room-admitted Socket.IO. Message history is
 stored in `soundspin_messages` and was created by the
@@ -239,7 +274,7 @@ troubleshooting guide.
 
 Profiles are created by `20260716220100_profiles_and_progression.sql` and
 simplified by `20260720110538_simplify_profiles.sql`. Every account receives a
-public Lydman profile with a display name, bio, avatar, and theme. Available
+public turntune profile with a display name, bio, avatar, and theme. Available
 avatars and themes are validated server-side before a profile is updated.
 
 Application admins are marked on `soundspin_profiles` by the
@@ -272,18 +307,18 @@ stored in the private `chat-media` Supabase Storage bucket and are limited to
 6 MB. Later authorization migrations make the originally public bucket private;
 the server signs five-minute image URLs after checking room access. GIF search requires a
 GIPHY developer key in the server-side `GIPHY_API_KEY`; without it, the GIF
-button remains disabled. Lydman proxies GIF searches so the key is never
+button remains disabled. turntune proxies GIF searches so the key is never
 returned to the browser and browser CORS policy does not apply to GIPHY's API
 response.
 
 YouTube keyword search requires a YouTube Data API v3 key in
 `YOUTUBE_API_KEY`. Keep this server-side variable in `.env` locally and in
-Dokploy's environment settings in production. The browser calls Lydman's
+Dokploy's environment settings in production. The browser calls turntune's
 authenticated search endpoint; the key is never returned to the client.
 
 SoundCloud search requires the `client_id` and `client_secret` from a registered
 SoundCloud application in `SOUNDCLOUD_CLIENT_ID` and
-`SOUNDCLOUD_CLIENT_SECRET`. Lydman exchanges them server-side for a cached
+`SOUNDCLOUD_CLIENT_SECRET`. turntune exchanges them server-side for a cached
 client-credentials token; neither the credentials nor the token are returned to
 the browser. Playback uses SoundCloud's official embedded widget and is limited
 to public tracks SoundCloud reports as playable.
@@ -310,8 +345,10 @@ Commands clone the last committed room, validate within its command queue,
 persist, and then publish. Unrelated Supabase rooms write independently; the
 local JSON fallback shares one atomic file writer. Idle Supabase room cache
 entries are released after ten minutes, waiting for commands and DJ grace.
-Each waiting queue is capped at 1,000 tracks; chat retains a 1,000-row active
-window and a scrolled reader snapshot. Catalog caches are bounded.
+Waiting queues default to 100 tracks per account/room and 500 across rooms, with
+500 tracks total per room. Chat keeps a 1,000-row client window and a scrolled
+reader snapshot; server retention defaults to the latest 10,000 messages within
+90 days, drained by bounded maintenance. Catalog caches are bounded.
 
 Apply all pending migrations before deploying this server, including
 `20261007063943_restrict_feedback_submission_columns.sql`,
@@ -322,23 +359,41 @@ and aggregate complete UTC activity totals for the dashboard.
 
 ## Dokploy deployment
 
-1. Push this repository to a Git provider supported by Dokploy.
-2. Create a new **Compose** application in Dokploy.
-3. Select the repository and use `compose.yaml`.
-4. Configure all required production settings from `.env.example`, including
-   `APP_ORIGIN`, Supabase credentials and the exact trusted proxy addresses.
-   Keep server credentials outside browser build variables.
-5. Configure the matching HTTPS domain and proxy HTTP/Socket.IO to container
-   port `3000`; prevent direct public access to the backend port. Follow the
-   ingress requirements in [`docs/production-hardening.md`](docs/production-hardening.md).
-6. Deploy into isolated staging, apply all migrations and complete the
-   documented release gates in [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md).
-   Open public ingress only after their evidence has been reviewed and approved.
+Use **Actions → Deploy → Run workflow** in GitHub. Select `develop` for staging
+or `master` for production and provide the release evidence URL. Production
+requires an approved, merged release PR and the successful staging run URL.
+Both the PR description and the approving review must link that run. No revision
+needs to be copied: staging builds and scans the selected commit, then production
+promotes that same image digest after verifying the source trees match.
+
+The existing Compose services are recorded in [`deploy/targets.json`](deploy/targets.json).
+The workflow uses [`compose.release.yaml`](compose.release.yaml), switches the
+selected service to Raw Compose and injects the immutable GHCR image reference.
+[`compose.yaml`](compose.yaml) remains available for local source builds. Follow
+[`docs/github-deployments.md`](docs/github-deployments.md) for GitHub Environment,
+registry and Dokploy setup before the first workflow run.
+
+Keep the required settings from `.env.example`, including `APP_ORIGIN`, Supabase
+credentials and exact trusted proxy addresses, in Dokploy. Route HTTPS and
+Socket.IO to container port `3000` and prevent direct public backend access.
+Apply all migrations before the server deployment and complete the gates in
+[`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md). Open public ingress
+only after their evidence has been reviewed and approved.
 
 When Supabase is configured, room state is stored in Postgres. The named
 `soundspin-data` volume remains as a local-development fallback. WebSockets
 must remain enabled on the proxy; Dokploy's standard Traefik setup supports
 them.
+
+Keep the Dokploy domain's target port at `3000`. `SOUNDSPIN_PORT` controls only
+the host's loopback binding; staging can use `3001` there. Set
+`TRUSTED_PROXY_CIDRS` to the proxy's observed address on the shared Docker
+network and recheck it after recreating the proxy.
+
+After changing a domain port on Dokploy v0.29.12, use a fresh **Deploy**.
+**Redeploy** can retain old routing labels. The workflow regenerates the release
+Compose configuration and verifies the running target port. Stop the active
+`soundspin` Compose service before a manual deploy or recovery operation.
 
 ## Playback providers
 
@@ -346,9 +401,12 @@ The shared `Track` model stores a source provider plus ISRC-first provider
 mappings. Tracks waiting in a DJ's queue are only sent to that listener; the DJ lineup and the
 currently playing track remain visible to the room.
 YouTube and SoundCloud play through their embedded players. A listener can link
-Spotify and choose either the Lydman Web Playback device or their Spotify
-Desktop/Connect device. Apple Music listeners authorize MusicKit in the player.
-Lydman tries to resolve the same recording across catalogs by ISRC, then by
+Spotify when an application administrator enables it for the room, then choose
+either the turntune Web Playback device or their Spotify Desktop/Connect device.
+Spotify starts disabled for every room; the administrator control requires
+MFA/AAL2 and is separate from room-owner permissions. Apple Music listeners
+authorize MusicKit in the player.
+turntune tries to resolve the same recording across catalogs by ISRC, then by
 normalized title, artist, and duration when no ISRC is available.
 
 The adapters share measured playback status and lifecycle contracts. Explicit
@@ -362,13 +420,19 @@ autoplay and OAuth checks still require configured accounts.
 Add `SPOTIFY_REDIRECT_URI` to the Spotify developer dashboard exactly as
 configured. Spotify does not accept `localhost`: use the explicit loopback
 address `http://127.0.0.1:5173/api/spotify/callback` for local development, and
-open Lydman at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
-domain in production. Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
+open turntune at `http://127.0.0.1:5173`. Use an HTTPS callback on the deployed
+domain in production. Start Spotify Connect from the host configured in
+`SPOTIFY_REDIRECT_URI`: its authorization cookie belongs to that host, so a flow
+started on a legacy domain cannot finish on a different callback host. Migrate
+the active origin, Supabase Auth redirect allowlist, and provider callback
+allowlists together. This branch does not change live DNS or environment settings.
+
+Generate `PROVIDER_TOKEN_ENCRYPTION_KEY` with a password manager or
 cryptographically secure random generator; changing it invalidates stored
 Spotify refresh tokens. Apple Music requires a MusicKit media identifier and
 private key. The private key accepts escaped `\n` line breaks in environment
 configuration.
 
-Important: Lydman coordinates playback but does not grant rights to music.
+Important: turntune coordinates playback but does not grant rights to music.
 Every adapter remains subject to its provider's availability, account rules,
 geographic restrictions, developer terms, and user playback entitlements.

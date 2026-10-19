@@ -62,7 +62,7 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     server.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-4000); });
     server.stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString();
-      const match = output.match(/Lydman listening on (http:\/\/127\.0\.0\.1:\d+)/);
+      const match = output.match(/turntune listening on (http:\/\/127\.0\.0\.1:\d+)/);
       if (match) { clearTimeout(timer); resolve(match[1]); }
     });
     server.once("error", (error) => { clearTimeout(timer); reject(error); });
@@ -168,6 +168,41 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     assert.equal((await action(host, "room:announcement", { expectedId: null, text: "x".repeat(501) })).ok, false);
   });
   const track = (providerId: string) => ({ provider: "youtube", providerId, title: "Test recording" });
+  await t.test("a full room admits only one concurrent final listener and opens a slot when someone leaves",async t=>{
+    const clients:Socket[]=[];t.after(()=>clients.forEach(client=>client.disconnect()));
+    const enter=async(index:number)=>{
+      const client=await connect();clients.push(client);
+      return {client,result:await action(client,"room:join",{roomId:"capacity-room",user:{id:`capacity-${index}`,name:`Listener ${index}`,avatarSeed:`capacity-${index}`}})};
+    };
+    for(let index=0;index<24;index++)assert.equal((await enter(index)).result.ok,true);
+    const final=await Promise.all([enter(24),enter(25)]);
+    assert.equal(final.filter(entry=>entry.result.ok).length,1);
+    const rejected=final.find(entry=>!entry.result.ok)!;
+    assert.match(rejected.result.error??'',/room is full/);
+    const departed=once(clients[1],"room:presence");clients[0].disconnect();await departed;
+    const index=clients.indexOf(rejected.client);
+    assert.equal((await action(rejected.client,"room:join",{roomId:"capacity-room",user:{id:`capacity-${index}`,name:`Listener ${index}`,avatarSeed:`capacity-${index}`}})).ok,true);
+  });
+  await t.test("a listener throttled while preparing tracks can still remove a track and finish playback",async t=>{
+    const listener=await connect();t.after(()=>listener.disconnect());
+    let state!:RoomSnapshot;
+    listener.on("room:snapshot",snapshot=>{state=snapshot;});
+    assert.equal((await action(listener,"room:join",{roomId:"quota-room",user:{id:"quota-listener",name:"Quota listener",avatarSeed:"quota"}})).ok,true);
+    assert.equal((await action(listener,"dj:join")).ok,true);
+    let blocked=false;
+    for(let index=0;index<20;index++) {
+      const result=await action(listener,"queue:add",track(`quota${String(index).padStart(6,"0")}`));
+      if(!result.ok){assert.match(result.error??'',/Too many requests/);blocked=true;break;}
+    }
+    assert.equal(blocked,true);
+    assert.ok(state.room.queue.length>0);
+    const waiting=state.room.queue[0];
+    assert.equal((await action(listener,"queue:remove",{trackId:waiting.id})).ok,true);
+    assert.equal(state.room.queue.some(item=>item.id===waiting.id),false);
+    const playing=state.room.playback.track!;
+    assert.equal((await action(listener,"playback:ended",{trackId:playing.id,revision:state.room.playback.revision})).ok,true);
+    assert.notEqual(state.room.playback.track?.id,playing.id);
+  });
   await t.test("a listener can add, import and manage a private queue without a DJ role or starting playback", async (t) => {
     const listener = await connect(); t.after(() => listener.disconnect());
     let state!: RoomSnapshot;
@@ -324,7 +359,7 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     const requestId = "00000000-0000-4000-8000-000000000021";
     assert.equal((await action(bob, "queue:set-add", { setId, requestId })).ok, false);
     const first = await action(alice, "queue:set-add", { setId, requestId }) as { ok: boolean; added: number; skipped: Array<{ title: string; reason: string }> };
-    assert.equal(first.ok, true); assert.equal(first.added, 3);
+    assert.equal(first.ok, true,JSON.stringify(first)); assert.equal(first.added, 3);
     assert.equal(first.skipped.length, 1); assert.match(first.skipped[0].reason, /unavailable/);
     const queued = aliceState.room.queue.map(value => value.id);
     const repeated = await action(alice, "queue:set-add", { setId, requestId });

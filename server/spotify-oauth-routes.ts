@@ -1,7 +1,9 @@
+import { serverT } from "./i18n.js";
 import { SignupAttemptLimiter } from "./invite-signup.js";
 import crypto from "node:crypto";
 import type { Express, Request } from "express";
 import type { SpotifyAccounts } from "./spotify-accounts.js";
+import { spotifyAccessAllowed, spotifyRoomContext, type SpotifyAccessCheck } from "./spotify-access.js";
 
 const FLOW_TTL_MS = 10 * 60_000;
 const COOKIE_PREFIX = "soundspin_spotify_";
@@ -34,6 +36,7 @@ const digest = (value: string) => crypto.createHash("sha256").update(value).dige
 
 export interface SpotifyOAuthRouteOptions {
   getUserId: (request: Request) => Promise<string | null>;
+  canUseSpotify?: SpotifyAccessCheck;
   isAccountActive?: (userId: string) => Promise<boolean>;
   accounts: Pick<SpotifyAccounts, "configured" | "connect">;
   authorizationUrl: (redirectUri: string, state: string) => string;
@@ -46,23 +49,27 @@ export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRoute
   const now = options.now || Date.now;
   const attempts = new SignupAttemptLimiter(10, FLOW_TTL_MS);
   const ipAttempts = new SignupAttemptLimiter(30, FLOW_TTL_MS);
-  const states = new Map<string, { userId: string; returnTo: string; redirectUri: string; nonceDigest: Buffer; expiresAt: number; secure: boolean }>();
+  const states = new Map<string, { userId: string; roomSlug?: string; returnTo: string; redirectUri: string; nonceDigest: Buffer; expiresAt: number; secure: boolean }>();
   const prune = () => {
     for (const [state, flow] of states) if (flow.expiresAt <= now()) states.delete(state);
   };
   app.get("/api/spotify/connect", async (request, response) => {
     response.set("Cache-Control", "no-store");
     const userId = await options.getUserId(request);
-    if (!userId) return response.status(401).json({ error: "Authentication required." });
-    if (!options.accounts.configured) return response.status(503).json({ error: "Spotify OAuth or provider-token encryption is not configured yet." });
+    if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
+    let roomSlug: string | undefined;
+    try { roomSlug = spotifyRoomContext(request); }
+    catch { return response.status(400).json({ error: serverT("invalid_room_context") }); }
+    if (!await spotifyAccessAllowed(options.canUseSpotify, request, userId, roomSlug)) return response.status(403).json({ error: serverT("spotify_is_unavailable_in_this_room") });
+    if (!options.accounts.configured) return response.status(503).json({ error: serverT("spotify_oauth_or_provider_token_encryption_is_not_configured_yet") });
     prune();
     if ([...states.values()].filter(flow => flow.userId === userId).length >= 3 ||
-      !attempts.consume(userId, now()) || !ipAttempts.consume(request.ip || request.socket.remoteAddress || "unknown", now()) || states.size >= 10_000) return response.status(429).json({ error: "Too many Spotify connection attempts. Try again shortly." });
+      !attempts.consume(userId, now()) || !ipAttempts.consume(request.ip || request.socket.remoteAddress || "unknown", now()) || states.size >= 10_000) return response.status(429).json({ error: serverT("too_many_spotify_connection_attempts_try_again_shortly") });
     const state = crypto.randomBytes(24).toString("base64url");
     const nonce = crypto.randomBytes(32).toString("base64url");
     const redirectUri = options.redirectUri(request);
     const secure = new URL(redirectUri).protocol === "https:";
-    states.set(state, { userId, returnTo: spotifyReturnPath(request.query.returnTo), redirectUri, nonceDigest: digest(nonce), expiresAt: now() + FLOW_TTL_MS, secure });
+    states.set(state, { userId, roomSlug, returnTo: spotifyReturnPath(request.query.returnTo), redirectUri, nonceDigest: digest(nonce), expiresAt: now() + FLOW_TTL_MS, secure });
     response.cookie(cookieName(state, secure), nonce, { httpOnly: true, sameSite: "lax", secure, path: cookiePath(secure), maxAge: FLOW_TTL_MS });
     response.json({ url: options.authorizationUrl(redirectUri, state) });
   });
@@ -73,7 +80,7 @@ export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRoute
     const nonce = state && flow ? readCookie(request, cookieName(state, flow.secure)) : null;
     if (!state || !flow || flow.expiresAt <= now() || !nonce || !crypto.timingSafeEqual(digest(nonce), flow.nonceDigest)) {
       prune();
-      return response.status(400).send("Spotify authorization expired or belongs to another browser. Return to Lydman and try again.");
+      return response.status(400).send(serverT("spotify_authorization_expired_or_belongs_to_another_browser_return_to_turntune_and_tr"));
     }
     // Consume only after browser proof: a forwarded URL cannot cancel the legitimate flow.
     states.delete(state);
@@ -82,7 +89,8 @@ export function mountSpotifyOAuthRoutes(app: Express, options: SpotifyOAuthRoute
     if (!code) return response.redirect(withOutcome(flow.returnTo, "denied"));
     try {
       const authorize = async () => {
-        if (options.isAccountActive && !await options.isAccountActive(flow.userId)) throw new Error("Account access is unavailable.");
+        if (options.isAccountActive && !await options.isAccountActive(flow.userId)) throw new Error(serverT("account_access_is_unavailable"));
+        if (!await spotifyAccessAllowed(options.canUseSpotify, request, flow.userId, flow.roomSlug)) throw new Error(serverT("spotify_is_unavailable_in_this_room"));
       };
       await authorize();
       await options.accounts.connect(flow.userId, code, flow.redirectUri, authorize);

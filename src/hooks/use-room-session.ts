@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppAuth } from "./use-app-auth";
 import { useRoomConnection } from "./use-room-connection";
@@ -28,6 +30,7 @@ export const appRouteContext = (route: AppRoute) => route.kind === "room" ? `roo
 /** Coordinates URL navigation, room admission and transient room state in one lifetime. */
 export function useRoomSession({ auth, profile, profileReady, onNotice, transport = socket }: { auth: AppAuth; profile: User; profileReady: boolean; onNotice: (message: string) => void;
   transport?: NonNullable<Parameters<typeof useRoomConnection>[0]['transport']> }) {
+  useTranslation();
   const [route, setRoute] = useState(() => parseNavigationRoute(location.pathname, history.state));
   const routeRef = useRef(route); routeRef.current = route;
   const [snapshot, setSnapshot] = useState<RoomSnapshot | null>(null);
@@ -46,10 +49,10 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     if(!auth.session?.access_token)return;
     const controller=new AbortController();
     if(inviteRequest.current?.token!==inviteToken)inviteRequest.current={token:inviteToken,requestId:crypto.randomUUID()};
-    void requestJson(`/api/rooms/${roomId}/invite-links/redeem`,{method:"POST",accessToken:auth.session.access_token,signal:controller.signal,body:JSON.stringify({token:inviteToken,requestId:inviteRequest.current.requestId}),errorMessage:"Could not accept this room invitation."}).then(()=>{
+    void requestJson(`/api/rooms/${roomId}/invite-links/redeem`,{method:"POST",accessToken:auth.session.access_token,signal:controller.signal,body:JSON.stringify({token:inviteToken,requestId:inviteRequest.current.requestId}),errorMessage:i18n.t("common:use_room_session_could_not_accept_this_room_invitation")}).then(()=>{
       if(controller.signal.aborted)return;
       const url=new URL(location.href);url.searchParams.delete("invite");history.replaceState(history.state,"",url.pathname+url.search+url.hash);setInviteReady(true);setRoomJoinError("");
-    }).catch(error=>{if(!controller.signal.aborted)setRoomJoinError(error instanceof Error?error.message:"Could not accept this room invitation.");});
+    }).catch(error=>{if(!controller.signal.aborted)setRoomJoinError(error instanceof Error?error.message:i18n.t("common:use_room_session_could_not_accept_this_room_invitation"));});
     return()=>controller.abort();
   },[inviteToken,roomId,auth.session?.access_token,inviteAttempt]);
   const navigationContext = `${auth.session?.user.id || "guest"}:${appRouteContext(route)}`;
@@ -96,7 +99,10 @@ export function useRoomSession({ auth, profile, profileReady, onNotice, transpor
     setSnapshot(null); setRoomPassword(password || ""); setRoomPasswordRequired(false); setRoomJoinError("");
   };
   const goHome = () => { transport.disconnect(); navigate({ kind: "lobby" }, "/"); };
-  const openProfile = (profileId: string) => navigate({ kind: "profile", profileId, backgroundRoomId: roomId || undefined }, `/profile/${profileId}`, { from: location.pathname, backgroundRoomId: roomId || undefined });
+  const openProfile = (profileId: string) => {
+    const backgroundRoomId = snapshot?.room.id === roomId ? roomId || undefined : undefined;
+    navigate({ kind: "profile", profileId, backgroundRoomId }, `/profile/${profileId}`, { from: location.pathname, backgroundRoomId });
+  };
   const openAdmin = () => { transport.disconnect(); navigate({ kind: "admin" }, "/admin", { from: location.pathname }); };
   const backFromProfile = () => { if (history.state?.from) history.back(); else goHome(); };
   return { route, roomId, profilePageId: route.kind === "profile" ? route.profileId : null, adminPage: route.kind === "admin", navigationContext,

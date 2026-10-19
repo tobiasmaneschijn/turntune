@@ -1,3 +1,4 @@
+import i18n from "./i18n";
 import type { RoomRole, User } from "./types";
 import { requestJson } from "./lib/authenticated-http";
 
@@ -10,4 +11,4 @@ export type ModerationAction = "timeout" | "kick" | "ban" | "dj-remove" | "dj-su
 export interface RoomAction { action: ModerationAction; userId?: string; durationMinutes?: number | null; reason?: string; restrictionId?: string; messageId?: string; role?: "moderator" | "dj" | "member"; enabled?: boolean; reportId?: string; mode?: "after-track" | "skip"; kind?: "slow-mode" | "staff-chat" | "dj-lock"; value?: number; overrideId?: string }
 export function roomManagementRequest<T>(roomId: string, path: string, accessToken: string, options?: RequestInit) { return requestJson<T>(`/api/rooms/${encodeURIComponent(roomId)}/${path}`, { ...options, accessToken }); }
 export function roomModerationAction(roomId: string, accessToken: string, action: RoomAction, requestId: string = crypto.randomUUID(), signal?: AbortSignal) { return roomManagementRequest<{ ok: boolean }>(roomId, "moderation/actions", accessToken, { method: "POST", body: JSON.stringify({ requestId, ...action }), signal }); }
-export function formatRoomTime(timestamp: number | null | undefined) { return timestamp == null ? "Permanent" : new Date(timestamp).toLocaleString(); }
+export function formatRoomTime(timestamp: number | null | undefined) { return timestamp == null ? i18n.t("common:permanent") : new Date(timestamp).toLocaleString(i18n.resolvedLanguage); }

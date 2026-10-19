@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { isMixcloudShowKey } from "../../shared/mixcloud";
 import { createPlayerApiLoader } from "../player-api-loader";
@@ -21,22 +23,21 @@ declare global {
 
 const loadApi = createPlayerApiLoader({
   src: "https://widget.mixcloud.com/media/js/widgetApi.js",
-  label: "the Mixcloud player",
+  label: () => i18n.t("music:mixcloud.sdkLabel"),
   readApi: () => window.Mixcloud
 });
-const SEEK_DENIED = "Mixcloud refused this seek. Playback may be out of sync with the room.";
-const AUTOPLAY_BLOCKED = "Press Play Mixcloud to start playback.";
 const seconds = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
 class WidgetTimeoutError extends Error {}
 
-function bounded<T>(operation: PromiseLike<T>, message: string, timeoutMs = 8_000): Promise<T> {
+function bounded<T>(operation: PromiseLike<T>, message: () => string, timeoutMs = 8_000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new WidgetTimeoutError(message)), timeoutMs);
+    const timer = window.setTimeout(() => reject(new WidgetTimeoutError(message())), timeoutMs);
     Promise.resolve(operation).then(resolve, reject).finally(() => window.clearTimeout(timer));
   });
 }
 
 export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus, onError }: CheckpointProviderPlaybackProps) {
+  const { t } = useTranslation("music");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const widgetRef = useRef<MixcloudWidget | null>(null);
   const playbackRef = useRef(playback);
@@ -102,7 +103,7 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
       try {
         const [position, duration, paused] = await bounded(Promise.all([
           widget.getPosition(), widget.getDuration(), widget.getIsPaused()
-        ]), "Mixcloud playback status took too long to load.");
+        ]), () => i18n.t("music:mixcloud.statusTimeout"));
         if (!valid() || revision !== commandRevision.current) return;
         const currentTime = seconds(position);
         callbacksRef.current.onStatus({ ready: true, buffering, currentTime, duration: seconds(duration), playing: !paused, isLive: false, trackId });
@@ -117,7 +118,7 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
         }
         const waitingForPlay = paused && playbackRef.current.playing && !busy.current && !buffering && !ended;
         setNeedsPlay(waitingForPlay);
-        if (waitingForPlay && !deniedSeek.current) callbacksRef.current.onError?.(AUTOPLAY_BLOCKED);
+        if (waitingForPlay && !deniedSeek.current) callbacksRef.current.onError?.(i18n.t("music:mixcloud.autoplayBlocked"));
         else if (!deniedSeek.current) callbacksRef.current.onError?.("");
         if (!paused && playbackRef.current.playing && !busy.current && !deniedSeek.current && !ended &&
           playbackNeedsSeek(currentTime, playbackTargetPosition(playbackRef.current), "health")) {
@@ -126,18 +127,18 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
           synchronizeRef.current("health");
         }
       } catch (cause) {
-        if (valid() && revision === commandRevision.current) callbacksRef.current.onError?.(cause instanceof Error ? cause.message : "Could not read Mixcloud playback.");
+        if (valid() && revision === commandRevision.current) callbacksRef.current.onError?.(cause instanceof Error ? cause.message : i18n.t("music:mixcloud.statusFailed"));
       } finally { sampling = false; }
     };
 
     void (async () => {
       try {
-        if (!isMixcloudShowKey(showKey)) { fail("This Mixcloud show key is invalid."); return; }
+        if (!isMixcloudShowKey(showKey)) { fail(i18n.t("music:mixcloud.invalidShow")); return; }
         const api = await loadApi();
         if (!active || !iframeRef.current) return;
         widget = api.PlayerWidget(iframeRef.current);
         widgetRef.current = widget;
-        await bounded(widget.ready, "The Mixcloud player took too long to become ready. Sync to try again.", 15_000);
+        await bounded(widget.ready, () => i18n.t("music:mixcloud.readyTimeout"), 15_000);
         if (!valid() || failed.current) return;
         const bind = (name: keyof MixcloudWidget["events"], listener: Listener) => {
           const event = widget!.events[name];
@@ -153,11 +154,11 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
           pendingEnded = commandRevision.current;
           void sample();
         });
-        bind("error", () => { if (valid()) fail("This Mixcloud show could not be played. Sync to try again."); });
+        bind("error", () => { if (valid()) fail(i18n.t("music:mixcloud.unavailable")); });
         setReadyWidget(widget);
         polling = window.setInterval(() => void sample(), 750);
       } catch (cause) {
-        if (active) fail(cause instanceof Error ? cause.message : "Could not initialize Mixcloud playback.");
+        if (active) fail(cause instanceof Error ? cause.message : i18n.t("music:mixcloud.initializeFailed"));
       }
     })();
 
@@ -186,27 +187,27 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
     commands.current = commands.current.catch(() => {}).then(async () => {
       if (!valid()) return;
       try {
-        const observed = await bounded(widget.getPosition(), "Mixcloud playback took too long to respond. Sync to try again.");
+        const observed = await bounded(widget.getPosition(), () => i18n.t("music:mixcloud.playbackTimeout"));
         if (!valid()) return;
         const current = playbackRef.current;
-        if (!current.playing) await bounded(widget.pause(), "Could not pause Mixcloud playback.");
+        if (!current.playing) await bounded(widget.pause(), () => i18n.t("music:mixcloud.pauseFailed"));
         if (!valid()) return;
         const target = playbackTargetPosition(playbackRef.current);
         if (playbackNeedsSeek(observed, target, intent)) {
-          const allowed = await bounded(widget.seek(target), "Mixcloud seek took too long to respond. Sync to try again.");
+          const allowed = await bounded(widget.seek(target), () => i18n.t("music:mixcloud.seekTimeout"));
           if (!valid()) return;
           deniedSeek.current = !allowed;
-          callbacksRef.current.onError?.(allowed ? "" : SEEK_DENIED);
+          callbacksRef.current.onError?.(allowed ? "" : i18n.t("music:mixcloud.seekDenied"));
         }
         if (!valid()) return;
-        if (playbackRef.current.playing) await bounded(widget.play(), "Could not start Mixcloud playback. Press Play Mixcloud to try again.");
+        if (playbackRef.current.playing) await bounded(widget.play(), () => i18n.t("music:mixcloud.startFailed"));
         if (valid()) appliedCheckpoint.current = checkpointRef.current;
       } catch (cause) {
         if (valid()) {
           if (cause instanceof WidgetTimeoutError) failRef.current(cause.message);
           else {
             setNeedsPlay(playbackRef.current.playing);
-            callbacksRef.current.onError?.(cause instanceof Error ? cause.message : "Mixcloud playback failed.");
+            callbacksRef.current.onError?.(cause instanceof Error ? cause.message : i18n.t("music:mixcloud.playbackFailed"));
           }
         }
       } finally { if (valid()) busy.current = false; }
@@ -224,7 +225,7 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
     if (!widget || !playbackRef.current.playing || failed.current) return;
     const revision = commandRevision.current;
     // Invoke directly in the click handler so the browser receives the user gesture.
-    void bounded(widget.play(), "Could not start Mixcloud playback. Try again.").then(() => {
+    void bounded(widget.play(), () => i18n.t("music:mixcloud.retryFailed")).then(() => {
       if (widgetRef.current !== widget || playbackRef.current.track?.id !== id) return;
       if (revision !== commandRevision.current || checkpoint !== checkpointRef.current || !playbackRef.current.playing) {
         synchronizeRef.current("checkpoint");
@@ -234,15 +235,15 @@ export function MixcloudPlayer({ playback, syncRevision, isDj, onEnded, onStatus
       setNeedsPlay(false);
       if (!deniedSeek.current) callbacksRef.current.onError?.("");
     }).catch(cause => {
-      if (widgetRef.current === widget && playbackRef.current.track?.id === id && revision === commandRevision.current && playbackRef.current.playing) callbacksRef.current.onError?.(cause instanceof Error ? cause.message : "Mixcloud playback failed.");
+      if (widgetRef.current === widget && playbackRef.current.track?.id === id && revision === commandRevision.current && playbackRef.current.playing) callbacksRef.current.onError?.(cause instanceof Error ? cause.message : i18n.t("music:mixcloud.playbackFailed"));
     });
   };
 
   return <div className="mixcloud-shell">
     <iframe key={`${trackId}:${showKey}:${attempt}`} ref={iframeRef}
       src={`https://www.mixcloud.com/widget/iframe/?${new URLSearchParams({ feed: showKey, mini: "true", hide_cover: "false", light: "false" })}`}
-      title={`Mixcloud player for ${playback.track?.title || "current show"}`} allow="autoplay" scrolling="no"
+      title={t("mixcloud.playerTitle", { title: playback.track?.title || t("mixcloud.currentShow") })} allow="autoplay" scrolling="no"
       style={{ width: "100%", height: 120, border: 0 }} />
-    {needsPlay && playback.playing && <button type="button" onClick={startPlayback}>Play Mixcloud</button>}
+    {needsPlay && playback.playing && <button type="button" onClick={startPlayback}>{t("mixcloud.play")}</button>}
   </div>;
 }

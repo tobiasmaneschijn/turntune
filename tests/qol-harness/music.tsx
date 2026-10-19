@@ -22,7 +22,7 @@ function initialSnapshot(roomId = "fixture-room"): RoomSnapshot {
   const quiet = scenario === "quiet" || scenario === "listener-quiet";
   return {
     room: { id: roomId, name: "Music tools", ownerUserId: other.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true, passwordProtected: false,
-      settings: { djAccess: scenario === "restricted" ? "roles" : "everyone" },
+      settings: { spotifyEnabled: true, djAccess: scenario === "restricted" ? "roles" : "everyone" },
       djUserId: quiet ? null : other.id,
       djQueueUserIds: listener ? [other.id] : [self.id, other.id],
       queue: scenario === "library-artwork-preload" ? artworkList("queue") : quiet || listener ? [] : tracks.map((track) => ({ ...track })),

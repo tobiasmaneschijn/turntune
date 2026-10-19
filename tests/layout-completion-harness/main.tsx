@@ -4,13 +4,14 @@ import type { GroupImperativeHandle } from "react-resizable-panels";
 import { RoomHeader } from "../../src/components/RoomHeader";
 import { RoomWorkspace } from "../../src/components/RoomWorkspace";
 import { RoomMiniPlayer } from "../../src/components/RoomMiniPlayer";
-import { RoomAnnouncementBanner } from "../../src/components/RoomAnnouncementBanner";
+import { RoomNotices } from "../../src/components/RoomNotices";
 import { ListeningChecklist, type ListeningAudioState, type ListeningProviderState } from "../../src/components/ListeningChecklist";
 import { RoomLobby } from "../../src/components/RoomLobby";
 import { RoomSettingsDialog } from "../../src/components/RoomSettingsDialog";
 import { useRoomLayoutPresets } from "../../src/hooks/use-room-layout-presets";
 import { rememberNavigationFocus, useRouteFocus } from "../../src/hooks/use-route-focus";
 import { recordRoomVisit } from "../../src/lib/room-visits";
+import { readUserSettings } from "../../src/playback-settings";
 import { ThemeProvider } from "../../src/components/theme-provider";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { Dialog, DialogContent, DialogTitle } from "../../src/components/ui/dialog";
@@ -55,6 +56,8 @@ function MountedProviderSentinel() {
 }
 
 function RoomHarness() {
+  const [noticeSnapshot, setNoticeSnapshot] = useState<RoomSnapshot>({ ...snapshot, room: { ...snapshot.room, announcement: { id: "layout-note", text: "Take turns, and enjoy listening together.", authorId: "host", updatedAt: 1, expiresAt: null } } });
+  Object.assign(state, { setNoticeSnapshot });
   const [pane, setPane] = useState<"radio" | "player" | "chat">("player");
   const [muted, setMuted] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -77,7 +80,7 @@ function RoomHarness() {
   return <main className="app-shell">
     <RoomHeader roomName="Layout Listening Room" roomSlug="layout-room" listenerCount={users.length} currentUser={user} participants={users} ownerUserId={user.id} djUserId="listener-0" moderatorUserIds={["listener-1"]} onOpenProfile={profile} onHome={() => setNotice("Room directory opened")} onProfile={profile} onSettings={() => setSettings(true)} onRoomSettings={() => setRoomSettings(true)} onResetLayout={layout.resetLayout} onNotice={setNotice} onFocusSearch={focusSearch} onFocusChat={focusChat} onOpenQueue={() => { setPane("radio"); setNotice("My private queue opened"); }} onOpenPlayer={() => setPane("player")} onToggleMute={() => setMuted(value => !value)} muted={muted} layoutPreset={layout.layoutPreset} onLayoutPresetChange={layout.onLayoutPresetChange} />
     <RoomWorkspace value={pane} onValueChange={setPane} compact={compact} groupRef={group} defaultLayout={layout.defaultLayout} onLayoutChanged={layout.onLayoutChanged}
-      roomNotice={<RoomAnnouncementBanner roomId="layout-room" userId={user.id} announcement={{ id: "layout-note", text: "Take turns, and enjoy listening together.", authorId: "host", updatedAt: 1, expiresAt: null }} serverTime={snapshot.serverTime} canEdit={false} connected />}
+      roomNotice={<RoomNotices snapshot={noticeSnapshot} userId={user.id} canEdit={scenario === "room-notices"} connected accessToken="fixture-token" onRules={() => setNotice("Room rules opened")} />}
       listeningChecklist={scenario === "checklist" && <ListeningChecklist userId={user.id} providerName="SoundCloud" providerState={providerState} audioState={audioState} onEnableAudio={() => setAudioState("playing")} onOpenSettings={() => { setProviderState("ready"); setSettings(true); }} />}
       miniPlayer={<RoomMiniPlayer track={track} statusText={audioState === "playing" ? "Playing on this device" : "Enable my audio to listen"} statusTone="playing" muted={muted} onToggleMute={() => setMuted(value => !value)} onOpenPlayer={() => setPane("player")} />}
       radio={<aside className="panel fixture-pane"><h2>Radio</h2><Input ref={search} aria-label="Music search" /><Button onClick={() => setNotice("My private queue opened")}>My private queue</Button></aside>}
@@ -91,6 +94,6 @@ function RoomHarness() {
 }
 function LobbyHarness() {
   const [open, setOpen] = useState(true);
-  return open ? <RoomLobby accessToken="fixture-token" currentUser={user} onOpenRoom={(slug, password) => { state.roomEntry = { slug, password }; setOpen(false); }} onOpenProfile={() => {}} onSignOut={() => {}} feedbackButton={null} /> : <main><h1>Entered room</h1><Button onClick={() => setOpen(true)}>Return to directory</Button></main>;
+  return open ? <RoomLobby accessToken="fixture-token" currentUser={user} onOpenRoom={(slug, password) => { state.roomEntry = { slug, password }; setOpen(false); }} onOpenProfile={() => {}} onSignOut={() => {}} userSettings={readUserSettings()} onSettingsChange={() => {}} /> : <main><h1>Entered room</h1><Button onClick={() => setOpen(true)}>Return to directory</Button></main>;
 }
 createRoot(document.getElementById("root")!).render(<ThemeProvider><TooltipProvider>{scenario.includes("lobby") ? <LobbyHarness /> : <RoomHarness />}</TooltipProvider></ThemeProvider>);

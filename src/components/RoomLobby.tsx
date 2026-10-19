@@ -1,12 +1,10 @@
-import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, ArrowRight, Heart, LockKeyhole, LogOut, MoreHorizontal, Plus, Radio, RefreshCw, Users, X } from "lucide-react";
-import { Avatar } from "./Avatar";
-import { Brand } from "./app-primitives";
-import { AppVersion } from "./AppVersion";
-import { ThemeToggle } from "./ThemeToggle";
+import { useTranslation } from "react-i18next";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Popover } from "@base-ui/react/popover";
+import { AlertCircle, ArrowRight, Heart, LockKeyhole, Plus, Radio, RefreshCw, Search, SlidersHorizontal, Users, X } from "lucide-react";
+import { AppHeader } from "./AppHeader";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +18,6 @@ import { Label } from "./ui/label";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { Skeleton } from "./ui/skeleton";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import type { RoomDirectoryEntry, User } from "../types";
 import { readStoredValue, storeValue } from "../lib/browser-storage";
@@ -29,6 +26,7 @@ import { FriendsPanel } from "./FriendsPanel";
 import { readRecentRoomVisits } from "../lib/room-visits";
 import "../styles/layout-completion.css";
 import { requestJson } from "../lib/authenticated-http";
+import type { SoundSpinUserSettings } from "../playback-settings";
 
 const directoryCache = new Map<string, RoomDirectoryEntry[]>();
 interface FavoriteFailure {
@@ -37,10 +35,11 @@ interface FavoriteFailure {
   favorite: boolean;
   message: string;
 }
+type RoomScope = "all" | "favorite" | "member";
 function readDirectoryPreferences(userId: string) {
   try {
     const value: unknown = JSON.parse(readStoredValue(`soundspin:room-directory:${userId}`) || "{}");
-    return value && typeof value === "object" ? value as { query?: string; filter?: string; sort?: string; tag?: string; language?: string } : {};
+    return value && typeof value === "object" ? value as { query?: string; scope?: string; filter?: string; sort?: string; tag?: string; language?: string } : {};
   }
   catch { return {}; }
 }
@@ -52,8 +51,9 @@ interface RoomLobbyProps {
   onOpenProfile: () => void;
   onOpenPerson?: (id: string) => void;
   onSignOut: () => void;
-  feedbackButton: ReactNode;
-  adminButton?: ReactNode;
+  userSettings: SoundSpinUserSettings;
+  onSettingsChange: (settings: SoundSpinUserSettings) => void;
+  onAdmin?: () => void;
 }
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
@@ -67,14 +67,21 @@ export function RoomLobby({
   onOpenProfile,
   onOpenPerson,
   onSignOut,
-  feedbackButton,
-  adminButton
+  userSettings,
+  onSettingsChange,
+  onAdmin
 }: RoomLobbyProps) {
+  const { t } = useTranslation("rooms");
   const [rooms, setRooms] = useState<RoomDirectoryEntry[]>(() => directoryCache.get(currentUser.id) || []);
   const [loading, setLoading] = useState(() => !directoryCache.has(currentUser.id));
   const [directoryLoaded, setDirectoryLoaded] = useState(() => directoryCache.has(currentUser.id));
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState(() => { const value = readDirectoryPreferences(currentUser.id).query; return typeof value === "string" ? value : ""; });
+  const [scope, setScope] = useState<RoomScope>(() => {
+    const saved = readDirectoryPreferences(currentUser.id).scope;
+    return saved === "favorite" || saved === "member" ? saved : "all";
+  });
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [tag, setTag] = useState(() => { const value = readDirectoryPreferences(currentUser.id).tag; return typeof value === "string" ? value : ""; });
   const [language, setLanguage] = useState(() => { const value = readDirectoryPreferences(currentUser.id).language; return typeof value === "string" ? value : ""; });
   const [filter, setFilter] = useState<"all" | "active" | "protected">(() => {
@@ -96,7 +103,7 @@ export function RoomLobby({
   }, [currentUser.id]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
   const preferencesUserRef = useRef(currentUser.id);
-  useEffect(() => { if (preferencesUserRef.current === currentUser.id) storeValue(`soundspin:room-directory:${currentUser.id}`, JSON.stringify({ query, filter, sort, tag, language })); }, [currentUser.id, query, filter, sort, tag, language]);
+  useEffect(() => { if (preferencesUserRef.current === currentUser.id) storeValue(`soundspin:room-directory:${currentUser.id}`, JSON.stringify({ query, scope, filter, sort, tag, language })); }, [currentUser.id, query, scope, filter, sort, tag, language]);
   const [favoritePending, setFavoritePending] = useState<Set<string>>(new Set());
   const favoritePendingRef = useRef(new Set<string>());
   const [favoriteFailures, setFavoriteFailures] = useState<Record<string, FavoriteFailure>>({});
@@ -115,7 +122,7 @@ export function RoomLobby({
         validate: (value): value is { rooms: RoomDirectoryEntry[] } => Boolean(value && typeof value === "object" && "rooms" in value && Array.isArray(value.rooms)) });
       if (requestId === requestRef.current) { setRooms(payload.rooms); directoryCache.set(currentUser.id, payload.rooms); setDirectoryLoaded(true); setNow(Date.now()); }
     } catch (loadError) {
-      if (requestId === requestRef.current) setError(loadError instanceof Error ? loadError.message : "Could not load rooms.");
+      if (requestId === requestRef.current) setError(loadError instanceof Error ? loadError.message : t("roomLobby.couldNotLoadRooms"));
     } finally {
       if (requestId === requestRef.current) { setLoading(false); setRefreshing(false); }
     }
@@ -126,6 +133,8 @@ export function RoomLobby({
     if (preferencesUserRef.current !== currentUser.id) {
       const preferences = readDirectoryPreferences(currentUser.id);
       setQuery(typeof preferences.query === "string" ? preferences.query : "");
+      setScope(preferences.scope === "favorite" || preferences.scope === "member" ? preferences.scope : "all");
+      setFiltersOpen(false);
       setTag(typeof preferences.tag === "string" ? preferences.tag : "");
       setLanguage(typeof preferences.language === "string" ? preferences.language : "");
       setFilter(preferences.filter === "active" || preferences.filter === "protected" ? preferences.filter : "all");
@@ -145,24 +154,20 @@ export function RoomLobby({
     return () => { requestRef.current += 1; accountRef.current += 1; controller.abort(); };
   }, [loadRooms]);
 
+  // Local history only reorders rooms already returned by the authorized directory.
+  const lastVisitedSlug = recentVisits.find(visit => rooms.some(room => room.slug === visit.slug))?.slug;
   const visibleRooms = useMemo(() => rooms.filter((room) =>
+    (scope !== "favorite" || room.isFavorite) && (scope !== "member" || room.role !== null) &&
     [room.name, room.description, ...(room.tags ?? []), room.language].filter(Boolean).join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()) &&
     (!tag || room.tags?.includes(tag)) && (!language || room.language === language) &&
     (filter !== "active" || room.listenerCount > 0) && (filter !== "protected" || room.passwordProtected)
-  ).sort((left, right) => (sort === "active" ? right.listenerCount - left.listenerCount : sort === "favorite" ? Number(right.isFavorite) - Number(left.isFavorite) : 0) || left.name.localeCompare(right.name)), [rooms, query, filter, sort, tag, language]);
+  ).sort((left, right) => (sort === "active" ? Number(right.slug === lastVisitedSlug) - Number(left.slug === lastVisitedSlug) || right.listenerCount - left.listenerCount : sort === "favorite" ? Number(right.isFavorite) - Number(left.isFavorite) : 0) || left.name.localeCompare(right.name)), [rooms, query, scope, filter, sort, tag, language, lastVisitedSlug]);
   const availableTags = [...new Set(rooms.flatMap(room => room.tags ?? []))].sort();
   const availableLanguages = [...new Set(rooms.map(room => room.language).filter((value): value is string => Boolean(value)))].sort();
-  const accessibleRecentRooms = recentVisits.map(visit => rooms.find(room => room.slug === visit.slug)).filter((room): room is RoomDirectoryEntry => Boolean(room));
-  // A room belongs to one section. Recent access and membership take precedence
-  // so changing its favorite state does not move those familiar cards.
-  const recentSlugs = new Set(accessibleRecentRooms.map(room => room.slug));
-  const favorites = visibleRooms.filter(room => room.isFavorite && room.role === null && !recentSlugs.has(room.slug));
-  const memberRooms = visibleRooms.filter(room => room.role !== null && !recentSlugs.has(room.slug));
-  const isOtherPublicRoom = (room: RoomDirectoryEntry) => (room.accessMode ?? (room.isPublic ? "public" : "members")) === "public" && room.role === null && !room.isFavorite && !recentSlugs.has(room.slug);
-  const publicRooms = visibleRooms.filter(isOtherPublicRoom);
-  const recentRooms = accessibleRecentRooms.filter(room => visibleRooms.some(visible => visible.slug === room.slug));
-  const lastRoom = accessibleRecentRooms[0] && visibleRooms.some(room => room.slug === accessibleRecentRooms[0].slug) ? accessibleRecentRooms[0] : null;
   const filtering = Boolean(query.trim() || tag || language) || filter !== "all";
+  const filterCount = Number(filter !== "all") + Number(sort !== "active") + Number(Boolean(tag)) + Number(Boolean(language));
+  const resetOptions = () => { setFilter("all"); setSort("active"); setTag(""); setLanguage(""); };
+  const resetDirectory = () => { setQuery(""); setScope("all"); resetOptions(); };
 
   const enter = (room: RoomDirectoryEntry) => {
     if (room.passwordProtected) setProtectedRoom(room);
@@ -188,7 +193,7 @@ export function RoomLobby({
       if (accountRequest === accountRef.current) {
         setRooms((current) => { const updated = current.map((item) => item.slug === room.slug ? { ...item, isFavorite: previous } : item); directoryCache.set(currentUser.id, updated); return updated; });
         setFavoriteFailures(current => ({ ...current, [room.slug]: { slug: room.slug, name: room.name, favorite: next,
-          message: favoriteError instanceof Error ? favoriteError.message : "Try again." } }));
+          message: favoriteError instanceof Error ? favoriteError.message : t("roomLobby.tryAgain") } }));
       }
     } finally {
       if (accountRequest === accountRef.current) {
@@ -201,106 +206,88 @@ export function RoomLobby({
 
   return (
     <main className="room-lobby">
-      <header className="lobby-header">
-        <div className="app-brand-stack"><Brand /><AppVersion /></div>
-        <div className="lobby-header-actions">
-          {adminButton}
-          {feedbackButton}
-          <ThemeToggle compact />
-          <Button variant="ghost" className="lobby-profile h-10 px-2" data-navigation-focus="lobby-profile" onClick={onOpenProfile} aria-label="Open your profile">
-            <Avatar user={currentUser} size={28} />
-            <span><strong>{currentUser.name}</strong></span>
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onSignOut} className="lobby-sign-out text-muted-foreground">
-            <LogOut /> Sign out
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="lobby-more-actions" aria-label="More account actions" />}><MoreHorizontal /></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="room-actions-menu">
-              <DropdownMenuItem onClick={onOpenProfile}>Your profile</DropdownMenuItem>
-              <DropdownMenuItem onClick={onSignOut}><LogOut /> Sign out</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
-
-      <div className="lobby-shell">
-        <section className="lobby-hero">
+      <AppHeader currentUser={currentUser} page="rooms" onProfile={onOpenProfile} onAdmin={onAdmin} onSignOut={onSignOut}
+        onHome={() => { resetDirectory(); document.querySelector<HTMLElement>(".lobby-page-heading h1")?.focus(); }}
+        settings={{ accessToken, userSettings, onSettingsChange }} diagnosticContext={{ surface: "room-directory" }} />
+      <div className="lobby-shell" id="main-content" tabIndex={-1}>
+        <div className="lobby-page-heading">
           <div>
-            <h1 tabIndex={-1}>Rooms</h1>
+            <h1 tabIndex={-1}>{t("roomLobby.rooms")}</h1>
           </div>
-          <Button size="lg" onClick={() => setCreating(true)}>
-            <Plus /> New room
-          </Button>
-        </section>
+          <Button onClick={() => setCreating(true)}>
+            <Plus />{t("roomLobby.newRoom")}{" "}</Button>
+        </div>
 
         {error && (
           <Alert variant="destructive" className="lobby-error">
             <AlertCircle />
-            <AlertTitle>Couldn't load rooms</AlertTitle>
+            <AlertTitle>{t("roomLobby.couldnTLoadRooms")}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
-            <AlertAction><Button variant="ghost" size="sm" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0}>Retry</Button><Button variant="ghost" size="icon-xs" onClick={() => setError("")} aria-label="Dismiss error"><X /></Button></AlertAction>
+            <AlertAction><Button variant="ghost" size="sm" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0}>{t("roomLobby.retry")}</Button><Button variant="ghost" size="icon-xs" onClick={() => setError("")} aria-label={t("roomLobby.dismissError")}><X /></Button></AlertAction>
           </Alert>
         )}
         {Object.values(favoriteFailures).map(failure => <Alert key={failure.slug} variant="destructive" className="lobby-error lobby-favorite-error">
           <AlertCircle />
-          <AlertTitle>Couldn't {failure.favorite ? "add" : "remove"} {failure.name} {failure.favorite ? "to" : "from"} favorites</AlertTitle>
+          <AlertTitle>{t(failure.favorite ? "roomLobby.addFavoriteFailed" : "roomLobby.removeFavoriteFailed", { name: failure.name })}</AlertTitle>
           <AlertDescription>{failure.message}</AlertDescription>
-          <AlertAction><Button variant="ghost" size="sm" aria-label={`${favoritePending.has(failure.slug) ? "Retrying…" : "Retry"} favorite change for ${failure.name}`} disabled={favoritePending.has(failure.slug)} onClick={() => void updateFavorite(failure, failure.favorite)}>{favoritePending.has(failure.slug) ? "Retrying…" : "Retry"}</Button><Button variant="ghost" size="icon-xs" aria-label={`Dismiss favorite error for ${failure.name}`} onClick={() => setFavoriteFailures(current => { const updated = { ...current }; delete updated[failure.slug]; return updated; })}><X /></Button></AlertAction>
+          <AlertAction><Button variant="ghost" size="sm" aria-label={t(favoritePending.has(failure.slug) ? "roomLobby.retryingFavorite" : "roomLobby.retryFavorite", { name: failure.name })} disabled={favoritePending.has(failure.slug)} onClick={() => void updateFavorite(failure, failure.favorite)}>{favoritePending.has(failure.slug) ? t("roomLobby.retrying") : t("roomLobby.retry")}</Button><Button variant="ghost" size="icon-xs" aria-label={t("roomLobby.dismissFavoriteErrorForName", { name: failure.name })} onClick={() => setFavoriteFailures(current => { const updated = { ...current }; delete updated[failure.slug]; return updated; })}><X /></Button></AlertAction>
         </Alert>)}
 
-        <div className="lobby-directory-tools">
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a room" aria-label="Find a room" />
-          <Select value={filter} onValueChange={(value) => setFilter(value as typeof filter)}>
-            <SelectTrigger aria-label="Filter rooms"><SelectValue>{filter === "active" ? "Listening now" : filter === "protected" ? "Protected rooms" : "All rooms"}</SelectValue></SelectTrigger>
-            <SelectContent><SelectItem value="all">All rooms</SelectItem><SelectItem value="active">Listening now</SelectItem><SelectItem value="protected">Protected rooms</SelectItem></SelectContent>
-          </Select>
-          <Select value={sort} onValueChange={(value) => setSort(value as typeof sort)}>
-            <SelectTrigger aria-label="Sort rooms"><SelectValue>{sort === "favorite" ? "Favorites first" : sort === "alphabetical" ? "Alphabetical" : "Active first"}</SelectValue></SelectTrigger>
-            <SelectContent><SelectItem value="active">Active first</SelectItem><SelectItem value="favorite">Favorites first</SelectItem><SelectItem value="alphabetical">Alphabetical</SelectItem></SelectContent>
-          </Select>
-          <Button variant="outline" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0} aria-label="Refresh rooms"><RefreshCw className={refreshing ? "spin" : undefined} /><span>{refreshing ? "Refreshing…" : "Refresh"}</span></Button>
+        <div className="lobby-directory-bar">
+          <div className="lobby-scopes" role="group" aria-label={t("roomLobby.roomViews")}>
+            {([['all', t("roomLobby.allRooms")], ['favorite', t("roomLobby.favorites2")], ['member', t("roomLobby.yourRooms")]] as const).map(([value, label]) =>
+              <Button key={value} variant="ghost" aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</Button>
+            )}
+          </div>
+          <div className="lobby-directory-tools">
+            <div className="lobby-search"><Search aria-hidden="true" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("roomLobby.findARoom")} aria-label={t("roomLobby.findARoom")} /></div>
+            <Popover.Root open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <Popover.Trigger render={<Button variant="outline" className="lobby-filter-trigger" aria-label={t("roomLobby.filterSort")} />}>
+                <SlidersHorizontal /><span>{t("roomLobby.filterSort")}</span>{filterCount > 0 && <span className="lobby-filter-count" aria-hidden="true">{filterCount}</span>}
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Positioner side="bottom" align="end" sideOffset={8} collisionPadding={12} className="lobby-filter-positioner">
+                  <Popover.Popup className="lobby-filter-popover">
+                    <div className="lobby-filter-heading"><Popover.Title>{t("roomLobby.filterSort")}</Popover.Title><Popover.Close render={<Button variant="ghost" size="icon-sm" aria-label={t("roomLobby.closeFilters")} />}><X /></Popover.Close></div>
+                    <div className="lobby-filter-field"><Label htmlFor="directory-filter">{t("roomLobby.show")}</Label><Select value={filter} onValueChange={value => setFilter(value as typeof filter)}>
+                      <SelectTrigger id="directory-filter" aria-label={t("roomLobby.filterRooms")}><SelectValue>{filter === "active" ? t("roomLobby.listeningNow") : filter === "protected" ? t("roomLobby.protectedRooms") : t("roomLobby.allRooms")}</SelectValue></SelectTrigger>
+                      <SelectContent><SelectItem value="all">{t("roomLobby.allRooms")}</SelectItem><SelectItem value="active">{t("roomLobby.listeningNow")}</SelectItem><SelectItem value="protected">{t("roomLobby.protectedRooms")}</SelectItem></SelectContent>
+                    </Select></div>
+                    <div className="lobby-filter-field"><Label htmlFor="directory-sort">{t("roomLobby.sortBy")}</Label><Select value={sort} onValueChange={value => setSort(value as typeof sort)}>
+                      <SelectTrigger id="directory-sort" aria-label={t("roomLobby.sortRooms")}><SelectValue>{sort === "favorite" ? t("roomLobby.favoritesFirst") : sort === "alphabetical" ? t("roomLobby.alphabetical") : t("roomLobby.recentActive")}</SelectValue></SelectTrigger>
+                      <SelectContent><SelectItem value="active">{t("roomLobby.recentActive")}</SelectItem><SelectItem value="favorite">{t("roomLobby.favoritesFirst")}</SelectItem><SelectItem value="alphabetical">{t("roomLobby.alphabetical")}</SelectItem></SelectContent>
+                    </Select></div>
+                    {(availableTags.length > 0 || tag) && <div className="lobby-filter-field"><Label htmlFor="directory-tag">{t("roomLobby.tag")}</Label><Select value={tag} onValueChange={value => setTag(String(value))}><SelectTrigger id="directory-tag" aria-label={t("roomLobby.roomTag")}><SelectValue>{tag || t("roomLobby.allTags")}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">{t("roomLobby.allTags")}</SelectItem>{[...new Set([...availableTags, ...(tag ? [tag] : [])])].map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select></div>}
+                    {(availableLanguages.length > 0 || language) && <div className="lobby-filter-field"><Label htmlFor="directory-language">{t("roomLobby.language")}</Label><Select value={language} onValueChange={value => setLanguage(String(value))}><SelectTrigger id="directory-language" aria-label={t("roomLobby.roomLanguage")}><SelectValue>{language || t("roomLobby.allLanguages")}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">{t("roomLobby.allLanguages")}</SelectItem>{[...new Set([...availableLanguages, ...(language ? [language] : [])])].map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select></div>}
+                    <div className="lobby-filter-footer"><Button variant="ghost" size="sm" aria-label={t("roomLobby.resetFilterOptions")} disabled={filterCount === 0} onClick={resetOptions}>{t("roomLobby.reset")}</Button><Popover.Close render={<Button size="sm" variant="secondary" />}>{t("roomLobby.done")}</Popover.Close></div>
+                  </Popover.Popup>
+                </Popover.Positioner>
+              </Popover.Portal>
+            </Popover.Root>
+            <Button variant="ghost" size="icon" onClick={() => void loadRooms()} disabled={refreshing || favoritePending.size > 0} aria-label={refreshing ? t("roomLobby.refreshingRooms") : t("roomLobby.refreshRooms")} title={t("roomLobby.refreshRooms")}><RefreshCw className={refreshing ? "spin" : undefined} /></Button>
+          </div>
         </div>
-        {(availableTags.length > 0 || availableLanguages.length > 0) && <div className="lobby-discovery-filters">
-          {availableTags.length > 0 && <Select value={tag} onValueChange={value => setTag(String(value))}><SelectTrigger aria-label="Room tag"><SelectValue>{tag || "All tags"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">All tags</SelectItem>{availableTags.map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select>}
-          {availableLanguages.length > 0 && <Select value={language} onValueChange={value => setLanguage(String(value))}><SelectTrigger aria-label="Room language"><SelectValue>{language || "All languages"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="">All languages</SelectItem>{availableLanguages.map(value => <SelectItem value={value} key={value}>{value}</SelectItem>)}</SelectContent></Select>}
-        </div>}
-        <div className="lobby-filter-summary"><p role="status">{!loading && directoryLoaded && `${visibleRooms.length} ${visibleRooms.length === 1 ? "room" : "rooms"}`}</p>{(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={() => { setQuery(""); setFilter("all"); setSort("active"); setTag(""); setLanguage(""); }}>Reset filters</Button>}</div>
+        <div className="lobby-filter-summary">
+          <p role="status">{loading ? t("roomLobby.loadingRooms") : directoryLoaded ? t("roomLobby.roomCount", { count: visibleRooms.length }) : ""}</p>
+          <div className="lobby-applied-filters">
+            {filter !== "all" && <span>{filter === "active" ? t("roomLobby.listeningNow") : t("roomLobby.protectedRooms")}</span>}
+            {sort !== "active" && <span>{sort === "favorite" ? t("roomLobby.favoritesFirst") : t("roomLobby.alphabetical")}</span>}
+            {tag && <span>{tag}</span>}{language && <span>{language}</span>}
+            {(filtering || sort !== "active") && <Button variant="ghost" size="sm" onClick={resetDirectory}>{t("roomLobby.resetFilters")}</Button>}
+          </div>
+        </div>
         {loading ? (
-          <div className="room-card-grid" aria-label="Loading rooms">
-            {[0, 1, 2].map((item) => <Skeleton key={item} className="h-36 rounded-xl" />)}
+          <div className="lobby-loading" aria-label={t("roomLobby.loadingRooms2")} aria-busy="true">
+            {[0, 1, 2].map(item => <Skeleton key={item} className="h-24 rounded-lg" />)}
           </div>
         ) : (
-          <div className="lobby-sections">
-            {!rooms.length && directoryLoaded && <Empty><EmptyHeader><EmptyMedia variant="icon"><Radio /></EmptyMedia><EmptyTitle>No rooms available</EmptyTitle><EmptyDescription>Open an invite to join a private room.</EmptyDescription></EmptyHeader><Button variant="outline" onClick={() => setCreating(true)}>Create room</Button></Empty>}
-            {lastRoom && <section className="lobby-return-room" aria-label="Return to last room"><div><h2>Return to last room</h2><p>{lastRoom.name}</p></div><Button variant="outline" aria-label={`Return to ${lastRoom.name}`} data-navigation-focus={`room:${lastRoom.slug}`} onClick={() => enter(lastRoom)}>Return <ArrowRight /></Button></section>}
-            {accessibleRecentRooms.length > 0 && <RoomSection title="Recently visited" rooms={recentRooms} onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now} />}
-            {favorites.length > 0 && (
-              <RoomSection
-                title="Favorites"
-                rooms={favorites}
-                onEnter={enter}
-                onFavorite={toggleFavorite}
-                favoritePending={favoritePending}
-                now={now}
-              />
-            )}
-            {rooms.some((room) => room.role !== null && !recentSlugs.has(room.slug)) && <RoomSection
-              title="Your rooms" rooms={memberRooms}
-              onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending} filtering={filtering} now={now}
-            />}
-            {rooms.some(isOtherPublicRoom) && <RoomSection
-              title="Public rooms"
-              rooms={publicRooms}
-              onEnter={enter}
-              onFavorite={toggleFavorite}
-              favoritePending={favoritePending}
-              filtering={filtering}
-              now={now}
-            />}
+          <div className="lobby-directory-results">
+            {!rooms.length && directoryLoaded && <Empty><EmptyHeader><EmptyMedia variant="icon"><Radio /></EmptyMedia><EmptyTitle>{t("roomLobby.noRoomsAvailable")}</EmptyTitle><EmptyDescription>{t("roomLobby.openAnInviteToJoinAPrivateRoom")}</EmptyDescription></EmptyHeader><Button variant="outline" onClick={() => setCreating(true)}>{t("roomLobby.createRoom")}</Button></Empty>}
+            {visibleRooms.length > 0 && <ul className="room-directory-list" aria-label={t("roomLobby.rooms")}>{visibleRooms.map(room => <li key={room.slug}><RoomRow room={room} lastVisited={room.slug === lastVisitedSlug} onEnter={enter} onFavorite={toggleFavorite} favoritePending={favoritePending.has(room.slug)} now={now} /></li>)}</ul>}
+            {rooms.length > 0 && visibleRooms.length === 0 && <Empty className="lobby-empty"><EmptyHeader><EmptyMedia variant="icon"><Radio /></EmptyMedia><EmptyTitle>{filtering ? t("roomLobby.noMatchingRooms") : scope === "favorite" ? t("roomLobby.noFavoriteRooms") : t("roomLobby.youHavenTJoinedAnyRooms")}</EmptyTitle></EmptyHeader><Button variant="outline" onClick={resetDirectory}>{t("roomLobby.browseAllRooms")}</Button></Empty>}
           </div>
         )}
-        <FriendsPanel accessToken={accessToken} currentUser={currentUser} onOpenRoom={onOpenRoom} onOpenPerson={onOpenPerson} />
+        <FriendsPanel compact accessToken={accessToken} currentUser={currentUser} onOpenRoom={onOpenRoom} onOpenPerson={onOpenPerson} />
       </div>
 
       {creating && (
@@ -321,91 +308,50 @@ export function RoomLobby({
   );
 }
 
-function RoomSection({
-  title,
-  rooms,
-  onEnter,
-  onFavorite,
-  favoritePending,
-  filtering = false,
-  now
-}: {
-  title: string;
-  rooms: RoomDirectoryEntry[];
+function RoomRow({ room, lastVisited, onEnter, onFavorite, favoritePending, now }: {
+  room: RoomDirectoryEntry;
+  lastVisited: boolean;
   onEnter: (room: RoomDirectoryEntry) => void;
   onFavorite: (room: RoomDirectoryEntry) => void;
-  favoritePending: Set<string>;
-  filtering?: boolean;
+  favoritePending: boolean;
   now: number;
 }) {
-  return (
-    <section className="room-directory-section">
-      <div className="directory-heading">
-        <div><h2>{title}</h2></div>
+  const { t } = useTranslation("rooms");
+  const preview = room.isPublic && !room.passwordProtected ? room.preview : undefined;
+  const previewStale = preview && now - preview.observedAt > 90_000;
+  const roleLabel = room.role ? t(`roles.${room.role}`) : null;
+  return <article className="room-directory-row" aria-label={room.name}>
+    <div className="directory-room-art" aria-hidden="true">
+      {preview?.artworkUrl ? <TrackArtwork track={{ provider: preview.provider || "youtube", providerId: "" }} src={preview.artworkUrl} compact /> : <Radio />}
+    </div>
+    <div className="directory-room-copy">
+      <div className="directory-room-title"><h2 title={room.name}>{room.name}</h2>{lastVisited && <span className="directory-last-visited">{t("roomLobby.lastVisited")}</span>}</div>
+      <div className="directory-room-meta">
+        <span className="directory-listeners"><Users aria-hidden="true" />{t("roomLobby.listeningCount", { count: room.listenerCount })}</span>
+        {roleLabel && <span>{roleLabel}</span>}
+        {room.passwordProtected && <Badge variant="outline"><LockKeyhole />{t("roomLobby.protected")}</Badge>}
+        {(room.accessMode === "members" || !room.isPublic) && <Badge variant="outline">{t("roomLobby.membersOnly")}</Badge>}
+        {room.accessMode === "unlisted" && <Badge variant="outline">{t("roomLobby.unlisted")}</Badge>}
+        {room.language && <span>{room.language}</span>}
+        {room.tags?.map(tag => <span key={tag}>{tag}</span>)}
       </div>
-      {rooms.length ? (
-        <div className="room-card-grid">
-          {rooms.map((room) => (
-            <Card className="room-card" size="sm" key={room.slug}>
-              <CardHeader className="room-card-header">
-                <span className="room-card-art"><Radio /></span>
-                <div className="min-w-0">
-                  <CardTitle className="truncate" title={room.name}>{room.name}</CardTitle>
-                  <CardDescription className="mt-1 flex items-center gap-1.5">
-                    <Users className="size-3.5" /> {room.listenerCount} listening
-                  </CardDescription>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={room.isFavorite ? "text-primary" : "text-muted-foreground"}
-                   onClick={() => void onFavorite(room)}
-                   aria-label={`${room.isFavorite ? "Remove" : "Add"} ${room.name} ${room.isFavorite ? "from" : "to"} favorites`}
-                   aria-pressed={room.isFavorite}
-                   disabled={favoritePending.has(room.slug)}
-                  title={room.isFavorite ? "Remove from favorites" : "Add to favorites"}
-                >
-                  <Heart fill={room.isFavorite ? "currentColor" : "none"} />
-                </Button>
-              </CardHeader>
-              {(room.description || room.isPublic && !room.passwordProtected && room.preview) && <div className="room-card-preview">
-                {room.description && <p className="room-card-description">{room.description}</p>}
-                {room.isPublic && !room.passwordProtected && room.preview && <div className="room-preview-track">
-                  <TrackArtwork track={{ provider: room.preview.provider || "youtube", providerId: "" }} src={room.preview.artworkUrl || null} compact className="room-preview-art" />
-                  <div><small>{now - room.preview.observedAt > 90_000 ? "Preview is out of date" : room.preview.playing ? "Playing" : "Paused"}</small><strong title={room.preview.title}>{room.preview.title}</strong>{room.preview.artist && <span>{room.preview.artist}</span>}</div>
-                </div>}
-              </div>}
-              <CardContent className="room-card-content">
-                <div className="room-card-badges">
-                  {room.passwordProtected && <Badge variant="outline"><LockKeyhole /> Protected</Badge>}
-                  {(room.accessMode === "members" || !room.isPublic) && <Badge variant="outline">Members only</Badge>}
-                  {room.accessMode === "unlisted" && <Badge variant="outline">Unlisted</Badge>}
-                  {room.role === "member" && <Badge variant="secondary">Member</Badge>}
-                  {room.role === "owner" && <Badge variant="secondary">Owner</Badge>}
-                  {room.role === "moderator" && <Badge variant="secondary">Moderator</Badge>}
-                  {room.role === "dj" && <Badge variant="secondary">DJ role</Badge>}
-                  {room.language && <span className="room-card-language">{room.language}</span>}
-                  {room.tags?.map(tag => <span className="room-card-tag" key={tag}>{tag}</span>)}
-                </div>
-                <Button variant="secondary" size="sm" data-navigation-focus={`room:${room.slug}`} onClick={() => onEnter(room)} aria-label={`Join ${room.name}`}>
-                  Join <ArrowRight />
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <Empty className="empty-room-section">
-          <EmptyHeader>
-            <EmptyMedia variant="icon"><Radio /></EmptyMedia>
-            <EmptyTitle>{filtering ? "No matching rooms" : "No rooms yet"}</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-      )}
-    </section>
-  );
+      {room.description && <p className="directory-room-description">{room.description}</p>}
+    </div>
+    {preview && <div className="directory-track">
+      <span className={preview.playing && !previewStale ? "directory-track-playing" : undefined}>{previewStale ? t("roomLobby.previewIsOutOfDate") : preview.playing ? t("roomLobby.playing") : t("roomLobby.paused")}</span>
+      <strong title={preview.title}>{preview.title}</strong>
+      {preview.artist && <span className="directory-track-artist" title={preview.artist}>{preview.artist}</span>}
+    </div>}
+    <div className="directory-room-actions">
+      <Button variant="ghost" size="icon" className={room.isFavorite ? "text-primary" : "text-muted-foreground"}
+        onClick={() => onFavorite(room)} aria-label={t(room.isFavorite ? "roomLobby.removeRoomFavorite" : "roomLobby.addRoomFavorite", { name: room.name })}
+        aria-pressed={room.isFavorite} disabled={favoritePending} title={room.isFavorite ? t("roomLobby.removeFromFavorites") : t("roomLobby.addToFavorites")}>
+        <Heart fill={room.isFavorite ? "currentColor" : "none"} />
+      </Button>
+      <Button variant="secondary" className="directory-join" data-navigation-focus={`room:${room.slug}`} onClick={() => onEnter(room)} aria-label={t("roomLobby.joinName", { name: room.name })}>{t("roomLobby.join")}{" "}<ArrowRight /></Button>
+    </div>
+  </article>;
 }
-
 function CreateRoomDialog({
   accessToken,
   onClose,
@@ -415,6 +361,7 @@ function CreateRoomDialog({
   onClose: () => void;
   onCreated: (slug: string, password?: string) => void;
 }) {
+  const { t } = useTranslation("rooms");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [roomAccess, setRoomAccess] = useState<"public" | "unlisted" | "members">("public");
@@ -441,8 +388,8 @@ function CreateRoomDialog({
       if (activeRef.current) onCreated(payload.room.slug, submittedPassword);
     } catch (createError) {
       if (activeRef.current) setError(createError instanceof Error && !(createError instanceof TypeError)
-        && createError.message !== "The request timed out. Try again." && createError.message !== "The server returned an invalid response. Try again."
-        ? createError.message : "Creation wasn't confirmed. Refresh rooms before creating another.");
+        && createError.message !== t("common:authenticated_http_the_request_timed_out_try_again") && createError.message !== t("common:authenticated_http_the_server_returned_an_invalid_response_try_again")
+        ? createError.message : t("roomLobby.creationWasnTConfirmedRefreshRoomsBeforeCreating"));
     } finally {
       savingRef.current = false;
       if (activeRef.current) setSaving(false);
@@ -454,12 +401,12 @@ function CreateRoomDialog({
       <DialogContent showCloseButton={!saving}>
         <form className="grid gap-5" autoComplete="off" onSubmit={submit} aria-busy={saving}>
           <DialogHeader>
-            <DialogTitle>Create a room</DialogTitle>
-            <DialogDescription className="sr-only">Name and access settings.</DialogDescription>
+            <DialogTitle>{t("roomLobby.createARoom")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("roomLobby.nameAndAccessSettings")}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="room-name">Room name</Label>
+              <Label htmlFor="room-name">{t("roomLobby.roomName")}</Label>
               <Input
                 id="room-name"
                 name="soundspin-room-name"
@@ -472,11 +419,11 @@ function CreateRoomDialog({
                 maxLength={48}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Friday focus"
+                placeholder={t("roomLobby.fridayFocus")}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="room-password">Password <span className="font-normal text-muted-foreground">Optional</span></Label>
+              <Label htmlFor="room-password">{t("roomLobby.password")}{" "}<span className="font-normal text-muted-foreground">{t("roomLobby.optional")}</span></Label>
               <Input
                 id="room-password"
                 name="soundspin-new-room-password"
@@ -488,16 +435,16 @@ function CreateRoomDialog({
                 maxLength={128}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="No password"
+                placeholder={t("roomLobby.noPassword")}
               />
             </div>
-            <div className="grid gap-2"><Label htmlFor="new-room-access">Room access</Label><Select value={roomAccess} onValueChange={value => setRoomAccess(value as typeof roomAccess)}><SelectTrigger id="new-room-access" disabled={saving}><SelectValue>{roomAccess === "public" ? "Public" : roomAccess === "unlisted" ? "Unlisted" : "Members only"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="unlisted">Unlisted</SelectItem><SelectItem value="members">Members only</SelectItem></SelectContent></Select>{roomAccess === "unlisted" && <p className="room-setting-help">Anyone with the room address can join. Hidden from discovery.</p>}</div>
+            <div className="grid gap-2"><Label htmlFor="new-room-access">{t("roomLobby.roomAccess")}</Label><Select value={roomAccess} onValueChange={value => setRoomAccess(value as typeof roomAccess)}><SelectTrigger id="new-room-access" disabled={saving}><SelectValue>{roomAccess === "public" ? t("roomLobby.public") : roomAccess === "unlisted" ? t("roomLobby.unlisted") : t("roomLobby.membersOnly")}</SelectValue></SelectTrigger><SelectContent><SelectItem value="public">{t("roomLobby.public")}</SelectItem><SelectItem value="unlisted">{t("roomLobby.unlisted")}</SelectItem><SelectItem value="members">{t("roomLobby.membersOnly")}</SelectItem></SelectContent></Select>{roomAccess === "unlisted" && <p className="room-setting-help">{t("roomLobby.anyoneWithTheRoomAddressCanJoinHidden")}</p>}</div>
           </div>
           {error && <div className="dialog-error" role="alert">{error}</div>}
-          {saving && <p className="text-sm text-muted-foreground" role="status">Wait for room creation to finish.</p>}
+          {saving && <p className="text-sm text-muted-foreground" role="status">{t("roomLobby.waitForRoomCreationToFinish")}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving || !name.trim()}>{saving ? "Creating…" : "Create room"}</Button>
+            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>{t("roomLobby.cancel")}</Button>
+            <Button type="submit" disabled={saving || !name.trim()}>{saving ? t("roomLobby.creating") : t("roomLobby.createRoom")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -516,6 +463,7 @@ export function PasswordDialog({
   onClose: () => void;
   onSubmit: (password: string) => void;
 }) {
+  const { t } = useTranslation("rooms");
   const [password, setPassword] = useState("");
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -524,16 +472,16 @@ export function PasswordDialog({
           <DialogHeader>
             <div className="mb-2 flex size-9 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><LockKeyhole className="size-4" /></div>
             <DialogTitle>{roomName}</DialogTitle>
-            <DialogDescription className="sr-only">Enter the room password to join.</DialogDescription>
+            <DialogDescription className="sr-only">{t("roomLobby.enterTheRoomPasswordToJoin")}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="join-password">Password</Label>
+            <Label htmlFor="join-password">{t("roomLobby.password")}</Label>
             <Input id="join-password" autoFocus required type="password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} />
           </div>
           {error && <div className="dialog-error" role="alert">{error}</div>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={!password}>Join room</Button>
+            <Button type="button" variant="outline" onClick={onClose}>{t("roomLobby.cancel")}</Button>
+            <Button type="submit" disabled={!password}>{t("roomLobby.joinRoom")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

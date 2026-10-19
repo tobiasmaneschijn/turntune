@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { requestJson } from '@/lib/authenticated-http'
@@ -22,6 +23,7 @@ export function SignUpForm({
   client?: SupabaseClient
   onNavigate: (path: string) => void
 }) {
+  const { t } = useTranslation("public");
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [invitePassword, setInvitePassword] = useState('')
@@ -34,7 +36,7 @@ export function SignUpForm({
     setError(null)
 
     if (!displayName.trim()) {
-      setError('Enter a display name.')
+      setError(t("displayNameRequired"))
       return
     }
     setIsLoading(true)
@@ -43,11 +45,11 @@ export function SignUpForm({
       await requestJson('/api/signup', {
         method: 'POST',
         body: JSON.stringify({ email, invitePassword, displayName: displayName.trim() }),
-        errorMessage: 'Could not create account. Try again.',
+        errorMessage: t("createAccountError"),
       })
       setSuccess(true)
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'Could not create account. Try again.')
+      setError(error instanceof Error ? error.message : t("createAccountError"))
     } finally {
       setIsLoading(false)
     }
@@ -58,34 +60,34 @@ export function SignUpForm({
       {success ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Check your email</CardTitle>
+            <CardTitle className="text-xl">{t("checkEmail")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="mb-4 text-sm">If this address can be invited, you will receive a link to verify your email and choose a password.</p>
+            <p className="mb-4 text-sm">{t("invitationSent")}</p>
             {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
             <Button type="button" className="w-full" disabled={isLoading} onClick={() => onNavigate('/login')}>
-              Sign in
+              {t("signIn")}
             </Button>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Create account</CardTitle>
+            <CardTitle className="text-xl">{t("createAccount")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSignUp}>
               <div className="flex flex-col gap-6">
                 <div className="grid gap-2">
-                  <Label htmlFor="display-name">Display name</Label>
+                  <Label htmlFor="display-name">{t("displayName")}</Label>
                   <Input id="display-name" autoComplete="nickname" required maxLength={32} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email">{t("email")}</Label>
                   <Input
                     id="email"
                     type="email"
-                    placeholder="you@example.com"
+                    placeholder={t("emailPlaceholder")}
                     autoComplete="email"
                     required
                     value={email}
@@ -93,7 +95,7 @@ export function SignUpForm({
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="invite-password">Invite password</Label>
+                  <Label htmlFor="invite-password">{t("invitePassword")}</Label>
                   <Input
                     id="invite-password"
                     type="password"
@@ -103,16 +105,16 @@ export function SignUpForm({
                     onChange={(e) => setInvitePassword(e.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Get this from whoever invited you.
+                    {t("invitePasswordHint")}
                   </p>
                 </div>
                 {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Sending invitation…' : 'Create account'}
+                  {isLoading ? t("sendingInvitation") : t("createAccount")}
                 </Button>
               </div>
               <div className="mt-4 text-center text-sm">
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>Sign in</Button>
+                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/login')}>{t("signIn")}</Button>
               </div>
             </form>
           </CardContent>

@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { RoomCommandError } from './socket-handler.js'
 import { SecurityLimitError } from './security-budget.js'
 import { ChatRateLimit, ChatWriteConflict } from './chat-errors.js'
@@ -12,7 +13,7 @@ export function publicRequestFailure(error: unknown, fallback: string) {
   if (error instanceof SecurityLimitError || error instanceof ChatRateLimit) return { status: 429, message: error.message }
   if (error instanceof ChatWriteConflict) return { status: 409, message: error.message }
   if (error instanceof RoomCommandError) return { status: 403, message: error.message }
-  if (error instanceof ZodError) return { status: 400, message: 'Invalid request fields.' }
+  if (error instanceof ZodError) return { status: 400, message: serverT("invalid_request_fields") }
   return { status: 503, message: fallback }
 }
 /** SQL's intentional P0001 exceptions are classified by exact static messages.

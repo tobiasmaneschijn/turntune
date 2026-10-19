@@ -1,9 +1,10 @@
+import { serverT } from "./i18n.js";
 /** Only construct from claims returned by credential verification, never decoded client JSON. */
 export function createSocketCredentialLease(userId: string, expiresAtSeconds: unknown, now = Date.now) {
-  if (!userId || typeof expiresAtSeconds !== "number" || !Number.isFinite(expiresAtSeconds)) throw new Error("Your session has expired. Sign in again.");
+  if (!userId || typeof expiresAtSeconds !== "number" || !Number.isFinite(expiresAtSeconds)) throw new Error(serverT("your_session_has_expired_sign_in_again"));
   const expiresAt = expiresAtSeconds * 1000;
   const assertActive = () => {
-    if (now() >= expiresAt) throw new Error("Your session has expired. Reconnect with a refreshed session.");
+    if (now() >= expiresAt) throw new Error(serverT("your_session_has_expired_reconnect_with_a_refreshed_session"));
   };
   assertActive();
   return {

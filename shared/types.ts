@@ -97,6 +97,8 @@ export interface RoomAnnouncement {
 }
 
 export interface RoomSettings {
+  /** Disabled unless an application administrator enables it for this room. */
+  spotifyEnabled?: boolean;
   djAccess?: DjAccess;
   allowedProviders?: Provider[];
   description?: string;

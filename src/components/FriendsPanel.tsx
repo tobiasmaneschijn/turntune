@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Search, UserPlus } from "lucide-react";
 import type { User } from "../types";
@@ -36,6 +37,7 @@ export interface FriendsPanelProps {
   onOpenRoom: (slug: string) => void;
   onOpenPerson?: (id: string) => void;
   currentRoomSlug?: string;
+  compact?: boolean;
 }
 
 const isUser = (value: unknown): value is User => Boolean(value && typeof value === "object" &&
@@ -58,8 +60,10 @@ function isSocialPayload(value: unknown): value is SocialPayload {
       "slug" in invitation.room && typeof invitation.room.slug === "string" && "name" in invitation.room && typeof invitation.room.name === "string"));
 }
 
-export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerson, currentRoomSlug }: FriendsPanelProps) {
+export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerson, currentRoomSlug, compact = false }: FriendsPanelProps) {
+  const { t } = useTranslation("rooms");
   const panelId = useId();
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [people, setPeople] = useState<SocialPerson[]>([]);
   const [blockedPeople, setBlockedPeople] = useState<User[]>([]);
   const [receiveRequests, setReceiveRequests] = useState(true);
@@ -112,18 +116,18 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
       setBlockedPeople(payload.blockedPeople || []); setReceiveRequests(payload.receiveRequests !== false);
       setLoaded(true);
     } catch {
-      if (isCurrent(userId, controller) && request === socialRequestRef.current) setLoadError("Couldn't load friends.");
+      if (isCurrent(userId, controller) && request === socialRequestRef.current) setLoadError(t("socialCouldnTLoadFriends"));
     } finally {
       controllersRef.current.delete(controller);
       if (socialControllerRef.current === controller) socialControllerRef.current = null;
       if (isCurrent(userId, controller) && request === socialRequestRef.current) setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     mountedRef.current = true;
     setPeople([]); setBlockedPeople([]); setReceiveRequests(true); setInvitations([]); setLoaded(false); setRemoveTarget(null); setLoadError(""); setActionError(""); setNotice("");
-    setQuery(""); setSearchResults([]); setSearched(false); setSearching(false); setSearchError(""); setInvited(new Set());
+    setQuery(""); setSearchResults([]); setSearched(false); setSearching(false); setSearchError(""); setInvited(new Set()); setDiscoveryOpen(false);
     pendingRef.current.clear(); setPending(new Set());
     void load();
     const timer = setInterval(() => { if (document.visibilityState === "visible" && visibleRef.current) void load(); }, 30_000);
@@ -163,7 +167,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
       if (!isCurrent(userId, controller) || request !== searchRequestRef.current) return;
       setSearchResults(payload.people.filter(user => user.id !== userId)); setSearched(true);
     } catch (error) {
-      if (isCurrent(userId, controller) && request === searchRequestRef.current) setSearchError(error instanceof Error ? error.message : "Couldn't find people. Try again.");
+      if (isCurrent(userId, controller) && request === searchRequestRef.current) setSearchError(error instanceof Error ? error.message : t("socialCouldnTFindPeopleTryAgain"));
     } finally {
       controllersRef.current.delete(controller);
       if (searchControllerRef.current === controller) searchControllerRef.current = null;
@@ -177,7 +181,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
     const controller = new AbortController(); controllersRef.current.add(controller);
     pendingRef.current.add(key); setPending(new Set(pendingRef.current)); setActionError(""); setNotice("");
     try { await action(controller.signal); }
-    catch (error) { if (isCurrent(userId, controller)) setActionError(error instanceof Error ? error.message : "Couldn't save. Try again."); }
+    catch (error) { if (isCurrent(userId, controller)) setActionError(error instanceof Error ? error.message : t("socialCouldnTSaveTryAgain")); }
     finally {
       controllersRef.current.delete(controller);
       if (isCurrent(userId, controller)) { pendingRef.current.delete(key); setPending(new Set(pendingRef.current)); }
@@ -192,7 +196,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
       if (!mountedRef.current || userRef.current !== userId || signal.aborted) return;
       setPeople(current => action === "remove" || action === "decline" ? current.filter(person => person.user.id !== user.id)
         : [...current.filter(person => person.user.id !== user.id), { user, state: action === "accept" ? "friends" : "outgoing" }]);
-      setNotice(action === "request" ? "Request sent." : action === "accept" ? "Friend added." : action === "remove" ? "Friend removed." : relation === "outgoing" ? "Request cancelled." : "Request declined.");
+      setNotice(action === "request" ? t("socialRequestSent") : action === "accept" ? t("socialFriendAdded") : action === "remove" ? t("socialFriendRemoved") : relation === "outgoing" ? t("socialRequestCancelled") : t("socialRequestDeclined"));
       await load();
     });
   };
@@ -203,7 +207,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
       await requestJson(`/api/social/blocks/${encodeURIComponent(user.id)}`, { method: "PUT", accessToken: tokenRef.current, signal, body: JSON.stringify({ blocked }) });
       if (!mountedRef.current || userRef.current !== userId || signal.aborted) return;
       setSearchResults(current => current.filter(person => person.id !== user.id));
-      setNotice(blocked ? "Listener blocked." : "Listener unblocked.");
+      setNotice(blocked ? t("socialListenerBlocked") : t("socialListenerUnblocked"));
       await load();
     });
   };
@@ -222,7 +226,7 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
     void act(user.id, async signal => {
       await requestJson("/api/room-invitations", { method: "POST", accessToken: tokenRef.current, signal, body: JSON.stringify({ userId: user.id, roomSlug }) });
       if (!mountedRef.current || userRef.current !== userId || signal.aborted || roomRef.current !== roomSlug) return;
-      setInvited(current => new Set(current).add(user.id)); setNotice("Invite sent.");
+      setInvited(current => new Set(current).add(user.id)); setNotice(t("socialInviteSent"));
     });
   };
 
@@ -240,54 +244,64 @@ export function FriendsPanel({ accessToken, currentUser, onOpenRoom, onOpenPerso
   };
 
   const personRow = (user: User, relation?: SocialPerson, blocked = false) => <div className="friends-person" key={user.id}>
-    {onOpenPerson ? <button type="button" className="friends-person-profile" onClick={() => onOpenPerson(user.id)} aria-label={`Open ${user.name}'s profile`}><Avatar user={user} size={32} /><strong>{user.name}</strong></button>
+    {onOpenPerson ? <button type="button" className="friends-person-profile" onClick={() => onOpenPerson(user.id)} aria-label={t("socialOpenProfile", { name: user.name })}><Avatar user={user} size={32} /><strong>{user.name}</strong></button>
       : <span className="friends-person-profile"><Avatar user={user} size={32} /><strong>{user.name}</strong></span>}
     <span className="friends-person-actions">
-      {blocked ? <Button size="sm" variant="secondary" disabled={pending.has(user.id)} aria-label={`Unblock ${user.name}`} onClick={() => changeBlock(user, false)}>Unblock</Button> : relation?.state === "friends" ? <>
+      {blocked ? <Button size="sm" variant="secondary" disabled={pending.has(user.id)} aria-label={t("socialUnblockListener", { name: user.name })} onClick={() => changeBlock(user, false)}>{t("socialUnblock")}</Button> : relation?.state === "friends" ? <>
         {relation.room && <span className="friends-room-name">{relation.room.name}</span>}
-        {relation.room?.canJoin && relation.room.slug !== currentRoomSlug && <Button size="sm" variant="secondary" aria-label={`Join ${relation.room.name} with ${user.name}`} onClick={() => onOpenRoom(relation.room!.slug)}>Join</Button>}
-        {currentRoomSlug && <Button size="sm" variant="secondary" disabled={pending.has(user.id) || invited.has(user.id)} aria-label={`${invited.has(user.id) ? "Invited" : "Invite"} ${user.name} to this room`} onClick={() => invite(user)}>{invited.has(user.id) ? "Invited" : "Invite"}</Button>}
-        <Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => setRemoveTarget(user)} aria-label={`Remove ${user.name} from friends`}>Remove</Button>
-      </> : relation?.state === "incoming" ? <><Button size="sm" disabled={pending.has(user.id)} aria-label={`Accept ${user.name}'s friend request`} onClick={() => changeFriend(user, "accept")}>Accept</Button><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={`Decline ${user.name}'s friend request`} onClick={() => changeFriend(user, "decline")}>Decline</Button></>
-        : relation?.state === "outgoing" ? <><span className="friends-state">Pending</span><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={`Cancel request to ${user.name}`} onClick={() => changeFriend(user, "decline")}>Cancel</Button></>
-          : <Button size="sm" variant="secondary" disabled={pending.has(user.id)} aria-label={`Add friend ${user.name}`} onClick={() => changeFriend(user, "request")}><UserPlus />Add friend</Button>}
-      {!blocked && <Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={`Block ${user.name}`} onClick={() => changeBlock(user, true)}>Block</Button>}
+        {relation.room?.canJoin && relation.room.slug !== currentRoomSlug && <Button size="sm" variant="secondary" aria-label={t("socialJoinFriendRoom", { room: relation.room.name, name: user.name })} onClick={() => onOpenRoom(relation.room!.slug)}>{t("socialJoin")}</Button>}
+        {currentRoomSlug && <Button size="sm" variant="secondary" disabled={pending.has(user.id) || invited.has(user.id)} aria-label={invited.has(user.id) ? t("socialInvitedListener", { name: user.name }) : t("socialInviteListener", { name: user.name })} onClick={() => invite(user)}>{invited.has(user.id) ? t("socialInvited") : t("socialInvite")}</Button>}
+        <Button size="sm" variant="ghost" disabled={pending.has(user.id)} onClick={() => setRemoveTarget(user)} aria-label={t("socialRemoveFriendName", { name: user.name })}>{t("socialRemove")}</Button>
+      </> : relation?.state === "incoming" ? <><Button size="sm" disabled={pending.has(user.id)} aria-label={t("socialAcceptFriendRequest", { name: user.name })} onClick={() => changeFriend(user, "accept")}>{t("socialAccept")}</Button><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={t("socialDeclineFriendRequest", { name: user.name })} onClick={() => changeFriend(user, "decline")}>{t("socialDecline")}</Button></>
+        : relation?.state === "outgoing" ? <><span className="friends-state">{t("socialPending")}</span><Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={t("socialCancelFriendRequest", { name: user.name })} onClick={() => changeFriend(user, "decline")}>{t("socialCancel")}</Button></>
+          : <Button size="sm" variant="secondary" disabled={pending.has(user.id)} aria-label={t("socialAddFriendName", { name: user.name })} onClick={() => changeFriend(user, "request")}><UserPlus />{t("socialAddFriend")}</Button>}
+      {!blocked && <Button size="sm" variant="ghost" disabled={pending.has(user.id)} aria-label={t("socialBlockListener", { name: user.name })} onClick={() => changeBlock(user, true)}>{t("socialBlock")}</Button>}
     </span>
   </div>;
 
   const friends = people.filter(person => person.state === "friends");
   const requests = people.filter(person => person.state !== "friends");
-  return <section className="friends-panel" aria-labelledby={`${panelId}-title`} ref={sectionRef}>
-    <h2 id={`${panelId}-title`}>Friends</h2>
-    {!loaded && loading && <p className="friends-state" role="status">Loading friends…</p>}
-    {loadError && <div className="friends-error" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>Retry</Button></div>}
+  const friendSettings = <details className="friends-discovery friends-settings"><summary>{t("socialFriendSettings")}</summary>
+    <label className="friends-person"><span>{t("socialReceiveFriendRequests")}</span><input type="checkbox" checked={receiveRequests} disabled={!loaded || pending.has("settings")} onChange={event => changeRequestSetting(event.target.checked)} /></label>
+    {blockedPeople.length > 0 && <div className="friends-group"><h3>{t("socialBlockedListeners")}</h3>{blockedPeople.map(user => personRow(user, undefined, true))}</div>}
+  </details>;
+  const discovery = <>
+    <form className="friends-search" onSubmit={search}><Input aria-label={t("socialFindPeople")} aria-describedby={`${panelId}-search-requirement`} minLength={2} maxLength={48} placeholder={t("socialName")} value={query} onChange={event => {
+      setQuery(event.target.value); searchRequestRef.current += 1; searchControllerRef.current?.abort(); setSearching(false); setSearched(false); setSearchResults([]); setSearchError("");
+    }} /><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? t("socialSearching") : t("socialSearch")}</Button></form>
+    <p className="friends-search-hint" id={`${panelId}-search-requirement`}>{t("socialEnterAtLeast2Characters")}</p>
+    {searchError && <p className="friends-error" role="alert">{searchError}</p>}
+    {searchResults.map(user => personRow(user, people.find(person => person.user.id === user.id)))}
+    {searched && !searchResults.length && <p className="friends-state" role="status">{t("socialNoMatches")}</p>}
+  </>;
+  return <section className={`friends-panel${compact ? " friends-panel--compact" : ""}`} aria-labelledby={`${panelId}-title`} ref={sectionRef}>
+    {compact ? <div className="friends-panel-heading">
+      <h2 id={`${panelId}-title`}>{t("socialFriends")}</h2>
+      <Button size="sm" variant="ghost" aria-expanded={discoveryOpen} aria-controls={`${panelId}-discovery`} onClick={() => setDiscoveryOpen(open => !open)}><UserPlus />{t("socialFindPeople")}</Button>
+    </div> : <h2 id={`${panelId}-title`}>{t("socialFriends")}</h2>}
+    {!loaded && loading && <p className="friends-state" role="status">{t("socialLoadingFriends")}</p>}
+    {loadError && <div className="friends-error" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>{t("socialRetry")}</Button></div>}
     {actionError && <p className="friends-error" role="alert">{actionError}</p>}
     {notice && <p className="friends-feedback" role="status">{notice}</p>}
-    {invitations.length > 0 && <div className="friends-group"><h3>Room invites</h3>{invitations.map(invitation => <div className="friends-person" key={invitation.id}><span className="friends-invitation"><strong>{invitation.room.name}</strong><span>{invitation.from.name}</span></span><Button size="sm" disabled={pending.has(`invite:${invitation.id}`)} aria-label={`Accept invite to ${invitation.room.name} from ${invitation.from.name}`} onClick={() => acceptInvitation(invitation)}>Accept invite</Button></div>)}</div>}
+    {invitations.length > 0 && <div className="friends-group"><h3>{t("socialRoomInvites")}</h3>{invitations.map(invitation => <div className="friends-person" key={invitation.id}><span className="friends-invitation"><strong>{invitation.room.name}</strong><span>{invitation.from.name}</span></span><Button size="sm" disabled={pending.has(`invite:${invitation.id}`)} aria-label={t("socialAcceptRoomInvitation", { room: invitation.room.name, name: invitation.from.name })} onClick={() => acceptInvitation(invitation)}>{t("socialAcceptInvite")}</Button></div>)}</div>}
     {friends.map(person => personRow(person.user, person))}
-    {loaded && !friends.length && !requests.length && !invitations.length && <p className="friends-state">No friends yet.</p>}
-    {requests.length > 0 && <div className="friends-group"><h3>Requests</h3>{requests.map(person => personRow(person.user, person))}</div>}
-    <details className="friends-discovery"><summary>Friend settings</summary>
-      <label className="friends-person"><span>Receive friend requests</span><input type="checkbox" checked={receiveRequests} disabled={!loaded || pending.has("settings")} onChange={event => changeRequestSetting(event.target.checked)} /></label>
-      {blockedPeople.length > 0 && <div className="friends-group"><h3>Blocked listeners</h3>{blockedPeople.map(user => personRow(user, undefined, true))}</div>}
-    </details>
-    <details className="friends-discovery"><summary>Find people</summary>
-      <form className="friends-search" onSubmit={search}><Input aria-label="Find people" aria-describedby={`${panelId}-search-requirement`} minLength={2} maxLength={48} placeholder="Name" value={query} onChange={event => {
-        setQuery(event.target.value); searchRequestRef.current += 1; searchControllerRef.current?.abort(); setSearching(false); setSearched(false); setSearchResults([]); setSearchError("");
-      }} /><Button type="submit" variant="outline" disabled={searching || query.trim().length < 2}><Search />{searching ? "Searching…" : "Search"}</Button></form>
-      <p className="friends-search-hint" id={`${panelId}-search-requirement`}>Enter at least 2 characters.</p>
-      {searchError && <p className="friends-error" role="alert">{searchError}</p>}
-      {searchResults.map(user => personRow(user, people.find(person => person.user.id === user.id)))}
-      {searched && !searchResults.length && <p className="friends-state" role="status">No matches.</p>}
-    </details>
+    {loaded && !friends.length && !requests.length && !invitations.length && <p className="friends-state">{t("socialNoFriendsYet")}</p>}
+    {requests.length > 0 && <div className="friends-group"><h3>{t("socialRequests")}</h3>{requests.map(person => personRow(person.user, person))}</div>}
+    {compact ? <div className="friends-panel-discovery" id={`${panelId}-discovery`} hidden={!discoveryOpen}>
+      {discovery}
+      {friendSettings}
+    </div> : <>
+      {friendSettings}
+      <details className="friends-discovery"><summary>{t("socialFindPeople")}</summary>{discovery}</details>
+    </>}
     <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
       <DialogContent showCloseButton={false}>
-        <DialogTitle>Remove {removeTarget?.name} from friends?</DialogTitle>
-        <DialogDescription>Adding them again requires a new friend request.</DialogDescription>
-        <DialogFooter><Button variant="outline" onClick={() => setRemoveTarget(null)}>Cancel</Button>
-          <Button variant="destructive" aria-label={`Remove ${removeTarget?.name} from friends`} onClick={() => {
+        <DialogTitle>{t("socialRemoveFriendConfirm", { name: removeTarget?.name })}</DialogTitle>
+        <DialogDescription>{t("socialAddingThemAgainRequiresANewFriendRequest")}</DialogDescription>
+        <DialogFooter><Button variant="outline" onClick={() => setRemoveTarget(null)}>{t("socialCancel")}</Button>
+          <Button variant="destructive" aria-label={t("socialRemoveFriendName", { name: removeTarget?.name })} onClick={() => {
             const user = removeTarget; setRemoveTarget(null); if (user) changeFriend(user, "remove");
-          }}>Remove</Button></DialogFooter>
+          }}>{t("socialRemove")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </section>;

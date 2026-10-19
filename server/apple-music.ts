@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { providerDuration, providerHttpsUrl, providerJson } from "./provider-http.js";
 import crypto from "node:crypto";
@@ -59,7 +60,7 @@ export class AppleMusicApi {
   }
 
   getDeveloperToken() {
-    if (!this.configured) throw new Error("Apple Music is not configured yet.");
+    if (!this.configured) throw new Error(serverT("apple_music_is_not_configured_yet"));
     if (this.token && this.token.expiresAt > Date.now() + 60_000) return this.token.value;
     const issuedAt = Math.floor(Date.now() / 1000);
     const expiresAt = issuedAt + 6 * 60 * 60;
@@ -84,7 +85,7 @@ export class AppleMusicApi {
       headers: { Authorization: `Bearer ${this.getDeveloperToken()}` }, signal
     });
     if (!response.ok) {
-      throw new Error(payload.errors?.[0]?.detail || payload.errors?.[0]?.title || "Apple Music request failed.");
+      throw new Error(payload.errors?.[0]?.detail || payload.errors?.[0]?.title || serverT("apple_music_request_failed"));
     }
     return payload;
   }
@@ -100,7 +101,7 @@ export class AppleMusicApi {
   async getTrack(id: string, storefront = this.storefront, signal?: AbortSignal) {
     const payload = await this.request(`/catalog/${encodeURIComponent(storefront)}/songs/${encodeURIComponent(id)}`, signal);
     const result = payload.data?.[0] && mapAppleSong(payload.data[0], storefront);
-    if (!result) throw new Error("That Apple Music song could not be found.");
+    if (!result) throw new Error(serverT("that_apple_music_song_could_not_be_found"));
     return result;
   }
 

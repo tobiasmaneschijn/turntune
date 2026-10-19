@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import crypto from "node:crypto";
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -27,18 +28,18 @@ export function mountSignupRoutes(app: express.Express, options: SignupRouteOpti
 
   app.post("/api/signup", express.json({ limit: "4kb" }), async (request, response) => {
     response.set("Cache-Control", "no-store");
-    if (!options.admin || !options.invitePassword || !origin) return response.status(503).json({ error: "Invite-only signup is not configured." });
+    if (!options.admin || !options.invitePassword || !origin) return response.status(503).json({ error: serverT("invite_only_signup_is_not_configured") });
     const ip = request.ip || request.socket.remoteAddress || "unknown";
-    if (!attempts.consume(ip)) return response.status(429).json({ error: "Too many signup attempts. Try again later." });
+    if (!attempts.consume(ip)) return response.status(429).json({ error: serverT("too_many_signup_attempts_try_again_later") });
     const parsed = inviteSignupSchema.safeParse(request.body);
-    if (!parsed.success) return response.status(400).json({ error: "Enter a valid display name, email, and invite password." });
-    if (!invitePasswordMatches(parsed.data.invitePassword, options.invitePassword)) return response.status(403).json({ error: "The invite password is incorrect." });
+    if (!parsed.success) return response.status(400).json({ error: serverT("enter_a_valid_display_name_email_and_invite_password") });
+    if (!invitePasswordMatches(parsed.data.invitePassword, options.invitePassword)) return response.status(403).json({ error: serverT("the_invite_password_is_incorrect") });
     const email = parsed.data.email.toLowerCase();
     const emailKey = crypto.createHash("sha256").update(email).digest("hex");
     // Reservation happens before the privileged call, so concurrent requests and
     // successful invitations cannot bypass it. Failures also retain the reservation.
     if (active >= 4 || !emailDelivery.consume(emailKey) || !creationByIp.consume(ip) || !creationGlobal.consume("global")) {
-      return response.status(429).json({ error: "Too many signup attempts. Try again later." });
+      return response.status(429).json({ error: serverT("too_many_signup_attempts_try_again_later") });
     }
     active++;
     let timer: NodeJS.Timeout | undefined;
@@ -58,6 +59,6 @@ export function mountSignupRoutes(app: express.Express, options: SignupRouteOpti
       await Promise.race([invite, new Promise<void>(resolve => { timer = setTimeout(resolve, 12_000); })]);
     } catch { /* Same generic response for an existing address or service failure. */ }
     finally { if (timer) clearTimeout(timer); }
-    return response.status(202).json({ ok: true, message: "If this address can be invited, you will receive an email to finish creating your account." });
+    return response.status(202).json({ ok: true, message: serverT("if_this_address_can_be_invited_you_will_receive_an_email_to_finish_creating_your_acco") });
   });
 }

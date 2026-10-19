@@ -203,23 +203,23 @@ test('full-chain waiting queue budgets cap aggregate accounts across rooms and a
     const tracks=count=>Array.from({length:count},(_,index)=>({id:`track-${index}`,provider:'youtube',providerId:'abcdefghijk',title:'Test track'}));
     const change=(room,count,user=member)=>db.query('update soundspin_rooms set state=$2 where slug=$1',[room,{djQueues:{[user]:tracks(count)}}]);
     for(let index=0;index<11;index++)await createRoom(db,`queue-room-${index}`,index<10?owner:outsider);
-    for(let index=0;index<10;index++)await change(`queue-room-${index}`,200);
+    for(let index=0;index<5;index++)await change(`queue-room-${index}`,100);
     await assert.rejects(change('queue-room-10',1),/Account waiting queue limit reached/);
-    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,2000);
-    await change('queue-room-0',199);await change('queue-room-10',1);
-    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,2000);
-    await assert.rejects(change('queue-room-10',2001,outsider),/Room waiting queue limit reached/);
+    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,500);
+    await change('queue-room-0',99);await change('queue-room-10',1);
+    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,500);
+    await assert.rejects(change('queue-room-10',501,outsider),/Room waiting queue limit reached/);
     // Seed a faithful legacy over-limit account fixture: both room state and
     // its migration-backfilled ledger agree. Only the fixture owner bypasses
     // the trigger; ordinary service/client requests retain every control.
     await db.exec('reset role; alter table soundspin_rooms disable trigger soundspin_room_queue_budget');
-    await change('queue-room-0',201);
-    await db.query('update private.soundspin_queue_usage set track_count=201 where room_slug=\'queue-room-0\' and user_id=$1',[member]);
+    await change('queue-room-0',101);
+    await db.query('update private.soundspin_queue_usage set track_count=101 where room_slug=\'queue-room-0\' and user_id=$1',[member]);
     await db.exec('alter table soundspin_rooms enable trigger soundspin_room_queue_budget; set role service_role');
-    await change('queue-room-0',200);
-    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,2001);
-    await assert.rejects(change('queue-room-0',201),/Account waiting queue limit reached/);
-    await change('queue-room-0',199);
+    await change('queue-room-0',100);
+    assert.equal((await db.query('select sum(track_count)::integer as count from private.soundspin_queue_usage where user_id=$1',[member])).rows[0].count,501);
+    await assert.rejects(change('queue-room-0',101),/Account waiting queue limit reached/);
+    await change('queue-room-0',99);
     await change('queue-room-10',0);
     assert.equal((await db.query('select count(*)::integer as count from private.soundspin_queue_usage where room_slug=\'queue-room-10\' and user_id=$1',[member])).rows[0].count,0);
   }finally{await db.close();}

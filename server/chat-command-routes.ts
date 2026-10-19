@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express, { type Express, type Request, type Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import type { ChatHistoryRouteOptions } from './chat-history.js'
@@ -17,7 +18,7 @@ function cursor(request: Request): ChatReadCursor | undefined {
     typeof beforeId !== 'string' ||
     !UUID.test(beforeId)
   )
-    throw new PublicRequestError('Invalid history position.')
+    throw new PublicRequestError(serverT("invalid_history_position"))
   return { createdAt: beforeAt, id: beforeId }
 }
 export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOptions, commands: ChatCommandService) {
@@ -28,19 +29,19 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
       try {
         const userId = await options.getUserId(request)
         if (!userId) {
-          response.status(401).json({ error: 'Sign in to use room chat.' })
+          response.status(401).json({ error: serverT("sign_in_to_use_room_chat") })
           return
         }
         const room = request.params.roomSlug
-        if (typeof room !== 'string' || !/^[a-z0-9-]{3,48}$/.test(room)) throw new PublicRequestError('Invalid room.')
+        if (typeof room !== 'string' || !/^[a-z0-9-]{3,48}$/.test(room)) throw new PublicRequestError(serverT("invalid_room"))
         const admitted = write ? await options.canWriteRoom?.(userId, room) : await options.canReadRoom(userId, room)
         if (!admitted) {
-          response.status(403).json({ error: 'Join this room before using its chat.' })
+          response.status(403).json({ error: serverT("join_this_room_before_using_its_chat") })
           return
         }
         const result = await run(room, userId, request)
         if (!(await options.canReadRoom(userId, room))) {
-          response.status(403).json({ error: 'This room session has ended.' })
+          response.status(403).json({ error: serverT("this_room_session_has_ended") })
           return
         }
         response.json(result)
@@ -52,9 +53,9 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
   const payload = async (room: string, request: Request, search?: string) => {
     const direction = request.query.direction === 'newer' ? 'newer' : 'older'
     if (request.query.direction !== undefined && !['newer', 'older'].includes(String(request.query.direction)))
-      throw new PublicRequestError('Invalid history page.')
+      throw new PublicRequestError(serverT("invalid_history_page"))
     const limit = search ? 40 : request.query.pageSize === undefined ? 200 : Number(request.query.pageSize)
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new PublicRequestError('Invalid history page.')
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new PublicRequestError(serverT("invalid_history_page"))
     const page = await commands.readPage(room, cursor(request), direction, limit, search)
     return { ...(await commands.readPayload(room, page.rows)), cursor: page.cursor, hasMore: page.hasMore }
   }
@@ -70,7 +71,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
         request.query.q.trim().length < 2 ||
         request.query.q.trim().length > 100
       )
-        throw new PublicRequestError('Enter 2–100 characters to search room messages.')
+        throw new PublicRequestError(serverT("enter_2_100_characters_to_search_room_messages"))
       return payload(room, request, request.query.q.trim())
     })
   )
@@ -78,7 +79,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
     '/api/rooms/:roomSlug/chat/messages/:messageId',
     route(false, (room, _user, request) => {
       const id = request.params.messageId
-      if (typeof id !== 'string' || !UUID.test(id)) throw new PublicRequestError('Invalid message.')
+      if (typeof id !== 'string' || !UUID.test(id)) throw new PublicRequestError(serverT("invalid_message"))
       return commands.readMessage(room, id)
     })
   )
@@ -86,7 +87,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
     '/api/rooms/:roomSlug/chat/context/:messageId',
     route(false, async (room, _user, request) => {
       const id = request.params.messageId
-      if (typeof id !== 'string' || !UUID.test(id)) throw new PublicRequestError('Invalid message.')
+      if (typeof id !== 'string' || !UUID.test(id)) throw new PublicRequestError(serverT("invalid_message"))
       const record = await commands.loadMessage(id)
       if (!record || record.roomId !== room) return null
       const at = { id, createdAt: record.message.createdAt }
@@ -138,21 +139,21 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
     express.json({ limit: '2kb' }),
     route(false, async (room, user, request) => {
       const storagePath = request.body?.storagePath
-      if (typeof storagePath !== 'string') throw new PublicRequestError('Invalid chat image.')
+      if (typeof storagePath !== 'string') throw new PublicRequestError(serverT("invalid_chat_image"))
       return resolveChatMediaUrl(options.client, room, storagePath, user, true)
     })
   )
   app.post(
     '/api/rooms/:roomSlug/chat/uploads',
     managedUploadAdmission({
-      client: options.client, getUserId: async request => (await options.getUserId(request)) || null, purpose: 'chat',
+      client: options.client, getUserId: async request => (await options.getUserId(request)) || null, purpose: 'chat',getResourcePolicy:options.getResourcePolicy,
       room: request => {
         const room = request.params.roomSlug
-        if (typeof room !== 'string' || !/^[a-z0-9-]{3,48}$/.test(room)) throw new PublicRequestError('Invalid room.')
+        if (typeof room !== 'string' || !/^[a-z0-9-]{3,48}$/.test(room)) throw new PublicRequestError(serverT("invalid_room"))
         return room
       },
       check: async (user, room) => {
-        if (!room || !(await options.canWriteRoom?.(user, room))) throw new PublicRequestError('Join this room before uploading chat images.', 403)
+        if (!room || !(await options.canWriteRoom?.(user, room))) throw new PublicRequestError(serverT("join_this_room_before_uploading_chat_images"), 403)
         await commands.checkParticipation(room, user, 'media')
       }
     }),

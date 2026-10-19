@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { Music2 } from "lucide-react";
 import type { ProviderTrackMapping } from "../types";
@@ -61,7 +63,7 @@ function removeSpotifyListeners(player: SpotifySdkPlayer | null) {
 
 const loadSpotifySdk = createPlayerApiLoader({
   src: "https://sdk.scdn.co/spotify-player.js",
-  label: "Spotify's web player",
+  label: () => i18n.t("music:spotify.sdkLabel"),
   readApi: () => window.Spotify,
   readyCallback: "onSpotifyWebPlaybackSDKReady"
 });
@@ -82,7 +84,7 @@ onProviderSessionReset("spotify", resetSpotifySession);
 if (import.meta.hot) import.meta.hot.dispose(resetSpotifySession);
 
 async function api<T>(path: string, accessToken: string, init?: RequestInit) {
-  if (!init?.method || init.method === "GET") return requestJson<T>(path, { ...init, accessToken, errorMessage: "Spotify request failed." });
+  if (!init?.method || init.method === "GET") return requestJson<T>(path, { ...init, accessToken, errorMessage: i18n.t("music:spotify.requestFailed") });
   const response = await fetch(path, {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(15_000),
@@ -94,7 +96,7 @@ async function api<T>(path: string, accessToken: string, init?: RequestInit) {
   });
   if (response.status === 204) return null as T;
   const payload = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "Spotify request failed.");
+  if (!response.ok) throw new Error(payload.error || i18n.t("music:spotify.requestFailed"));
   return payload;
 }
 
@@ -106,7 +108,7 @@ function isDeviceUnavailable(error: unknown) {
   return /device not found|no active device|device.*offline/i.test(error instanceof Error ? error.message : "");
 }
 
-async function transferSpotifyPlayback(accessToken: string, deviceId: string, current: () => boolean, signal?: AbortSignal) {
+async function transferSpotifyPlayback(accessToken: string, deviceId: string, current: () => boolean, signal?: AbortSignal, roomSlug?: string) {
   let lastError: unknown;
   for (const delay of [0, 250, 750, 1_500]) {
     if (delay) await wait(delay);
@@ -115,6 +117,7 @@ async function transferSpotifyPlayback(accessToken: string, deviceId: string, cu
       await api("/api/spotify/playback", accessToken, {
         method: "POST",
         signal,
+        headers: { "x-soundspin-room": roomSlug ?? "" },
         body: JSON.stringify({ action: "transfer", deviceId })
       });
       return;
@@ -134,6 +137,7 @@ export function SpotifyPlayer({
   volume,
   accessToken,
   userId,
+  roomSlug,
   preferredDeviceId,
   resumeAfterReconnect,
   onEnded,
@@ -145,10 +149,12 @@ export function SpotifyPlayer({
   mode: "web" | "desktop";
   accessToken: string;
   userId: string;
+  roomSlug?: string;
   preferredDeviceId?: string;
   resumeAfterReconnect: boolean;
   onConnectionLost: (message: string) => void;
 }) {
+  const { t } = useTranslation("music");
   const playerRef = useRef<SpotifySdkPlayer | null>(null);
   const deviceIdRef = useRef("");
   const commandRef = useRef("");
@@ -185,7 +191,7 @@ export function SpotifyPlayer({
   modeRef.current = mode;
 
   function sessionApi<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-    return api<T>(path, token, { ...init, signal: init?.signal || AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]) });
+    return api<T>(path, token, { ...init, headers: { ...init?.headers, "x-soundspin-room": roomSlug ?? "" }, signal: init?.signal || AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]) });
   }
 
   const reconcilePlayback = (force = false, wake = false) => {
@@ -243,7 +249,7 @@ export function SpotifyPlayer({
             await sendCommand();
           } catch (cause) {
             if (!player || !isDeviceUnavailable(cause) || !current()) throw cause;
-            await transferSpotifyPlayback(accessTokenRef.current, currentDeviceId, current, AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]));
+            await transferSpotifyPlayback(accessTokenRef.current, currentDeviceId, current, AbortSignal.any([sessionControllerRef.current.signal, AbortSignal.timeout(15_000)]), roomSlug);
             if (!current()) return;
             await sendCommand();
           }
@@ -258,7 +264,7 @@ export function SpotifyPlayer({
     const task = commandsRef.current.then(() => desktopLease ? desktopLease.enqueue(reconcile) : reconcile()).catch((cause) => {
       if (!current()) return;
       commandRef.current = "";
-      const message = cause instanceof Error ? cause.message : "Could not sync Spotify playback.";
+      const message = cause instanceof Error ? cause.message : i18n.t("music:spotify.syncFailed");
       setError(message);
       if (modeRef.current === "web" && isDeviceUnavailable(cause)) recoverWebPlayerRef.current();
       if (/connect spotify/i.test(message)) onConnectionLostRef.current(message);
@@ -281,14 +287,14 @@ export function SpotifyPlayer({
       commandRef.current = "";
       suppressedReconnectRef.current = "";
       const handleFailure = (cause: unknown) => {
-        const message = cause instanceof Error ? cause.message : "Could not sync Spotify playback.";
+        const message = cause instanceof Error ? cause.message : i18n.t("music:spotify.syncFailed");
         setError(message);
         if (mode === "web" && isDeviceUnavailable(cause)) recoverWebPlayerRef.current();
       };
       if (mode === "desktop") {
         const currentDeviceId = deviceIdRef.current;
         if (!currentDeviceId) {
-          setError("Open the selected Spotify device, then sync again.");
+          setError(i18n.t("music:spotify.openSelectedDevice"));
           return;
         }
         void reconcilePlaybackRef.current(true);
@@ -369,7 +375,7 @@ export function SpotifyPlayer({
           available.find((device) => device.is_active) ||
           available.find((device) => device.type === "Computer") ||
           available[0];
-        if (!selected?.id) throw new Error("Open Spotify on your computer or another device, then try again.");
+        if (!selected?.id) throw new Error(i18n.t("music:spotify.openDevice"));
         selectedDevice = selected.id;
         lifecycle = spotifyDesktopLifecycles.get(selected.id) || new PlaybackCommandLifecycle();
         spotifyDesktopLifecycles.set(selected.id, lifecycle);
@@ -380,7 +386,7 @@ export function SpotifyPlayer({
         setDeviceId(selected.id);
       }).catch((cause) => {
         if (!alive) return;
-        const message = cause instanceof Error ? cause.message : "Could not find a Spotify device.";
+        const message = cause instanceof Error ? cause.message : i18n.t("music:spotify.deviceNotFound");
         setError(message);
         onConnectionLostRef.current(message);
       });
@@ -423,7 +429,7 @@ export function SpotifyPlayer({
         .then(({ accessToken: spotifyToken }) => { if (alive) callback(spotifyToken); })
         .catch((cause) => {
           if (!alive) return;
-          const message = cause instanceof Error ? cause.message : "Spotify authorization expired.";
+          const message = cause instanceof Error ? cause.message : i18n.t("music:spotify.authorizationExpired");
           setError(message);
           onConnectionLostRef.current(message);
         });
@@ -440,7 +446,7 @@ export function SpotifyPlayer({
       let reconnectAttempts = 0;
       let reconnecting = false;
       const player = spotifyWebPlayerSingleton || new sdk.Player({
-        name: "Lydman Web Player",
+        name: i18n.t("music:spotify.deviceName"),
         volume: volume / 100,
         getOAuthToken: (callback) => { if (providerSessionRevision("spotify") === sessionRevision) spotifyWebTokenProvider?.(callback); }
       });
@@ -450,7 +456,7 @@ export function SpotifyPlayer({
       const scheduleReconnect = (immediate = false) => {
         if (!alive || reconnecting || reconnectTimer !== undefined) return;
         const delay = immediate ? 0 : Math.min(1_000 * (2 ** reconnectAttempts), 15_000);
-        setError("Reconnecting the Lydman Spotify device…");
+        setError(i18n.t("music:spotify.reconnecting"));
         reconnectTimer = window.setTimeout(() => {
           reconnectTimer = undefined;
           if (!alive) return;
@@ -463,7 +469,7 @@ export function SpotifyPlayer({
           void wait(250).then(async () => {
             if (!alive) return;
             const connected = await player.connect();
-            if (!connected) throw new Error("Spotify did not accept the reconnect request.");
+            if (!connected) throw new Error(i18n.t("music:spotify.reconnectRejected"));
             if (deviceIdRef.current) {
               reconnecting = false;
               return;
@@ -478,7 +484,7 @@ export function SpotifyPlayer({
             if (!alive) return;
             reconnecting = false;
             reconnectAttempts += 1;
-            setError(cause instanceof Error ? cause.message : "Spotify reconnection failed.");
+            setError(cause instanceof Error ? cause.message : i18n.t("music:spotify.reconnectFailed"));
             scheduleReconnect();
           });
         }, delay);
@@ -517,7 +523,7 @@ export function SpotifyPlayer({
         }
       }) as (payload: never) => void);
       player.addListener("initialization_error", ((payload: { message: string }) => {
-        if (alive) setError(payload.message || "Spotify could not initialize this browser player.");
+        if (alive) setError(payload.message || i18n.t("music:spotify.browserFailed"));
       }) as (payload: never) => void);
       player.addListener("authentication_error", ((payload: { message: string }) => {
         if (alive) {
@@ -526,11 +532,11 @@ export function SpotifyPlayer({
         }
       }) as (payload: never) => void);
       player.addListener("account_error", ((payload: { message: string }) => {
-        if (alive) setError(payload.message || "Spotify Premium is required.");
+        if (alive) setError(payload.message || i18n.t("music:spotify.premiumRequired"));
       }) as (payload: never) => void);
       player.addListener("playback_error", ((payload: { message: string }) => {
         if (!alive) return;
-        setError(payload.message || "Spotify playback stopped unexpectedly.");
+        setError(payload.message || i18n.t("music:spotify.playbackStopped"));
         if (isDeviceUnavailable(new Error(payload.message))) scheduleReconnect();
       }) as (payload: never) => void);
       player.addListener("autoplay_failed", (() => {
@@ -571,7 +577,7 @@ export function SpotifyPlayer({
       return player.connect().then((connected) => {
         if (!connected) {
           scheduleReconnect();
-          throw new Error("Spotify could not connect the Lydman Web Player.");
+          throw new Error(i18n.t("music:spotify.connectFailed"));
         }
         if (!alive || deviceIdRef.current) return;
         readyWatchdog = window.setTimeout(() => {
@@ -580,7 +586,7 @@ export function SpotifyPlayer({
         }, 6_000);
       });
     }).catch((cause) => {
-      if (alive) setError(cause instanceof Error ? cause.message : "Could not initialize Spotify.");
+      if (alive) setError(cause instanceof Error ? cause.message : i18n.t("music:spotify.initializeFailed"));
     });
     return () => {
       alive = false; removeReset(); releaseController();
@@ -602,12 +608,12 @@ export function SpotifyPlayer({
       playerRef.current = null;
       deviceIdRef.current = "";
     };
-  }, [mode, preferredDeviceId, userId]);
+  }, [mode, preferredDeviceId, userId, roomSlug]);
 
   useEffect(() => {
     if (mode === "web") {
       void playerRef.current?.setVolume(volume / 100).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Could not set Spotify volume.");
+        setError(cause instanceof Error ? cause.message : i18n.t("music:spotify.volumeFailed"));
         if (isDeviceUnavailable(cause)) recoverWebPlayerRef.current();
       });
     } else if (deviceId) {
@@ -619,7 +625,7 @@ export function SpotifyPlayer({
           body: JSON.stringify({ action: "volume", deviceId, volumePercent: volume })
         });
       }).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Could not set Spotify volume.");
+        setError(cause instanceof Error ? cause.message : i18n.t("music:spotify.volumeFailed"));
       });
     }
   }, [mode, volume, deviceId]);
@@ -712,7 +718,7 @@ export function SpotifyPlayer({
       setActivationRevision((revision) => revision + 1);
     }).catch((cause) => {
       if (revision !== providerSessionRevision("spotify") || playerRef.current !== player) return;
-      setError(cause instanceof Error ? cause.message : "Spotify playback could not be enabled.");
+      setError(cause instanceof Error ? cause.message : i18n.t("music:spotify.enableFailed"));
     }).finally(() => { if (revision === providerSessionRevision("spotify")) setActivating(false); });
   };
 
@@ -728,22 +734,22 @@ export function SpotifyPlayer({
           <DialogContent className="spotify-activation-dialog" showCloseButton={false}>
             <div className="spotify-activation-icon"><Music2 /></div>
             <DialogHeader className="spotify-activation-copy">
-              <DialogTitle>Enable Spotify playback</DialogTitle>
+              <DialogTitle>{t("spotify.enableTitle")}</DialogTitle>
               <DialogDescription>
-                Your browser blocked autoplay. Enable playback to start audio.
+                {t("spotify.autoplayHelp")}
               </DialogDescription>
             </DialogHeader>
             {error && <div className="dialog-error" role="alert">{error}</div>}
             <DialogFooter className="spotify-activation-actions">
-              <Button type="button" variant="outline" onClick={() => setActivationDismissed(true)}>Not now</Button>
-              <Button type="button" onClick={activateSpotify} disabled={activating}>{activating ? "Enabling…" : "Enable playback"}</Button>
+              <Button type="button" variant="outline" onClick={() => setActivationDismissed(true)}>{t("spotify.notNow")}</Button>
+              <Button type="button" onClick={activateSpotify} disabled={activating}>{activating ? t("spotify.enabling") : t("spotify.enable")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
       {activationNeeded && mode === "web" && activationDismissed && (
         <div className="spotify-playback-overlay">
-          <button type="button" onClick={() => setActivationDismissed(false)}>Enable Spotify playback</button>
+          <button type="button" onClick={() => setActivationDismissed(false)}>{t("spotify.enableTitle")}</button>
         </div>
       )}
     </>

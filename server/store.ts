@@ -1,7 +1,10 @@
+import { serverT } from "./i18n.js";
 import { RoomCommandError } from "./socket-handler.js";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createBoundedAdminClient } from "./supabase-client.js";
+import { ResourcePolicyStore } from "./resource-policy.js";
+import { PublicRequestError, trustedSqlRequestError } from "./public-request-error.js";
 import { profileUpdateSchema, type ProfileUpdate } from "./profile-fields.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { advanceRadio, normalizeRadioState, pruneUnauthorizedDjs } from "./radio.js";
@@ -24,12 +27,25 @@ import type {
 import type { RoomModerationState, RoomMemberRecord, User } from "./types.js";
 
 const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, avatar_url, avatar_path, theme_key, created_at, updated_at, handle, status_text, favorite_tracks";
+function resourceQuotaError(error:{code?:string;message:string}) {
+  if(error.code!=="P0001")return undefined;
+  const messages:Record<string,string>={
+    "Room ownership limit reached":"Your room limit is reached. Remove an unused room before creating another.",
+    "Room waiting queue limit reached":"This room's waiting queue is full. Remove tracks before adding more.",
+    "Account waiting queue limit reached":"Your waiting queues are full. Remove tracks before adding more.",
+    "Saved picks limit reached":"Your saved picks are full. Delete a pick before saving another.",
+    "Saved sets limit reached":"Your saved sets are full. Delete a set before saving another.",
+    "Set tracks limit reached":"This set has reached its track limit. Remove tracks before adding more.",
+  };
+  return Object.hasOwn(messages,error.message)?new PublicRequestError(messages[error.message],429):undefined;
+}
 
 interface Database {
   rooms: Record<string, Room>;
   roomPasswords?: Record<string, string | null>;
   musicConnections?: Record<string, MusicProviderConnection>;
   privateLibraries?: Record<string, PrivateLibrary>;
+  favorites?: Record<string,string[]>;
 }
 
 interface StoreOptions {
@@ -38,6 +54,7 @@ interface StoreOptions {
   supabase?: SupabaseClient | null;
   maxCachedRooms?: number;
   maxCachedRoomBytes?: number;
+  resourcePolicies?: ResourcePolicyStore;
 }
 
 export interface RoomChange<T> {
@@ -53,6 +70,7 @@ export interface RoomChange<T> {
 }
 
 export class Store {
+  readonly resourcePolicies: ResourcePolicyStore;
   // The cache is the live room object graph used by Socket.IO handlers. Supabase
   // is durable storage, not a replacement for the process's coordination state.
   private data: Database = { rooms: {} };
@@ -90,6 +108,7 @@ export class Store {
     } else if (url && secretKey) {
       this.supabase = createBoundedAdminClient();
     }
+    this.resourcePolicies = options.resourcePolicies ?? new ResourcePolicyStore(this.supabase);
   }
 
   get usesSupabase() {
@@ -113,16 +132,16 @@ export class Store {
     for (const [candidate] of [...this.roomTouches].sort((a,b)=>a[1]-b[1])) {
       if (!this.roomPinned(candidate) && this.releaseRoom(candidate) && reservedCount() < this.maxCachedRooms) return;
     }
-    throw new RoomCommandError("The room service is busy. Try again shortly.");
+    throw new RoomCommandError(serverT("the_room_service_is_busy_try_again_shortly"));
   }
   private reserveRoomBytes(id:string,room:Room) {
     const size=Buffer.byteLength(JSON.stringify(room));
-    if(size>8*1024*1024)throw new RoomCommandError("This room has reached its state size limit. Remove unused queue entries.");
+    if(size>8*1024*1024)throw new RoomCommandError(serverT("this_room_has_reached_its_state_size_limit_remove_unused_queue_entries"));
     for(const [candidate] of [...this.roomTouches].sort((a,b)=>a[1]-b[1])) {
       if(this.cachedRoomBytes-(this.roomBytes.get(id)??0)+size<=this.maxCachedRoomBytes)break;
       if(candidate!==id&&!this.roomPinned(candidate))this.releaseRoom(candidate);
     }
-    if(this.cachedRoomBytes-(this.roomBytes.get(id)??0)+size>this.maxCachedRoomBytes)throw new RoomCommandError("The room service is busy. Try again shortly.");
+    if(this.cachedRoomBytes-(this.roomBytes.get(id)??0)+size>this.maxCachedRoomBytes)throw new RoomCommandError(serverT("the_room_service_is_busy_try_again_shortly"));
     return size;
   }
 
@@ -132,11 +151,11 @@ export class Store {
     try {
       const data = JSON.parse(await readFile(this.dataFile, "utf8")) as Database;
       if (!data || typeof data !== "object" || !data.rooms || typeof data.rooms !== "object" || Array.isArray(data.rooms)) {
-        throw new Error("The saved SoundSpin database has an invalid format.");
+        throw new Error(serverT("the_saved_turntune_database_has_an_invalid_format"));
       }
       for (const [id, room] of Object.entries(data.rooms)) {
         if (!room || typeof room !== "object" || Array.isArray(room)) {
-          throw new Error(`The saved SoundSpin room ${id} has an invalid format.`);
+          throw new Error(serverT("the_saved_turntune_room_id_has_an_invalid_format", { id: id }));
         }
         room.id = id;
         normalizeRadioState(room);
@@ -162,7 +181,7 @@ export class Store {
       .eq("user_id", userId)
       .eq("provider", provider)
       .maybeSingle();
-    if (error) throw new Error(`Could not load ${provider} connection: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_provider_connection_value2", { provider: provider, value2: error.message }));
     return data ? {
       userId: data.user_id,
       provider: data.provider,
@@ -196,7 +215,7 @@ export class Store {
       metadata: connection.metadata,
       updated_at: now
     }, { onConflict: "user_id,provider" });
-    if (error) throw new Error(`Could not save ${connection.provider} connection: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_save_value1_connection_value2", { value1: connection.provider, value2: error.message }));
   }
 
   async deleteMusicConnection(userId: string, provider: "spotify") {
@@ -210,7 +229,7 @@ export class Store {
       .delete()
       .eq("user_id", userId)
       .eq("provider", provider);
-    if (error) throw new Error(`Could not disconnect ${provider}: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_disconnect_provider_value2", { provider: provider, value2: error.message }));
   }
 
   getRoom(id: string) {
@@ -220,7 +239,7 @@ export class Store {
   /** One room's entire validate/persist/commit sequence is ordered, including timers. */
   withRoomOperation<T>(roomId: string, operation: () => Promise<T>): Promise<T> {
     const queued = this.queuedRoomChanges.get(roomId) || 0;
-    if (queued >= 100) return Promise.reject(new Error("Too many room changes are pending. Try again shortly."));
+    if (queued >= 100) return Promise.reject(new Error(serverT("too_many_room_changes_are_pending_try_again_shortly")));
     this.queuedRoomChanges.set(roomId, queued + 1);
     runtimeMetrics.pendingRoomCommands++;
     const previous = this.roomChanges.get(roomId) || Promise.resolve();
@@ -240,7 +259,7 @@ export class Store {
       const started = performance.now();
       let change: RoomChange<T> | undefined;
       try {
-        if (this.getRoom(room.id) !== room) throw new Error("This room session changed. Join the room again.");
+        if (this.getRoom(room.id) !== room) throw new Error(serverT("this_room_session_changed_join_the_room_again"));
         const draft = structuredClone(room);
         change = await operation(draft);
         change.unchanged ??= !change.metadata && !change.member && !change.memberDeletes?.length && JSON.stringify(draft) === JSON.stringify(room);
@@ -260,6 +279,7 @@ export class Store {
   private async commitRoom(current: Room, draft: Room, change: RoomChange<unknown>) {
     const started = performance.now();
     try {
+      await this.checkQueueGrowth(current,draft);
       const size=this.reserveRoomBytes(draft.id,draft);
       this.roomPendingBytes.set(draft.id,size);
       if (!this.supabase) {
@@ -282,19 +302,19 @@ export class Store {
               p_slug: draft.id, p_state: state, p_metadata: change.metadata || {}, p_member: change.member || null,
               p_member_deletes: change.memberDeletes || [], p_moderation: draft.moderation || emptyModeration()
             });
-            if (error) throw new Error(`Could not save room: ${error.message}`);
-            if (!data) throw new Error("Could not save room: the room no longer exists.");
+            if (error) throw resourceQuotaError(error)??new Error(serverT("could_not_save_room_value1", { value1: error.message }));
+            if (!data) throw new Error(serverT("could_not_save_room_the_room_no_longer_exists"));
           } else if (change.member || change.metadata) {
             const { data, error } = await supabase.rpc("soundspin_commit_room", {
               p_slug: draft.id, p_state: state, p_metadata: change.metadata || {}, p_member: change.member || null
             });
-            if (error) throw new Error(`Could not save room: ${error.message}`);
-            if (!data) throw new Error("Could not save room: the room no longer exists.");
+            if (error) throw resourceQuotaError(error)??new Error(serverT("could_not_save_room_value1", { value1: error.message }));
+            if (!data) throw new Error(serverT("could_not_save_room_the_room_no_longer_exists"));
           } else {
             const { data, error } = await supabase.from("soundspin_rooms").update({ state, updated_at: new Date().toISOString() })
               .eq("slug", draft.id).select("slug").maybeSingle();
-            if (error) throw new Error(`Could not save room: ${error.message}`);
-            if (!data) throw new Error("Could not save room: the room no longer exists.");
+            if (error) throw resourceQuotaError(error)??new Error(serverT("could_not_save_room_value1", { value1: error.message }));
+            if (!data) throw new Error(serverT("could_not_save_room_the_room_no_longer_exists"));
           }
           Object.assign(current, draft);
         }, draft.id);
@@ -306,6 +326,22 @@ export class Store {
       throw error;
     } finally {
       this.roomPendingBytes.delete(draft.id);
+    }
+  }
+
+  private async checkQueueGrowth(current:Room,draft:Room) {
+    const entries=Object.entries(draft.djQueues??{});
+    const total=entries.reduce((sum,[,tracks])=>sum+tracks.length,0);
+    const previousTotal=Object.values(current.djQueues??{}).reduce((sum,tracks)=>sum+tracks.length,0);
+    if(total>previousTotal && total>(await this.resourcePolicies.getGlobal()).queueTracksPerRoom)throw new RoomCommandError(serverT("this_room_s_waiting_queue_is_full_remove_tracks_before_adding_more"));
+    for(const [actor,tracks] of entries) {
+      if(tracks.length<=(current.djQueues?.[actor]?.length??0))continue;
+      const {limits}=await this.resourcePolicies.get(actor);
+      if(tracks.length>limits.queueTracksPerRoom)throw new RoomCommandError(serverT("your_waiting_queue_is_full_remove_tracks_before_adding_more"));
+      if(!this.supabase) {
+        const other=Object.values(this.data.rooms).filter(room=>room.id!==draft.id).reduce((sum,room)=>sum+(room.djQueues?.[actor]?.length??0),0);
+        if(other+tracks.length>limits.queueTracksTotal)throw new RoomCommandError(serverT("your_waiting_queues_are_full_remove_tracks_before_adding_more"));
+      }
     }
   }
 
@@ -322,35 +358,35 @@ export class Store {
    * its cached document before another command can persist stale identities. */
   async eraseAccountRoomData(userId: string, onRoomErased?: (room: Room) => void): Promise<void> {
     if (!this.supabase || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))
-      throw new Error("Account room cleanup requires configured secure storage.");
+      throw new Error(serverT("account_room_cleanup_requires_configured_secure_storage"));
     const started = Date.now();
     let after: string | null = null;
     const verifyComplete = async () => {
       const remaining = await this.supabase!.rpc("soundspin_moderation_actor_rooms", { p_user: userId, p_after: null, p_limit: 1 }).abortSignal(AbortSignal.timeout(5_000));
       if (remaining.error || !Array.isArray(remaining.data) || remaining.data.length)
-        throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+        throw new Error(serverT("account_room_cleanup_remains_pending_retry_the_deletion_job"));
     };
     for (let page = 0; page < 20; page++) {
-      if (Date.now() - started > 20_000) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+      if (Date.now() - started > 20_000) throw new Error(serverT("account_room_cleanup_remains_pending_retry_the_deletion_job"));
       const listing = await this.supabase.rpc("soundspin_moderation_actor_rooms", { p_user: userId, p_after: after, p_limit: 50 }).abortSignal(AbortSignal.timeout(5_000));
       if (listing.error || !Array.isArray(listing.data) || listing.data.length > 50 || listing.data.some((id, index, ids) => typeof id !== "string" || !/^[a-z0-9-]{3,48}$/.test(id) || (index > 0 && id <= ids[index-1]) || (after !== null && id <= after)))
-        throw new Error("Account room cleanup could not be inventoried.");
+        throw new Error(serverT("account_room_cleanup_could_not_be_inventoried"));
       const ids = listing.data as string[];
       if (!ids.length) return verifyComplete();
       for (const roomId of ids) {
-        if (Date.now() - started > 20_000) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+        if (Date.now() - started > 20_000) throw new Error(serverT("account_room_cleanup_remains_pending_retry_the_deletion_job"));
         // Coalesce an already-running load before erasure; it must not cache a
         // document read before the SQL scrub after this operation finishes.
         await this.loadRoom(roomId);
         await this.withRoomOperation(roomId, async () => {
           const current = this.getRoom(roomId);
           const erased = await this.supabase!.rpc("soundspin_erase_live_moderation_account", { p_room: roomId, p_user: userId }).abortSignal(AbortSignal.timeout(5_000));
-          if (erased.error) throw new Error("Account room cleanup remains pending. Retry the deletion job.");
+          if (erased.error) throw new Error(serverT("account_room_cleanup_remains_pending_retry_the_deletion_job"));
           if (erased.data === null) { delete this.data.rooms[roomId]; this.roomTouches.delete(roomId); this.roomBytes.delete(roomId); return; }
           const result = erased.data as { state?: unknown; moderation?: unknown };
           if (!result.state || typeof result.state !== "object" || Array.isArray(result.state) || !result.moderation || typeof result.moderation !== "object" || Array.isArray(result.moderation)) {
             delete this.data.rooms[roomId]; this.roomTouches.delete(roomId); this.roomBytes.delete(roomId);
-            throw new Error("Account room cleanup returned an invalid document.");
+            throw new Error(serverT("account_room_cleanup_returned_an_invalid_document"));
           }
           if (!current) return;
           const state = result.state as Partial<Room>;
@@ -392,7 +428,7 @@ export class Store {
   async getPrivateLibrary(userId: string): Promise<PrivateLibrary> {
     if (!this.supabase) return structuredClone(this.data.privateLibraries && Object.hasOwn(this.data.privateLibraries, userId) ? this.data.privateLibraries[userId] : emptyLibrary());
     const { data, error } = await this.supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
-    if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_private_picks_and_sets_value1", { value1: error.message }));
     if (!data) return emptyLibrary();
     const parsed = privateLibrarySchema.safeParse(data.data);
     if (!parsed.success || !Number.isSafeInteger(Number(data.revision)) || Number(data.revision) < 1) throw new PrivateLibraryDataError();
@@ -404,10 +440,11 @@ export class Store {
     const mutation = libraryMutationSchema.parse(value);
     const previous = this.libraryWrites.get(userId);
     const operation = (previous ? previous.catch(() => emptyLibrary()) : Promise.resolve(emptyLibrary())).then(async () => {
+      const {limits}=await this.resourcePolicies.get(userId);
       if (!this.supabase) {
         this.data.privateLibraries ||= {};
         const before = this.data.privateLibraries[userId];
-        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(before || emptyLibrary(), mutation);
+        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(before || emptyLibrary(), mutation,Date.now(),limits);
         Object.defineProperty(this.data.privateLibraries, userId, { value: next, writable: true, enumerable: true, configurable: true });
         try { await this.persistFile(); }
         catch (error) { if (before) this.data.privateLibraries[userId] = before; else delete this.data.privateLibraries[userId]; throw error; }
@@ -416,23 +453,23 @@ export class Store {
       const supabase = this.supabase;
       for (let attempt = 0; attempt < 5; attempt++) {
         const { data, error } = await supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
-        if (error) throw new Error(`Could not load private picks and sets: ${error.message}`);
+        if (error) throw new Error(serverT("could_not_load_private_picks_and_sets_value1", { value1: error.message }));
         const parsed = data ? privateLibrarySchema.safeParse(data.data) : null;
         const validRevision = !data || (Number.isSafeInteger(Number(data.revision)) && Number(data.revision) >= 1 && Number(data.revision) < Number.MAX_SAFE_INTEGER);
         if (mutation.type !== "clear-library" && ((!parsed?.success && data) || !validRevision)) throw new PrivateLibraryDataError();
-        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(parsed?.success ? parsed.data : emptyLibrary(), mutation);
+        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(parsed?.success ? parsed.data : emptyLibrary(), mutation,Date.now(),limits);
         if (!data) {
           const insert = await supabase.from("soundspin_private_libraries").insert({ user_id: userId, data: next, revision: 1 });
           if (!insert.error) return next;
           if (insert.error.code === "23505") continue;
-          throw new Error(`Could not save private picks and sets: ${insert.error.message}`);
+          throw resourceQuotaError(insert.error)??new Error(serverT("could_not_save_private_picks_and_sets_value1", { value1: insert.error.message }));
         }
         const revision = validRevision ? Number(data.revision) + 1 : 1;
         const update = await supabase.from("soundspin_private_libraries").update({ data: next, revision, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("revision", data.revision).select("revision").maybeSingle();
-        if (update.error) throw new Error(`Could not save private picks and sets: ${update.error.message}`);
+        if (update.error) throw resourceQuotaError(update.error)??new Error(serverT("could_not_save_private_picks_and_sets_value1", { value1: update.error.message }));
         if (update.data) return next;
       }
-      throw new Error("Your library changed in another tab. Refresh and try again.");
+      throw new Error(serverT("your_library_changed_in_another_tab_refresh_and_try_again"));
     });
     this.libraryWrites.set(userId, operation);
     void operation.finally(() => { if (this.libraryWrites.get(userId) === operation) this.libraryWrites.delete(userId); }).catch(() => {});
@@ -441,11 +478,11 @@ export class Store {
 
   /** Reserve a guest room before a join yields, so every socket shares its owner/state. */
   getOrCreateLocalRoom(id: string, create: () => Room): Room {
-    if (this.supabase) throw new Error("Supabase rooms must be explicitly created before joining.");
+    if (this.supabase) throw new Error(serverT("supabase_rooms_must_be_explicitly_created_before_joining"));
     const current = this.getRoom(id);
     if (current) return current;
     const room = create();
-    if (room.id !== id) throw new Error("The new room address does not match its cache key.");
+    if (room.id !== id) throw new Error(serverT("the_new_room_address_does_not_match_its_cache_key"));
     Object.defineProperty(this.data.rooms, id, { value: room, enumerable: true, writable: true, configurable: true });
     return room;
   }
@@ -481,10 +518,10 @@ export class Store {
     if (error) {
       if (error.code === "PGRST205") {
         throw new Error(
-          "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+          serverT("turntune_database_is_not_initialized_deploy_the_migrations_from_github_or_run_the_ini")
         );
       }
-      throw new Error(`Could not load room: ${error.message}`);
+      throw new Error(serverT("could_not_load_room_value1", { value1: error.message }));
     }
     if (!data) return undefined;
     const { data: roomRoles, error: roomRoleError } = await supabase
@@ -492,9 +529,9 @@ export class Store {
       .select("user_id, role")
       .eq("room_slug", id)
       .in("role", ["moderator", "dj"]);
-    if (roomRoleError) throw new Error(`Could not load room roles: ${roomRoleError.message}`);
+    if (roomRoleError) throw new Error(serverT("could_not_load_room_roles_value1", { value1: roomRoleError.message }));
     const { data: privateData, error: privateError } = await supabase.from("soundspin_room_moderation").select("data").eq("room_slug", id).maybeSingle();
-    if (privateError) throw new Error(`Could not load room restrictions: ${privateError.message}`);
+    if (privateError) throw new Error(serverT("could_not_load_room_restrictions_value1", { value1: privateError.message }));
 
     // `state` holds the fast-changing radio document. First-class room columns
     // and membership rows win over duplicated values in that JSON because they
@@ -528,7 +565,7 @@ export class Store {
     const rooms: Room[] = [];
     for (let offset = 0; ; offset += 100) {
       const { data, error } = await this.supabase.from("soundspin_rooms").select("slug").eq("session_active", true).order("slug").range(offset, offset + 99);
-      if (error) throw new Error(`Could not load room sessions: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_load_room_sessions_value1", { value1: error.message }));
       const batch: Array<Room|undefined>=new Array(data?.length??0);
       let index=0;
       await Promise.all(Array.from({length:Math.min(8,data?.length??0)},async()=>{
@@ -548,7 +585,7 @@ export class Store {
         isPublic: room.isPublic ?? true,
         accessMode: accessMode(room),
         passwordProtected: room.passwordProtected ?? false,
-        isFavorite: false,
+        isFavorite: this.data.favorites?.[userId]?.includes(room.id)??false,
         role: roleInRoom(room, userId),
         listenerCount: listenerCounts[room.id] || 0,
         createdAt: new Date(room.createdAt).toISOString(),
@@ -563,7 +600,7 @@ export class Store {
       const rows: T[] = [];
       for (let offset = 0; offset<1000; offset += 500) {
         const { data, error } = await supabase.from(table).select(columns).eq(filterColumn, filterValue).order(orderColumn).range(offset, offset + 499);
-        if (error) throw new Error(`Could not load your room directory: ${error.message}`);
+        if (error) throw new Error(serverT("could_not_load_your_room_directory_value1", { value1: error.message }));
         rows.push(...(data || []) as unknown as T[]);
         if (!data || data.length < 500) return rows;
       }
@@ -583,7 +620,7 @@ export class Store {
       const found: DirectoryRow[] = [];
       for (let index = 0; index < lookupSlugs.length; index += 100) {
         const { data, error } = await supabase.from("soundspin_rooms").select(columns).in("slug", lookupSlugs.slice(index, index + 100));
-        if (error) throw new Error(`Could not load your saved rooms: ${error.message}`);
+        if (error) throw new Error(serverT("could_not_load_your_saved_rooms_value1", { value1: error.message }));
         found.push(...(data || []) as DirectoryRow[]);
       }
       return found;
@@ -593,21 +630,21 @@ export class Store {
       allRows<DirectoryRow>("soundspin_rooms", columns, "owner_id", userId, "slug"),
       lookup()
     ]);
-    if (publicResult.error) throw new Error(`Could not load public rooms: ${publicResult.error.message}`);
+    if (publicResult.error) throw new Error(serverT("could_not_load_public_rooms_value1", { value1: publicResult.error.message }));
     const rooms = [...new Map([...(publicResult.data || []) as DirectoryRow[], ...owned, ...saved].map((room) => [room.slug, room])).values()];
     const banned = new Set<string>();
     const owners=new Set(rooms.map(room=>room.owner_id)),disabledOwners=new Set<string>();
     for(const batchStart of Array.from({length:Math.ceil(owners.size/100)},(_,index)=>index*100)){
       const {data,error}=await supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",[...owners].slice(batchStart,batchStart+100));
-      if(error)throw new Error("Could not verify room owners.");
+      if(error)throw new Error(serverT("could_not_verify_room_owners"));
       for(const entry of data||[])if(entry.state!=="active")disabledOwners.add(entry.user_id);
     }
     for (let offset = 0; offset < rooms.length; offset += 100) {
       const restrictionResult=await supabase.from("soundspin_room_restrictions").select("room_slug,disabled").in("room_slug",rooms.slice(offset,offset+100).map(room=>room.slug));
-      if(restrictionResult.error)throw new Error("Could not verify platform room restrictions.");
+      if(restrictionResult.error)throw new Error(serverT("could_not_verify_platform_room_restrictions"));
       for(const entry of restrictionResult.data||[])if(entry.disabled)banned.add(entry.room_slug);
       const { data, error } = await supabase.from("soundspin_room_moderation").select("room_slug,data").in("room_slug", rooms.slice(offset, offset + 100).map(room => room.slug));
-      if (error) throw new Error(`Could not verify room restrictions: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_verify_room_restrictions_value1", { value1: error.message }));
       for (const entry of data || []) if ((entry.data as RoomModerationState)?.restrictions?.some(item => item.userId === userId && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now()))) banned.add(entry.room_slug);
     }
 
@@ -633,10 +670,11 @@ export class Store {
   }
 
   async createRoom(room: Room, passwordHash: string | null) {
+    const {limits}=await this.resourcePolicies.get(room.ownerUserId);
     if (!this.supabase) {
       await this.enqueueWrite(async () => {
-        if (this.getRoom(room.id)) throw new Error("That room address is already in use.");
-        if (Object.values(this.data.rooms).filter(item=>item.ownerUserId===room.ownerUserId).length >= 10) throw new RoomCommandError("Your room limit is reached. Remove an unused room before creating another.");
+        if (this.getRoom(room.id)) throw new Error(serverT("that_room_address_is_already_in_use"));
+        if (Object.values(this.data.rooms).filter(item=>item.ownerUserId===room.ownerUserId).length >= limits.ownedRooms) throw new RoomCommandError(serverT("your_room_limit_is_reached_remove_an_unused_room_before_creating_another"));
         const roomPasswords = { ...this.data.roomPasswords, [room.id]: passwordHash };
         await writeFile(this.tempFile, JSON.stringify({ ...this.data, rooms: { ...this.data.rooms, [room.id]: room }, roomPasswords }, null, 2), "utf8");
         await rename(this.tempFile, this.dataFile);
@@ -662,8 +700,8 @@ export class Store {
     })); } catch(cause){this.roomPendingBytes.delete(room.id);throw cause;}
     this.roomPendingBytes.delete(room.id);
     if (error) {
-      if (error.code === "23505") throw new Error("That room address is already in use.");
-      throw new Error(`Could not create room: ${error.message}`);
+      if (error.code === "23505") throw new Error(serverT("that_room_address_is_already_in_use"));
+      throw resourceQuotaError(error)??new Error(serverT("could_not_create_room_value1", { value1: error.message }));
     }
     this.data.rooms[room.id] = room;
     this.roomBytes.set(room.id,size);
@@ -675,26 +713,28 @@ export class Store {
     assertActive: () => void, register: () => void) {
     return this.withRoomOperation(room.id, async () => {
       assertActive();
-      if (this.getRoom(room.id) !== room) throw new RoomCommandError("This room session changed. Join again.");
+      if (this.getRoom(room.id) !== room) throw new RoomCommandError(serverT("this_room_session_changed_join_again"));
       const access = await this.getRoomAccess(room.id,user.id);
-      if (!access.exists || access.banned || (!access.isPublic && !access.role)) throw new RoomCommandError("You no longer have access to this room.");
-      if (access.passwordHash !== expectedPasswordHash) throw new RoomCommandError("The room password changed. Join again.");
+      if (!access.exists || access.banned || (!access.isPublic && !access.role)) throw new RoomCommandError(serverT("you_no_longer_have_access_to_this_room"));
+      if (access.passwordHash !== expectedPasswordHash) throw new RoomCommandError(serverT("the_room_password_changed_join_again"));
       let role: RoomRole = access.role ?? "member";
       if (this.supabase) {
         const {data,error} = await this.supabase.rpc("soundspin_admit_room", {
           p_slug:room.id,p_user_id:user.id,p_password_hash:expectedPasswordHash
         });
-        if (error || !data) throw new RoomCommandError("Room access changed. Join again.");
-        if (!data.role || !["owner","moderator","dj","member"].includes(data.role)) throw new Error("Invalid admission response.");
+        if (error || !data) throw new RoomCommandError(serverT("room_access_changed_join_again"));
+        if (!data.role || !["owner","moderator","dj","member"].includes(data.role)) throw new Error(serverT("invalid_admission_response"));
         role=data.role;
-      } else {
+      } else if(access.role) {
         const draft=structuredClone(room),state=ensureModeration(draft),member=state.members[user.id];
         state.members[user.id]={user,role,joinedAt:member?.joinedAt??Date.now()};
         await this.commitRoom(room,draft,{result:undefined});
       }
       // Cache membership for synchronous command guards, after the authoritative grant.
-      const state=ensureModeration(room),member=state.members[user.id];
-      state.members[user.id]={user,role,joinedAt:member?.joinedAt??Date.now()};
+      if(access.role) {
+        const state=ensureModeration(room),member=state.members[user.id];
+        state.members[user.id]={user,role,joinedAt:member?.joinedAt??Date.now()};
+      }
       assertActive();
       register(); // Synchronous: a subsequent removal must observe and revoke this admission.
       this.touchRoom(room.id);
@@ -717,9 +757,9 @@ export class Store {
       this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle(),
       this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle()
     ]);
-    if (error) throw new Error(`Could not check room access: ${error.message}`);
-    if (membershipError) throw new Error(`Could not check room membership: ${membershipError.message}`);
-    if (privateError) throw new Error(`Could not check room restrictions: ${privateError.message}`);
+    if (error) throw new Error(serverT("could_not_check_room_access_value1", { value1: error.message }));
+    if (membershipError) throw new Error(serverT("could_not_check_room_membership_value1", { value1: membershipError.message }));
+    if (privateError) throw new Error(serverT("could_not_check_room_restrictions_value1", { value1: privateError.message }));
     const mode = room?.access_mode ?? (room?.is_public ? "public" : "members");
     const banned = Boolean((privateData?.data as RoomModerationState)?.restrictions?.some(item => item.userId === userId && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now())));
     return {
@@ -746,16 +786,16 @@ export class Store {
       this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle(),
       this.supabase.from("soundspin_room_restrictions").select("disabled").eq("room_slug",roomSlug).maybeSingle()
     ]);
-    if (error) throw new Error(`Could not verify room readers: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_verify_room_readers_value1", { value1: error.message }));
     if (!metadata) return new Set();
-    if (privateError) throw new Error(`Could not verify room restrictions: ${privateError.message}`);
-    if(roomRestriction.error)throw new Error("Could not verify platform room restrictions.");
+    if (privateError) throw new Error(serverT("could_not_verify_room_restrictions_value1", { value1: privateError.message }));
+    if(roomRestriction.error)throw new Error(serverT("could_not_verify_platform_room_restrictions"));
     if(roomRestriction.data?.disabled)return new Set();
     const disabledAccounts=new Set<string>();
     const accountIds=[...new Set([...ids,metadata.owner_id])];
     for(let offset=0;offset<accountIds.length;offset+=100){
       const accountResult=await this.supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",accountIds.slice(offset,offset+100));
-      if(accountResult.error)throw new Error("Could not verify account restrictions.");
+      if(accountResult.error)throw new Error(serverT("could_not_verify_account_restrictions"));
       for(const entry of accountResult.data||[])if(entry.state!=="active")disabledAccounts.add(entry.user_id);
     }
     if(disabledAccounts.has(metadata.owner_id))return new Set();
@@ -767,7 +807,7 @@ export class Store {
     for (let offset = 0; offset < others.length; offset += 100) {
       const batch = others.slice(offset, offset + 100);
       const { data, error: membershipError } = await this.supabase.from("soundspin_room_members").select("user_id").eq("room_slug", roomSlug).in("user_id", batch);
-      if (membershipError) throw new Error(`Could not verify room readers: ${membershipError.message}`);
+      if (membershipError) throw new Error(serverT("could_not_verify_room_readers_value1", { value1: membershipError.message }));
       for (const member of data || []) if (batch.includes(member.user_id)) allowed.add(member.user_id);
     }
     return allowed;
@@ -789,7 +829,7 @@ export class Store {
       { room_slug: roomSlug, user_id: userId, role: "member", updated_at: new Date().toISOString() },
       { onConflict: "room_slug,user_id", ignoreDuplicates: true }
     );
-    if (error) throw new Error(`Could not record room membership: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_record_room_membership_value1", { value1: error.message }));
   }
 
   async listRoomMembers(roomSlug: string): Promise<RoomMemberRecord[]> {
@@ -803,14 +843,14 @@ export class Store {
     const rows: Array<{ user_id: string; role: RoomRole; joined_at: string }> = [];
     for (let offset = 0; ; offset += 500) {
       const { data, error } = await this.supabase.from("soundspin_room_members").select("user_id,role,joined_at").eq("room_slug", roomSlug).order("user_id").range(offset, offset + 499);
-      if (error) throw new Error(`Could not load room members: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_load_room_members_value1", { value1: error.message }));
       rows.push(...(data || []) as typeof rows);
       if (!data || data.length < 500) break;
     }
     const profiles = new Map<string, User>();
     for (let offset = 0; offset < rows.length; offset += 100) {
       const { data, error } = await this.supabase.from("soundspin_profiles").select("user_id,display_name,avatar_key,avatar_url").in("user_id", rows.slice(offset, offset + 100).map(row => row.user_id));
-      if (error) throw new Error(`Could not load member profiles: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_load_member_profiles_value1", { value1: error.message }));
       for (const profile of data || []) profiles.set(profile.user_id, { id: profile.user_id, name: profile.display_name, avatarSeed: profile.user_id, avatarKey: profile.avatar_key, avatarUrl: profile.avatar_url || undefined });
     }
     return rows.map(row => ({ user: profiles.get(row.user_id) || { id: row.user_id, name: "Listener", avatarSeed: row.user_id }, role: row.user_id === room.ownerUserId ? "owner" : row.role, joinedAt: Date.parse(row.joined_at) }));
@@ -819,12 +859,23 @@ export class Store {
   async listRoomInvitations(roomSlug: string) {
     if (!this.supabase) return [];
     const { data, error } = await this.supabase.from("soundspin_room_invitations").select("id,sender_id,recipient_id,created_at,expires_at,accepted_at,cancelled_at").eq("room_slug", roomSlug).order("created_at", { ascending: false }).limit(200);
-    if (error) throw new Error(`Could not load room invitations: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_room_invitations_value1", { value1: error.message }));
     return (data || []).map(row => ({ id: row.id as string, senderId: row.sender_id as string, recipientId: row.recipient_id as string, createdAt: Date.parse(row.created_at), expiresAt: Date.parse(row.expires_at), acceptedAt: row.accepted_at ? Date.parse(row.accepted_at) : null, cancelledAt: row.cancelled_at ? Date.parse(row.cancelled_at) : null }));
   }
 
   async setFavorite(roomSlug: string, userId: string, favorite: boolean) {
-    if (!this.supabase) return;
+    if (!this.supabase) {
+      const {limits}=await this.resourcePolicies.get(userId);
+      await this.enqueueWrite(async()=>{
+        const before=this.data.favorites;
+        const current=before?.[userId]??[];
+        if(favorite&&!current.includes(roomSlug)&&current.length>=limits.favoriteRooms)throw new RoomCommandError(serverT("your_favorite_rooms_are_full_remove_a_favorite_before_adding_another"));
+        this.data.favorites={...before,[userId]:favorite?[...new Set([...current,roomSlug])]:current.filter(slug=>slug!==roomSlug)};
+        try { await writeFile(this.tempFile,JSON.stringify(this.data),"utf8");await rename(this.tempFile,this.dataFile); }
+        catch(error){this.data.favorites=before;throw error;}
+      });
+      return;
+    }
     const query = favorite
       ? this.supabase.from("soundspin_room_favorites").upsert(
           { room_slug: roomSlug, user_id: userId },
@@ -832,7 +883,27 @@ export class Store {
         )
       : this.supabase.from("soundspin_room_favorites").delete().eq("room_slug", roomSlug).eq("user_id", userId);
     const { error } = await query;
-    if (error) throw new Error(`Could not update favorite: ${error.message}`);
+    if (error) throw trustedSqlRequestError(error,{"Favorite room limit reached":429},"Could not update favorite.");
+  }
+
+  /** Only the dedicated application-admin RPC may change this capability. */
+  async setRoomSpotifyEnabled(roomSlug:string,actor:string,enabled:boolean,authorize:()=>Promise<void>) {
+    const room=await this.loadRoom(roomSlug);
+    if(!room)throw new RoomCommandError(serverT("room_not_found"));
+    if(!this.supabase)throw new RoomCommandError(serverT("administrator_controls_require_a_signed_in_account"));
+    await this.withRoomOperation(room.id,async()=>{
+      await authorize();
+      const {data,error}=await this.supabase!.rpc("soundspin_set_room_spotify",{p_actor:actor,p_room:roomSlug,p_enabled:enabled});
+      if(error||!data)throw new RoomCommandError(serverT("could_not_change_spotify_access"));
+      room.settings=data.settings;
+      room.policyRevision=data.policyRevision;
+    });
+    // Stop a now-disabled source through the ordinary ordered radio commit.
+    await this.changeRoom(room,draft=>{
+      if(draft.playback.track&&!roomAllowsProvider(draft.settings,draft.playback.track.provider))advanceRadio(draft);
+      return {result:undefined};
+    });
+    return room;
   }
 
   async updateRoomSettings(
@@ -841,18 +912,18 @@ export class Store {
     update: RoomSettingsPatch,
     authorize?:()=>void|Promise<void>
   ) {
-    if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError("Room descriptions can contain at most 240 characters.");
-    if (update.themePrompt !== undefined && update.themePrompt !== null && (typeof update.themePrompt !== "string" || update.themePrompt.trim().length > 160)) throw new RoomCommandError("Themes can contain at most 160 characters.");
+    if (update.description !== undefined && update.description.trim().length > 240) throw new RoomCommandError(serverT("room_descriptions_can_contain_at_most_240_characters"));
+    if (update.themePrompt !== undefined && update.themePrompt !== null && (typeof update.themePrompt !== "string" || update.themePrompt.trim().length > 160)) throw new RoomCommandError(serverT("themes_can_contain_at_most_160_characters"));
     const providers = update.allowedProviders === undefined ? undefined : allowedProvidersSchema.safeParse(update.allowedProviders);
-    if (providers && !providers.success) throw new RoomCommandError(providers.error.issues[0]?.message || "Invalid music services.");
+    if (providers && !providers.success) throw new RoomCommandError(providers.error.issues[0]?.message || serverT("invalid_music_services"));
     const room = await this.loadRoom(roomSlug);
-    if (!room) throw new RoomCommandError("This room no longer exists.");
+    if (!room) throw new RoomCommandError(serverT("this_room_no_longer_exists"));
     await this.changeRoom(room, async draft => {
       await authorize?.();
       const access = await this.getRoomAccess(roomSlug, userId);
       await authorize?.();
-      if (access.role !== "owner" && access.role !== "moderator") throw new RoomCommandError("Only the owner or a moderator can change room settings.");
-      if (access.banned) throw new RoomCommandError("You are banned from this room.");
+      if (access.role !== "owner" && access.role !== "moderator") throw new RoomCommandError(serverT("only_the_owner_or_a_moderator_can_change_room_settings"));
+      if (access.banned) throw new RoomCommandError(serverT("you_are_banned_from_this_room"));
       const parsed = roomSettingsPatchSchema.parse(update);
       authorizeRoomSettingsPatch(draft, userId, parsed);
       const metadata: Record<string, unknown> = {};
@@ -887,19 +958,19 @@ export class Store {
 
   private async verifyRoomOwner(roomSlug: string, userId: string) {
     if (!this.supabase) {
-      if (this.getRoom(roomSlug)?.ownerUserId !== userId) throw new RoomCommandError("Only the room owner can manage room roles.");
+      if (this.getRoom(roomSlug)?.ownerUserId !== userId) throw new RoomCommandError(serverT("only_the_room_owner_can_manage_room_roles"));
       return;
     }
     const { data, error } = await this.supabase.from("soundspin_rooms").select("owner_id").eq("slug", roomSlug).single();
-    if (error) throw new Error(`Could not verify room owner: ${error.message}`);
-    if (data.owner_id !== userId) throw new RoomCommandError("Only the room owner can manage room roles.");
+    if (error) throw new Error(serverT("could_not_verify_room_owner_value1", { value1: error.message }));
+    if (data.owner_id !== userId) throw new RoomCommandError(serverT("only_the_room_owner_can_manage_room_roles"));
   }
 
   async setModerator(roomSlug: string, ownerUserId: string, targetUserId: string, moderator: boolean, authorize?: () => void | Promise<void>) {
     await this.verifyRoomOwner(roomSlug, ownerUserId);
-    if (targetUserId === ownerUserId) throw new RoomCommandError("The owner already has full room access.");
+    if (targetUserId === ownerUserId) throw new RoomCommandError(serverT("the_owner_already_has_full_room_access"));
     const room = await this.loadRoom(roomSlug);
-    if (!room) throw new RoomCommandError("This room no longer exists.");
+    if (!room) throw new RoomCommandError(serverT("this_room_no_longer_exists"));
     await this.changeRoom(room, async draft => {
       await authorize?.();
       await this.verifyRoomOwner(roomSlug, ownerUserId);
@@ -916,17 +987,17 @@ export class Store {
 
   async setDjRole(roomSlug: string, ownerUserId: string, targetUserId: string, dj: boolean, authorize?: () => void | Promise<void>) {
     await this.verifyRoomOwner(roomSlug, ownerUserId);
-    if (targetUserId === ownerUserId) throw new RoomCommandError("The owner can always join the DJ queue.");
+    if (targetUserId === ownerUserId) throw new RoomCommandError(serverT("the_owner_can_always_join_the_dj_queue"));
     const verifyTarget = async () => {
       if (this.supabase) {
         const { data, error } = await this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", targetUserId).maybeSingle();
-        if (error) throw new Error(`Could not verify target role: ${error.message}`);
-        if (data?.role === "moderator") throw new RoomCommandError("Moderators can already join the DJ queue.");
-      } else if (this.getRoom(roomSlug)?.moderatorUserIds.includes(targetUserId)) throw new RoomCommandError("Moderators can already join the DJ queue.");
+        if (error) throw new Error(serverT("could_not_verify_target_role_value1", { value1: error.message }));
+        if (data?.role === "moderator") throw new RoomCommandError(serverT("moderators_can_already_join_the_dj_queue"));
+      } else if (this.getRoom(roomSlug)?.moderatorUserIds.includes(targetUserId)) throw new RoomCommandError(serverT("moderators_can_already_join_the_dj_queue"));
     };
     await verifyTarget();
     const room = await this.loadRoom(roomSlug);
-    if (!room) throw new RoomCommandError("This room no longer exists.");
+    if (!room) throw new RoomCommandError(serverT("this_room_no_longer_exists"));
     await this.changeRoom(room, async draft => {
       await authorize?.();
       await this.verifyRoomOwner(roomSlug, ownerUserId); await verifyTarget();
@@ -951,9 +1022,9 @@ export class Store {
         { user_id: userId, display_name: displayName, updated_at: new Date().toISOString() },
         { onConflict: "user_id", ignoreDuplicates: true }
       );
-    if (error) throw new Error(`Could not load profile: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_profile_value1", { value1: error.message }));
     const profile = await this.getProfile(userId);
-    if (!profile) throw new Error("Could not load profile after creating it.");
+    if (!profile) throw new Error(serverT("could_not_load_profile_after_creating_it"));
     return profile;
   }
 
@@ -964,7 +1035,7 @@ export class Store {
       .select(PROFILE_COLUMNS)
       .eq("user_id", userId)
       .maybeSingle();
-    if (error) throw new Error(`Could not load profile: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_profile_value1", { value1: error.message }));
     return data as SoundSpinProfile | null;
   }
 
@@ -975,7 +1046,7 @@ export class Store {
       .select("key, kind, name, metadata")
       .order("kind", { ascending: true })
       .order("name", { ascending: true });
-    if (error) throw new Error(`Could not load profile options: ${error.message}`);
+    if (error) throw new Error(serverT("could_not_load_profile_options_value1", { value1: error.message }));
     return (data || []) as SoundSpinProfileOption[];
   }
 
@@ -987,7 +1058,7 @@ export class Store {
     const update = profileUpdateSchema.parse(input);
     const supabase = this.supabase;
     const current = await this.getProfile(userId);
-    if (!current) throw new Error("Profile not found.");
+    if (!current) throw new Error(serverT("profile_not_found"));
 
     const validateOption = async (
       key: string,
@@ -1000,7 +1071,7 @@ export class Store {
         .eq("key", key)
         .eq("kind", kind)
         .maybeSingle();
-      if (error) throw new Error(`Could not validate ${kind}: ${error.message}`);
+      if (error) throw new Error(serverT("could_not_validate_kind_value2", { kind: kind, value2: error.message }));
       if (!option) throw new Error(missingMessage);
     };
 
@@ -1014,12 +1085,12 @@ export class Store {
     let customAvatarUrl: string | undefined;
     if (update.customAvatarPath !== undefined) {
       const [folder, fileName, extra] = update.customAvatarPath.split("/");
-      if (folder !== userId || !fileName || extra) throw new Error("That avatar upload is not yours.");
+      if (folder !== userId || !fileName || extra) throw new Error(serverT("that_avatar_upload_is_not_yours"));
       const { data: objects, error } = await supabase.storage
         .from("profile-avatars")
         .list(userId, { search: fileName, limit: 10 });
-      if (error) throw new Error(`Could not validate avatar upload: ${error.message}`);
-      if (!objects?.some((object) => object.name === fileName)) throw new Error("That avatar upload was not found.");
+      if (error) throw new Error(serverT("could_not_validate_avatar_upload_value1", { value1: error.message }));
+      if (!objects?.some((object) => object.name === fileName)) throw new Error(serverT("that_avatar_upload_was_not_found"));
       customAvatarUrl = supabase.storage.from("profile-avatars").getPublicUrl(update.customAvatarPath).data.publicUrl;
     }
 
@@ -1046,8 +1117,8 @@ export class Store {
       .eq("user_id", userId)
       .select(PROFILE_COLUMNS)
       .single();
-    if (error?.code === "23505" && update.handle !== undefined) throw new Error("That handle is taken.");
-    if (error) throw new Error(`Could not update profile: ${error.message}`);
+    if (error?.code === "23505" && update.handle !== undefined) throw new Error(serverT("that_handle_is_taken"));
+    if (error) throw new Error(serverT("could_not_update_profile_value1", { value1: error.message }));
     return data as SoundSpinProfile;
   }
 
@@ -1073,12 +1144,12 @@ export class Store {
       if (error) {
         if (error.code === "PGRST205") {
           throw new Error(
-            "Lydman database is not initialized. Deploy the migrations from GitHub or run the initial migration in the Supabase SQL editor."
+            serverT("turntune_database_is_not_initialized_deploy_the_migrations_from_github_or_run_the_ini")
           );
         }
-        throw new Error(`Could not save room: ${error.message}`);
+        throw new Error(serverT("could_not_save_room_value1", { value1: error.message }));
       }
-      if (!data) throw new Error("Could not save room: the room no longer exists.");
+      if (!data) throw new Error(serverT("could_not_save_room_the_room_no_longer_exists"));
     }, room.id);
   }
 

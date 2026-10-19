@@ -1,63 +1,64 @@
 import { expect, test } from "@playwright/test";
-const url = "/tests/player-qol-harness/index.html?listener";
 
-test("accepted reaction accent needs both server acknowledgement and matching snapshot", async ({ page }) => {
-  await page.clock.install();
-  await page.goto(url);
-  const love = page.getByRole("button", { name: /^Love it/ });
-  await love.scrollIntoViewIfNeeded();
-  await expect(page.locator(".bang-meter")).not.toHaveClass(/decorations-off/);
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
-  await love.click();
-  await page.evaluate(() => window.playerQolTest.pending?.({ ok: true }));
-  await expect(love).not.toHaveClass(/is-accepted/);
-  await page.evaluate(() => window.playerQolTest.setVotes({ listener: 1 }));
-  await expect(love).toHaveAttribute("aria-pressed", "true");
-  await expect(love).toHaveClass(/is-accepted/);
-  await page.clock.runFor(180);
-  await expect(love).not.toHaveClass(/is-accepted/);
-  await expect(page.locator(".bang-meter [aria-live]")).toHaveCount(0);
-});
-
-test("heavy remote voting keeps counts immediate and bounds decorative changes", async ({ page }) => {
-  await page.goto(url);
-  await page.locator(".bang-meter").scrollIntoViewIfNeeded();
-  await expect(page.locator(".bang-meter")).not.toHaveClass(/decorations-off/);
-  const changes = await page.evaluate(async () => {
-    const bar = document.querySelector(".bang-pulse i")!;
-    let mutations = 0;
-    const observer = new MutationObserver(items => { mutations += items.length; });
-    observer.observe(bar, { attributes: true, attributeFilter: ["style"] });
-    for (let index = 0; index < 60; index++) {
-      window.playerQolTest.setVotes(Object.fromEntries(Array.from({ length: index + 1 }, (_, id) => [`listener-${id}`, index % 2 ? 1 : -1])));
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
-    observer.disconnect();
-    return mutations;
+test("listeners can react to the current track and see confirmed room reactions", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto("/tests/player-qol-harness/index.html?listener");
+  const banger = page.getByRole("button", { name: "Vote Banger", exact: true });
+  const lame = page.getByRole("button", { name: "Vote Lame", exact: true });
+  for (const control of [banger, lame]) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await banger.focus();
+  await page.keyboard.press("Enter");
+  await expect(banger).toBeDisabled();
+  await expect(lame).toBeDisabled();
+  await expect(banger).toHaveAttribute("aria-pressed", "false");
+  await page.evaluate(() => window.playerQolTest.pending?.({ ok: false, error: "The track changed" }));
+  await expect(page.getByRole("alert")).toContainText("The track changed");
+  await expect(banger).toBeEnabled();
+  await expect(banger).toHaveAttribute("aria-pressed", "false");
+  await banger.focus();
+  await page.keyboard.press("Enter");
+  await page.evaluate(() => {
+    window.playerQolTest.pending?.({ ok: true });
+    window.playerQolTest.setVotes({ listener: 1, mira: 1 });
   });
-  expect(changes).toBeLessThanOrEqual(6);
-  await expect(page.locator(".bang-meter-heading small")).toHaveText("60 of 60 reacted");
-  await expect(page.locator(".bang-pulse-summary strong")).toHaveText("Certified banger");
-  await expect(page.locator(".bang-reaction.is-accepted")).toHaveCount(0);
-});
+  await expect(banger).toHaveAttribute("aria-pressed", "true");
+  await expect(lame).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const aggregate = page.getByRole("img", { name: /^Room reactions:/ });
+  await expect(aggregate).toHaveAccessibleName(/\b2\b.*\bBanger\b.*\b0\b.*\bLame\b/);
 
-test("hidden player and live reduced-motion preference suppress decorative reactions", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(url);
-  await page.locator(".bang-meter").scrollIntoViewIfNeeded();
-  await expect(page.locator(".bang-meter")).not.toHaveClass(/decorations-off/);
-  await page.getByRole("tab", { name: "Chat", exact: true }).click();
-  await expect(page.locator(".bang-meter")).toHaveClass(/decorations-off/);
-  await page.evaluate(() => window.playerQolTest.setVotes({ listener: 1 }));
-  await page.getByRole("tab", { name: "Player", exact: true }).click();
-  await page.locator(".bang-meter").scrollIntoViewIfNeeded();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(page.locator(".bang-meter")).toHaveClass(/decorations-off/);
-  const dislike = page.getByRole("button", { name: /^Not it/ });
-  await dislike.click();
-  await page.evaluate(() => { window.playerQolTest.setVotes({ listener: -1 }); window.playerQolTest.pending?.({ ok: true }); });
-  await expect(dislike).toHaveAttribute("aria-pressed", "true");
-  await expect(dislike).not.toHaveClass(/is-accepted/);
-  await expect(page.locator(".bang-pulse")).toHaveCSS("animation-name", "none");
+  await lame.focus();
+  await page.keyboard.press("Space");
+  await expect(banger).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() => {
+    window.playerQolTest.pending?.({ ok: true });
+    window.playerQolTest.setVotes({ listener: -1, mira: 1 });
+  });
+  await expect(lame).toHaveAttribute("aria-pressed", "true");
+  await expect(banger).toHaveAttribute("aria-pressed", "false");
+  await expect(aggregate).toHaveAccessibleName(/\b1\b.*\bBanger\b.*\b1\b.*\bLame\b/);
+  const meter = page.getByRole("region", { name: "Bang-O-Meter for the current track", exact: true });
+  expect(await meter.evaluate(element => element.getAnimations({ subtree: true }).some(animation => animation.playState === "running"))).toBe(false);
+  await lame.focus();
+  await page.keyboard.press("Space");
+  await page.evaluate(() => {
+    window.playerQolTest.pending?.({ ok: true });
+    window.playerQolTest.setVotes({ mira: 1 });
+  });
+  await expect(lame).toHaveAttribute("aria-pressed", "false");
+  await expect(banger).toHaveAttribute("aria-pressed", "false");
+  await expect(aggregate).toHaveAccessibleName(/\b1\b.*\bBanger\b.*\b0\b.*\bLame\b/);
+  expect(await page.evaluate(() => window.playerQolTest.requests)).toEqual([1, 1, -1, 0].map(value => ({ event: "vibe:vote", payload: { trackId: "t1", value } })));
+
+  await page.goto("/tests/player-qol-harness/index.html");
+  await expect(banger).toBeDisabled();
+  await expect(lame).toBeDisabled();
+  expect(await page.evaluate(() => window.playerQolTest.requests)).toEqual([]);
 });

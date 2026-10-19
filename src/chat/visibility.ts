@@ -1,6 +1,7 @@
+import i18n from '../i18n'
 import { getMessagePreview, type ChatMessage, type ChatReply } from './model'
 
-export const HIDDEN_MESSAGE_PREVIEW = 'Hidden'
+export const hiddenMessagePreview = () => i18n.t('chat:hidden')
 
 interface VisibilityStorage {
   getItem(key: string): string | null
@@ -76,5 +77,5 @@ export function createChatVisibilityState(store: ReturnType<typeof createChatVis
 }
 
 export function getVisibleMessagePreview(message: ChatMessage | ChatReply, hiddenIds: ReadonlySet<string>) {
-  return !message.removedAt&&hiddenIds.has(message.id) ? HIDDEN_MESSAGE_PREVIEW : getMessagePreview(message)
+  return !message.removedAt&&hiddenIds.has(message.id) ? hiddenMessagePreview() : getMessagePreview(message)
 }

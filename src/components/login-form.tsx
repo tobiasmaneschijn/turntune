@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -22,6 +23,7 @@ export function LoginForm({
   client: SupabaseClient
   onNavigate: (path: string) => void
 }) {
+  const { t } = useTranslation("public");
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +40,7 @@ export function LoginForm({
       })
       if (error) throw error
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : 'Could not sign in. Try again.')
+      setError(error instanceof Error ? error.message : t("signInError"))
     } finally {
       setIsLoading(false)
     }
@@ -48,17 +50,17 @@ export function LoginForm({
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">Sign in</CardTitle>
+          <CardTitle className="text-xl">{t("signIn")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin}>
             <div className="flex flex-col gap-6">
               <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("email")}</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder={t("emailPlaceholder")}
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -66,7 +68,7 @@ export function LoginForm({
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password">{t("password")}</Label>
                   <Button
                     type="button"
                     variant="link"
@@ -74,7 +76,7 @@ export function LoginForm({
                     className="ml-auto h-auto p-0"
                     onClick={() => onNavigate('/forgot-password')}
                   >
-                    Forgot password?
+                    {t("forgotPassword")}
                   </Button>
                 </div>
                 <Input
@@ -87,11 +89,11 @@ export function LoginForm({
               </div>
               {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Signing in…' : 'Sign in'}
+                {isLoading ? t("signingIn") : t("signIn")}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
-              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/sign-up')}>Create account</Button>
+              <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => onNavigate('/sign-up')}>{t("createAccount")}</Button>
             </div>
           </form>
         </CardContent>

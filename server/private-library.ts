@@ -1,18 +1,21 @@
+import { serverT } from "./i18n.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { approvedRemoteImageUrl } from "../shared/remote-images.js";
 import { isMixcloudShowKey, mixcloudShowKey } from "../shared/mixcloud.js";
+import { DEFAULT_PLAN_LIMITS, planLimitsSchema, type PlanLimits } from "../shared/resource-policy.js";
+import { PublicRequestError } from "./public-request-error.js";
 
 export class PrivateLibraryDataError extends Error {
   constructor() { super("Your library could not be read. Clear your library to reset it."); }
 }
-export const LIBRARY_LIMITS = { picks: 500, sets: 30, setTracks: 50 } as const;
+export const LIBRARY_LIMITS = { picks: DEFAULT_PLAN_LIMITS.libraryPicks, sets: DEFAULT_PLAN_LIMITS.librarySets, setTracks: DEFAULT_PLAN_LIMITS.librarySetTracks };
 export const libraryTrackSchema = z.object({
   provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
-  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), "Artwork must use a supported image host.").optional(),
+  artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), serverT("artwork_must_use_a_supported_image_host")).optional(),
   permalinkUrl: z.string().url().startsWith("https://").max(2048).optional(),
   durationMs: z.number().int().positive().max(86_400_000).optional()
 }).superRefine((track, context) => {
@@ -21,14 +24,16 @@ export const libraryTrackSchema = z.object({
     : track.provider === "apple" ? /^\d+$/.test(track.providerId)
     : track.provider === "mixcloud" ? isMixcloudShowKey(track.providerId)
     : /^soundcloud:tracks:\d+$/.test(track.providerId);
-  if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: "Invalid individual track identifier." });
+  if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: serverT("invalid_individual_track_identifier") });
   if (track.provider === "mixcloud" && (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId)) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: "A matching Mixcloud show URL is required." });
+    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: serverT("a_matching_mixcloud_show_url_is_required") });
   }
 });
 const id = z.string().uuid();
 const setName = z.string().trim().min(1).max(60);
-const trackList = z.array(libraryTrackSchema).min(1).max(LIBRARY_LIMITS.setTracks);
+// Parsers accept supported saved data after a plan downgrade. Growth is checked
+// against the effective plan when applying the mutation.
+const trackList = z.array(libraryTrackSchema).min(1).max(planLimitsSchema.shape.librarySetTracks.maxValue!);
 export const libraryMutationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("save-pick"), track: libraryTrackSchema }),
   z.object({ type: z.literal("delete-pick"), id }),
@@ -38,8 +43,8 @@ export const libraryMutationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("clear-library") })
 ]);
 export const privateLibrarySchema = z.object({
-  picks: z.array(z.object({ id, track: libraryTrackSchema, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(LIBRARY_LIMITS.picks),
-  sets: z.array(z.object({ id, name: setName, tracks: trackList, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(LIBRARY_LIMITS.sets)
+  picks: z.array(z.object({ id, track: libraryTrackSchema, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(planLimitsSchema.shape.libraryPicks.maxValue!),
+  sets: z.array(z.object({ id, name: setName, tracks: trackList, savedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })).max(planLimitsSchema.shape.librarySets.maxValue!)
 });
 export type LibraryTrack = z.infer<typeof libraryTrackSchema>;
 export type PrivateLibrary = z.infer<typeof privateLibrarySchema>;
@@ -47,14 +52,14 @@ export type LibraryMutation = z.infer<typeof libraryMutationSchema>;
 export const emptyLibrary = (): PrivateLibrary => ({ picks: [], sets: [] });
 
 /** Explicit field schemas remove room IDs, contributor data, mappings and tokens. */
-export function changePrivateLibrary(current: PrivateLibrary, mutation: LibraryMutation, now = Date.now()): PrivateLibrary {
+export function changePrivateLibrary(current: PrivateLibrary, mutation: LibraryMutation, now = Date.now(), limits:Pick<PlanLimits,"libraryPicks"|"librarySets"|"librarySetTracks"> = DEFAULT_PLAN_LIMITS): PrivateLibrary {
   const library = structuredClone(current);
   switch (mutation.type) {
     case "save-pick": {
       const found = library.picks.find((pick) => pick.track.provider === mutation.track.provider && pick.track.providerId === mutation.track.providerId);
       if (found) found.track = mutation.track;
       else {
-        if (library.picks.length >= LIBRARY_LIMITS.picks) throw new Error("Your 500 saved picks are full. Delete a pick before saving another.");
+        if (library.picks.length >= limits.libraryPicks) throw new PublicRequestError(serverT("your_value1_saved_picks_are_full_delete_a_pick_before_saving_another", { value1: limits.libraryPicks }),429);
         library.picks.unshift({ id: randomUUID(), track: mutation.track, savedAt: now });
       }
       break;
@@ -63,16 +68,17 @@ export function changePrivateLibrary(current: PrivateLibrary, mutation: LibraryM
     case "save-set": {
       const existing = library.sets.find((set) => set.id === mutation.id);
       const tracks = mutation.tracks.filter((track, index, all) => all.findIndex((item) => item.provider === track.provider && item.providerId === track.providerId) === index);
+      if(tracks.length>limits.librarySetTracks&&tracks.length>(existing?.tracks.length??0))throw new PublicRequestError(serverT("sets_can_contain_up_to_value1_tracks", { value1: limits.librarySetTracks }),429);
       if (existing) { existing.name = mutation.name; existing.tracks = tracks; }
       else {
-        if (library.sets.length >= LIBRARY_LIMITS.sets) throw new Error("Your 30 saved sets are full. Delete a set before saving another.");
+        if (library.sets.length >= limits.librarySets) throw new PublicRequestError(serverT("your_value1_saved_sets_are_full_delete_a_set_before_saving_another", { value1: limits.librarySets }),429);
         library.sets.unshift({ id: mutation.id, name: mutation.name, tracks, savedAt: now });
       }
       break;
     }
     case "rename-set": {
       const existing = library.sets.find((set) => set.id === mutation.id);
-      if (!existing) throw new Error("That set was deleted. Refresh your picks and sets.");
+      if (!existing) throw new Error(serverT("that_set_was_deleted_refresh_your_picks_and_sets"));
       existing.name = mutation.name;
       break;
     }

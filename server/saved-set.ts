@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import { providerJson } from "./provider-http.js";
 import { libraryTrackSchema, type LibraryTrack } from "./private-library.js";
 import type { Room, Track } from "./types.js";
@@ -11,45 +12,46 @@ import { verifyTrackDuration } from "./track-metadata.js";
 export type ResolvedSetTrack = Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">;
 export interface SetImportOutcome { added: number; skipped: Array<{ title: string; reason: string }>; started: boolean }
 
-export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string }) {
+export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey, allowSpotify = false }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string; allowSpotify?: boolean }) {
   const mixcloudApi = mixcloud || new MixcloudApi(fetchImpl);
   return async (track: LibraryTrack, signal: AbortSignal): Promise<ResolvedSetTrack> => {
     signal.throwIfAborted();
+    if (track.provider === "spotify" && !allowSpotify) throw new Error(serverT("spotify_is_disabled_in_this_room"));
     let verified = { ...track };
     if (track.provider === "youtube") {
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.providerId)}`;
       const { response, payload: source } = await providerJson<{ title?: unknown; author_name?: unknown } | null>("youtube",fetchImpl,`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, { signal });
-      if (!response.ok) throw new Error("This YouTube recording is unavailable or could not be verified.");
+      if (!response.ok) throw new Error(serverT("this_youtube_recording_is_unavailable_or_could_not_be_verified"));
       const safe = libraryTrackSchema.safeParse({ ...verified, title: source?.title, artist: source?.author_name === undefined ? track.artist : source.author_name, permalinkUrl: url });
-      if (!safe.success) throw new Error("This YouTube recording returned invalid or oversized metadata.");
+      if (!safe.success) throw new Error(serverT("this_youtube_recording_returned_invalid_or_oversized_metadata"));
       verified = safe.data;
     } else if (track.provider === "spotify") {
-      if (!spotify.configured) throw new Error("Spotify catalog verification is unavailable. Try this recording later.");
+      if (!spotify.configured) throw new Error(serverT("spotify_catalog_verification_is_unavailable_try_this_recording_later"));
       const source = await spotify.getTrack(track.providerId,signal);
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else if (track.provider === "apple") {
-      if (!appleMusic.configured) throw new Error("Apple Music catalog verification is unavailable. Try this recording later.");
+      if (!appleMusic.configured) throw new Error(serverT("apple_music_catalog_verification_is_unavailable_try_this_recording_later"));
       const source = await appleMusic.getTrack(track.providerId,undefined,signal);
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else if (track.provider === "mixcloud") {
       const source = await mixcloudApi.resolveTrack(track.permalinkUrl || track.providerId, signal);
-      if (source.id !== track.providerId) throw new Error("This Mixcloud link now resolves to a different show.");
+      if (source.id !== track.providerId) throw new Error(serverT("this_mixcloud_link_now_resolves_to_a_different_show"));
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     } else {
-      if (!soundCloud.configured || !track.permalinkUrl) throw new Error("SoundCloud verification needs a configured catalog and a saved source link.");
+      if (!soundCloud.configured || !track.permalinkUrl) throw new Error(serverT("soundcloud_verification_needs_a_configured_catalog_and_a_saved_source_link"));
       const url = new URL(track.permalinkUrl);
-      if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "soundcloud.com" || url.hostname.endsWith(".soundcloud.com"))) throw new Error("This saved SoundCloud source link is invalid.");
+      if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "soundcloud.com" || url.hostname.endsWith(".soundcloud.com"))) throw new Error(serverT("this_saved_soundcloud_source_link_is_invalid"));
       const source = await soundCloud.resolveTrack(url.href,signal);
-      if (source.id !== track.providerId) throw new Error("This SoundCloud link now resolves to a different recording.");
+      if (source.id !== track.providerId) throw new Error(serverT("this_soundcloud_link_now_resolves_to_a_different_recording"));
       verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
     }
     signal.throwIfAborted();
     const safeSource = libraryTrackSchema.safeParse(verified);
-    if (!safeSource.success) throw new Error("This recording returned invalid or oversized source metadata.");
-    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal);
+    if (!safeSource.success) throw new Error(serverT("this_recording_returned_invalid_or_oversized_source_metadata"));
+    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal,{ allowSpotify });
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
-    if (!safeMapped.success) throw new Error("This recording returned invalid or oversized catalog metadata.");
+    if (!safeMapped.success) throw new Error(serverT("this_recording_returned_invalid_or_oversized_catalog_metadata"));
     const duration = track.provider === "youtube" ? await verifyTrackDuration(safeMapped.data,{youtubeApiKey,soundCloud,fetcher:fetchImpl,signal}) : {durationMs:verified.durationMs,durationVerified:Boolean(verified.durationMs),isLive:false};
     return { ...mappings, ...safeMapped.data,...duration };
   };
@@ -58,8 +60,9 @@ export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixclo
 /** The supplied resolver must verify source availability before mapping counterparts.
  * Four workers retain original order; every failure/time-budget item is explained.
  * This budget leaves time for the normal 15-second socket acknowledgement. */
-export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: LibraryTrack, signal: AbortSignal) => Promise<ResolvedSetTrack>, budgetMs = 10_000) {
-  if (!tracks.length || tracks.length > 50) throw new Error("A saved set must contain 1–50 tracks.");
+export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: LibraryTrack, signal: AbortSignal) => Promise<ResolvedSetTrack>, budgetMs = 10_000, maxTracks = 50) {
+  if (!Number.isInteger(maxTracks) || maxTracks < 1 || maxTracks > 100) throw new Error(serverT("invalid_set_import_limit"));
+  if (!tracks.length || tracks.length > maxTracks) throw new Error(serverT("a_saved_set_must_contain_1_maxtracks_tracks", { maxTracks: maxTracks }));
   const deadline = Date.now() + budgetMs;
   const results: Array<{ track: ResolvedSetTrack } | { title: string; reason: string }> = [];
   let next = 0;
@@ -71,7 +74,7 @@ export async function resolveSavedSet(tracks: LibraryTrack[], resolve: (track: L
       const controller = new AbortController();
       let timer: NodeJS.Timeout | undefined;
       try {
-        const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("This recording could not be verified in time. Try appending again.")); }, Math.min(4_000, remaining)); });
+        const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error(serverT("this_recording_could_not_be_verified_in_time_try_appending_again"))); }, Math.min(4_000, remaining)); });
         results[index] = { track: await Promise.race([resolve(input, controller.signal), timeout]) };
       } catch (error) { results[index] = { title: input.title, reason: error instanceof Error ? error.message : "This recording is unavailable on its source provider." }; }
       finally { if (timer) clearTimeout(timer); }
@@ -91,10 +94,10 @@ export class SetImportRegistry {
     const key = `${room.id}:${userId}:${requestId}`;
     const existing = this.entries.get(key);
     if (existing?.room === room && existing.userId === userId) {
-      if (existing.setId !== setId) throw new Error("This import request already belongs to a different saved set.");
+      if (existing.setId !== setId) throw new Error(serverT("this_import_request_already_belongs_to_a_different_saved_set"));
       return existing.result;
     }
-    if (this.entries.size >= 2000) throw new Error("Too many set imports are pending. Wait before trying again.");
+    if (this.entries.size >= 2000) throw new Error(serverT("too_many_set_imports_are_pending_wait_before_trying_again"));
     let committed: SetImportOutcome | undefined;
     const result = Promise.resolve().then(() => operation((outcome) => {
       committed = structuredClone(outcome);

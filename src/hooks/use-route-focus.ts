@@ -5,6 +5,7 @@ export function rememberNavigationFocus(context: string) {
   const target = document.activeElement as HTMLElement | null;
   const key = target?.closest<HTMLElement>("[data-navigation-focus]")?.dataset.navigationFocus;
   if (key) returnTargets.set(context, key);
+  else returnTargets.delete(context);
 }
 
 /** Call with the intentional route identity, never with presence/playback state. */
@@ -24,7 +25,8 @@ export function useRouteFocus(route: string, restoreContext?: string, suspendDes
       if (panel?.id) document.getElementById(`room-tab-${panel.id}`)?.click();
       if (!target.hasAttribute("tabindex") && target.tagName === "H1") target.tabIndex = -1;
       frame = requestAnimationFrame(() => target.focus({ preventScroll: false }));
-      if (restoreContext) returnTargets.delete(restoreContext);
+      // Keep the origin for later Back/Forward traversals of the same route.
+      // The next explicit navigation from this context replaces it.
       return true;
     };
     if (focusDestination()) return () => cancelAnimationFrame(frame);

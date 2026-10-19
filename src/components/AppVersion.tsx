@@ -1,4 +1,6 @@
-import { APP_VERSION, CHANGELOG } from "../changelog";
+import { useTranslation } from "react-i18next";
+import { APP_VERSION, getChangelog } from "../changelog";
+import type { RefObject } from "react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -10,39 +12,41 @@ import {
   DialogTrigger
 } from "./ui/dialog";
 
-const releaseDate = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  timeZone: "UTC"
-});
-
-export function AppVersion() {
+export function AppVersion({ open, onOpenChange, hideTrigger = false, finalFocus }: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+  finalFocus?: RefObject<HTMLElement | null>;
+} = {}) {
+  const { t, i18n } = useTranslation("public");
+  const releaseDate = new Intl.DateTimeFormat(i18n.resolvedLanguage || "en", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "UTC"
+  });
   return (
-    <Dialog>
-      <DialogTrigger render={
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {!hideTrigger && <DialogTrigger render={
         <Button
           variant="ghost"
           size="xs"
           className="changelog-trigger"
-          aria-label={`v${APP_VERSION} Changelog`}
+          aria-label={t("versionChangelog", { version: APP_VERSION })}
         />
       }>
         <span className="app-version-number">v{APP_VERSION}</span>
         <span aria-hidden="true">·</span>
-        <span>Changelog</span>
-      </DialogTrigger>
-      <DialogContent className="changelog-dialog">
+        <span>{t("changelog")}</span>
+      </DialogTrigger>}
+      <DialogContent className="changelog-dialog" finalFocus={finalFocus}>
         <DialogHeader>
-          <DialogTitle>Changelog</DialogTitle>
-          <DialogDescription className="sr-only">Current version: {APP_VERSION}.</DialogDescription>
+          <DialogTitle>{t("changelog")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("currentVersion", { version: APP_VERSION })}</DialogDescription>
         </DialogHeader>
-        <div className="changelog-releases" tabIndex={0} role="region" aria-label="Release notes">
-          {CHANGELOG.map((release) => (
+        <div className="changelog-releases" tabIndex={0} role="region" aria-label={t("releaseNotes")}>
+          {getChangelog().map((release) => (
             <article className="changelog-release" key={release.version}>
               <header className="changelog-release-header">
                 <h2>v{release.version}</h2>
-                {release.version === APP_VERSION && <Badge variant="secondary">Current</Badge>}
+                {release.version === APP_VERSION && <Badge variant="secondary">{t("current")}</Badge>}
                 <time dateTime={release.date}>{releaseDate.format(new Date(`${release.date}T00:00:00Z`))}</time>
               </header>
               <p className="changelog-release-title">{release.title}</p>

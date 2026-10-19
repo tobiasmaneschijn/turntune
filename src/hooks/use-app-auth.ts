@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import { useEffect, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseClient } from "../supabase";
@@ -13,6 +15,7 @@ export interface AppAuth {
 }
 
 export function useAppAuth() {
+  useTranslation();
   const [attempt, setAttempt] = useState(0);
   const [auth, setAuth] = useState<AppAuth>({
     loading: true, client: null, session: null, enabled: false, recovery: false, error: ""
@@ -59,7 +62,7 @@ export function useAppAuth() {
       unsubscribe?.();
       setAuth((current) => ({
         ...current, loading: false,
-        error: error instanceof Error ? error.message : "Could not restore your session. Try again."
+        error: error instanceof Error ? error.message : i18n.t("common:use_app_auth_could_not_restore_your_session_try_again")
       }));
     });
 

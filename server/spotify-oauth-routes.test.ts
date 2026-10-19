@@ -4,11 +4,12 @@ import test from "node:test";
 import express from "express";
 import { mountSpotifyOAuthRoutes, spotifyReturnPath } from "./spotify-oauth-routes.js";
 
-async function fixture(run: (base: string, context: { connected: string[]; now: number; fail: boolean; active: boolean }) => Promise<void>) {
+async function fixture(run: (base: string, context: { connected: string[]; now: number; fail: boolean; active: boolean; spotifyAllowed: boolean; checkedRooms: Array<string | undefined> }) => Promise<void>) {
   const app = express();
-  const context = { connected: [] as string[], now: 1_000, fail: false, active: true };
+  const context = { connected: [] as string[], now: 1_000, fail: false, active: true, spotifyAllowed: true, checkedRooms: [] as Array<string | undefined> };
   mountSpotifyOAuthRoutes(app, { getUserId: async request => request.get("authorization") === "Bearer alice" ? "alice" : null,
     isAccountActive: async () => context.active,
+    canUseSpotify: async (_request, _userId, roomSlug) => { context.checkedRooms.push(roomSlug); return context.spotifyAllowed && (roomSlug === undefined || roomSlug === "lounge"); },
     accounts: { configured: true, connect: async (userId, _code, _redirect, authorize) => { await authorize?.(); if (context.fail) throw new Error("Provider unavailable"); context.connected.push(userId); } },
     redirectUri: () => "https://app.test/api/spotify/callback", authorizationUrl: (_uri, state) => `https://spotify.test/authorize?state=${state}`, now: () => context.now });
   const server = app.listen(0, "127.0.0.1");
@@ -16,8 +17,8 @@ async function fixture(run: (base: string, context: { connected: string[]; now: 
   try { await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, context); }
   finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }
-async function begin(base: string, returnTo = "/") {
-  const response = await fetch(`${base}/api/spotify/connect?${new URLSearchParams({ returnTo })}`, { headers: { Authorization: "Bearer alice" } });
+async function begin(base: string, returnTo = "/", roomSlug?: string) {
+  const response = await fetch(`${base}/api/spotify/connect?${new URLSearchParams({ returnTo, ...(roomSlug ? { roomSlug } : {}) })}`, { headers: { Authorization: "Bearer alice" } });
   assert.equal(response.status, 200);
   const cookie = response.headers.get("set-cookie")!;
   assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Lax/); assert.match(cookie, /Secure/);
@@ -85,5 +86,20 @@ test("a valid browser OAuth flow cannot link an account suspended after it start
     assert.equal(denied.headers.get("location"), "/?spotify=error");
     assert.deepEqual(context.connected, []);
     assert.equal((await callback(base, flow.state, flow.cookie)).status, 400);
+  });
+});
+
+test("OAuth binds the authorized room and rejects a room disabled before callback without exchanging credentials", async () => {
+  await fixture(async (base, context) => {
+    context.spotifyAllowed = false;
+    assert.equal((await fetch(`${base}/api/spotify/connect?roomSlug=lounge`, { headers: { Authorization: "Bearer alice" } })).status, 403);
+    context.spotifyAllowed = true;
+    assert.equal((await fetch(`${base}/api/spotify/connect?roomSlug=another-room`, { headers: { Authorization: "Bearer alice" } })).status, 403);
+    const flow = await begin(base, "/room/lounge", "lounge");
+    context.spotifyAllowed = false;
+    const response = await fetch(`${base}/api/spotify/callback?${new URLSearchParams({ state: flow.state, code: "code", roomSlug: "another-room" })}`, { redirect: "manual", headers: { Cookie: flow.cookie } });
+    assert.equal(response.headers.get("location"), "/room/lounge?spotify=error");
+    assert.equal(context.checkedRooms.at(-1), "lounge");
+    assert.deepEqual(context.connected, []);
   });
 });

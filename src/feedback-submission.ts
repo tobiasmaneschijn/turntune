@@ -1,3 +1,4 @@
+import i18n from "./i18n";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS, UPLOAD_TIMEOUT_MS } from "./lib/bounded-operation";
 
@@ -9,10 +10,10 @@ export type FeedbackSubmissionStage =
   | { kind: "cleaning" };
 
 export function feedbackStageLabel(stage: FeedbackSubmissionStage) {
-  if (stage.kind === "uploading") return `Uploading screenshot ${stage.index} of ${stage.total}`;
-  if (stage.kind === "sending") return "Sending feedback";
-  if (stage.kind === "cleaning") return "Removing incomplete uploads";
-  return "Preparing feedback";
+  if (stage.kind === "uploading") return i18n.t("common:feedback_submission_uploading_screenshot_value1_of_value2", { value1: stage.index, value2: stage.total });
+  if (stage.kind === "sending") return i18n.t("common:feedback_submission_sending_feedback");
+  if (stage.kind === "cleaning") return i18n.t("common:feedback_submission_removing_incomplete_uploads");
+  return i18n.t("common:feedback_submission_preparing_feedback");
 }
 export interface FeedbackSubmissionInput {
   userId: string;
@@ -30,7 +31,7 @@ export function createFeedbackAttempt(input: FeedbackSubmissionInput): FeedbackA
   return { id: crypto.randomUUID(), input: { ...input, screenshots: [...input.screenshots], record: structuredClone(input.record) }, uploadedPaths: [], insertStarted: false, outcomeUnknown: false };
 }
 export class FeedbackOutcomeUnknownError extends Error {
-  constructor() { super("Send status unknown. Retry to check the original submission."); this.name = "FeedbackOutcomeUnknownError"; }
+  constructor() { super(i18n.t("common:feedback_submission_send_status_unknown_retry_to_check_the_original_submission")); this.name = "FeedbackOutcomeUnknownError"; }
 }
 class FeedbackRequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -57,12 +58,12 @@ export async function submitFeedbackRecord(
     signal: options.signal, timeoutMs: options.insertTimeoutMs ?? SUBMISSION_TIMEOUT_MS
   });
   if (sessionError) throw sessionError;
-  if (!data.session || data.session.user.id !== source.userId) throw new Error("Your account changed. Try again with the current account.");
+  if (!data.session || data.session.user.id !== source.userId) throw new Error(i18n.t("common:feedback_submission_your_account_changed_try_again_with_the_current_account"));
   const token = data.session.access_token, transport = options.fetchImpl || fetch;
   const send = async (path: string, body: BodyInit, signal: AbortSignal, type = "application/json") => {
     const response = await transport(path, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": type }, body, signal });
     const result = await response.json() as { error?: string; id?: string; storagePath?: string };
-    if (!response.ok) throw new FeedbackRequestError(result.error || "Feedback could not be saved. Try again.", response.status);
+    if (!response.ok) throw new FeedbackRequestError(result.error || i18n.t("common:feedback_submission_feedback_could_not_be_saved_try_again"), response.status);
     return result;
   };
   try {
@@ -73,7 +74,7 @@ export async function submitFeedbackRecord(
         const result = await boundedOperation(signal => send("/api/uploads/feedback", attachment.file, signal, attachment.file.type), {
           signal: options.signal, timeoutMs: options.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS
         });
-        if (typeof result.storagePath !== "string" || !result.storagePath.startsWith(`${source.userId}/`)) throw new Error("The server returned an invalid upload response.");
+        if (typeof result.storagePath !== "string" || !result.storagePath.startsWith(`${source.userId}/`)) throw new Error(i18n.t("common:feedback_submission_the_server_returned_an_invalid_upload_response"));
         attempt.uploadedPaths.push(result.storagePath);
       }
     }
@@ -83,7 +84,7 @@ export async function submitFeedbackRecord(
     const result = await boundedOperation(signal => send("/api/feedback", JSON.stringify({ ...source.record, id: attempt.id, screenshot_paths: attempt.uploadedPaths }), signal), {
       signal: options.signal, timeoutMs: options.insertTimeoutMs ?? SUBMISSION_TIMEOUT_MS
     });
-    if (result.id !== attempt.id) throw new Error("The server returned an invalid feedback response.");
+    if (result.id !== attempt.id) throw new Error(i18n.t("common:feedback_submission_the_server_returned_an_invalid_feedback_response"));
     return attempt.id;
   } catch (error) {
     // A disconnect/timeout/gateway failure after dispatch can commit. Keep the

@@ -8,6 +8,7 @@ async function fixture(run: (base: string, state: { calls: Array<{ kind: string;
   const state = { calls: [] as Array<{ kind: string; value?: string; path?: string; body?: unknown }>, unauthorizedOnce: false };
   const options = {
     authEnabled: true, getUserId: async (request: express.Request) => request.get("authorization") === "Bearer alice" ? "alice" : null,
+    canUseSpotify: async () => true,
     youtubeApiKey: "fixture", soundCloudApi: { configured: true, searchTracks: async (q: string) => { state.calls.push({ kind: "soundcloud-search", value: q }); return []; }, resolveTrack: async (url: string) => { state.calls.push({ kind: "soundcloud-resolve", value: url }); return {}; } },
     spotifyApi: { configured: true, searchTracks: async (q: string) => { state.calls.push({ kind: "spotify-search", value: q }); return []; }, getTrack: async (id: string) => { state.calls.push({ kind: "spotify-track", value: id }); return {}; },
       request: async (_token: string, path: string, init?: RequestInit) => { state.calls.push({ kind: "spotify-request", path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -59,6 +60,36 @@ test("music routes deny missing authentication before catalogs/accounts and prev
     assert.deepEqual(await token.json(), { accessToken: "fixture-token" });
     assert.deepEqual(state.calls, [{ kind: "token", value: "alice" }]);
   });
+});
+test("Spotify requires current authorized room context before tokens, provider work, or connection metadata", async () => {
+  let enabled = false;
+  await fixture(async (base, state) => {
+    for (const [method, path] of [["GET", "search?q=mix"], ["GET", "resolve?url=abcdefghij123456789012"], ["GET", "token"], ["GET", "devices"], ["GET", "playback"], ["POST", "playback"]]) {
+      assert.equal((await fetch(`${base}/api/spotify/${path}`, { ...authenticated, method })).status, 403, path);
+    }
+    assert.equal((await fetch(`${base}/API/SPOTIFY/token`, authenticated)).status, 403);
+    const connections = await fetch(`${base}/api/music/connections?roomSlug=lounge`, authenticated);
+    assert.equal(connections.status, 200);
+    assert.deepEqual((await connections.json()).spotify, { configured: false, connected: false, profile: null });
+    assert.equal(state.calls.length, 0);
+    enabled = true;
+    assert.equal((await fetch(`${base}/api/spotify/token?roomSlug=another-room&userId=bob`, authenticated)).status, 403);
+    assert.equal((await fetch(`${base}/api/spotify/token`, authenticated)).status, 403);
+    assert.equal((await fetch(`${base}/api/spotify/token?roomSlug=lounge`, { headers: { ...authenticated.headers, "x-soundspin-room": "another-room" } })).status, 400);
+    assert.equal((await fetch(`${base}/api/spotify/search?q=mix&roomSlug=lounge`, authenticated)).status, 200);
+    assert.equal((await fetch(`${base}/api/spotify/token`, { headers: { ...authenticated.headers, "x-soundspin-room": "lounge" } })).status, 200);
+    assert.deepEqual(state.calls.map(call => call.kind), ["spotify-search", "token"]);
+    enabled = false;
+    assert.equal((await fetch(`${base}/api/spotify/search?q=mix&roomSlug=lounge`, authenticated)).status, 403);
+    assert.equal(state.calls.length, 2);
+  }, { canUseSpotify: async (_request, actor, roomSlug) => enabled && actor === "alice" && roomSlug === "lounge" });
+  await fixture(async (base, state) => {
+    assert.equal((await fetch(`${base}/api/spotify/token?roomSlug=lounge`, authenticated)).status, 403);
+    assert.deepEqual(state.calls, []);
+    // Turning a room feature off must not prevent revoking one's own connection.
+    assert.equal((await fetch(`${base}/api/spotify/connection`,{...authenticated,method:"DELETE"})).status,204);
+    assert.deepEqual(state.calls,[{kind:"disconnect",value:"alice"}]);
+  }, { canUseSpotify: undefined });
 });
 test("catalog searches reuse provider caches, YouTube requests have deadlines, and provider identifiers are validated", async () => {
   await fixture(async (base, state) => {
@@ -213,7 +244,7 @@ test("YouTube live status does not cache unavailable videos, upstream failures, 
 });
 
 
-test("provider resolution and playback endpoints charge authenticated account and IP budgets before provider work", async () => {
+test("provider requests throttle one account before provider work while listeners sharing an IP can keep polling", async () => {
   await fixture(async (base, state) => {
     for (let index = 0; index < 60; index++) assert.equal((await fetch(`${base}/api/spotify/resolve?url=abcdefghij123456789012`, authenticated)).status, 200);
     const calls = state.calls.length;
@@ -222,4 +253,10 @@ test("provider resolution and playback endpoints charge authenticated account an
     // Another endpoint has its own limit; the same verified account remains authoritative.
     assert.equal((await fetch(`${base}/api/spotify/devices`, authenticated)).status, 200);
   });
+  await fixture(async(base,state)=>{
+    for(let listener=0;listener<5;listener++) {
+      for(let poll=0;poll<40;poll++)assert.equal((await fetch(`${base}/api/spotify/playback`,{headers:{Authorization:`Bearer listener-${listener}`}})).status,200);
+    }
+    assert.equal(state.calls.filter(call=>call.kind==="spotify-request").length,200);
+  },{getUserId:async request=>request.get("authorization")?.match(/^Bearer (listener-\d)$/)?.[1]??null});
 });

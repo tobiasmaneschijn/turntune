@@ -1,11 +1,14 @@
+import { useTranslation } from "react-i18next";
 import type { MouseEvent } from "react";
 import { ArrowRight, MessageCircle, Music2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { User } from "@/types";
 import { Avatar } from "@/components/Avatar";
+import { AppHeader } from "@/components/AppHeader";
 import { Brand } from "@/components/app-primitives";
 import { AppVersion } from "@/components/AppVersion";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -27,12 +30,6 @@ const SAMPLE_USERS: User[] = [
   { id: "leo", name: "Leo", avatarSeed: "leo", avatarKey: "voltage", isAppAdmin: false }
 ];
 
-const STEPS = [
-  "Sign up with an invite",
-  "Create a room and share its link",
-  "Add songs and take turns as DJ"
-];
-
 function navigateInsideApp(
   event: MouseEvent<HTMLAnchorElement>,
   path: string,
@@ -52,39 +49,33 @@ function navigateInsideApp(
 }
 
 export function LandingPage({ onNavigate }: LandingPageProps) {
+  const { t } = useTranslation("public");
+  const steps = [t("landingStepInvite"), t("landingStepRoom"), t("landingStepQueue")];
   return (
     <main className="landing-page">
-      <header className="landing-header">
-        <nav className="landing-nav" aria-label="Main navigation">
-          <a
-            className="landing-brand-link"
-            href="/"
-            aria-label="Lydman home"
-            onClick={(event) => navigateInsideApp(event, "/", onNavigate)}
-          >
-            <Brand />
-          </a>
-          <div className="landing-nav-links">
-            <a href="#how-it-works">How it works</a>
-            <a href="#music-services">Music services</a>
-          </div>
-          <div className="landing-nav-actions">
+      <AppHeader
+        onHome={() => onNavigate("/")}
+        navigation={<div className="landing-nav-links">
+            <a href="#how-it-works">{t("howItWorks")}</a>
+            <a href="#music-services">{t("musicServices")}</a>
+          </div>}
+        publicActions={<>
+            <ThemeToggle compact />
             <a
               href="/login"
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "landing-nav-sign-in")}
               onClick={(event) => navigateInsideApp(event, "/login", onNavigate)}
             >
-              Sign in
+              {t("signIn")}
             </a>
-          </div>
-        </nav>
-      </header>
+          </>}
+      />
 
-      <section className="landing-hero" aria-labelledby="landing-title">
+      <section className="landing-hero" id="main-content" tabIndex={-1} aria-labelledby="landing-title">
         <div className="landing-hero-copy">
-          <h1 id="landing-title">Listen together.</h1>
+          <h1 id="landing-title">{t("motto")}</h1>
           <p>
-            Share a room, queue songs, and take turns as DJ.
+            {t("landingIntro")}
           </p>
           <div className="landing-hero-actions">
             <a
@@ -92,32 +83,32 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               className={buttonVariants({ size: "lg" })}
               onClick={(event) => navigateInsideApp(event, "/sign-up", onNavigate)}
             >
-              Sign up with an invite <ArrowRight data-icon="inline-end" />
+              {t("signUpWithInvite")} <ArrowRight data-icon="inline-end" />
             </a>
           </div>
-          <p className="landing-invite-note">An account is required to create or join rooms.</p>
+          <p className="landing-invite-note">{t("accountRequired")}</p>
         </div>
 
         <div className="landing-preview-stage">
-          <p className="landing-preview-caption">Example listening room</p>
-          <Card className="landing-preview" aria-label="Example of a Lydman listening room">
+          <p className="landing-preview-caption">{t("exampleRoom")}</p>
+          <Card className="landing-preview" aria-label={t("exampleRoomLabel")}>
             <CardHeader className="landing-preview-header">
               <div>
-                <CardTitle>Friday night radio</CardTitle>
-                <CardDescription>6 listeners</CardDescription>
+                <CardTitle>{t("sampleRoomName")}</CardTitle>
+                <CardDescription>{t("listeners", { count: 6 })}</CardDescription>
               </div>
-              <div className="landing-avatar-stack" aria-label="Maya, Noah, Liv, and Leo are listening">
+              <div className="landing-avatar-stack" aria-label={t("sampleListeners")}>
                 {SAMPLE_USERS.map((user) => <Avatar key={user.id} user={user} size={30} />)}
                 <span className="landing-avatar-more" aria-hidden="true">+2</span>
               </div>
             </CardHeader>
             <CardContent className="landing-preview-content">
-              <section className="landing-now-playing" aria-label="Now playing Afterglow by Night Drive">
+              <section className="landing-now-playing" aria-label={t("nowPlayingTrack", { title: "Afterglow", artist: "Night Drive" })}>
                 <div className="landing-album-art" aria-hidden="true">
                   <Music2 />
                 </div>
                 <div className="landing-track-copy">
-                  <span className="landing-preview-label">Now playing</span>
+                  <span className="landing-preview-label">{t("nowPlaying")}</span>
                   <strong>Afterglow</strong>
                   <small>Night Drive</small>
                   <div className="landing-track-progress" aria-hidden="true"><span /></div>
@@ -131,8 +122,8 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               <div className="landing-preview-columns">
                 <section className="landing-preview-panel" aria-labelledby="landing-queue-title">
                   <div className="landing-preview-panel-heading">
-                    <span id="landing-queue-title">Up next</span>
-                    <Badge variant="secondary">Maya&apos;s turn</Badge>
+                    <span id="landing-queue-title">{t("upNext")}</span>
+                    <Badge variant="secondary">{t("userTurn", { name: "Maya" })}</Badge>
                   </div>
                   <ol className="landing-queue">
                     <li><span>01</span><div><strong>Velvet Sky</strong><small>Solar Echo</small></div><Avatar user={SAMPLE_USERS[0]} size={24} /></li>
@@ -142,12 +133,12 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
 
                 <section className="landing-preview-panel" aria-labelledby="landing-chat-title">
                   <div className="landing-preview-panel-heading">
-                    <span id="landing-chat-title">Room chat</span>
+                    <span id="landing-chat-title">{t("roomChat")}</span>
                     <MessageCircle aria-hidden="true" />
                   </div>
                   <div className="landing-chat-preview">
-                    <div><Avatar user={SAMPLE_USERS[2]} size={24} /><p><strong>Liv</strong><span>Love this intro</span></p></div>
-                    <div><Avatar user={SAMPLE_USERS[3]} size={24} /><p><strong>Leo</strong><span>Wait for the drop</span></p></div>
+                    <div><Avatar user={SAMPLE_USERS[2]} size={24} /><p><strong>Liv</strong><span>{t("sampleChatIntro")}</span></p></div>
+                    <div><Avatar user={SAMPLE_USERS[3]} size={24} /><p><strong>Leo</strong><span>{t("sampleChatDrop")}</span></p></div>
                   </div>
                 </section>
               </div>
@@ -157,19 +148,19 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       <section className="landing-section landing-how" id="how-it-works" aria-labelledby="landing-how-title">
-        <h2 id="landing-how-title">How it works</h2>
+        <h2 id="landing-how-title">{t("howItWorks")}</h2>
         <ol className="landing-steps">
-          {STEPS.map((step) => <li key={step}>{step}</li>)}
+          {steps.map((step) => <li key={step}>{step}</li>)}
         </ol>
       </section>
 
       <section className="landing-section landing-providers" id="music-services" aria-labelledby="landing-providers-title">
-        <h2 id="landing-providers-title">Music services</h2>
+        <h2 id="landing-providers-title">{t("musicServices")}</h2>
         <div>
-          <ul className="landing-provider-list" aria-label="Supported music services">
-            {["YouTube", "SoundCloud", "Spotify", "Apple Music (when available)"].map((provider) => <li key={provider}>{provider}</li>)}
+          <ul className="landing-provider-list" aria-label={t("supportedServices")}>
+            {["YouTube", "SoundCloud", t("appleMusicWhenAvailable")].map((provider) => <li key={provider}>{provider}</li>)}
           </ul>
-          <p>Spotify playback requires Premium; Apple Music requires a subscription. Connect your account in Settings.</p>
+          <p>{t("appleMusicSubscription")}</p>
         </div>
       </section>
 
@@ -177,7 +168,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         <Brand />
         <div className="landing-footer-meta">
           <AppVersion />
-          <small>© {new Date().getFullYear()} Lydman</small>
+          <small>{t("copyright", { year: new Date().getFullYear() })}</small>
         </div>
       </footer>
     </main>

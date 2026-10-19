@@ -1,3 +1,4 @@
+import i18n from "./i18n";
 export type NotificationPermissionState = NotificationPermission | 'unsupported'
 export type NotificationResult = 'system' | 'in-app' | 'suppressed'
 export interface AttentionNotification {
@@ -27,11 +28,11 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 export const notificationPermissionDescription = (permission: NotificationPermissionState) => permission === 'unsupported'
-  ? 'This browser does not support system notifications. In-app notifications are still available.'
+  ? i18n.t("common:notifications_this_browser_does_not_support_system_notifications_in_app_notifications_are")
   : permission === 'denied'
-    ? 'System notifications are blocked. Allow them in your browser’s site settings.'
-    : permission === 'granted' ? 'System notifications are allowed for this browser.'
-      : 'Enable notifications to allow them in this browser.'
+    ? i18n.t("common:notifications_system_notifications_are_blocked_allow_them_in_your_browser_s_site_settings")
+    : permission === 'granted' ? i18n.t("common:notifications_system_notifications_are_allowed_for_this_browser")
+      : i18n.t("common:notifications_enable_notifications_to_allow_them_in_this_browser")
 
 export function isAppInBackground() {
   return typeof document === 'undefined' || document.visibilityState !== 'visible' || !document.hasFocus()

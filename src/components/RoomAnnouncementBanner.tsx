@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Megaphone, Pencil, X } from "lucide-react";
 import type { RoomAnnouncement } from "../types";
@@ -16,6 +17,7 @@ export function RoomAnnouncementBanner({ roomId, userId, announcement, serverTim
   roomId: string; userId: string; announcement?: RoomAnnouncement | null; serverTime: number;
   canEdit: boolean; connected: boolean; request?: typeof requestDefault;
 }) {
+  const { t, i18n } = useTranslation("rooms");
   const [now, setNow] = useState(Date.now());
   const serverClock = useRef({ timestamp: serverTime, offset: serverTime - Date.now() });
   if (serverClock.current.timestamp !== serverTime) serverClock.current = { timestamp: serverTime, offset: serverTime - Date.now() };
@@ -65,28 +67,28 @@ export function RoomAnnouncementBanner({ roomId, userId, announcement, serverTim
       if (!activeRef.current || identityRef.current !== requestIdentity) return;
       pendingRef.current = false; setPending(false);
       if (result.ok) setOpen(false);
-      else setError(result.error || "Could not save the room note. Try again.");
+      else setError(result.error || t("roomAnnouncementBanner.couldNotSaveTheRoomNoteTryAgain"));
     });
   };
   if (!note && !canEdit) return null;
   return <>
     <div className={`room-announcement-banner ${hidden || !note ? "is-collapsed" : ""}`}>
       <Megaphone size={16} aria-hidden="true" />
-      {note && !hidden ? <><button className="room-announcement-text" onClick={() => { if (canEdit) edit(); else setOpen(true); }} aria-label={`Read full room note: ${note.text}`}>{note.text}</button><Button size="icon" variant="ghost" onClick={dismiss} aria-label="Dismiss room note"><X /></Button></> :
-        <span>{hidden ? <Button size="sm" variant="ghost" onClick={reopen}>Show room note</Button> : "Room note"}</span>}
-      {canEdit && <Button ref={openerRef} variant="ghost" size="sm" disabled={!connected} onClick={edit}><Pencil size={14} />{note ? "Edit" : "Add note"}</Button>}
+      {note && !hidden ? <><button className="room-announcement-text" onClick={() => { if (canEdit) edit(); else setOpen(true); }} aria-label={t("roomAnnouncementBanner.readFullRoomNoteText", { text: note.text })}>{note.text}</button><Button size="icon" variant="ghost" onClick={dismiss} aria-label={t("roomAnnouncementBanner.dismissRoomNote")}><X /></Button></> :
+        <span>{hidden ? <Button size="sm" variant="ghost" onClick={reopen}>{t("roomAnnouncementBanner.showRoomNote")}</Button> : t("roomAnnouncementBanner.roomNote")}</span>}
+      {canEdit && <Button ref={openerRef} variant="ghost" size="sm" disabled={!connected} onClick={edit}><Pencil size={14} />{note ? t("roomAnnouncementBanner.edit") : t("roomAnnouncementBanner.addNote")}</Button>}
     </div>
     <Dialog open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
       <DialogContent className="room-announcement-dialog" finalFocus={canEdit ? openerRef : undefined}>
-        <DialogHeader><DialogTitle>Room note</DialogTitle><DialogDescription>Dismissing this note hides it for your browser session.</DialogDescription></DialogHeader>
+        <DialogHeader><DialogTitle>{t("roomAnnouncementBanner.roomNote")}</DialogTitle><DialogDescription>{t("roomAnnouncementBanner.dismissingThisNoteHidesItForYourBrowser")}</DialogDescription></DialogHeader>
         {canEdit ? <form onSubmit={(event) => { event.preventDefault(); save(); }}>
-          <Label htmlFor="room-note-text">Note</Label><Textarea id="room-note-text" value={text} onChange={event => setText(event.target.value)} maxLength={500} rows={4} disabled={pending} autoFocus />
+          <Label htmlFor="room-note-text">{t("roomAnnouncementBanner.note")}</Label><Textarea id="room-note-text" value={text} onChange={event => setText(event.target.value)} maxLength={500} rows={4} disabled={pending} autoFocus />
           <small>{text.length}/500</small>
-          <Label htmlFor="room-note-expiry">Remove automatically after</Label><select id="room-note-expiry" value={expiry} onChange={event => setExpiry(event.target.value)} disabled={pending}>{note?.expiresAt && <option value="keep">Keep current expiry</option>}<option value="none">Until a host removes it</option><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">1 day</option><option value="10080">7 days</option></select>
-          {note?.expiresAt && <small>Expires {new Date(note.expiresAt).toLocaleString()}.</small>}
+          <Label htmlFor="room-note-expiry">{t("roomAnnouncementBanner.removeAutomaticallyAfter")}</Label><select id="room-note-expiry" value={expiry} onChange={event => setExpiry(event.target.value)} disabled={pending}>{note?.expiresAt && <option value="keep">{t("roomAnnouncementBanner.keepCurrentExpiry")}</option>}<option value="none">{t("roomAnnouncementBanner.untilAHostRemovesIt")}</option><option value="60">{t("roomAnnouncementBanner.1Hour")}</option><option value="240">{t("roomAnnouncementBanner.4Hours")}</option><option value="1440">{t("roomAnnouncementBanner.1Day")}</option><option value="10080">{t("roomAnnouncementBanner.7Days")}</option></select>
+          {note?.expiresAt && <small>{t("roomAnnouncementBanner.expiry", { date: new Date(note.expiresAt).toLocaleString(i18n.resolvedLanguage) })}</small>}
           {error && <p role="alert">{error}</p>}
-          <DialogFooter>{expectedId.current && <Button type="button" variant="outline" disabled={pending || !connected} onClick={() => save(true)}>Remove note</Button>}<Button type="button" variant="ghost" disabled={pending} onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" disabled={pending || !connected || !text.trim()}>{pending ? "Saving…" : "Save note"}</Button></DialogFooter>
-        </form> : <><p className="room-note-full-text">{note?.text}</p>{note?.expiresAt && <small>Expires {new Date(note.expiresAt).toLocaleString()}.</small>}<Button onClick={() => setOpen(false)}>Done</Button></>}
+          <DialogFooter>{expectedId.current && <Button type="button" variant="outline" disabled={pending || !connected} onClick={() => save(true)}>{t("roomAnnouncementBanner.removeNote")}</Button>}<Button type="button" variant="ghost" disabled={pending} onClick={() => setOpen(false)}>{t("roomAnnouncementBanner.cancel")}</Button><Button type="submit" disabled={pending || !connected || !text.trim()}>{pending ? t("roomAnnouncementBanner.saving") : t("roomAnnouncementBanner.saveNote")}</Button></DialogFooter>
+        </form> : <><p className="room-note-full-text">{note?.text}</p>{note?.expiresAt && <small>{t("roomAnnouncementBanner.expiry", { date: new Date(note.expiresAt).toLocaleString(i18n.resolvedLanguage) })}</small>}<Button onClick={() => setOpen(false)}>{t("roomAnnouncementBanner.done")}</Button></>}
       </DialogContent>
     </Dialog>
   </>;

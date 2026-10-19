@@ -1,6 +1,6 @@
 # UI/UX improvements — implementation record
 
-Date: 8 October 2026. Product: Lydman / SoundSpin.
+Date: 8 October 2026. Product: turntune (reviewed as Lydman / SoundSpin).
 
 This records the changes implementing `docs/ui-ux-review-2026-10-08.md`. The review remains the historical baseline. Changes preserve the room workspace, existing provider behavior, and the project's neutral/lime design system. The repository's no-slop-ui and Impeccable distill, harden, optimize, adapt, and polish guidance informed the work.
 

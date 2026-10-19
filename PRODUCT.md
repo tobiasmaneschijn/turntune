@@ -1,6 +1,6 @@
-# SoundSpin
+# turntune
 
-SoundSpin is a shared listening room application. Listeners play music through supported personal providers, chat, and join a rotating DJ lineup. Each account's waiting queue and saved library are private.
+turntune is a shared listening room application. Listeners play music through supported personal providers, chat, and join a rotating DJ lineup. Each account's waiting queue and saved library are private.
 
 ## Room management
 

@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -20,9 +21,9 @@ app.get("/api/admin/dashboard", async (request, response) => {
   try {
     const admin = await getApiAdminUserId(request);
     if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
-    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
+    if (!supabaseAdmin) return response.status(503).json({ error: serverT("admin_data_is_unavailable") });
     const inbox = inboxSchema.safeParse(request.query);
-    if (!inbox.success) return response.status(400).json({ error: "Invalid inbox filter." });
+    if (!inbox.success) return response.status(400).json({ error: serverT("invalid_inbox_filter") });
     const pageSize = 50;
     let feedbackQuery = supabaseAdmin.from("soundspin_feedback")
       .select("id, user_id, message, screenshot_paths, room_slug, page_path, viewport, category, impact, diagnostics, status, admin_note, created_at, updated_at")
@@ -141,7 +142,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
       }))
     });
   } catch (error) {
-    response.status(500).json({ error: "Could not load admin data." });
+    response.status(500).json({ error: serverT("could_not_load_admin_data") });
   }
 });
 
@@ -150,19 +151,19 @@ app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), asy
   try {
     const admin = await getApiAdminUserId(request);
     if (!admin.ok) return response.status(admin.status).json({ error: admin.error });
-    if (!supabaseAdmin) return response.status(503).json({ error: "Admin data is unavailable." });
+    if (!supabaseAdmin) return response.status(503).json({ error: serverT("admin_data_is_unavailable") });
 
     const feedbackId = z.string().uuid().safeParse(request.params.feedbackId);
     const update = feedbackStatusSchema.safeParse(request.body);
     if (!feedbackId.success || !update.success) {
-      return response.status(400).json({ error: update.success ? "Invalid feedback item." : update.error.issues[0]?.message });
+      return response.status(400).json({ error: update.success ? serverT("invalid_feedback_item") : update.error.issues[0]?.message });
     }
 
     const { data, error } = await supabaseAdmin.rpc("soundspin_update_feedback_admin", {
       p_actor: admin.userId, p_id: feedbackId.data, p_status: update.data.status, p_note: update.data.adminNote
     });
     if (error) throw error;
-    if (!data) return response.status(404).json({ error: "Feedback item not found." });
+    if (!data) return response.status(404).json({ error: serverT("feedback_item_not_found") });
     securityEvent("admin_change", "success", { requestId: response.locals.requestId, actorId: admin.userId, targetId: feedbackId.data });
     response.json({
       feedback: {
@@ -173,7 +174,7 @@ app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), asy
       }
     });
   } catch (error) {
-    response.status(500).json({ error: "Could not update feedback." });
+    response.status(500).json({ error: serverT("could_not_update_feedback") });
   }
 });
 

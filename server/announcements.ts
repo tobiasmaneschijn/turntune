@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import crypto from "node:crypto";
 import { z } from "zod";
 import type { Room, RoomAnnouncement } from "./types.js";
@@ -16,9 +17,9 @@ export function activeAnnouncement(value: RoomAnnouncement | null | undefined, n
 }
 
 export function changeAnnouncement(room: Room, userId: string, input: z.infer<typeof announcementSchema>, now = Date.now()) {
-  if (room.ownerUserId !== userId && !room.moderatorUserIds.includes(userId)) throw new Error("Only room owners and moderators can edit the room note.");
+  if (room.ownerUserId !== userId && !room.moderatorUserIds.includes(userId)) throw new Error(serverT("only_room_owners_and_moderators_can_edit_the_room_note"));
   const current = activeAnnouncement(room.announcement, now);
-  if ((current?.id || null) !== input.expectedId) throw new Error("The room note changed. Reopen it before saving your edit.");
+  if ((current?.id || null) !== input.expectedId) throw new Error(serverT("the_room_note_changed_reopen_it_before_saving_your_edit"));
   const next: RoomAnnouncement | null = input.text ? {
     id: crypto.randomUUID(), text: input.text, authorId: userId, updatedAt: now,
     expiresAt: input.expiresInMinutes === "keep" ? current?.expiresAt ?? null : input.expiresInMinutes === null ? null : now + input.expiresInMinutes * 60_000

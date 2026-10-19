@@ -1,3 +1,4 @@
+import { serverT } from "./i18n.js";
 import type { Room, Track } from "./types.js";
 import { effectiveRoomPolicy } from "../shared/room-policy.js";
 import { roomAllowsProvider } from "../shared/providers.js";
@@ -32,15 +33,15 @@ export function activeDjRestriction(room: Room, userId:string, now=Date.now()) {
 }
 export function trackEligibility(room:PolicyRoom, track:Track, now=Date.now(), fallback=false):string|null {
   const policy=effectiveRoomPolicy(room,now),state=radioState(room,now);
-  if (!roomAllowsProvider(policy,track.provider)) return "This music service is disabled.";
-  if (fallback && (!track.durationVerified || !track.durationMs || track.isLive)) return "Fallback needs a verified finite track.";
+  if (!roomAllowsProvider(policy,track.provider)) return serverT("this_music_service_is_disabled");
+  if (fallback && (!track.durationVerified || !track.durationMs || track.isLive)) return serverT("fallback_needs_a_verified_finite_track");
   if (policy.maxTrackMinutes && state.exceptions[track.id] !== (room.policyRevision??0)) {
-    if (!track.durationVerified || !track.durationMs || track.isLive) return "Duration is unknown or live. A moderator exception is required.";
-    if (track.durationMs>policy.maxTrackMinutes*60_000) return `Longer than the ${policy.maxTrackMinutes}-minute limit.`;
+    if (!track.durationVerified || !track.durationMs || track.isLive) return serverT("duration_is_unknown_or_live_a_moderator_exception_is_required");
+    if (track.durationMs>policy.maxTrackMinutes*60_000) return serverT("longer_than_the_value1_minute_limit", { value1: policy.maxTrackMinutes });
   }
   if (policy.repeatWindowMinutes) {
     const boundary=now-policy.repeatWindowMinutes*60_000;
-    if (recordingKeys(track).some(key=>(state.repeatLedger[key]??0)>boundary)) return "This recording is inside the repeat window.";
+    if (recordingKeys(track).some(key=>(state.repeatLedger[key]??0)>boundary)) return serverT("this_recording_is_inside_the_repeat_window");
   }
   return null;
 }

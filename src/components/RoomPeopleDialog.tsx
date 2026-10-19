@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { X } from "lucide-react";
@@ -24,6 +25,7 @@ export function RoomPeopleDialog({ open, onOpenChange, users, currentUserId, djU
   anchor?: RefObject<HTMLElement | null>;
   participantActions?: (user: User) => ReactNode;
 }) {
+  const { t } = useTranslation("rooms");
   const mobile = useMediaQuery("(max-width: 640px)");
   const [query, setQuery] = useState("");
   useEffect(() => { if (!open) setQuery(""); }, [open]);
@@ -32,25 +34,25 @@ export function RoomPeopleDialog({ open, onOpenChange, users, currentUserId, djU
   const Title = mobile ? DialogTitle : Popover.Title;
   const Description = mobile ? DialogDescription : Popover.Description;
   const content = <>
-      <DialogHeader><Title>Room listeners</Title><Description>{users.length} {users.length === 1 ? "listener" : "listeners"}</Description></DialogHeader>
-      {users.length > 7 && <Input aria-label="Find a listener" placeholder="Find a listener" value={query} onChange={(event) => setQuery(event.target.value)} />}
+      <DialogHeader><Title>{t("roomPeopleDialog.roomListeners")}</Title><Description>{t("roomPeopleDialog.listenerCount", { count: users.length })}</Description></DialogHeader>
+      {users.length > 7 && <Input aria-label={t("roomPeopleDialog.findAListener")} placeholder={t("roomPeopleDialog.findAListener")} value={query} onChange={(event) => setQuery(event.target.value)} />}
       <div className="room-people-list">
-        {orderedUsers.map((user) => <div key={user.id} className="room-people-person-row"><Button variant="ghost" className="room-person" data-navigation-focus="room-listeners" aria-label={`Open ${user.name}'s profile`} onClick={() => { onOpenChange(false); onOpenProfile(user.id); }}>
+        {orderedUsers.map((user) => <div key={user.id} className="room-people-person-row"><Button variant="ghost" className="room-person" data-navigation-focus="room-listeners" aria-label={t("roomPeopleDialog.openNameSProfile", { name: user.name })} onClick={() => { onOpenChange(false); onOpenProfile(user.id); }}>
           <Avatar user={user} size={40} />
-          <span className="room-person-name"><strong>{user.name}</strong>{user.id === currentUserId && <small>You</small>}</span>
+          <span className="room-person-name"><strong>{user.name}</strong>{user.id === currentUserId && <small>{t("roomPeopleDialog.you")}</small>}</span>
           <span className="room-person-badges">
-            {user.id === djUserId && <Badge>On air</Badge>}
-            {user.id === ownerUserId ? <Badge variant="secondary">Owner</Badge> : moderatorUserIds.includes(user.id) && <Badge variant="secondary">Moderator</Badge>}
+            {user.id === djUserId && <Badge>{t("roomPeopleDialog.onAir")}</Badge>}
+            {user.id === ownerUserId ? <Badge variant="secondary">{t("roomPeopleDialog.owner")}</Badge> : moderatorUserIds.includes(user.id) && <Badge variant="secondary">{t("roomPeopleDialog.moderator")}</Badge>}
           </span>
         </Button>{participantActions?.(user)}</div>)}
-        {orderedUsers.length === 0 && <p className="room-people-empty">No listeners match that name.</p>}
+        {orderedUsers.length === 0 && <p className="room-people-empty">{t("roomPeopleDialog.noListenersMatchThatName")}</p>}
       </div>
   </>;
   if (mobile) return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="room-people-dialog room-people-sheet" finalFocus={finalFocus}>{content}</DialogContent></Dialog>;
   return <Popover.Root open={open} onOpenChange={onOpenChange}>
     <Popover.Portal><Popover.Positioner anchor={anchor || finalFocus} positionMethod="fixed" side="bottom" align="start" sideOffset={8} className="room-people-positioner">
       <Popover.Popup className="room-people-dialog room-people-popover" finalFocus={finalFocus}>
-        {content}<Popover.Close render={<Button variant="ghost" size="icon" className="room-people-close" aria-label="Close room listeners" />}><X /></Popover.Close>
+        {content}<Popover.Close render={<Button variant="ghost" size="icon" className="room-people-close" aria-label={t("roomPeopleDialog.closeRoomListeners")} />}><X /></Popover.Close>
       </Popover.Popup>
     </Popover.Positioner></Popover.Portal>
   </Popover.Root>;

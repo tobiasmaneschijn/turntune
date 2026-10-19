@@ -4,6 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Store } from "./store.js";
+import { ResourcePolicyStore } from "./resource-policy.js";
+import { DEFAULT_PLAN_LIMITS } from "../shared/resource-policy.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { changePrivateLibrary, emptyLibrary, libraryMutationSchema } from "./private-library.js";
 const track = { provider: "youtube" as const, providerId: "dQw4w9WgXcQ", title: "A saved recording" };
@@ -23,7 +25,11 @@ test("picks and sets are idempotent, ordered, bounded and explicitly deletable",
   library = changePrivateLibrary(library, { type: "rename-set", id, name: "Closing" });
   assert.equal(library.sets[0].name, "Closing");
   assert.deepEqual(changePrivateLibrary(library, { type: "clear-library" }), emptyLibrary());
-  assert.equal(libraryMutationSchema.safeParse({ type: "save-set", id, name: "Too long", tracks: Array(51).fill(track) }).success, false);
+  assert.equal(libraryMutationSchema.safeParse({ type: "save-set", id, name: "Too long", tracks: Array(101).fill(track) }).success, false);
+  const smallerPlan={...DEFAULT_PLAN_LIMITS,libraryPicks:1};
+  assert.throws(()=>changePrivateLibrary(library,{type:"save-pick",track:other},30,smallerPlan),/saved favorites are full/);
+  assert.equal(changePrivateLibrary(library,{type:"delete-pick",id:library.picks[0].id},30,smallerPlan).picks.length,0);
+  assert.equal(changePrivateLibrary(library,{type:"save-pick",track:other},30,{...smallerPlan,libraryPicks:2}).picks.length,2);
 });
 test("local fallback persists library across restart, isolates owners and serializes concurrent writes", async (t) => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "soundspin-library-test-"));
@@ -56,7 +62,7 @@ test("database revision conflict merges a concurrent writer instead of overwriti
       }
     }; return query;
   } } as unknown as SupabaseClient;
-  const store = new Store({ supabase: client });
+  const store = new Store({ supabase: client,resourcePolicies:new ResourcePolicyStore(null) });
   const saved = await store.updatePrivateLibrary("alice", { type: "save-pick", track });
   assert.deepEqual(saved.picks.map((pick) => pick.track.title).sort(), ["A saved recording", "Concurrent pick"]);
   assert.equal(updates, 2); assert.equal(row.revision, 3);
@@ -89,7 +95,7 @@ test("explicit owner reset repairs corrupt metadata or unsafe legacy revisions w
       };
       return query;
     } } as unknown as SupabaseClient;
-    const store = new Store({ supabase: client });
+    const store = new Store({ supabase: client,resourcePolicies:new ResourcePolicyStore(null) });
     await assert.rejects(store.getPrivateLibrary("alice"), /Clear your library/);
     await assert.rejects(store.updatePrivateLibrary("alice", { type: "save-pick", track }), /Clear your library/);
     assert.equal(writes, 0);

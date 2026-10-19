@@ -1,12 +1,16 @@
+import i18n from "../i18n";
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { AlertCircle, Heart, Info, ThumbsDown, Maximize2, Minimize2, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX } from "lucide-react";
+import { AlertCircle, CircleHelp, Heart, Info, ThumbsDown, Maximize2, Minimize2, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX } from "lucide-react";
 import { PauseIcon, PlayIcon, SkipIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { Slider } from "./ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { TrackArtwork, trackArtworkUrl } from "./TrackArtwork";
 import { TrackDetailsDialog } from "./TrackDetailsDialog";
 import { DeferredDialog } from "./DeferredDialog";
 import { playbackFeedback, localPlaybackAligned } from "../playback-feedback";
+import { providerLabel } from "../music-presentation";
 import type { ComponentType } from "react";
 import type { SocketReply } from "../socket-request";
 import "../styles/playback-qol.css";
@@ -16,7 +20,7 @@ import { AppleMusicPlayer } from "./AppleMusicPlayer";
 import { resetProviderSession, setProviderAccount } from "../provider-session";
 import { YouTubePlayer } from "./YouTubePlayer";
 import { MixcloudPlayer } from "./MixcloudPlayer";
-import { allowedRoomProviders, PROVIDER_LABELS, roomAllowsProvider } from "../../shared/providers";
+import { allowedRoomProviders, roomAllowsProvider } from "../../shared/providers";
 import type { PlayerStatus } from "../provider-playback";
 import { requestJson } from "../lib/authenticated-http";
 import { socket } from "../socket";
@@ -41,10 +45,6 @@ export interface NowPlayingLocalState {
   localVolumeSupported?: boolean;
 }
 
-function providerLabel(provider: Provider) {
-  return PROVIDER_LABELS[provider];
-}
-
 function formatPlaybackTime(seconds: number) {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
   const rounded = Math.floor(seconds);
@@ -67,6 +67,7 @@ function BangOMeter({
   roomConnected: boolean;
   requestAction: typeof defaultRequestAction;
 }) {
+  const { t } = useTranslation("music");
   const track = snapshot.room.playback.track;
   const [pending, setPending] = useState(false);
   const [voteError, setVoteError] = useState("");
@@ -99,26 +100,24 @@ function BangOMeter({
   const sentiment = votes.length
     ? votes.reduce<number>((total, vote) => total + vote, 0) / votes.length
     : 0;
-  const participation = eligibleListenerCount
-    ? votes.length / eligibleListenerCount
-    : 0;
   const currentVote = vibe?.votes[currentUserId];
   currentVoteRef.current = currentVote || 0;
   const addedByCurrentUser = track?.addedBy.id === currentUserId;
+  const voteDisabled = addedByCurrentUser || !roomConnected || pending;
   const positiveVotes = votes.filter((vote) => vote === 1).length;
   const negativeVotes = votes.filter((vote) => vote === -1).length;
   const label =
-    !votes.length ? (addedByCurrentUser ? "Listeners rate your track" : "Waiting on the room") :
-    votes.length === 1 ? "First reaction is in" :
-    sentiment >= .6 ? "Certified banger" :
-    sentiment >= .2 ? "Room is feeling it" :
-    sentiment <= -.6 ? "Not landing" :
-    sentiment <= -.2 ? "Cooling off" :
-    "Split room";
-  const pulseShape = [9, 13, 18, 25, 31, 25, 18, 13, 9];
-  const aggregate = useCoalescedDecoration(`${sentiment}:${participation}:${votes.length}`, decorationsEnabled);
-  const [decorativeSentiment, decorativeParticipation, decorativeVotes] = aggregate.split(":").map(Number);
-  const pulseTone = !decorativeVotes ? "idle" : decorativeSentiment >= .2 ? "positive" : decorativeSentiment <= -.2 ? "negative" : "mixed";
+    !votes.length ? (addedByCurrentUser ? t("nowPlaying.rateYourTrack") : t("nowPlaying.waitingReactions")) :
+    votes.length === 1 ? t("nowPlaying.firstReaction") :
+    sentiment >= .6 ? t("nowPlaying.bangerVerdict") :
+    sentiment >= .2 ? t("nowPlaying.positiveVerdict") :
+    sentiment <= -.6 ? t("nowPlaying.negativeVerdict") :
+    sentiment <= -.2 ? t("nowPlaying.coolingVerdict") :
+    t("nowPlaying.splitVerdict");
+  const aggregate = useCoalescedDecoration(JSON.stringify([track?.id, sentiment]), decorationsEnabled);
+  const [decorativeTrackId, decorativeSentiment] = JSON.parse(aggregate) as [string | null, number];
+  // A new track or an empty room must not inherit the previous needle position.
+  const needleSentiment = votes.length && decorativeTrackId === track?.id ? decorativeSentiment : sentiment;
   const confirmAccepted = () => {
     const intent = requestedVote.current;
     if (!intent?.acknowledged || intent.trackId !== trackRef.current || intent.value !== currentVoteRef.current) return;
@@ -133,13 +132,6 @@ function BangOMeter({
     const timer = window.setTimeout(() => setAcceptedAccent(0), 180);
     return () => window.clearTimeout(timer);
   }, [acceptedAccent, decorationsEnabled]);
-  const pulseHeights = pulseShape.map((height, index) => {
-    const direction = (index - 4) / 4;
-    const lean = 1 + decorativeSentiment * direction * .65;
-    const energy = .56 + decorativeParticipation * .44;
-    return Math.max(4, Math.round(height * lean * energy));
-  });
-
   const vote = (value: -1 | 1) => {
     if (addedByCurrentUser || !roomConnected || !track || pendingRef.current) return;
     const requestTrackId = track.id;
@@ -151,59 +143,85 @@ function BangOMeter({
       if (!activeRef.current || trackRef.current !== requestTrackId) return;
       pendingRef.current = false;
       setPending(false);
-      if (!result.ok) { requestedVote.current = null; setVoteError(result.error || "Could not save your reaction. Try again."); }
+      if (!result.ok) { requestedVote.current = null; setVoteError(result.error || i18n.t("music:nowPlaying.reactionFailed")); }
       else if (requestedVote.current?.trackId === requestTrackId) { requestedVote.current.acknowledged = true; confirmAccepted(); }
     });
   };
 
   return (
-    <section ref={meterRef} className={`bang-meter ${decorationsEnabled ? "" : "decorations-off"}`} aria-label="Bang-O-Meter for the current track">
+    <section ref={meterRef} className={`bang-meter ${decorationsEnabled ? "" : "decorations-off"}`} aria-label={t("nowPlaying.meterLabel")}>
       <div className="bang-meter-heading">
-        <span>Bang-O-Meter</span>
-        <small>{votes.length} of {eligibleListenerCount} reacted</small>
+        <span>{t("nowPlaying.meterTitle")}</span>
+        <small>{t("nowPlaying.reactionCount", { count: votes.length, total: eligibleListenerCount })}</small>
       </div>
       <div
         className={`bang-meter-body ${addedByCurrentUser ? "is-readonly" : ""}`}
         role="group"
-        aria-label={addedByCurrentUser ? "Listener reactions" : "React to the current track"}
+        aria-label={addedByCurrentUser ? t("nowPlaying.listenerReactions") : t("nowPlaying.reactLabel")}
       >
-        <button
-          type="button"
-          className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""} ${acceptedAccent === -1 ? "is-accepted" : ""}`}
-          aria-pressed={currentVote === -1}
-          disabled={addedByCurrentUser || !roomConnected || pending}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(-1)}
+      <div className="bang-meter-face">
+        <div
+          key={track?.id}
+          className="bang-gauge"
+          data-empty={!votes.length}
+          role="img"
+          aria-label={t("nowPlaying.reactionSummary", { positive: positiveVotes, negative: negativeVotes })}
         >
-          <ThumbsDown size={16} />
-          <span>Not it</span>
-          <strong>{negativeVotes}</strong>
-        </button>
-        <div className="bang-pulse-summary">
-          <div
-            className={`bang-pulse bang-pulse-${pulseTone}`}
-            style={{ opacity: decorativeVotes ? .58 + decorativeParticipation * .42 : .3 }}
-            aria-hidden="true"
-          >
-            {pulseHeights.map((height, index) => <i key={index} style={{ height: `${height}px` }} />)}
-          </div>
-          <strong>{label}</strong>
+          <svg viewBox="0 0 320 112" aria-hidden="true">
+            <path className="bang-gauge-arc" d="M 72.99 63.43 A 96 96 0 0 1 247.01 63.43" />
+            {Array.from({ length: 11 }, (_, index) => {
+              const angle = (-65 + index * 13) * Math.PI / 180;
+              return <line
+                key={index}
+                className={`bang-gauge-tick ${index >= 7 ? "bang-gauge-tick-positive" : ""}`}
+                x1={160 + Math.sin(angle) * 89}
+                y1={104 - Math.cos(angle) * 89}
+                x2={160 + Math.sin(angle) * 96}
+                y2={104 - Math.cos(angle) * 96}
+              />;
+            })}
+            <g className="bang-gauge-needle" style={{ transform: `rotate(${needleSentiment * 65}deg)`, opacity: votes.length ? 1 : .3 }}>
+              <line x1="160" y1="104" x2="160" y2="28" />
+            </g>
+            <circle className="bang-gauge-pivot" cx="160" cy="104" r="4" />
+          </svg>
+          <div className="bang-gauge-scale" aria-hidden="true"><span>{t("nowPlaying.lame")}</span><span>{t("nowPlaying.banger")}</span></div>
         </div>
-        <button
-          type="button"
-          className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""} ${acceptedAccent === 1 ? "is-accepted" : ""}`}
-          aria-pressed={currentVote === 1}
-          disabled={addedByCurrentUser || !roomConnected || pending}
-          title={addedByCurrentUser ? "Only listeners can react to a track you added" : undefined}
-          onClick={() => vote(1)}
-        >
-          <Heart size={16} />
-          <span>Love it</span>
-          <strong>{positiveVotes}</strong>
-        </button>
+        <strong className="bang-meter-verdict" aria-live="polite">{label}</strong>
       </div>
-      {addedByCurrentUser && <small className="bang-owner-note sr-only">Only other listeners can react to your track.</small>}
-      {pending && <small role="status">Saving your reaction…</small>}
+        <Tooltip>
+          <TooltipTrigger
+            render={<button disabled={voteDisabled} />}
+            type="button"
+            className={`bang-reaction bang-negative ${currentVote === -1 ? "active" : ""} ${acceptedAccent === -1 ? "is-accepted" : ""}`}
+            aria-label={t("nowPlaying.voteLame")}
+            aria-pressed={currentVote === -1}
+            disabled={voteDisabled}
+            title={addedByCurrentUser ? t("nowPlaying.ownerVoteTitle") : undefined}
+            onClick={() => vote(-1)}
+          >
+            <ThumbsDown size={20} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>{t("nowPlaying.lame")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={<button disabled={voteDisabled} />}
+            type="button"
+            className={`bang-reaction bang-positive ${currentVote === 1 ? "active" : ""} ${acceptedAccent === 1 ? "is-accepted" : ""}`}
+            aria-label={t("nowPlaying.voteBanger")}
+            aria-pressed={currentVote === 1}
+            disabled={voteDisabled}
+            title={addedByCurrentUser ? t("nowPlaying.ownerVoteTitle") : undefined}
+            onClick={() => vote(1)}
+          >
+            <Heart size={20} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>{t("nowPlaying.banger")}</TooltipContent>
+        </Tooltip>
+      </div>
+      {addedByCurrentUser && <small className="bang-owner-note sr-only">{t("nowPlaying.ownerVoteHelp")}</small>}
+      {pending && <small role="status">{t("nowPlaying.savingReaction")}</small>}
       {voteError && <small role="alert">{voteError}</small>}
     </section>
   );
@@ -255,6 +273,7 @@ export function NowPlaying({
     mixcloud: ComponentType<React.ComponentProps<typeof MixcloudPlayer>>;
   }>;
 }) {
+  const { t } = useTranslation("music");
   useEffect(() => {
     setProviderAccount(currentUserId); setSpotifyWebStarted(false);
     setConnections({ loaded: false, spotifyConfigured: false, spotifyConnected: false, spotifyProfile: null, appleConfigured: false });
@@ -263,7 +282,9 @@ export function NowPlaying({
   const track = playback.track;
   const volume = userSettings.playback.defaultVolume;
   const [roomNotificationsMuted] = useRoomNotificationMuted(currentUserId, snapshot.room.id);
-  const playbackPreference = userSettings.playback.preference;
+  const spotifyEnabled = snapshot.room.settings.spotifyEnabled === true;
+  const roomSlug = snapshot.room.id;
+  const playbackPreference = !spotifyEnabled && userSettings.playback.preference.startsWith("spotify") ? "source" : userSettings.playback.preference;
   const [spotifyWebStarted, setSpotifyWebStarted] = useState(false);
   const [fallbackApprovedTrackId, setFallbackApprovedTrackId] = useState("");
   const unavailableNotifiedTrackRef = useRef("");
@@ -300,6 +321,7 @@ export function NowPlaying({
   const statusIdentityRef = useRef("");
   const accessTokenRef = useRef(accessToken);
   const connectionRequestRef = useRef<AbortController | null>(null);
+  const spotifyOperationRef = useRef<AbortController | null>(null);
   accessTokenRef.current = accessToken;
   identityRef.current = identity;
   const Youtube = providerPlayers?.youtube || YouTubePlayer;
@@ -308,8 +330,15 @@ export function NowPlaying({
   const Apple = providerPlayers?.apple || AppleMusicPlayer;
   const Mixcloud = providerPlayers?.mixcloud || MixcloudPlayer;
 
+  useEffect(() => {
+    if (!spotifyEnabled) { void resetProviderSession("spotify"); setSpotifyWebStarted(false); }
+  }, [spotifyEnabled, roomSlug]);
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   useEffect(() => () => connectionRequestRef.current?.abort(), []);
+  useEffect(() => {
+    spotifyOperationRef.current?.abort(); spotifyOperationRef.current = null;
+    return () => { spotifyOperationRef.current?.abort(); spotifyOperationRef.current = null; };
+  }, [spotifyEnabled, roomSlug, accessToken]);
   useEffect(() => { if (volume > 0) lastAudibleVolumeRef.current = volume; }, [volume]);
   useEffect(() => {
     pendingCommandRef.current = "";
@@ -328,7 +357,7 @@ export function NowPlaying({
       const expected = playback.position + (playback.playing ? Math.max(0, Date.now() - playback.updatedAt) / 1000 : 0);
       if (localPlaybackAligned(status, playback.playing, expected)) {
         syncStartedRef.current = null;
-        setSyncFeedback("Playback aligned with the room");
+        setSyncFeedback(i18n.t("music:nowPlaying.syncAligned"));
       }
     }
   }, [identity, playback.position, playback.playing, playback.updatedAt, track?.id]);
@@ -340,7 +369,7 @@ export function NowPlaying({
     if (!syncFeedback || syncStartedRef.current === null) return;
     const timeout = window.setTimeout(() => {
       syncStartedRef.current = null;
-      setSyncFeedback("Sync requested · check your playback or try again");
+      setSyncFeedback(i18n.t("music:nowPlaying.syncCheck"));
     }, 8000);
     return () => window.clearTimeout(timeout);
   }, [syncFeedback, identity]);
@@ -366,21 +395,21 @@ export function NowPlaying({
     void requestJson<{
       spotify?: { configured?: boolean; connected?: boolean; profile?: { displayName: string; product?: string } | null };
       apple?: { configured?: boolean };
-    }>("/api/music/connections", { accessToken, signal: controller.signal, errorMessage: "Could not load music connections." })
+    }>("/api/music/connections", { accessToken, headers: { "x-soundspin-room": roomSlug }, signal: controller.signal, errorMessage: i18n.t("music:nowPlaying.connectionsFailed") })
       .then((payload) => {
-        if (!aliveRef.current || accessTokenRef.current !== requestToken) return;
+        if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== requestToken) return;
         setConnections({
           loaded: true,
-          spotifyConfigured: Boolean(payload.spotify?.configured),
-          spotifyConnected: Boolean(payload.spotify?.connected),
-          spotifyProfile: payload.spotify?.profile || null,
+          spotifyConfigured: spotifyEnabled && Boolean(payload.spotify?.configured),
+          spotifyConnected: spotifyEnabled && Boolean(payload.spotify?.connected),
+          spotifyProfile: spotifyEnabled ? payload.spotify?.profile || null : null,
           appleConfigured: Boolean(payload.apple?.configured)
         });
       })
       .catch(() => {
-        if (!controller.signal.aborted && aliveRef.current && accessTokenRef.current === requestToken) setConnectionError("Could not check your music connections. Try again.");
+        if (!controller.signal.aborted && aliveRef.current && accessTokenRef.current === requestToken) setConnectionError(i18n.t("music:nowPlaying.connectionCheckFailed"));
       });
-  }, [accessToken]);
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   useEffect(loadConnections, [loadConnections]);
 
@@ -390,33 +419,36 @@ export function NowPlaying({
   }, [loadConnections]);
 
   const connectSpotify = useCallback(() => {
-    if (!accessToken) return;
-    void requestJson<{ url?: string }>(`/api/spotify/connect?returnTo=${encodeURIComponent(location.pathname)}`, {
-      accessToken, errorMessage: "Could not connect Spotify."
+    if (!accessToken || !spotifyEnabled || spotifyOperationRef.current) return;
+    const controller = new AbortController(); spotifyOperationRef.current = controller;
+    void requestJson<{ url?: string }>(`/api/spotify/connect?roomSlug=${encodeURIComponent(roomSlug)}&returnTo=${encodeURIComponent(location.pathname)}`, {
+      accessToken, signal: controller.signal, headers: { "x-soundspin-room": roomSlug }, errorMessage: i18n.t("music:nowPlaying.spotifyConnectFailed")
     }).then((payload) => {
-      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
-      if (!payload.url) throw new Error("Could not connect Spotify.");
+      if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== accessToken) return;
+      if (!payload.url) throw new Error(i18n.t("music:nowPlaying.spotifyConnectFailed"));
       location.assign(payload.url);
-    }).catch((error) => setPlaybackError(error instanceof Error ? error.message : "Could not connect Spotify."));
-  }, [accessToken]);
+    }).catch((error) => { if (!controller.signal.aborted) setPlaybackError(error instanceof Error ? error.message : i18n.t("music:nowPlaying.spotifyConnectFailed")); })
+      .finally(() => { if (spotifyOperationRef.current === controller) spotifyOperationRef.current = null; });
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   const disconnectSpotify = useCallback(() => {
-    if (!accessToken) return;
+    if (!accessToken || !spotifyEnabled || spotifyOperationRef.current) return;
+    const controller = new AbortController(); spotifyOperationRef.current = controller;
     void fetch("/api/spotify/connection", {
       method: "DELETE",
-      signal: AbortSignal.timeout(15_000),
-      headers: { Authorization: `Bearer ${accessToken}` }
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+      headers: { Authorization: `Bearer ${accessToken}`, "x-soundspin-room": roomSlug }
     }).then((response) => {
-      if (!response.ok) throw new Error("Could not disconnect Spotify.");
-      if (!aliveRef.current || accessTokenRef.current !== accessToken) return;
+      if (!response.ok) throw new Error(i18n.t("music:nowPlaying.spotifyDisconnectFailed"));
+      if (controller.signal.aborted || !aliveRef.current || accessTokenRef.current !== accessToken) return;
       connectionRequestRef.current?.abort();
       void resetProviderSession("spotify");
       setSpotifyWebStarted(false);
       setConnections((current) => ({ ...current, spotifyConnected: false, spotifyProfile: null }));
     }).catch((error) => {
-      setPlaybackError(error instanceof Error ? error.message : "Could not disconnect Spotify.");
-    });
-  }, [accessToken]);
+      if (!controller.signal.aborted) setPlaybackError(error instanceof Error ? error.message : i18n.t("music:nowPlaying.spotifyDisconnectFailed"));
+    }).finally(() => { if (spotifyOperationRef.current === controller) spotifyOperationRef.current = null; });
+  }, [accessToken, spotifyEnabled, roomSlug]);
 
   const runCommand = (command: string, event: string, payload: unknown) => {
     if (!roomConnected || !canControlPlayback || pendingCommandRef.current || !track) return;
@@ -430,28 +462,28 @@ export function NowPlaying({
       setPendingCommand("");
       if (!result.ok) {
         setSeekPreview(null);
-        setPlaybackError(result.error || "Could not update room playback.");
+        setPlaybackError(result.error || i18n.t("music:nowPlaying.updateFailed"));
       }
     });
   };
 
   const update = (playing: boolean) => {
     const position = playback.position + (playback.playing ? (Date.now() - playback.updatedAt) / 1000 : 0);
-    runCommand(playing ? "Starting room…" : "Pausing room…", "playback:update", { trackId: track?.id, playing, position });
+    runCommand(playing ? i18n.t("music:nowPlaying.starting") : i18n.t("music:nowPlaying.pausing"), "playback:update", { trackId: track?.id, playing, position });
   };
 
   const commitSeek = (value: number | readonly number[]) => {
     if (!canControlPlayback || !track) return;
     const position = typeof value === "number" ? value : value[0];
     if (!Number.isFinite(position)) return;
-    runCommand("Seeking room…", "playback:update", { trackId: track.id, playing: playback.playing, position });
+    runCommand(i18n.t("music:nowPlaying.seeking"), "playback:update", { trackId: track.id, playing: playback.playing, position });
   };
 
   const syncPlayback = () => {
     setPlaybackError("");
     setProviderPlaybackError("");
     syncStartedRef.current = Date.now();
-    setSyncFeedback("Sync requested…");
+    setSyncFeedback(i18n.t("music:nowPlaying.syncRequested"));
     window.dispatchEvent(new Event("soundspin:playback-sync"));
     setSyncRevision((revision) => revision + 1);
   };
@@ -496,7 +528,7 @@ export function NowPlaying({
     effectiveProvider === "spotify" ||
     (!track && spotifyWebStarted)
   );
-  const providerName = effectiveProvider ? providerLabel(effectiveProvider) : playbackPreference === "source" ? "Room source" : providerLabel(preferredProvider);
+  const providerName = effectiveProvider ? providerLabel(effectiveProvider) : playbackPreference === "source" ? t("nowPlaying.roomSource") : providerLabel(preferredProvider);
   const localVolumeSupported = effectiveProvider !== "mixcloud";
   const locallyMuted = localVolumeSupported && volume === 0;
   const feedback = playbackFeedback({
@@ -527,7 +559,7 @@ export function NowPlaying({
     playerStatus.playing === true && !playerStatus.buffering ? "playing" :
     !playback.playing ? "paused" : "loading";
   useEffect(() => {
-    onLocalStateChange?.({ providerName, providerState, audioState, statusText: track ? feedback.text : "Waiting for the next track", statusTone: feedback.tone, muted: locallyMuted, localVolumeSupported });
+    onLocalStateChange?.({ providerName, providerState, audioState, statusText: track ? feedback.text : i18n.t("music:nowPlaying.waitingTrack"), statusTone: feedback.tone, muted: locallyMuted, localVolumeSupported });
   }, [onLocalStateChange, providerName, providerState, audioState, feedback.text, feedback.tone, Boolean(track), locallyMuted, localVolumeSupported]);
   useEffect(() => {
     if (!webPlaybackAllowed) setSpotifyWebStarted(false);
@@ -538,24 +570,24 @@ export function NowPlaying({
   useEffect(() => {
     if (!providerFallback || !preferredAllowed || !track || !userSettings.notifications.unavailableTrack || unavailableNotifiedTrackRef.current === track.id) return;
     unavailableNotifiedTrackRef.current = track.id;
-    notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:fallback:${track.id}:${preferredProvider}`, title: "Playback fallback needed", body: `${track.title} is not available on ${providerLabel(preferredProvider)}.`, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
+    notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:fallback:${track.id}:${preferredProvider}`, title: i18n.t("music:nowPlaying.fallbackNotification"), body: i18n.t("music:nowPlaying.fallbackNotificationBody", { title: track.title, provider: providerLabel(preferredProvider) }), backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
   }, [providerFallback, preferredAllowed, preferredProvider, track?.id, track?.title, userSettings.notifications.unavailableTrack, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id]);
 
   useEffect(() => {
     const message = localPlaybackError;
     if (!message || !userSettings.notifications.playbackErrors || playbackErrorNotifiedRef.current === message) return;
     playbackErrorNotifiedRef.current = message;
-    notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:playback-error:${track?.id}:${message}`, title: "Lydman playback error", body: message, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
+    notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:playback-error:${track?.id}:${message}`, title: i18n.t("music:nowPlaying.errorNotification"), body: message, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
   }, [localPlaybackError, userSettings.notifications.playbackErrors, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id, track?.id]);
 
   return (
     <>
       <section className={`now-playing panel ${compact ? "compact" : ""}`}>
       <div className="now-playing-heading">
-        <h2 className="section-kicker">Now playing</h2>
-        <Button variant="ghost" size="sm" type="button" onClick={onToggleCompact} title={compact ? "Focus the player" : "Give chat more room"}>
+        <h2 className="section-kicker">{t("nowPlaying.title")}</h2>
+        <Button variant="ghost" size="sm" type="button" onClick={onToggleCompact} title={compact ? t("nowPlaying.focusPlayerTitle") : t("nowPlaying.focusChatTitle")}>
           {compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
-          <span>{compact ? "Focus player" : "Focus chat"}</span>
+          <span>{compact ? t("nowPlaying.focusPlayer") : t("nowPlaying.focusChat")}</span>
         </Button>
       </div>
       {keepSpotifyWebMounted && (
@@ -567,6 +599,7 @@ export function NowPlaying({
           volume={volume}
           accessToken={accessToken!}
           userId={currentUserId}
+          roomSlug={roomSlug}
           preferredDeviceId={userSettings.playback.spotifyDeviceId}
           resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
           onEnded={handleEnded}
@@ -581,19 +614,19 @@ export function NowPlaying({
           <div className={`track-stage ${effectiveProvider === "spotify" && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""} ${effectiveProvider === "mixcloud" ? "has-mixcloud" : ""}`}>
             <TrackArtwork track={track} />
             {effectiveProvider === "spotify" && previewArtwork && (
-              <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={`${track.title} album artwork`} />
+              <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={t("nowPlaying.artwork", { title: track.title })} />
             )}
             {fallbackNeedsApproval ? (
               <div className="provider-player-shell fallback-player-shell">
-                <strong>Use the room source?</strong>
-                <small>No {providerLabel(preferredProvider)} match.</small>
-                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Play with {providerLabel(effectiveProvider!)}</Button>
+                <strong>{t("nowPlaying.useRoomSource")}</strong>
+                <small>{t("nowPlaying.noMatch", { provider: providerLabel(preferredProvider) })}</small>
+                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>{t("nowPlaying.playWith", { provider: providerLabel(effectiveProvider!) })}</Button>
               </div>
             ) : fallbackSuppressed ? (
               <div className="provider-player-shell fallback-player-shell">
-                <strong>Track unavailable</strong>
-                <small>No {providerLabel(preferredProvider)} match. Playback on this device is paused.</small>
-                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>Use {providerName} for this track</Button>
+                <strong>{t("nowPlaying.unavailable")}</strong>
+                <small>{t("nowPlaying.noMatchPaused", { provider: providerLabel(preferredProvider) })}</small>
+                <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>{t("nowPlaying.useForTrack", { provider: providerName })}</Button>
               </div>
             ) : effectiveProvider === "spotify" && effectiveMapping ? (
               spotifyReady ? (
@@ -606,6 +639,7 @@ export function NowPlaying({
                     volume={volume}
                     accessToken={accessToken!}
                     userId={currentUserId}
+                    roomSlug={roomSlug}
                     preferredDeviceId={userSettings.playback.spotifyDeviceId}
                     resumeAfterReconnect={userSettings.playback.resumeAfterReconnect}
                     onEnded={handleEnded}
@@ -616,8 +650,8 @@ export function NowPlaying({
                 )
               ) : (
                 <div className="provider-player-shell spotify-player-shell">
-                  <strong>Connect Spotify to listen</strong>
-                  <Button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>Connect Spotify</Button>
+                  <strong>{t("nowPlaying.connectSpotifyHelp")}</strong>
+                  <Button type="button" onClick={connectSpotify} disabled={!connections.spotifyConfigured}>{t("nowPlaying.connectSpotify")}</Button>
                 </div>
               )
             ) : effectiveProvider === "apple" && effectiveMapping && accessToken ? (
@@ -660,8 +694,8 @@ export function NowPlaying({
               />
             ) : (
               <div className="provider-player-shell">
-                <strong>No playable version is available</strong>
-                <small>Choose another playback provider.</small>
+                <strong>{t("nowPlaying.noVersion")}</strong>
+                <small>{t("nowPlaying.chooseProvider")}</small>
               </div>
             )}
           </div>
@@ -670,7 +704,7 @@ export function NowPlaying({
             <div>
               <div className="current-track-title">
                 <h3 title={track.title}>{track.title}</h3>
-                <Button ref={detailsButtonRef} variant="ghost" size="icon" className="track-details-action" aria-label="Track details" title="Track details" onClick={() => setDetailsOpen(true)}><Info size={16} /></Button>
+                <Button ref={detailsButtonRef} variant="ghost" size="icon" className="track-details-action" aria-label={t("nowPlaying.trackDetails")} title={t("nowPlaying.trackDetails")} onClick={() => setDetailsOpen(true)}><Info size={16} /></Button>
               </div>
               <p className="current-track-meta">
                 {track.artist && <span className="current-track-artist" title={track.artist}>{track.artist}</span>}
@@ -680,20 +714,10 @@ export function NowPlaying({
                 ) : providerLabel(track.provider)}
               </p>
             </div>
-            <div className="player-controls">
-              <Button disabled={controlsUnavailable} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? "Pause room" : "Play room"} aria-describedby="playback-control-help" aria-busy={Boolean(pendingCommand)}>
-                {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-              </Button>
-              <Button variant="outline" className="round-button" size="icon" disabled={!roomConnected || syncFeedback === "Sync requested…"} onClick={syncPlayback} aria-label="Sync playback with room" title="Sync playback with room" aria-busy={syncFeedback === "Sync requested…"}>
-                <RefreshCw size={19} />
-              </Button>
-              <Button variant="outline" disabled={controlsUnavailable} className="round-button" size="icon" onClick={() => runCommand("Skipping track…", "queue:next", { trackId: track.id })} aria-label="Next track" aria-describedby="playback-control-help">
-                <SkipIcon size={20} />
-              </Button>
-            </div>
           </div>
+          <div className="player-transport">
           <div className="playback-progress">
-            {isLive ? <span>Live</span> : (
+            {isLive ? <span>{t("nowPlaying.live")}</span> : (
               <>
                 <span>{formatPlaybackTime(shownPosition)}</span>
                 <Slider
@@ -702,8 +726,8 @@ export function NowPlaying({
                   step={1}
                   value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
                   disabled={controlsUnavailable || !playerStatus.duration}
-                  aria-label="Playback position"
-                  getAriaValueText={(_formatted, value) => `${formatPlaybackTime(value)} of ${formatPlaybackTime(playerStatus.duration)}`}
+                  aria-label={t("nowPlaying.position")}
+                  getAriaValueText={(_formatted, value) => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
                   onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
                   onValueCommitted={commitSeek}
                 />
@@ -711,52 +735,64 @@ export function NowPlaying({
               </>
             )}
           </div>
-          <div className="player-footer">
-            <div className="sync-status" data-status={feedback.tone} role="status">
+          <div className="player-controls" role="group" aria-label={t("nowPlaying.controls")}>
+            <Button variant="ghost" className="round-button" size="icon" disabled={!roomConnected || syncStartedRef.current !== null} onClick={syncPlayback} aria-label={t("nowPlaying.sync")} title={t("nowPlaying.sync")} aria-busy={syncStartedRef.current !== null}>
+              <RefreshCw size={19} />
+            </Button>
+            <Button disabled={controlsUnavailable} className="round-button primary" size="icon-lg" onClick={() => update(!playback.playing)} aria-label={playback.playing ? t("nowPlaying.pause") : t("nowPlaying.play")} aria-describedby="playback-control-help" aria-busy={Boolean(pendingCommand)}>
+              {playback.playing ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
+            </Button>
+            <Button variant="ghost" disabled={controlsUnavailable} className="round-button" size="icon" onClick={() => runCommand(i18n.t("music:nowPlaying.skipping"), "queue:next", { trackId: track.id })} aria-label={t("nowPlaying.next")} aria-describedby="playback-control-help">
+              <SkipIcon size={20} />
+            </Button>
+          </div>
+          </div>
+          <div className="player-utilities">
+            <div className="sync-status" data-status={feedback.tone} data-expanded={feedback.tone === "error" || feedback.tone === "pending" || locallyMuted || !playback.playing} role="status" title={feedback.text}>
               <span />{feedback.text}
             </div>
-            {providerFallback && <small className="provider-fallback">{preferredAllowed ? `No ${providerLabel(preferredProvider)} match` : `${providerLabel(preferredProvider)} is disabled in this room`} · {fallbackNeedsApproval ? "awaiting your choice" : fallbackSuppressed ? "local playback silent" : `using ${providerLabel(effectiveProvider!)}`}</small>}
+            {providerFallback && <small className="provider-fallback">{t("nowPlaying.fallbackStatus", { context: `${preferredAllowed ? "noMatch" : "disabled"}${fallbackNeedsApproval ? "Awaiting" : fallbackSuppressed ? "Silent" : "Using"}`, preferredProvider: providerLabel(preferredProvider), effectiveProvider: effectiveProvider ? providerLabel(effectiveProvider) : providerName })}</small>}
             <div className="volume-control">
-              <Button variant="ghost" size="icon" disabled={!localVolumeSupported} onClick={toggleMute} aria-label={locallyMuted ? "Unmute my audio" : "Mute my audio"} aria-pressed={locallyMuted}>{locallyMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</Button>
+              <Button variant="ghost" size="icon" disabled={!localVolumeSupported} onClick={toggleMute} aria-label={locallyMuted ? t("nowPlaying.unmute") : t("nowPlaying.mute")} aria-pressed={locallyMuted}>{locallyMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</Button>
               <Slider
                 min={0}
                 max={100}
                 value={[volume]}
-                aria-label="Volume"
+                aria-label={t("nowPlaying.volume")}
                 disabled={!localVolumeSupported}
-                getAriaValueText={(_formatted, value) => `${value} percent`}
+                getAriaValueText={(_formatted, value) => i18n.t("music:nowPlaying.percent", { value })}
                 onValueChange={(value) => setVolume(typeof value === "number" ? value : value[0])}
               />
             </div>
-            {!localVolumeSupported && <small className="playback-control-help">Use your device volume for Mixcloud.</small>}
-          </div>
-          <div className="player-secondary-actions">
+            {!localVolumeSupported && <small className="playback-control-help">{t("nowPlaying.mixcloudVolume")}</small>}
             <details className="playback-options">
-              <summary>Controls help</summary>
-              <p id="playback-control-help" className="playback-control-help">{!roomConnected ? "Reconnect to control playback." : !localVolumeSupported ? canControlPlayback ? "Playback controls affect the room." : "The DJ controls playback." : canControlPlayback ? "Playback controls affect the room. Volume and mute are local." : "The DJ controls playback. Volume and mute are local."}</p>
+              <summary aria-label={t("nowPlaying.controlsHelp")} title={t("nowPlaying.controlsHelp")}><CircleHelp size={18} aria-hidden="true" /><span>{t("nowPlaying.controlsHelp")}</span></summary>
+              <p id="playback-control-help" className="playback-control-help">{!roomConnected ? t("nowPlaying.reconnectHelp") : !localVolumeSupported ? canControlPlayback ? t("nowPlaying.roomControlsHelp") : t("nowPlaying.djControlsHelp") : canControlPlayback ? t("nowPlaying.localVolumeHelp") : t("nowPlaying.djLocalVolumeHelp")}</p>
             </details>
-            {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={`Playback settings · Playback source: ${providerName}${playbackPreference === "spotify-desktop" ? " Desktop" : ""}`} onClick={onOpenSettings}><SettingsIcon size={14} /> Playback settings</Button>}
+            {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={t(playbackPreference === "spotify-desktop" ? "nowPlaying.desktopSettingsLabel" : "nowPlaying.settingsLabel", { provider: providerName })} title={t("nowPlaying.settings")} onClick={onOpenSettings}><SettingsIcon size={18} aria-hidden="true" /><span>{t("nowPlaying.settings")}</span></Button>}
           </div>
           {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
-          {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>Retry playback</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>Settings</Button>}</div>}
-          {connectionError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>Retry connection check</Button></div>}
+          {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>{t("nowPlaying.retry")}</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>{t("nowPlaying.generalSettings")}</Button>}</div>}
+          {connectionError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>{t("nowPlaying.retryConnection")}</Button></div>}
           </div>
           </div>
           <BangOMeter snapshot={snapshot} currentUserId={currentUserId} roomConnected={roomConnected} requestAction={requestAction} />
-          {snapshot.room.settings.skipVote?.enabled && track.addedBy.id!==currentUserId && <Button variant="outline" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.skipVote.voted??false} onClick={()=>runCommand("Saving skip vote…","playback:skip-vote",{trackId:track.id,vote:!snapshot.room.radio?.skipVote.voted})}>{snapshot.room.radio?.skipVote.voted?"Retract skip vote":"Vote to skip"} · {snapshot.room.radio?.skipVote.count??0}/{snapshot.room.radio?.skipVote.required??3}</Button>}
-          {snapshot.room.capabilities?.djsPlayback && <Button variant="ghost" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.stopAfterTrackId===track.id} onClick={()=>runCommand("Updating stop after track…","playback:stop-after",{enabled:snapshot.room.radio?.stopAfterTrackId!==track.id})}>{snapshot.room.radio?.stopAfterTrackId===track.id?"Cancel stop after track":"Stop after this track"}</Button>}
+          <div className="player-session-actions">
+          {snapshot.room.settings.skipVote?.enabled && track.addedBy.id!==currentUserId && <Button variant="outline" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.skipVote.voted??false} onClick={()=>runCommand(i18n.t("music:nowPlaying.savingSkipVote"),"playback:skip-vote",{trackId:track.id,vote:!snapshot.room.radio?.skipVote.voted})}>{snapshot.room.radio?.skipVote.voted?t("nowPlaying.retractSkipVote"):t("nowPlaying.voteSkip")} · {snapshot.room.radio?.skipVote.count??0}/{snapshot.room.radio?.skipVote.required??3}</Button>}
+          {snapshot.room.capabilities?.djsPlayback && <Button variant="ghost" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.stopAfterTrackId===track.id} onClick={()=>runCommand(i18n.t("music:nowPlaying.updatingStopAfter"),"playback:stop-after",{enabled:snapshot.room.radio?.stopAfterTrackId!==track.id})}>{snapshot.room.radio?.stopAfterTrackId===track.id?t("nowPlaying.cancelStopAfter"):t("nowPlaying.stopAfter")}</Button>}
+          </div>
         </>
       ) : (
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
-          <h2>{snapshot.room.radio?.stopped ? "Room playback is stopped" : "No track playing"}</h2>
-          {snapshot.room.radio?.stopped ? snapshot.room.capabilities?.djsPlayback&&<Button disabled={!roomConnected||Boolean(pendingCommand)} onClick={()=>runCommand("Resuming room…","playback:resume",{})}>Resume room</Button> : onAddTrack ? <Button type="button" onClick={onAddTrack}>Add a track</Button> : <p>Add a track to start playback.</p>}
+          <h2>{snapshot.room.radio?.stopped ? t("nowPlaying.stopped") : t("nowPlaying.empty")}</h2>
+          {snapshot.room.radio?.stopped ? snapshot.room.capabilities?.djsPlayback&&<Button disabled={!roomConnected||Boolean(pendingCommand)} onClick={()=>runCommand(i18n.t("music:nowPlaying.resuming"),"playback:resume",{})}>{t("nowPlaying.resume")}</Button> : onAddTrack ? <Button type="button" onClick={onAddTrack}>{t("nowPlaying.addTrack")}</Button> : <p>{t("nowPlaying.addTrackHelp")}</p>}
         </div>
       )}
       </section>
       <TrackDetailsDialog track={track} open={detailsOpen} onOpenChange={setDetailsOpen} durationMs={track?.durationMs || playerStatus.duration * 1000} isLive={isLive} returnFocusRef={detailsButtonRef} />
       {settingsOpen && (
-        <DeferredDialog title="Settings" load={loadUserSettings} componentProps={{ settings: userSettings, connections, connectionError, onRetryConnections: loadConnections, accessToken, onSettingsChange: onUserSettingsChange, onConnectSpotify: connectSpotify, onDisconnectSpotify: disconnectSpotify, onClose: onCloseSettings }} />
+        <DeferredDialog title={t("nowPlaying.generalSettings")} load={loadUserSettings} componentProps={{ settings: userSettings, spotifyEnabled, roomSlug, connections, connectionError, onRetryConnections: loadConnections, accessToken, onSettingsChange: onUserSettingsChange, onConnectSpotify: connectSpotify, onDisconnectSpotify: disconnectSpotify, onClose: onCloseSettings }} />
       )}
     </>
   );
