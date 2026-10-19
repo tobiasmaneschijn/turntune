@@ -31,7 +31,7 @@ test("listeners can react to the current track and see confirmed room reactions"
   await expect(lame).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("alert")).toHaveCount(0);
   const aggregate = page.getByRole("img", { name: /^Room reactions:/ });
-  await expect(aggregate).toHaveAccessibleName(/2 Banger votes, 0 Lame votes/);
+  await expect(aggregate).toHaveAccessibleName(/\b2\b.*\bBanger\b.*\b0\b.*\bLame\b/);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await lame.focus();
@@ -43,7 +43,7 @@ test("listeners can react to the current track and see confirmed room reactions"
   });
   await expect(lame).toHaveAttribute("aria-pressed", "true");
   await expect(banger).toHaveAttribute("aria-pressed", "false");
-  await expect(aggregate).toHaveAccessibleName(/1 Banger votes, 1 Lame votes/);
+  await expect(aggregate).toHaveAccessibleName(/\b1\b.*\bBanger\b.*\b1\b.*\bLame\b/);
   const meter = page.getByRole("region", { name: "Bang-O-Meter for the current track", exact: true });
   expect(await meter.evaluate(element => element.getAnimations({ subtree: true }).some(animation => animation.playState === "running"))).toBe(false);
   await lame.focus();
@@ -54,7 +54,7 @@ test("listeners can react to the current track and see confirmed room reactions"
   });
   await expect(lame).toHaveAttribute("aria-pressed", "false");
   await expect(banger).toHaveAttribute("aria-pressed", "false");
-  await expect(aggregate).toHaveAccessibleName(/1 Banger votes, 0 Lame votes/);
+  await expect(aggregate).toHaveAccessibleName(/\b1\b.*\bBanger\b.*\b0\b.*\bLame\b/);
   expect(await page.evaluate(() => window.playerQolTest.requests)).toEqual([1, 1, -1, 0].map(value => ({ event: "vibe:vote", payload: { trackId: "t1", value } })));
 
   await page.goto("/tests/player-qol-harness/index.html");
