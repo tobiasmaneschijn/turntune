@@ -256,10 +256,12 @@ Both branches use the same append-only `supabase/migrations` directory. Add new
 timestamped migrations; do not edit an already-deployed migration. Merge feature
 branches into `develop`, verify staging, then merge `develop` into `master`.
 
-Keep Dokploy automatic deployment disabled. Before manually deploying either
-service, confirm its Supabase migration deployment and GitHub Actions checks
-succeeded for the intended commit. Production also requires the reviewed staging
-release evidence described in `SECURITY_RELEASE_STATUS.md`.
+Keep Dokploy automatic deployment disabled. Use the manual **Deploy** GitHub
+workflow after the intended commit's Supabase migration deployment and GitHub
+Actions checks succeed. It verifies those results for the exact revision.
+Production promotes the image verified in staging and requires the reviewed
+release evidence described in `SECURITY_RELEASE_STATUS.md`. See
+[`docs/github-deployments.md`](docs/github-deployments.md) for setup and use.
 
 Chat is delivered through authenticated, room-admitted Socket.IO. Message history is
 stored in `soundspin_messages` and was created by the
@@ -357,18 +359,26 @@ and aggregate complete UTC activity totals for the dashboard.
 
 ## Dokploy deployment
 
-1. Push this repository to a Git provider supported by Dokploy.
-2. Create a new **Compose** application in Dokploy.
-3. Select the repository and use `compose.yaml`.
-4. Configure all required production settings from `.env.example`, including
-   `APP_ORIGIN`, Supabase credentials and the exact trusted proxy addresses.
-   Keep server credentials outside browser build variables.
-5. Configure the matching HTTPS domain and proxy HTTP/Socket.IO to container
-   port `3000`; prevent direct public access to the backend port. Follow the
-   ingress requirements in [`docs/production-hardening.md`](docs/production-hardening.md).
-6. Apply all migrations, deploy into isolated staging and complete the
-   documented release gates in [`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md).
-   Open public ingress only after their evidence has been reviewed and approved.
+Use **Actions → Deploy → Run workflow** in GitHub. Select `develop` for staging
+or `master` for production and provide the release evidence URL. Production
+requires an approved, merged release PR and the successful staging run URL.
+Both the PR description and the approving review must link that run. No revision
+needs to be copied: staging builds and scans the selected commit, then production
+promotes that same image digest after verifying the source trees match.
+
+The existing Compose services are recorded in [`deploy/targets.json`](deploy/targets.json).
+The workflow uses [`compose.release.yaml`](compose.release.yaml), switches the
+selected service to Raw Compose and injects the immutable GHCR image reference.
+[`compose.yaml`](compose.yaml) remains available for local source builds. Follow
+[`docs/github-deployments.md`](docs/github-deployments.md) for GitHub Environment,
+registry and Dokploy setup before the first workflow run.
+
+Keep the required settings from `.env.example`, including `APP_ORIGIN`, Supabase
+credentials and exact trusted proxy addresses, in Dokploy. Route HTTPS and
+Socket.IO to container port `3000` and prevent direct public backend access.
+Apply all migrations before the server deployment and complete the gates in
+[`SECURITY_RELEASE_STATUS.md`](SECURITY_RELEASE_STATUS.md). Open public ingress
+only after their evidence has been reviewed and approved.
 
 When Supabase is configured, room state is stored in Postgres. The named
 `soundspin-data` volume remains as a local-development fallback. WebSockets
@@ -380,9 +390,10 @@ the host's loopback binding; staging can use `3001` there. Set
 `TRUSTED_PROXY_CIDRS` to the proxy's observed address on the shared Docker
 network and recheck it after recreating the proxy.
 
-After changing a domain port on Dokploy v0.29.12, use a fresh **Deploy** from
-Git. **Redeploy** reuses the generated Compose file and can retain old routing
-labels. Stop the active `soundspin` Compose service before either operation.
+After changing a domain port on Dokploy v0.29.12, use a fresh **Deploy**.
+**Redeploy** can retain old routing labels. The workflow regenerates the release
+Compose configuration and verifies the running target port. Stop the active
+`soundspin` Compose service before a manual deploy or recovery operation.
 
 ## Playback providers
 

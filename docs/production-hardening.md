@@ -79,7 +79,8 @@ The example is a list of names/placeholders, not deployable credentials.
 | Provider credentials | Enable only providers with real configured credentials; use separate development/staging/production keys and restrict provider scopes/quotas. |
 | Provider admission budgets | `PROVIDER_REQUESTS_PER_MINUTE=300`, `SPOTIFY_REQUESTS_PER_MINUTE=1200`, `PROVIDER_MAX_CONCURRENT=12`, `PROVIDER_GLOBAL_MAX_CONCURRENT=48` are initial process-wide ceilings. Spotify polling can cost about 40 calls/minute per active listener. Measure actual normal concurrency before raising limits; provider-side spend/quota caps are still required. Validated maximums are 10000 requests/minute, 32 concurrent/provider and 96 concurrent globally. |
 | `SOUNDSPIN_PORT` | Host loopback binding for the edge. Keep the container's internal port 3000. |
-| `SOUNDSPIN_REVISION` | Reviewed Git commit used for the OCI image revision label. `unknown` is allowed for local testing only; release artifacts must have a recorded revision and digest. |
+| `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: reviewed Git commit used for the OCI image revision label. The GitHub release workflow supplies the revision automatically. `unknown` is allowed for local testing only. |
+| `SOUNDSPIN_IMAGE` | Release Compose only: workflow-supplied `ghcr.io/...@sha256:...` reference. Production must use the digest verified in staging. |
 
 If frontend `VITE_SUPABASE_*` values are baked into a build, they must identify
 the same production project as `/api/config`. Prefer the runtime configuration
@@ -232,9 +233,17 @@ testing shared coordination first. Replacing the process disconnects sockets;
 the client reconnects and loads durable state.
 
 Build once from a reviewed revision and record the image digest, migration
-history, dependency lock hash and runtime configuration version. The base-image
-digest is reviewed, not permanently frozen: merge verified update proposals and
-rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
+history, dependency lock hash and runtime configuration version. The manual
+[GitHub deployment workflow](github-deployments.md) builds and scans in staging,
+then promotes that exact digest to production. It checks CI and Supabase results
+for the selected commit, binds evidence to the run and attempt, and requires
+an approved release PR for production. The approving review and PR description
+must both link the selected staging run. A merge commit may have a different SHA only
+when its Git tree equals the staged source tree. The full hosted release gates
+in this runbook still apply.
+
+The base-image digest is reviewed, not permanently frozen: merge verified update
+proposals and rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
 additional public CA as a BuildKit `proxy_ca` secret; it is mounted only during
 dependency installation. Keep certificate verification enabled.
 

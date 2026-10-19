@@ -1,0 +1,127 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target (develop for staging, master for production)
+        required: true
+        type: choice
+        options: [staging, production]
+      release_evidence:
+        description: Release evidence issue/PR URL; production requires the approved merge PR
+        required: true
+        type: string
+      staging_run:
+        description: Successful staging Deploy run URL (required for production)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      staging-run-id: ${{ steps.context.outputs.staging-run-id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Validate release target and staging provenance
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_EVIDENCE: ${{ inputs.release_evidence }}
+          STAGING_RUN_URL: ${{ inputs.staging_run }}
+        run: node scripts/release/prepare.mjs validate
+
+  image:
+    needs: validate
+    if: ${{ inputs.environment == 'staging' }}
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    uses: ./.github/workflows/release-image.yml
+
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    needs: [validate, image]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment == 'staging' && 'https://beta.soundspin.tobiasmaneschijn.com' || 'https://soundspin.tobiasmaneschijn.com' }}
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --include=dev
+      - name: Download the scanned staging image metadata
+        if: ${{ inputs.environment == 'staging' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-image
+          path: release-artifact
+      - name: Download the successful staging deployment evidence
+        if: ${{ inputs.environment == 'production' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: deployment-evidence
+          path: staging-evidence
+          run-id: ${{ needs.validate.outputs.staging-run-id }}
+          github-token: ${{ github.token }}
+      - name: Select the exact scanned image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_EVIDENCE: ${{ inputs.release_evidence }}
+          STAGING_RUN_URL: ${{ inputs.staging_run }}
+        run: node scripts/release/prepare.mjs image
+      - name: Check gates, replace the stopped instance, and verify ingress
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_EVIDENCE: ${{ inputs.release_evidence }}
+          STAGING_RUN_URL: ${{ inputs.staging_run }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          MIGRATION_CHECK_JSON: ${{ vars.MIGRATION_CHECK_JSON }}
+          DOKPLOY_API_URL: ${{ secrets.DOKPLOY_API_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+        run: node scripts/release/deploy.mjs
+      - name: Save deployment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-evidence
+          path: |
+            deployment-evidence.json
+            failure-evidence.json
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 90

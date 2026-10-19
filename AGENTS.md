@@ -46,7 +46,7 @@ when applying these skills. Installation details are in `.agents/skills/README.m
 Use the `dokploy` API skill for deployment work. Read
 `C:/Users/tfrom/.agents/skills/dokploy/SKILL.md` before using it.
 SoundSpin's existing services are in the **Fun** project: `production / soundspin`
-tracks `master`, and `staging / soundspin-staging` tracks `develop`. Discover and
+deploys `master`, and `staging / soundspin-staging` deploys `develop`. Discover and
 verify their environment and service IDs from the API instead of creating a new
 project or guessing IDs.
 
@@ -61,7 +61,9 @@ project or guessing IDs.
   Confirm the target environment, repository, branch and Compose file before
   deploying. If the host is unreachable, report the failure and leave live IDs
   and deployment status unverified.
-- SoundSpin uses a **Compose** service built from `compose.yaml`. The skill's
+- SoundSpin uses **Compose** services. Local source builds use `compose.yaml`;
+  the manual GitHub deployment workflow uses `compose.release.yaml` with a pinned
+  GHCR image and switches the selected existing service to Raw Compose. The skill's
   `application.*` examples apply to Application services; use the instance's
   Compose API for this service. Verify its endpoint and payload against the
   instance's API documentation before a write.
@@ -69,8 +71,8 @@ project or guessing IDs.
   commands are unavailable. Use the instance documentation for HTTP methods,
   query parameters and request bodies; do not assume Application endpoints or
   payloads work for Compose. Read back changed configuration before deploying.
-- Reuse the discovered SoundSpin Compose service. The README's instruction to
-  create a Compose application describes initial setup, not routine releases.
+- Reuse the discovered SoundSpin Compose service and verify its binding against
+  `deploy/targets.json`; routine releases do not create services or projects.
 - Use the separate **SoundSpin Staging** Supabase project for `develop` and
   **SoundSpin** for `master`. Both GitHub integrations use working directory `.`
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
@@ -97,13 +99,23 @@ project or guessing IDs.
   `dokploy-traefik` with `swarm.getContainerStats`, then inspect its network with
   `docker.getConfig`. Recheck after proxy recreation; do not reuse a remembered
   IP address or trust an entire private subnet.
-- On the observed Dokploy v0.29.12, use a fresh `compose.deploy` from Git after
+- On the observed Dokploy v0.29.12, use a fresh `compose.deploy` after
   domain/routing changes. `compose.redeploy` reuses a generated Compose file and
   can retain stale port labels. Verify the running container's Traefik target
   port labels after deployment, even when the saved domain configuration is correct.
-- Deploy the intended pushed revision and set `SOUNDSPIN_REVISION` to its commit
-  SHA so `compose.yaml` passes it as the `BUILD_REVISION` build argument. Record
-  the resulting image digest and migration history with the release evidence.
+- Prefer the manual **Deploy** GitHub workflow described in
+  `docs/github-deployments.md`. It supplies the revision automatically, builds
+  and scans the staging image, and promotes the same digest to production after
+  verifying matching source trees and reviewed staging evidence. Production
+  requires an approved, merged release PR for the selected `master` commit;
+  another collaborator with write access must approve its final head and include
+  the selected staging run URL in the approval text. The PR description must also
+  link that run. This is the supported approval gate for the
+  repository's plan, which lacks private-environment required reviewers. For an
+  explicitly requested source build with `compose.yaml`, set `SOUNDSPIN_REVISION`
+  to the actual checked-out commit
+  SHA for `BUILD_REVISION`; this label alone does not pin the source. Record the
+  resulting image digest and migration history with the release evidence.
   Deployment is asynchronous: record the deployment ID, check status and logs
   until completion, wait for container health
   and proxy registration, then verify `/api/health` and `/api/ready` through the
