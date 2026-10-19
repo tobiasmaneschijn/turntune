@@ -78,7 +78,7 @@ project or guessing IDs.
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
   deployment disabled; deploy manually only after that commit's migrations and
   CI checks succeed. Keep `develop` as the persistent staging branch after
-  promotion; do not delete it when merging the release PR.
+  promotion; do not delete it after promoting changes to `master`.
 - Primary deployment origins are `https://beta.turntune.app` for staging and
   `https://turntune.app` for production. Verify each configured domain and keep
   `APP_ORIGIN`, Supabase Auth's Site URL and the exact `/update-password` redirect
@@ -107,17 +107,17 @@ project or guessing IDs.
   can retain stale port labels. Verify the running container's Traefik target
   port labels after deployment, even when the saved domain configuration is correct.
 - Prefer the manual **Deploy** GitHub workflow described in
-  `docs/github-deployments.md`. It supplies the revision automatically, builds
-  and scans the staging image, and promotes the same digest to production after
-  verifying matching source trees and reviewed staging evidence. Production
-  requires a merged release PR for the selected `master` commit, its linked
-  staging run and a native manual dispatch with `confirm_production` selected.
-  The maintainer with write access may be the PR author. The original dispatch
-  must follow the merge and latest successful staging attempt; a staging rerun
-  requires a fresh production **Run workflow** action. Unresolved trusted
-  changes-requested reviews still block release; native dismissal can resolve
-  them. This uses GitHub's manual workflow authorization on a plan without
-  private-environment required reviewers. For an
+  `docs/github-deployments.md`. Select **Use workflow from** (`develop` for
+  staging, `master` for production), the matching **Target**, and **Confirm
+  deployment** (`confirm_deployment`). GitHub's native workflow dispatch write
+  permission authorizes the run. The workflow supplies the revision, builds and
+  scans the staging image, and records evidence automatically. Production finds
+  the latest successful manual staging **Deploy** run with the same Git tree as
+  the selected `master` commit, verifies its immutable image, current attempt,
+  artifacts and runtime checks, and promotes the digest unchanged. Start a fresh
+  production **Run workflow** action after that staging attempt completes;
+  starting a queued job or rerunning an earlier dispatch does not establish a
+  later confirmation. Keep the CI, migration and single-instance gates. For an
   explicitly requested source build with `compose.yaml`, set `SOUNDSPIN_REVISION`
   to the actual checked-out commit
   SHA for `BUILD_REVISION`; this label alone does not pin the source. Record the

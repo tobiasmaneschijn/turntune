@@ -1,7 +1,8 @@
 # GitHub deployments
 
-Use **Actions → Deploy → Run workflow**. GitHub supplies the selected commit;
-there is no revision field to copy from a terminal.
+Use **Actions → Deploy → Run workflow**. Set **Use workflow from**, choose the
+matching **Target**, and select **Confirm deployment**. GitHub supplies the
+selected commit and the workflow records deployment evidence automatically.
 
 | Environment | Select branch | Dokploy service | Supabase project | Origin |
 | --- | --- | --- | --- | --- |
@@ -28,11 +29,9 @@ Setup does not deploy the application.
 
 Create GitHub Environments named `staging` and `production`. Restrict deployment
 branches to exactly `develop` and `master`, respectively, with no tag rules.
-This private repository's plan does not support environment required reviewers.
-Production uses GitHub's native manual `workflow_dispatch` authorization: a
-maintainer with write access starts **Deploy** and selects `confirm_production`
-after reviewing the staging evidence. The maintainer may be the release PR's
-author. GitHub requires write access to
+GitHub's native manual `workflow_dispatch` permission authorizes deployment.
+The **Confirm deployment** checkbox (`confirm_deployment`) is required for both
+targets. GitHub requires write access to
 [run a workflow manually](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 Keep the environment branch restrictions above; see
 [GitHub Environment configuration](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
@@ -99,13 +98,10 @@ application domains use the HTTPS origins above.
 
 1. Push the reviewed changes to `develop`. Wait for **App checks**, **Security
    gates** and that commit's Supabase migration deployment to succeed.
-2. Open **Actions → Deploy → Run workflow** and select branch `develop` and
-   environment `staging`.
-3. Set `release_evidence` to an issue or pull request URL in this repository
-   recording the operator's approval and applicable release evidence. Run the
-   workflow.
-4. Wait for **Deploy staging** to pass, review its evidence and retain the run
-   URL for production.
+2. Open **Actions → Deploy → Run workflow**. Set **Use workflow from** to
+   `develop`, **Target** to `staging`, and select **Confirm deployment**.
+3. Run the workflow and wait for **Deploy staging** and ingress verification to
+   pass. Review the generated deployment evidence before promotion.
 
 The reusable image workflow builds the selected revision once, scans the image
 and publishes it to GHCR. The manifest records its revision, immutable digest,
@@ -121,39 +117,31 @@ Docker documents why [digests identify immutable images](https://docs.docker.com
 
 ## Deploy production
 
-1. Open the release PR into `master` and link the successful staging run in its
-   description. Complete and review the hosted gates in
+1. Complete and review the hosted gates in
    [`SECURITY_RELEASE_STATUS.md`](../SECURITY_RELEASE_STATUS.md) and
-   [`production-hardening.md`](production-hardening.md). Record the evidence,
-   operator and GO decision in that PR. A solo maintainer can review and deploy
-   their own release.
-2. Merge the release PR into `master`. Keep `develop` as the persistent staging
-   branch; do not delete it after promotion. Wait for the exact merge commit's
-   CI and production Supabase migration deployment to succeed.
-3. After the merge and latest successful staging attempt, open **Deploy → Run
-   workflow**, select `master` and environment `production`, and select
-   `confirm_production` after reviewing the evidence. Set `release_evidence` to
-   the merged release PR URL and `staging_run` to the successful staging
-   deployment's GitHub run URL.
+   [`production-hardening.md`](production-hardening.md), including the successful
+   staging deployment and its generated evidence.
+2. Merge the staged source into `master` without changing its Git tree. Keep
+   `develop` as the persistent staging branch. Wait for the selected `master`
+   commit's CI and production Supabase migration deployment to succeed.
+3. After the matching staging attempt completes, open **Deploy → Run workflow**.
+   Set **Use workflow from** to `master`, **Target** to `production`, and select
+   **Confirm deployment**. Start a fresh workflow run.
 4. Wait for deployment and ingress verification to finish.
 
-Production downloads the staging run's `deployment-evidence` artifact and
-promotes its exact digest. It verifies the successful manual staging workflow,
-deployment job, run ID and attempt, image revision, migration inventory and
-hosted checks. The production commit's Git tree must equal the staged commit's
-tree. A merge commit with identical source is accepted; new source requires
-another staging deployment. Production does not rebuild the image.
+Production automatically finds the latest successful manual **Deploy** run from
+`develop` whose Git tree equals the selected `master` commit's tree. It downloads
+that run's `deployment-evidence` artifact and verifies the staging deployment
+job, run ID and current attempt, immutable image reference, image revision,
+dependency lock hash, migration inventory and hosted checks. It promotes the
+exact verified digest without rebuilding. A merge commit with identical source
+is accepted; new source requires another staging deployment.
 
-The workflow verifies the merged release PR, its staging link and the native
-production dispatch actor's current write access. The original dispatch must
-postdate the merge and latest successful staging attempt; starting a queued job
-or rerunning it does not supply a new authorization. The selected staging
-attempt is checked again immediately before the active process is stopped.
-
-Unresolved changes-requested reviews from trusted collaborators still block
-release. A later approval or native dismissal can resolve them. A second
-reviewer is optional; the operator remains responsible for the full hosted
-release checklist. See [GitHub PR reviews](https://docs.github.com/en/pull-requests/reference/pull-request-reviews).
+The original production dispatch must follow the matching staging attempt's
+completion. Starting a queued job or rerunning an earlier dispatch does not
+establish a later confirmation. The selected staging attempt is checked again
+immediately before the active process is stopped. Missing matching staging
+evidence blocks production before any service is stopped.
 
 Evidence artifacts are retained for 90 days.
 Missing or expired artifacts block promotion. Workflow reruns bind evidence to
@@ -162,9 +150,10 @@ the current attempt and replace earlier artifacts.
 To retry staging, select **Re-run all jobs**. **Re-run failed jobs** can retain a
 build manifest from the previous attempt and is deliberately blocked by the
 attempt binding. Review the completed new run before production promotion.
-After any new staging attempt, use a fresh production **Run workflow** action
-with confirmation. **Re-run failed jobs** preserves the original production
-dispatch and cannot authorize staging evidence completed after that dispatch.
+After a new matching staging attempt completes, use a fresh production **Run
+workflow** action with **Confirm deployment** selected. **Re-run failed jobs**
+preserves the original production dispatch and cannot confirm staging evidence
+completed after that dispatch.
 GitHub documents the retained actor and source context for
 [workflow reruns](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 

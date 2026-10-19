@@ -2,7 +2,7 @@ import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { createGitHub, createDokploy } from './clients.mjs';
 import { verifyGitHubGates } from './github-gates.mjs';
-import { verifyReleaseReview } from './release-review.mjs';
+import { verifyDeploymentDispatch, verifyStagingForDispatch } from './dispatch.mjs';
 
 export const targets = JSON.parse(await readFile(new URL('../../deploy/targets.json', import.meta.url), 'utf8'));
 
@@ -14,13 +14,6 @@ export function releaseContext(env = process.env) {
   if (environment && (!targets[environment] || targets[environment].branch !== branch)) throw new Error('Staging requires develop; production requires master.');
   if (!['develop', 'master'].includes(branch) || env.GITHUB_REF !== `refs/heads/${branch}`) throw new Error('Only the develop and master branches may release.');
   return { repository: env.GITHUB_REPOSITORY, sha: env.GITHUB_SHA, branch, environment, target: targets[environment] };
-}
-
-export function reviewUrl(value, repository) {
-  let url; try { url = new URL(value); } catch { throw new Error('Supply the GitHub issue or pull request containing the release evidence.'); }
-  const prefix = `/${repository}/`;
-  if (url.origin !== 'https://github.com' || url.username || url.password || !url.pathname.startsWith(prefix) || !/^(issues|pull)\/[1-9]\d*(?:\/.*)?$/.test(url.pathname.slice(prefix.length)) || url.search) throw new Error('Release evidence must be an issue or pull request in this repository.');
-  return url.href;
 }
 
 export async function verifyEnvironmentProtection(github, repository, environment) {
@@ -98,21 +91,23 @@ export async function runPreflight(mode, env = process.env) {
   if (!imageOnly && mode !== 'deploy') throw new Error('Expected preflight mode image or deploy.');
   let migrationContext;
   if (!imageOnly) {
-    reviewUrl(env.RELEASE_EVIDENCE, context.repository);
     await verifyEnvironmentProtection(github, context.repository, context.environment);
-    context.review = await verifyReleaseReview({ github, repository: context.repository, sha: context.sha, environment: context.environment, releaseEvidenceUrl: env.RELEASE_EVIDENCE, stagingRunUrl: env.STAGING_RUN_URL, productionRunId: env.GITHUB_RUN_ID, productionRunAttempt: env.GITHUB_RUN_ATTEMPT, productionConfirmed: env.PRODUCTION_CONFIRMED });
+    context.authorization = await verifyDeploymentDispatch({ github, ...context, eventName: env.GITHUB_EVENT_NAME,
+      confirmed: env.DEPLOYMENT_CONFIRMED, runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT });
+    if (context.environment === 'production') context.authorization = await verifyStagingForDispatch({ github,
+      repository: context.repository, stagingRunUrl: env.STAGING_RUN_URL, dispatch: context.authorization });
     try { migrationContext = JSON.parse(env.MIGRATION_CHECK_JSON); } catch { throw new Error('Configure MIGRATION_CHECK_JSON from the observed Supabase GitHub check.'); }
     const expectedIdentity = `https://supabase.com/dashboard/project/${env.SUPABASE_PROJECT_REF}`;
     if (!env.SUPABASE_PROJECT_REF || migrationContext.identity?.field !== 'details_url' || ![expectedIdentity, `${expectedIdentity}/branches`].includes(migrationContext.identity.value)) throw new Error('The migration check identity must identify this environment’s Supabase dashboard project.');
   }
   const gates = await verifyGitHubGates({ github, ...context, migrationContext, requireMigrations: !imageOnly });
-  if (context.review) gates.releaseReview = context.review;
+  if (context.authorization) gates.authorization = context.authorization;
   if (!imageOnly) {
     const dokploy = createDokploy({ url: env.DOKPLOY_API_URL || env.DOKPLOY_API, key: env.DOKPLOY_API_KEY });
     await inspectTarget(dokploy, context, env.SUPABASE_PROJECT_REF);
   }
   const evidence = { ...context, gates }; delete evidence.target;
-  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nRevision: \`${context.sha}\`\n\n${imageOnly ? 'Image CI gates passed.' : `Target: **${context.environment}**. CI and migration gates passed. Release review: ${reviewUrl(env.RELEASE_EVIDENCE, context.repository)}`}\n`);
+  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nRevision: \`${context.sha}\`\n\n${imageOnly ? 'Image CI gates passed.' : `Target: **${context.environment}**. CI and migration gates passed. Deployment: ${context.authorization.url}`}\n`);
   if (mode === 'deploy') await writeFile('release-preflight.json', JSON.stringify(evidence, null, 2) + '\n');
   return evidence;
 }

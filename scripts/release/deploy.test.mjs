@@ -5,7 +5,7 @@ import { deployRelease } from './deploy.mjs';
 import { targets } from './preflight.mjs';
 
 const revision = 'a'.repeat(40);
-const env = { DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: revision, GITHUB_REF: 'refs/heads/develop', GITHUB_REF_NAME: 'develop', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', SUPABASE_PROJECT_REF: targets.staging.supabaseProjectRef, RELEASE_EVIDENCE: `https://github.com/${targets.repository}/issues/1` };
+const env = { DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: revision, GITHUB_REF: 'refs/heads/develop', GITHUB_REF_NAME: 'develop', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', SUPABASE_PROJECT_REF: targets.staging.supabaseProjectRef, GITHUB_EVENT_NAME: 'workflow_dispatch', DEPLOYMENT_CONFIRMED: 'true' };
 const template = 'services:\n  soundspin:\n    image: ${SOUNDSPIN_IMAGE:?Set an immutable GHCR image}\n';
 const manifest = await createImageManifest({ repository: targets.repository, branch: 'develop', revision, digest: `sha256:${'b'.repeat(64)}`, runId: '123', runAttempt: '1' });
 
