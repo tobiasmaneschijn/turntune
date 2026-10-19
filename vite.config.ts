@@ -24,7 +24,7 @@ function fixtureApiGuard(): Plugin {
 
 export default defineConfig(({mode})=>({
   // Mocked browser suites must never load a developer's connected credentials.
-  envDir: mode === "test" ? path.resolve(__dirname,"tests/env") : __dirname,
+  envDir: mode === "test" ? path.resolve(__dirname,"tests/config/env") : __dirname,
   envPrefix: mode === "test" ? "SOUNDSPIN_TEST_PUBLIC_" : "VITE_",
   cacheDir:mode==="test"?path.resolve(__dirname,"work",`vite-test-${testCacheKey}`):undefined,
   optimizeDeps:mode==="test"?{entries:["index.html","tests/**/*.html"]}:undefined,

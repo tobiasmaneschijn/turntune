@@ -433,7 +433,7 @@ npm run build
 
 Focused tests cover real React chat behavior on desktop/mobile, server routes,
 relay/transport lifetimes, same-UUID retry, authorization denial and SQL grants/
-RLS. `tests/sql/check-chat-rls.mjs` accepts an installed PGlite entry path and runs
+RLS. `tests/database/chat/check-chat-rls.mjs` accepts an installed PGlite entry path and runs
 the exact reviewed chat migrations in a disposable local PostgreSQL instance,
 including storage policies; it does not apply a live migration. Production
 deployment must apply the reviewed migration with the server/client update.

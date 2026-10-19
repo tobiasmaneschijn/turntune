@@ -674,7 +674,7 @@ Run these after room or radio changes:
 npm run test:radio
 npm run test:music
 npx tsx --test server/features/moderation/moderation-service.test.ts server/features/rooms/radio-policy.test.ts server/features/rooms/room-music-policy.test.ts
-node --test tests/moderation-rls.test.mjs
+node --test tests/database/moderation-rls.test.mjs
 npm run typecheck
 npm run build
 ```

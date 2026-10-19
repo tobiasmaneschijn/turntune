@@ -21,6 +21,9 @@ for development; never use production accounts or data in tests.
 | `shared/` | Client/server types, command schemas, and policies |
 | `supabase/migrations/` | Append-only database migration chain |
 | `tests/` | Integration, SQL, browser, and frontend helper tests |
+| `tests/browser/`, `tests/frontend/` | Browser workflows and frontend helper tests grouped by feature |
+| `tests/integration/`, `tests/database/` | Server integration and disposable database checks |
+| `tests/config/playwright/` | Browser suite configs and shared isolated-server defaults |
 | `scripts/` | Test runners, dependency checks, and notice generation |
 | `security/` | Release preflight, static analysis, and dependency exceptions |
 | `deploy/`, `scripts/release/` | Hosting target bindings and verified-image deployment tooling |
@@ -32,6 +35,7 @@ contracts and code maps.
 
 See the [frontend folder guide](../src/README.md) and
 [server folder guide](../server/README.md) for placement rules.
+The [test folder guide](../tests/README.md) describes workflows, fixtures, and suite configuration.
 
 ## Local configuration
 

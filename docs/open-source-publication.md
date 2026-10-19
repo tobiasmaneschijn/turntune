@@ -23,7 +23,7 @@ Only reviewed source files belong in the snapshots. Local environment files,
 runtime data, operator exports, private screenshots, backups, and audit logs stay
 outside published source. The secret check rejects local `.env*` files even if
 force-added; only the reviewed root `.env.example` is allowed. The unused root
-`.env.test` was removed; browser fixtures use `tests/env/`. Pattern scanning still
+`.env.test` was removed; browser fixtures use `tests/config/env/`. Pattern scanning still
 cannot establish that every secret or private detail is absent.
 
 ## Licensing and packaging
