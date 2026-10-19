@@ -389,7 +389,8 @@ must remain enabled on the proxy; Dokploy's standard Traefik setup supports
 them.
 
 Keep the Dokploy domain's target port at `3000`. `SOUNDSPIN_PORT` controls only
-the host's loopback binding; staging can use `3001` there. Set
+the host's loopback binding: use `3001` for staging and `3002` for production
+on this Dokploy host, where Dokploy itself publishes host port `3000`. Set
 `TRUSTED_PROXY_CIDRS` to the proxy's observed address on the shared Docker
 network and recheck it after recreating the proxy.
 

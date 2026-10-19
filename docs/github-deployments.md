@@ -14,6 +14,11 @@ checks their target configuration before deploying. Each target's
 `additionalOrigins` lists its retained legacy domain; `APP_ORIGINS` must match
 that list exactly. Keep Dokploy automatic deployment disabled.
 
+Set Dokploy's `SOUNDSPIN_PORT` to `3001` for staging and `3002` for production.
+These ports bind only to `127.0.0.1`; Dokploy itself publishes host port `3000`.
+The application and all Dokploy domain targets continue to use container port
+`3000`.
+
 ## Setup
 
 Commit the workflows to the default branch before using GitHub's Run workflow
@@ -63,13 +68,12 @@ before deployment. Its observed GitHub App identity is ID `330661`, slug
 }
 ```
 
-For production, use the same app binding and the exact details URL emitted by
-that project's integration. The initially observed production URL was
-`https://supabase.com/dashboard/project/xmutopoyxizxepkoshon/branches`, but its
-check was **skipped**. That result cannot authorize deployment. Correct the
-production integration and confirm a successful migration deployment for the
-intended `master` commit; update the exact identity binding if its URL changes.
-Missing, pending, skipped, failed or differently bound checks block deployment.
+For production, use the same app binding with `identity.value` set to
+`https://supabase.com/dashboard/project/xmutopoyxizxepkoshon`. This is the exact
+URL emitted by the successful production migration check. The integration
+automatically deploys migrations when `master` updates. Its separate `/branches`
+check does not record production completion. Missing, pending, skipped, failed
+or differently bound checks block deployment.
 
 GitHub publishes the private `ghcr.io/tobiasmaneschijn/soundspin` package using
 its automatic `GITHUB_TOKEN` with `packages: write`; no registry secret is needed
@@ -170,8 +174,8 @@ health and proxy registration, then checks the intended HTTPS ingress:
 - Rejection of hostile Origins and missing namespace credentials.
 - Exactly one active Node instance and the running proxy target port `3000`.
 
-Staging's host loopback binding remains `3001:3000`; production uses
-`3000:3000`. Keep WebSockets enabled and prevent direct public backend access.
+Staging's host loopback binding is `127.0.0.1:3001:3000`; production uses
+`127.0.0.1:3002:3000`. Keep WebSockets enabled and prevent direct public backend access.
 A triggered deployment is not a completed release.
 
 The workflow does not apply database migrations, open public ingress or approve
