@@ -70,7 +70,7 @@ Supabase Auth redirects and provider callbacks aligned with every active domain.
 Run **one active Node instance per environment**. Room coordination, presence,
 and timers are process-local. Apply the complete migration chain before updating
 the server, and review the [production hardening guide](docs/production-hardening.md)
-and [release requirements](SECURITY_RELEASE_STATUS.md) before exposing an instance.
+before exposing an instance.
 
 ### Dokploy deployment
 

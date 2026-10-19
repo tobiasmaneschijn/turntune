@@ -6,8 +6,7 @@ TLS proxy. Use `compose.yaml` for source builds or `compose.release.yaml` for a
 reviewed image digest. For local development, see [Development](development.md).
 
 Before opening public access, complete the staging and operator checks in
-[Production hardening](production-hardening.md) and the
-[security release status](../SECURITY_RELEASE_STATUS.md). A successful build or
+[Production hardening](production-hardening.md). A successful build or
 container health check does not complete those checks.
 
 ## Requirements
@@ -260,8 +259,8 @@ migration history. A deployment trigger alone does not confirm success.
 - Verify Socket.IO polling and a real WebSocket upgrade, hostile Origin rejection,
   and rejection of connections without namespace credentials.
 - Complete [Production hardening](production-hardening.md) for ingress, capacity,
-  monitoring, backup/restore, and rollback checks, and record the evidence required
-  by the [security release status](../SECURITY_RELEASE_STATUS.md).
+  monitoring, backup/restore, and rollback checks, and complete its
+  [release verification record](production-hardening.md#release-verification-record).
 - Follow [Managed uploads](managed-upload-release.md) for Storage checks and
   cleanup, [Platform security and privacy](platform-security-and-privacy.md) for
   administrator recovery, moderation, exports, and deletion, and

@@ -23,8 +23,7 @@ when reporting a problem with an older version.
 
 ## Running your own instance
 
-Follow the [self-hosting guide](docs/self-hosting.md),
-[production hardening](docs/production-hardening.md), and
-[release requirements](SECURITY_RELEASE_STATUS.md) before exposing an instance.
+Follow the [self-hosting guide](docs/self-hosting.md) and
+[production hardening](docs/production-hardening.md) before exposing an instance.
 Use your own service credentials and keep them out of browser builds, logs, and
 public reports.

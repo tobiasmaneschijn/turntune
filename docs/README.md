@@ -32,8 +32,6 @@
 - [Managed uploads](managed-upload-release.md): storage lifecycle and cleanup.
 - [Platform security and privacy](platform-security-and-privacy.md): administrator
   access, incident response, account erasure, and retention.
-- [Release status](../SECURITY_RELEASE_STATUS.md): remediation evidence and
-  outstanding deployment checks. This record is maintained in Danish.
 - [Release preflight SQL](../security/release-preflight.sql) and
   [static-analysis tooling](../security/static-analysis/README.md).
 
@@ -43,7 +41,6 @@ These records describe reviews and repository administration. Their historical
 test results do not verify the current revision or a deployed instance.
 
 - [Architecture review, 7 October 2026](codebase-review.md)
-- [Historical security audit](../SECURITY_AUDIT_REPORT.md)
 - [Open-source publication review](open-source-publication.md)
 - [Repository rename procedure](repository-rename.md)
 

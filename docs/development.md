@@ -127,7 +127,7 @@ Add timestamped migrations to `supabase/migrations/`; never edit a migration
 already applied to a shared environment. Both `develop` and `master` use the same
 append-only chain. Apply and verify migrations in an isolated environment before
 deploying the matching server. See [self-hosting](self-hosting.md#supabase) and
-[release requirements](../SECURITY_RELEASE_STATUS.md).
+[production hardening](production-hardening.md).
 
 ## Release notes
 

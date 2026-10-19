@@ -522,5 +522,5 @@ exists:
 - [ ] Final authenticated end-to-end staging check passed at the intended release
   revision; no unresolved deployment-blocking finding or untested critical flow.
 
-Public launch requires all these gates, plus the remediation acceptance criteria
-in `SECURITY_AUDIT_REPORT.md`. A completed repository change alone is not a GO.
+Public launch requires every gate above to pass and its release evidence to be
+reviewed. A completed repository change alone does not approve a deployment.

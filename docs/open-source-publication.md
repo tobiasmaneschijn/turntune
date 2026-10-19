@@ -91,9 +91,8 @@ server-side artifacts, or private copies elsewhere.
 ## Hosting is a separate release
 
 Publishing source does not deploy the service or approve production readiness.
-Follow [GitHub deployments](github-deployments.md),
-[production hardening](production-hardening.md), and
-[SECURITY_RELEASE_STATUS.md](../SECURITY_RELEASE_STATUS.md) for migrations, CI,
+Follow [GitHub deployments](github-deployments.md) and
+[production hardening](production-hardening.md) for migrations, CI,
 staging evidence, manual deployment, and ingress checks. Music/provider rights,
 hosted subscription terms, and operational privacy requirements remain separate
 from the source license.
