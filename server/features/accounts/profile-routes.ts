@@ -5,6 +5,7 @@ import { RoomCommandError } from "../../realtime/socket-handler.js";
 import type { Store } from "../../persistence/store.js";
 import type { PlatformSecurity } from "../../security/platform-security.js";
 import { profileUpdateSchema } from "./profile-fields.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 export interface ProfileRouteOptions {
   store: Pick<Store, "getProfile" | "getProfileOptions" | "updateProfile">;
@@ -28,6 +29,7 @@ export function mountProfileRoutes(app: express.Express, { store, platform, getA
       if (!profile) return response.status(404).json({ error: serverT("profile_not_found") });
       response.json({ profile, options });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "profile.read" });
       response.status(500).json({
         error: serverT("could_not_load_profile")
       });
@@ -45,6 +47,7 @@ export function mountProfileRoutes(app: express.Express, { store, platform, getA
       const profile = await store.updateProfile(userId, parsed.data);
       response.json({ profile });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "profile.update" });
       response.status(400).json({
         error: error instanceof RoomCommandError ? error.message : serverT("could_not_update_profile")
       });

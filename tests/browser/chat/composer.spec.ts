@@ -13,6 +13,18 @@ test.beforeEach(async ({ page }) => {
 
 test('Send a reply with a listener mention and emoji', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 600 })
+  // Vite fixtures do not send the production image policy. Enforce its pinned
+  // emoji source so blocked picker images cannot silently disappear.
+  await page.evaluate(() => {
+    const policy = document.createElement('meta')
+    policy.httpEquiv = 'Content-Security-Policy'
+    policy.content = "img-src 'self' data: blob: https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.3/assets/"
+    document.head.append(policy)
+  })
+  await page.route(/^https:\/\/cdn\.jsdelivr\.net\/gh\/jdecked\/twemoji@17\.0\.3\/assets\/svg\/[0-9a-f-]+\.svg$/, route => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72"><circle cx="36" cy="36" r="32" fill="#ffcc4d"/></svg>',
+  }))
   const composer = page.getByRole('textbox', { name: 'Message room chat' })
   expect(await composer.evaluate((element) => getComputedStyle(element).fontSize)).toBe(
     await page.locator('.chat-message-body').first().evaluate((element) => getComputedStyle(element).fontSize)
@@ -30,17 +42,30 @@ test('Send a reply with a listener mention and emoji', async ({ page }) => {
   await composer.fill('@Mi')
   await page.getByRole('listbox', { name: 'Tag a listener' }).getByRole('option').first().click()
   await page.getByRole('button', { name: 'Add emoji', exact: true }).click()
-  await page.getByRole('searchbox', { name: 'Search emoji' }).fill('grinning face')
-  await page.getByRole('button', { name: 'grinning face', exact: true }).click()
+  const picker = page.getByRole('tabpanel', { name: 'Emoji', exact: true })
+  const grinningFace = picker.getByRole('button', { name: 'grinning face', exact: true })
+  await expect(grinningFace).toBeVisible()
+  await expect.poll(() => grinningFace.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await picker.getByRole('tab', { name: 'Food & drink', exact: true }).click()
+  const food = picker.getByRole('rowgroup', { name: 'Food & drink', exact: true }).getByRole('button').first()
+  await expect(food).toBeVisible()
+  await expect.poll(() => food.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await picker.getByRole('searchbox', { name: 'Search emoji' }).fill('red heart')
+  const heart = picker.getByRole('button', { name: 'red heart', exact: true })
+  await expect(heart.locator('img')).toHaveAttribute('src', 'https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.3/assets/svg/2764.svg')
+  await expect.poll(() => heart.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await heart.click()
   await expect(composer).toBeFocused()
-  await expect(composer).toHaveValue('@Mira 😀')
+  await expect(composer).toHaveValue('@Mira ❤️')
   await composer.pressSequentially(' Great track')
   await composer.press('Enter')
   await expect(composer).toHaveValue('')
   const reply = page.locator('.chat-message-item').filter({ hasText: 'Great track' })
   await expect(reply).toHaveCount(1)
   await expect(reply).toContainText('@Mira')
-  await expect(reply.getByRole('img', { name: '😀', exact: true }).or(reply.getByText('😀 Great track', { exact: true }))).toBeVisible()
+  const sentEmoji = reply.getByRole('img', { name: '❤️', exact: true })
+  await expect(sentEmoji).toBeVisible()
+  await expect.poll(() => sentEmoji.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await expect(reply.locator('.chat-message-reply')).toContainText('A song for tonight')
   await expect.poll(() => page.evaluate(() => window.chatQolTest.saveIds.length)).toBe(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(

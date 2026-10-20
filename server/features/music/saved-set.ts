@@ -1,58 +1,29 @@
 import { serverT } from "../../lib/i18n.js";
-import { providerJson } from "../../integrations/provider-http.js";
 import { libraryTrackSchema, type LibraryTrack } from "./private-library.js";
 import type { Room, Track } from "../../types.js";
-import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
-import type { AppleMusicApi } from "../../integrations/apple-music.js";
-import type { SoundCloudApi } from "../../integrations/soundcloud.js";
-import { MixcloudApi } from "../../integrations/mixcloud.js";
-import { resolveTrackMappings } from "./provider-mappings.js";
+import { resolveProviderMappings } from "./provider-mappings.js";
+import { assertProviderAccess, createServerProviderRegistry, type ServerProviderOptions, type ServerProviderRegistry } from "./provider-registry.js";
 import { verifyTrackDuration } from "./track-metadata.js";
 
 export type ResolvedSetTrack = Omit<Track, "id" | "addedBy" | "addedAt" | "playedAt">;
 export interface SetImportOutcome { added: number; skipped: Array<{ title: string; reason: string }>; started: boolean }
 
-export function createSavedSetResolver({ spotify, appleMusic, soundCloud, mixcloud, fetchImpl = fetch, youtubeApiKey, allowSpotify = false }: { spotify: SpotifyApi; appleMusic: AppleMusicApi; soundCloud: SoundCloudApi; mixcloud?: Pick<MixcloudApi, "resolveTrack">; fetchImpl?: typeof fetch; youtubeApiKey?:string; allowSpotify?: boolean }) {
-  const mixcloudApi = mixcloud || new MixcloudApi(fetchImpl);
+export function createSavedSetResolver(options: ServerProviderOptions & { allowSpotify?: boolean; providers?: ServerProviderRegistry }) {
+  const providers = options.providers ?? createServerProviderRegistry(options);
   return async (track: LibraryTrack, signal: AbortSignal): Promise<ResolvedSetTrack> => {
     signal.throwIfAborted();
-    if (track.provider === "spotify" && !allowSpotify) throw new Error(serverT("spotify_is_disabled_in_this_room"));
-    let verified = { ...track };
-    if (track.provider === "youtube") {
-      const url = `https://www.youtube.com/watch?v=${encodeURIComponent(track.providerId)}`;
-      const { response, payload: source } = await providerJson<{ title?: unknown; author_name?: unknown } | null>("youtube",fetchImpl,`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`, { signal });
-      if (!response.ok) throw new Error(serverT("this_youtube_recording_is_unavailable_or_could_not_be_verified"));
-      const safe = libraryTrackSchema.safeParse({ ...verified, title: source?.title, artist: source?.author_name === undefined ? track.artist : source.author_name, permalinkUrl: url });
-      if (!safe.success) throw new Error(serverT("this_youtube_recording_returned_invalid_or_oversized_metadata"));
-      verified = safe.data;
-    } else if (track.provider === "spotify") {
-      if (!spotify.configured) throw new Error(serverT("spotify_catalog_verification_is_unavailable_try_this_recording_later"));
-      const source = await spotify.getTrack(track.providerId,signal);
-      verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
-    } else if (track.provider === "apple") {
-      if (!appleMusic.configured) throw new Error(serverT("apple_music_catalog_verification_is_unavailable_try_this_recording_later"));
-      const source = await appleMusic.getTrack(track.providerId,undefined,signal);
-      verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
-    } else if (track.provider === "mixcloud") {
-      const source = await mixcloudApi.resolveTrack(track.permalinkUrl || track.providerId, signal);
-      if (source.id !== track.providerId) throw new Error(serverT("this_mixcloud_link_now_resolves_to_a_different_show"));
-      verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
-    } else {
-      if (!soundCloud.configured || !track.permalinkUrl) throw new Error(serverT("soundcloud_verification_needs_a_configured_catalog_and_a_saved_source_link"));
-      const url = new URL(track.permalinkUrl);
-      if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "soundcloud.com" || url.hostname.endsWith(".soundcloud.com"))) throw new Error(serverT("this_saved_soundcloud_source_link_is_invalid"));
-      const source = await soundCloud.resolveTrack(url.href,signal);
-      if (source.id !== track.providerId) throw new Error(serverT("this_soundcloud_link_now_resolves_to_a_different_recording"));
-      verified = { ...verified, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs };
-    }
+    assertProviderAccess(track.provider, options.allowSpotify);
+    const provider = providers[track.provider];
+    if (!provider) throw new Error("This playback provider is unavailable.");
+    const source = await provider.resolveSource(track, signal);
     signal.throwIfAborted();
-    const safeSource = libraryTrackSchema.safeParse(verified);
+    const safeSource = libraryTrackSchema.safeParse(source.track);
     if (!safeSource.success) throw new Error(serverT("this_recording_returned_invalid_or_oversized_source_metadata"));
-    const mappings = await resolveTrackMappings(safeSource.data, spotify, appleMusic,signal,{ allowSpotify });
+    const mappings = await resolveProviderMappings(safeSource.data, providers, signal, { allowSpotify: options.allowSpotify, verifiedSource: { ...source, track: safeSource.data } });
     signal.throwIfAborted();
     const safeMapped = libraryTrackSchema.safeParse({ ...safeSource.data, ...mappings });
     if (!safeMapped.success) throw new Error(serverT("this_recording_returned_invalid_or_oversized_catalog_metadata"));
-    const duration = track.provider === "youtube" ? await verifyTrackDuration(safeMapped.data,{youtubeApiKey,soundCloud,fetcher:fetchImpl,signal}) : {durationMs:verified.durationMs,durationVerified:Boolean(verified.durationMs),isLive:false};
+    const duration = source.duration.durationVerified ? source.duration : await verifyTrackDuration(safeMapped.data, { providers, signal });
     return { ...mappings, ...safeMapped.data,...duration };
   };
 }

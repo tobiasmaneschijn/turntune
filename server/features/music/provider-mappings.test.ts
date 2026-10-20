@@ -25,3 +25,42 @@ test("disabled Spotify cannot resolve source tracks or probe counterpart catalog
   await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
   assert.equal(spotifyCalls, 1);
 });
+
+test("conflicting catalog recordings keep source playback regardless of response order", async () => {
+  const input = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Recording", artist: "Artist", durationMs: 180_000 };
+  async function resolveWithFirst(first: "spotify" | "apple") {
+    const releases = {} as Record<"spotify" | "apple", () => void>;
+    const catalog = (provider: "spotify" | "apple") => ({
+      configured: true,
+      searchTracks: () => new Promise(resolve => {
+        releases[provider] = () => resolve([{ provider, id: `${provider}-track`, title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: `${provider}-isrc` }]);
+      })
+    });
+    const pending = resolveTrackMappings(input, catalog("spotify") as unknown as SpotifyApi, catalog("apple") as unknown as AppleMusicApi, undefined, { allowSpotify: true });
+    releases[first]();
+    await Promise.resolve();
+    releases[first === "spotify" ? "apple" : "spotify"]();
+    return pending;
+  }
+  const first = await resolveWithFirst("spotify");
+  const retried = await resolveWithFirst("apple");
+  assert.equal(first.canonicalId, "youtube:abcdefghijk");
+  assert.equal(first.isrc, undefined);
+  assert.deepEqual(Object.keys(first.mappings ?? {}), ["youtube"]);
+  assert.deepEqual(retried, first);
+});
+
+test("verified source identity rejects a conflicting counterpart and accepts its corrected recording", async () => {
+  const input = { provider: "spotify" as const, providerId: "a".repeat(22), title: "Recording", artist: "Artist", durationMs: 180_000 };
+  const spotify = { configured: true, getTrack: async () => ({ provider: "spotify", id: input.providerId, title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: "USABC1234567" }) } as unknown as SpotifyApi;
+  let counterpartIsrc = "USABC7654321";
+  const apple = { configured: true, findByIsrc: async () => ({ provider: "apple", id: "123", title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: counterpartIsrc }) } as unknown as AppleMusicApi;
+  const first = await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
+  assert.equal(first.canonicalId, "isrc:USABC1234567");
+  assert.equal(first.mappings?.apple, undefined);
+  counterpartIsrc = "USABC1234567";
+  const retried = await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
+  assert.equal(retried.canonicalId, first.canonicalId);
+  assert.equal(retried.mappings?.apple?.providerId, "123");
+  assert.equal(retried.mappings?.apple?.matchMethod, "isrc");
+});

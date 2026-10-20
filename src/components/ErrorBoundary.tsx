@@ -1,5 +1,6 @@
 import i18n from "../i18n";
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ReactNode } from "react";
+import { telemetry } from "../../shared/observability";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
@@ -12,8 +13,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
 
   static getDerivedStateFromError() { return { failed: true }; }
 
-  componentDidCatch(error: Error, details: ErrorInfo) {
-    console.error("The app could not render this screen.", error, details.componentStack);
+  componentDidCatch(error: Error) {
+    telemetry.captureError(error, { operation: "browser.render.screen" });
   }
 
   render() {

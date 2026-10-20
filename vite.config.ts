@@ -30,6 +30,8 @@ export default defineConfig(({mode})=>({
   optimizeDeps:mode==="test"?{entries:["index.html","tests/**/*.html"]}:undefined,
   plugins: [react(), tailwindcss(),...(mode==="test"?[fixtureApiGuard()]:[])],
   build: {
+    // Uploaded privately during the build and removed before publishing.
+    sourcemap: "hidden",
     rollupOptions: {
       output: {
         manualChunks(id) {

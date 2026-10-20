@@ -5,7 +5,7 @@ import { testArguments, testEnvironment } from "../../scripts/run-tests.mjs";
 
 test("the launched test process receives no application credentials or production settings", () => {
   for (const name of Object.keys(process.env)) {
-    assert.ok(!/^(?:SUPABASE_|VITE_|SPOTIFY_|SOUNDCLOUD_|APPLE_MUSIC_|GIPHY_|YOUTUBE_|MIXCLOUD_|SIGNUP_|APP_ORIGIN$|TRUST_PROXY$|TRUSTED_PROXY_CIDRS$|PORT$|HOST$|NODE_OPTIONS$)/.test(name), `Unexpected inherited application setting: ${name}`);
+    assert.ok(!/^(?:SUPABASE_|VITE_|SPOTIFY_|SOUNDCLOUD_|APPLE_MUSIC_|GIPHY_|YOUTUBE_|MIXCLOUD_|SIGNUP_|SENTRY_|OBSERVABILITY_|OTEL_|APP_ORIGIN$|TRUST_PROXY$|TRUSTED_PROXY_CIDRS$|PORT$|HOST$|NODE_OPTIONS$)/.test(name), `Unexpected inherited application setting: ${name}`);
   }
   assert.equal(process.env.NODE_ENV, "test");
 });
@@ -32,6 +32,8 @@ test("test environment strips application credentials and runtime injection whil
     SIGNUP_INVITE_PASSWORD: "sentinel", APP_ORIGIN: "https://credential.invalid", TRUST_PROXY: "true",
     TRUSTED_PROXY_CIDRS: "0.0.0.0/0", PORT: "9999", HOST: "0.0.0.0", NODE_ENV: "production",
     NODE_OPTIONS: "--require=/missing/credential-injection.cjs", UNEXPECTED_PRIVATE_KEY: "sentinel",
+    SENTRY_DSN: "https://key@monitoring.invalid/1", SENTRY_BROWSER_DSN: "https://key@monitoring.invalid/2", SENTRY_AUTH_TOKEN: "sentinel",
+    OBSERVABILITY_PROVIDER: "sentry", OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.invalid", OTEL_EXPORTER_OTLP_HEADERS: "authorization=sentinel",
     PATH: "/safe/bin", HTTP_PROXY: "http://proxy.test", HTTPS_PROXY: "http://proxy.test", NO_PROXY: "localhost",
     NODE_EXTRA_CA_CERTS: "/safe/ca.pem", SSL_CERT_FILE: "/safe/ca.pem", LANG: "en_US.UTF-8"
   };

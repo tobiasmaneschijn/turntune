@@ -6,7 +6,15 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm ci --include=dev --cache /tmp/npm-cache --no-fund
 COPY . .
-RUN npm run build
+ARG BUILD_REVISION=unknown
+ARG SENTRY_ORG
+ARG SENTRY_BROWSER_PROJECT
+ARG SENTRY_SERVER_PROJECT
+ARG SENTRY_URL
+ARG SENTRY_UPLOAD_ENABLED=false
+# The upload token is available only to this command, never as an image setting.
+RUN --mount=type=secret,id=sentry_auth_token \
+    SENTRY_AUTH_TOKEN_FILE=/run/secrets/sentry_auth_token npm run build
 RUN find dist-server -name '*.test.js' -delete
 
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runtime
@@ -17,6 +25,7 @@ LABEL org.opencontainers.image.title="turntune" \
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV BUILD_REVISION=$BUILD_REVISION
 COPY package*.json ./
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \

@@ -4,6 +4,7 @@ import type { ResourcePolicyStore } from "../resources/resource-policy.js";
 import type { GiphyApi } from "../integrations/giphy.js";
 import type { AppleMusicApi } from "../integrations/apple-music.js";
 import type { SpotifyAccounts } from "../integrations/spotify/spotify-accounts.js";
+import { browserObservabilityConfig } from "../observability/config.js";
 
 export interface ConfigRouteOptions {
   authEnabled: boolean;
@@ -22,6 +23,7 @@ export function mountConfigRoutes(app: express.Express, options: ConfigRouteOpti
     let spotifyConfigured=false;
     try {const actor=await getApiUserId(request);spotifyConfigured=Boolean(actor&&options.spotifyAccounts.configured&&await canUseSpotify(request,actor));}catch{/* Public configuration does not expose disabled capabilities. */}
     response.json({
+      observability: browserObservabilityConfig(),
       giphyConfigured: options.giphyApi.configured,
       music: {
         spotifyConfigured,

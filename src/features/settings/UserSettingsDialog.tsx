@@ -19,6 +19,7 @@ import { Input } from "../../components/ui/input";
 import { getSupabaseClient } from "../../lib/supabase";
 import { requestJson } from "../../lib/authenticated-http";
 import { resetProviderSession } from "../playback/provider-session";
+import { PLAYBACK_PREFERENCES, playbackPreferenceAllowed } from "../playback/playback-selection";
 
 interface SpotifyDevice {
   id: string | null;
@@ -80,17 +81,14 @@ export function UserSettingsDialog({
     value: PlaybackPreference;
     title: string;
     icon: typeof Radio;
-  }> = [
-    { value: "source", title: t("userSettingsDialog.roomSource"), icon: Radio },
-    { value: "spotify-web", title: t("userSettingsDialog.spotifyInBrowser"), icon: Music2 },
-    { value: "spotify-desktop", title: t("userSettingsDialog.spotifyConnect"), icon: MonitorSpeaker },
-    { value: "apple", title: t("userSettingsDialog.appleMusic"), icon: Music2 }
-  ];
+  }> = (Object.entries(PLAYBACK_PREFERENCES) as Array<[PlaybackPreference, typeof PLAYBACK_PREFERENCES[PlaybackPreference]]>)
+    .map(([value, definition]) => ({ value, title: t(definition.titleKey),
+      icon: definition.icon === "radio" ? Radio : definition.icon === "device" ? MonitorSpeaker : Music2 }));
   const [tab, setTab] = useState<"playback" | "connections" | "notifications" | "appearance" | "account">("playback");
   const isMobile = useMediaQuery("(max-width: 600px)");
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const { theme = settings.appearance.theme, setTheme } = useTheme();
-  const playbackPreference = !spotifyEnabled && settings.playback.preference.startsWith("spotify") ? "source" : settings.playback.preference;
+  const playbackPreference = playbackPreferenceAllowed(settings.playback.preference, spotifyEnabled) ? settings.playback.preference : "source";
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
@@ -287,7 +285,7 @@ export function UserSettingsDialog({
                   <ToggleGroup className="playback-option-list" aria-label={t("userSettingsDialog.defaultPlaybackProvider")} orientation="vertical" value={[playbackPreference]} onValueChange={(value) => {
                     if (value[0]) updatePlayback({ preference: value[0] as PlaybackPreference });
                   }}>
-                    {playbackOptions.filter(option => spotifyEnabled || !option.value.startsWith("spotify")).map((option) => {
+                    {playbackOptions.filter(option => playbackPreferenceAllowed(option.value, spotifyEnabled)).map((option) => {
                       const unavailable = option.value.startsWith("spotify") ? spotifyUnavailable : option.value === "apple" && appleUnavailable;
                       const selected = playbackPreference === option.value;
                       const Icon = option.icon;

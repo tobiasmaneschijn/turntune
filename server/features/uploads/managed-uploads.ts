@@ -146,7 +146,7 @@ export function managedUploadAdmission(options: {
       next()
     } catch (error) {
       if (counted) { activeUploads--; const remaining = (activeActors.get(actor!) || 1) - 1; if (remaining) activeActors.set(actor!, remaining); else activeActors.delete(actor!) }
-      const failure = publicRequestFailure(error, 'Image uploads are unavailable. Try again later.')
+      const failure = publicRequestFailure(error, 'Image uploads are unavailable. Try again later.', { operation: 'upload.admit' })
       response.status(failure.status).json({ error: failure.message })
     }
   }

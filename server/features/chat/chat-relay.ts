@@ -117,7 +117,7 @@ export function createChatRelay(options: ChatRelayOptions) {
         origin.assertActive()
         return { ok: true }
       } catch (error) {
-        return { ok: false, error: error instanceof z.ZodError ? serverT("invalid_chat_event") : publicRequestFailure(error, serverT("chat_could_not_be_delivered_try_again")).message }
+        return { ok: false, error: error instanceof z.ZodError ? serverT("invalid_chat_event") : publicRequestFailure(error, serverT("chat_could_not_be_delivered_try_again"), { operation: 'chat.deliver' }).message }
       }
     },
   }

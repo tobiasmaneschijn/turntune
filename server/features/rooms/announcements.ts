@@ -1,4 +1,5 @@
 import { serverT } from "../../lib/i18n.js";
+import { telemetry } from "../../observability/index.js";
 import crypto from "node:crypto";
 import { z } from "zod";
 import type { Room, RoomAnnouncement } from "../../types.js";
@@ -45,7 +46,7 @@ export class AnnouncementExpiryRegistry {
       if (room.announcement.expiresAt > Date.now()) { this.watch(room); return; }
       // The callback stages and persists expiry before publishing it.
       void this.expire(room).catch(error => {
-        console.error(error);
+        telemetry.captureError(error, { operation: "room.announcement.expire" });
         if (room.announcement?.id !== note.id || this.entries.has(room.id)) return;
         const retry = setTimeout(() => { this.entries.delete(room.id); this.watch(room); }, 5_000);
         retry.unref();

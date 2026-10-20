@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import type { Playback } from "../../types";
 
 /** Measured local state. Sending a play command does not confirm playback. */
@@ -12,11 +13,17 @@ export interface PlayerStatus {
   trackId?: string;
 }
 
+export interface PlaybackAdapterControls {
+  /** Called directly from the user's Sync action to preserve playback activation. */
+  sync(): void;
+}
+
 /** Shared room intent and callbacks for every provider adapter. */
 export interface ProviderPlaybackProps {
   playback: Playback;
   isDj: boolean;
   volume: number;
+  controlsRef?: Ref<PlaybackAdapterControls>;
   onEnded: () => void;
   onStatus: (status: PlayerStatus) => void;
   /** An empty message clears a previously reported provider error. */
@@ -45,7 +52,10 @@ export interface PlaybackCommandLease {
   release(stop: () => Promise<void>): Promise<void>;
 }
 
-/** Serializes uninterruptible SDK/device operations across adapter mounts. */
+/** Serializes uninterruptible SDK/device operations across adapter mounts.
+ * Ownership is checked before a command starts; adapters must recheck current()
+ * after awaited SDK work before applying another command or emitting an event.
+ */
 export class PlaybackCommandLifecycle {
   private owner: object | null = null;
   private commands: Promise<void> = Promise.resolve();

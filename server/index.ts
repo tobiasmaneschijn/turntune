@@ -10,6 +10,9 @@ import { mountSpotifyAccessRoutes } from "./features/admin/spotify-access-routes
 import { mountApiErrors } from "./app/api-errors.js";
 import { serverT } from "./lib/i18n.js";
 import { runtimeMetrics } from "./lib/runtime-metrics.js";
+import { observeQueueCommand } from "./observability/actions.js";
+import { telemetry, flushTelemetry } from "./observability/index.js";
+import { startCapacityMetrics } from "./observability/capacity.js";
 import { mountAdminRoutes } from "./features/admin/admin-routes.js";
 import { mountMusicRoutes } from "./features/music/music-routes.js";
 import { mountRoomActions } from "./features/rooms/room-actions.js";
@@ -69,7 +72,8 @@ import { roomPresence, uniqueUsers } from "./features/rooms/presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./features/rooms/announcements.js";
 import { SoundCloudApi } from "./integrations/soundcloud.js";
 import { AppleMusicApi } from "./integrations/apple-music.js";
-import { resolveTrackMappings } from "./features/music/provider-mappings.js";
+import { resolveProviderMappings } from "./features/music/provider-mappings.js";
+import { createServerProviderRegistry } from "./features/music/provider-registry.js";
 import { SpotifyAccounts } from "./integrations/spotify/spotify-accounts.js";
 import { SpotifyApi } from "./integrations/spotify/spotify.js";
 import { GiphyApi } from "./integrations/giphy.js";
@@ -132,6 +136,7 @@ const soundCloudApi = new SoundCloudApi(
 const spotifyApi = new SpotifyApi();
 const giphyApi = new GiphyApi();
 const appleMusicApi = new AppleMusicApi();
+const musicProviders = createServerProviderRegistry({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi, youtubeApiKey });
 const spotifyAccounts = new SpotifyAccounts(store, spotifyApi);
 const authEnabled = Boolean(
   supabaseUrl &&
@@ -159,8 +164,8 @@ const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const queueUndo = new QueueUndoRegistry();
 const setImports = new SetImportRegistry();
 const roomEntryLimiter = new RoomEntryLimiter();
-const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey });
-const resolveSpotifySavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey,allowSpotify:true });
+const resolveSavedRecording = createSavedSetResolver({ providers: musicProviders });
+const resolveSpotifySavedRecording = createSavedSetResolver({ providers: musicProviders, allowSpotify: true });
 const sessionScheduler=new RoomSessionScheduler(roomCommands,broadcast,id=>uniqueUsers(roomUsers.get(id)?.values()??[]).length);
 const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
   await roomCommands.execute(room, draft => {
@@ -187,16 +192,7 @@ store.setRoomCacheHooks(watchIdleRoom,roomId=>!blockedRooms.has(roomId)&&(Boolea
   Boolean(store.getRoom(roomId)?.djQueueUserIds.some(id=>hasPendingDjEviction(roomId,id))) ||
   Boolean(store.getRoom(roomId)?.settings.themeSchedules?.some(item=>item.endsAt>Date.now())) ||
   Boolean(store.getRoom(roomId)?.radioState?.fallback.enabled)));
-console.log("Signup configuration:", {
-  signupInvitePassword: Boolean(signupInvitePassword),
-  supabaseUrl: Boolean(supabaseUrl),
-  supabasePublishableKey: Boolean(supabasePublishableKey),
-  supabaseSecretKey: Boolean(supabaseSecretKey),
-  supabaseJwksUrl: Boolean(supabaseJwksUrl),
-  usesSupabase: store.usesSupabase,
-  authEnabled,
-  signupAdmin: Boolean(signupAdmin)
-});
+telemetry.log("info", "server.starting");
 
 function spotifyRedirectUri(request: express.Request) {
   if (process.env.SPOTIFY_REDIRECT_URI) return process.env.SPOTIFY_REDIRECT_URI;
@@ -502,7 +498,7 @@ function scheduleDjEviction(room: Room, user: User) {
         return { result: undefined, committed: () => forgetDjUser(currentRoom.id, user.id) };
       });
     })().catch(error => {
-      console.error("Could not persist offline DJ removal", error);
+      telemetry.captureError(error, { operation: "room.dj.evict" });
       if (!shuttingDown && ![...(roomUsers.get(room.id)?.values() || [])].some(roomUser => roomUser.id === user.id)) scheduleDjEviction(room, user);
     });
   });
@@ -563,7 +559,10 @@ io.use(async (socket, next) => {
   socket.data.authUserId = data.userClaims.id;
   socket.data.platformAllowed=true;
   next();
-  }catch(error){next(new Error(error instanceof SecurityLimitError?error.message:serverT("account_access_could_not_be_verified_try_again")));}
+  }catch(error){
+    if (!(error instanceof SecurityLimitError)) telemetry.captureError(error, { operation: "socket.authenticate" });
+    next(new Error(error instanceof SecurityLimitError?error.message:serverT("account_access_could_not_be_verified_try_again")));
+  }
 });
 
 io.on("connection", (socket) => {
@@ -587,10 +586,12 @@ io.on("connection", (socket) => {
         if (member && !access.rooms.get(member.room.id)) { await restrictRoom(member.room.id); throw new RoomCommandError(serverT("this_room_is_unavailable")); }
       }
       await handler(payload, reply);
-    },()=>securityEvent("request_failed","failed"));
+    },error=>{telemetry.captureError(error,{operation:"socket.command"});securityEvent("request_failed","failed");});
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
     socket.on(event, (payload: unknown, reply?: unknown) => {
-      if (shuttingDown) return;
+      const commandMetric = observeQueueCommand(event, reply);
+      const acknowledgement = commandMetric?.reply ?? reply;
+      if (shuttingDown) { commandMetric?.finish("canceled"); return; }
       const userId=socket.data.authUserId||getMembership(socket.id)?.user.id||socket.id;
       const peer=trustedSocketPeer(socket);
       const rules=[{key:`socket-actions-user:${userId}`,maximum:240,windowMs:60_000},{key:`socket-actions-peer:${peer}`,maximum:1500,windowMs:60_000}];
@@ -599,17 +600,20 @@ io.on("connection", (socket) => {
       const globalRelease=securityBudget.acquire("socket-action-global",256);
       if(!userRelease||!globalRelease||!securityBudget.consume(rules)){
         userRelease?.();globalRelease?.();
-        if(typeof reply==="function")reply({ok:false,error:serverT("too_many_requests_wait_a_minute_before_trying_again"),retryAfter:60});
+        commandMetric?.finish("rejected", { reason: "rate_limit" });
+        if(typeof acknowledgement==="function")acknowledgement({ok:false,error:serverT("too_many_requests_wait_a_minute_before_trying_again"),retryAfter:60});
         securityEvent("rate_limited","denied");return;
       }
       const operation = (async()=>{
         try {
           const policy=await resourcePolicies.get(userId);
-          await resourceAdmission.roomAction(event,userId,socketRooms.get(socket.id),policy,()=>run(payload,reply));
+          await resourceAdmission.roomAction(event,userId,socketRooms.get(socket.id),policy,()=>run(payload,acknowledgement));
         } catch(error) {
-          if(typeof reply==="function")reply({ok:false,error:error instanceof SecurityLimitError?error.message:serverT("resource_limits_are_unavailable_try_again_shortly"),retryAfter:60});
+          if (!(error instanceof SecurityLimitError)) telemetry.captureError(error, { operation: "socket.admission" });
+          commandMetric?.finish(error instanceof SecurityLimitError ? "rejected" : "failure", { reason: error instanceof SecurityLimitError ? "capacity" : "server" });
+          if(typeof acknowledgement==="function")acknowledgement({ok:false,error:error instanceof SecurityLimitError?error.message:serverT("resource_limits_are_unavailable_try_again_shortly"),retryAfter:60});
         }
-      })().finally(()=>{userRelease();globalRelease();});
+      })().finally(()=>{ commandMetric?.finish("failure", { reason: "invalid_response" }); userRelease();globalRelease(); });
       activeSocketActions.add(operation);
       void operation.finally(() => activeSocketActions.delete(operation));
     });
@@ -723,7 +727,7 @@ io.on("connection", (socket) => {
       }
       reply?.({ ok: true });
     } catch (error) {
-      if(!(error instanceof RoomCommandError))securityEvent("request_failed","failed");
+      if(!(error instanceof RoomCommandError)){telemetry.captureError(error,{operation:"room.join"});securityEvent("request_failed","failed");}
       if (registration&&socket.data.admissionToken===registration&&socketRooms.get(socket.id) === roomId) {
           await leaveCurrentRoom(socket.id);
           await socket.leave(roomId);
@@ -748,7 +752,10 @@ io.on("connection", (socket) => {
     },
     broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
     watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
-    resolveTrack: async (track,room) => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi,undefined,{allowSpotify:roomAllowsProvider(room.settings,"spotify")});return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};},
+    resolveTrack: async (track, room) => {
+      const resolved = await resolveProviderMappings(track, musicProviders, undefined, { allowSpotify: roomAllowsProvider(room.settings, "spotify") });
+      return resolved.durationVerified ? resolved : { ...resolved, ...await verifyTrackDuration(track, { providers: musicProviders }) };
+    },
     resolveSavedRecording:(track,signal,room)=>(roomAllowsProvider(room.settings,"spotify")?resolveSpotifySavedRecording:resolveSavedRecording)(track,signal),
     getResourcePolicy:actor=>resourcePolicies.get(actor),
     runImport:async(actor,operation)=>resourceAdmission.importSet(actor,await resourcePolicies.get(actor),operation),
@@ -760,7 +767,7 @@ io.on("connection", (socket) => {
       reply?.(result);
     });
   }
-  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(()=>securityEvent("request_failed","failed")); });
+  socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(error=>{telemetry.captureError(error,{operation:"room.leave"});securityEvent("request_failed","failed");}); });
 });
 
 const maintenance = createMaintenance({ supabaseAdmin, authEnabled, accountDeletion, platform, resourcePolicies,
@@ -819,7 +826,20 @@ for(const room of await store.listSessionRooms()){
   else {blockedRooms.add(room.id);watchIdleRoom(room.id);}
 }
 maintenance.start();
+let stopCapacityMetrics: (() => void) | undefined;
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
+  if (!shuttingDown) stopCapacityMetrics = startCapacityMetrics(() => {
+    let activeRooms = 0;
+    const listeners = new Set<string>();
+    for (const users of roomUsers.values()) {
+      if (users.size) activeRooms++;
+      for (const user of users.values()) listeners.add(user.id);
+    }
+    return { activeRooms, connectedListeners: listeners.size, connectedSockets: io.engine.clientsCount,
+      pendingRoomCommands: runtimeMetrics.pendingRoomCommands };
+  });
+  telemetry.log("info", "server.listening");
+  // Local process harnesses use this readiness line to discover an ephemeral port.
   const address = httpServer.address();
   console.log(`turntune listening on http://${process.env.HOST || "0.0.0.0"}:${typeof address === "object" && address ? address.port : port}`);
 });
@@ -827,6 +847,7 @@ httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  stopCapacityMetrics?.();
   djEvictions.clear();
   announcementExpiries.clear();
   sessionScheduler.clear();
@@ -839,10 +860,13 @@ async function shutdown() {
     await Promise.allSettled([...activeSocketActions]);
     await maintenance.drain();
     await store.flush();
+    await flushTelemetry(2_000);
     clearTimeout(deadline);
   } catch (error) {
+    telemetry.captureError(error, { operation: "server.shutdown" });
     securityEvent("request_failed","failed");
     process.exitCode = 1;
+    await flushTelemetry(2_000);
   }
 }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createMaintenance } from './maintenance.js'
 import { DEFAULT_GLOBAL_LIMITS } from '../../shared/resource-policy.js'
+import { telemetry } from '../observability/index.js'
 
 test('connection maintenance retries a failed batch and removes only newly restricted accounts and rooms', async t => {
   const intervals = new Map<number, () => void>()
@@ -11,6 +12,8 @@ test('connection maintenance retries a failed batch and removes only newly restr
   })
   t.mock.method(globalThis, 'clearInterval', () => {})
   t.mock.method(console, 'log', () => {})
+  const incidents: string[] = []
+  t.mock.method(telemetry, 'captureError', (_error: unknown, context: { operation: string }) => { incidents.push(context.operation) })
   const removedAccounts: string[] = [], removedRooms: string[] = []
   let calls = 0
   const maintenance = createMaintenance({
@@ -36,9 +39,11 @@ test('connection maintenance retries a failed batch and removes only newly restr
   check(); check()
   await maintenance.drain()
   assert.equal(calls, 1, 'an unfinished check does not start another batch')
+  assert.deepEqual(incidents, ['maintenance.connections.check'])
   assert.deepEqual(removedAccounts, []); assert.deepEqual(removedRooms, [])
   check()
   await maintenance.drain()
   assert.equal(calls, 2)
+  assert.equal(incidents.length, 1, 'successful recovery does not report another incident')
   assert.deepEqual(removedAccounts, ['suspended'], 'unknown identities wait for the next check'); assert.deepEqual(removedRooms, ['disabled-room'])
 })

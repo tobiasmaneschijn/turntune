@@ -36,18 +36,34 @@ const codeOrBinaryExtension = /\.(?:[cm]?js|map|json|node|svg|png|woff2?)$/i;
 const binaryFallbacks = [
   [/^@esbuild\//, "node_modules/esbuild", "LICENSE.md"],
   [/^@rollup\/rollup-/, "node_modules/rollup", "LICENSE.md"],
+  // The parser's platform bindings share its version, source directory and MIT
+  // declaration; their npm archives omit the LICENSE shipped by oxc-parser.
+  [/^@oxc-parser\/binding-/, "node_modules/oxc-parser", "LICENSE"],
+  [/^@sentry\/cli-(?:darwin|linux-|win32-)/, "node_modules/@sentry/cli", "LICENSE"],
 ];
 // This exact optional build-tool binary declares MIT but ships no license text;
 // its matching source also supplies no copyright notice. Retain the reviewed
 // metadata declaration and separately identified standard terms, without
 // treating another package's copyright as its own. Unknown revisions still fail.
-const reviewedNativeNotices = new Map([
+const reviewedMissingNotices = new Map([
   ["@napi-rs/lzma-linux-x64-gnu", {
     version: "1.5.1", license: "MIT",
     integrity: "sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==",
     file: "licenses/npm/lzma-1.5.1/NOTICE.txt",
     sha256: "b92a071ea5362fbed53a097a17f602af46dd9253526b758f5c34be25a1cc1f45",
   }],
+  // These two npm packages omit their own LICENSE. The exact release's root
+  // license covers repository code; preserve that source notice, not a sibling
+  // package's different copyright. Package integrity and notice hash are pinned.
+  ...["@sentry/server-runtime-injection", "@sentry/server-utils"].map((name, index) => [name, {
+    version: "11.8.0", license: "MIT", repository: "git://github.com/getsentry/sentry-javascript.git",
+    integrity: [
+      "sha512-4uB4E8+9ni5NcJ463aYK/+n1hTMw/vSt4s+AkQ84CKigRDwv2FNNnD1AWpipWNj/xEQ6eQbUitGl7wg7/Ri8Pg==",
+      "sha512-2MRFz1rXxnuDGafl6o/itwKHZeZn5hUZYeXNbQK012uO/a2pXhEc8Zh3FeO5L4tjGrIWHx419saAFnKwbVC2IQ==",
+    ][index],
+    file: "licenses/npm/sentry-javascript-11.8.0/LICENSE.txt",
+    sha256: "b6d1586282dc00c1c830bd4c6c4a122e8e8c4b898fd42a5f4ee99870374f2d3d",
+  }]),
 ]);
 
 function documentId(relativeFile) {
@@ -88,11 +104,12 @@ for (const [directory, entry] of Object.entries(lock.packages).sort(([a], [b]) =
       noticeFiles.push(`${directory}/README.md`);
     }
     if (!noticeFiles.length) {
-      const reviewed = reviewedNativeNotices.get(name);
+      const reviewed = reviewedMissingNotices.get(name);
       if (reviewed) {
         assert.equal(entry.version, reviewed.version, `Reviewed native notice version differs: ${directory}`);
         assert.equal(license, reviewed.license, `Reviewed native notice license differs: ${directory}`);
         assert.equal(entry.integrity, reviewed.integrity, `Reviewed native notice integrity differs: ${directory}`);
+        if (reviewed.repository) assert.equal(pkg.repository, reviewed.repository, `Reviewed notice repository differs: ${directory}`);
         const text = readFileSync(path.join(root, reviewed.file), "utf8").replaceAll("\r\n", "\n");
         assert.equal(createHash("sha256").update(text).digest("hex"), reviewed.sha256, `Reviewed native notice changed: ${directory}`);
         noticeFiles.push(reviewed.file);
@@ -104,8 +121,26 @@ for (const [directory, entry] of Object.entries(lock.packages).sort(([a], [b]) =
         assert.equal(parent.version, entry.version, `Binary/parent license fallback version differs: ${directory}`);
         const parentLicense = typeof parent.license === "object" ? parent.license.type : parent.license;
         assert.equal(parentLicense, license, `Binary/parent license fallback license differs: ${directory}`);
+        if (name.startsWith("@oxc-parser/binding-")) {
+          assert.equal(parent.name, "oxc-parser", `Parser binding parent differs: ${directory}`);
+          assert.equal(parent.napi?.packageName, "@oxc-parser/binding", `Parser binding family differs: ${directory}`);
+          assert.equal(parent.optionalDependencies?.[name], entry.version, `Parser binding is not declared by its matching parent: ${directory}`);
+          assert.equal(pkg.repository?.url, parent.repository?.url, `Parser binding source repository differs: ${directory}`);
+          assert.equal(pkg.repository?.directory, parent.repository?.directory, `Parser binding source directory differs: ${directory}`);
+        }
+        if (name.startsWith("@sentry/cli-")) {
+          assert.equal(parent.name, "@sentry/cli", `Sentry binary parent differs: ${directory}`);
+          assert.equal(parent.optionalDependencies?.[name], entry.version, `Sentry binary is not declared by its matching parent: ${directory}`);
+          assert.equal(pkg.repository, "https://github.com/getsentry/sentry-cli", `Sentry binary source repository differs: ${directory}`);
+          assert.equal(parent.repository, "git://github.com/getsentry/sentry-cli.git", `Sentry parent source repository differs: ${directory}`);
+        }
         noticeFiles.push(`${parentDirectory}/${file}`);
       }
+    }
+    if (name === "@sentry/server-runtime-injection" || name === "@sentry/server-utils") {
+      const nestedNotice = `${directory}/build/THIRD-PARTY-LICENSES.txt`;
+      assert.ok(existsSync(path.join(root, nestedNotice)), `Missing bundled Sentry dependency notices: ${directory}`);
+      noticeFiles.push(nestedNotice);
     }
   }
   const ids = [...new Set(noticeFiles.sort().map(documentId))];
@@ -124,9 +159,11 @@ const lines = [
   `Generated from ${packages.length} locked package entries; ${installedCount} are installed.`,
   "Scope: production and development dependencies, including optional platform packages.",
   "Identical notice texts are stored once and referenced by number. A parent-package",
-  "license is used for matching esbuild/Rollup binary packages that omit a copy.",
+  "license is used for matching esbuild, Rollup, oxc-parser, and Sentry CLI binary packages that omit a copy.",
   "The exact reviewed lzma build-tool binary uses its recorded MIT metadata declaration",
   "and separately identified standard MIT terms; upstream supplied no copyright notice.",
+  "The reviewed Sentry runtime packages retain their exact release's repository license",
+  "and the third-party notices shipped inside their build directories.",
   "",
   "| Package | Version | Use | License | Local notice texts |",
   "| --- | --- | --- | --- | --- |",
@@ -151,7 +188,8 @@ for (const [digest, document] of sortedDocuments) {
     ...[...document.files].sort().map((file) => `- \`${file}\``),
     "",
     `${fence}text`,
-    document.text,
+    // Normalize presentation only; source hashes above retain the reviewed bytes.
+    document.text.replace(/[\t ]+$/gm, ""),
     fence,
     "",
   );

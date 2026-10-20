@@ -1,9 +1,11 @@
+import { createRef } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
 import { SpotifyPlayer } from "../../../../src/features/playback/providers/SpotifyPlayer";
 import type { PlayerStatus } from "../../../../src/features/playback/providers/YouTubePlayer";
 import { resetProviderSession, setProviderAccount } from "../../../../src/features/playback/provider-session";
+import type { PlaybackAdapterControls } from "../../../../src/features/playback/provider-playback";
 import type { Playback, ProviderTrackMapping, Track } from "../../../../src/types";
 
 interface MockState {
@@ -192,6 +194,7 @@ const onEnded = () => { errors.push("unexpected track end"); };
 const onConnectionLost = (message: string) => { connectionsLost.push(message); };
 const onError = (message: string) => { errors.push(message); };
 let mounted = true;
+const controlsRef = createRef<PlaybackAdapterControls>();
 
 function render() {
   root.render(mounted ? <SpotifyPlayer roomSlug="fixture-room"
@@ -200,6 +203,7 @@ function render() {
     mode={mode}
     isDj={false}
     volume={75}
+    controlsRef={controlsRef}
     accessToken={accessToken}
     userId={userId}
     resumeAfterReconnect={resumeAfterReconnect}
@@ -278,7 +282,7 @@ window.playbackHarness = {
     deferredState = undefined;
     pending?.resolve(pending.state);
   },
-  sync: () => { window.dispatchEvent(new Event("soundspin:playback-sync")); },
+  sync: () => { controlsRef.current?.sync(); },
   refreshAccessToken: (token) => { accessToken = token; render(); },
   requestSdkToken: async () => sdkPlayer?.requestToken(),
   requestOldSdkToken: () => sdkPlayers[0]?.requestTokenCallback(() => commands.push({source:"sdk", action:"stale-token"})),

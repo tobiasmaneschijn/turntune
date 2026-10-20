@@ -1,4 +1,5 @@
 import { serverT } from "../../lib/i18n.js";
+import { MUSIC_PROVIDERS } from "../../../shared/provider-definitions.js";
 import { providerJson, providerSignal } from "../../integrations/provider-http.js";
 import { SignupAttemptLimiter } from "../auth/invite-signup.js";
 import express from "express";
@@ -12,6 +13,8 @@ import { MixcloudApi, type MixcloudSearchResult } from "../../integrations/mixcl
 import { mixcloudShowKey } from "../../../shared/mixcloud.js";
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import { runtimeMetrics } from "../../lib/runtime-metrics.js";
+import { telemetry } from "../../observability/index.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 import { spotifyAccessAllowed, spotifyRoomContext, type SpotifyAccessCheck } from "./spotify-access.js";
 
 export interface MusicRouteOptions {
@@ -138,6 +141,12 @@ function appleMusicTrack(value: string) {
   }
 }
 
+function reportProviderError(error: unknown, request: express.Request, operation: string, provider?: string) {
+  // A canceled browser request or expected provider denial is not an incident.
+  if (request.aborted || error instanceof Error && error.name === "AbortError") return;
+  reportUnexpectedRequestError(error, { operation, provider });
+}
+
 export function mountMusicRoutes(app: express.Express, options: MusicRouteOptions) {
   const { authEnabled, youtubeApiKey, soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi } = options;
   const verifiedUsers = new WeakMap<express.Request, string | null>();
@@ -166,7 +175,7 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   const youtubeLiveLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
-  app.use(["/api/youtube", "/api/soundcloud", "/api/mixcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], async (request, response, next) => {
+  app.use([...MUSIC_PROVIDERS.map(provider => `/api/${provider}`), "/api/giphy", "/api/music"], async (request, response, next) => {
     response.set("Cache-Control", "no-store");
     // OAuth connect/callback are mounted separately and have their own flow quotas.
     if (request.path === "/connect" || request.path === "/callback") return next();
@@ -276,7 +285,7 @@ app.get("/api/youtube/live", async (request, response) => {
     if (isLive === null) return response.status(404).json({ error: serverT("youtube_video_is_unavailable") });
     return response.json({ isLive });
   } catch (error) {
-    console.error("YouTube live status lookup failed");
+    reportProviderError(error, request, "music.live.lookup", "youtube");
     return response.status(502).json({ error: serverT("could_not_check_youtube_live_status") });
   } finally {
     if (youtubeLivePending.get(id) === pending) youtubeLivePending.delete(id);
@@ -376,7 +385,7 @@ app.get("/api/youtube/search", async (request, response) => {
     });
     response.json({ results });
   } catch (error) {
-    console.error("YouTube search failed");
+    reportProviderError(error, request, "music.search", "youtube");
     response.status(502).json({
       error: serverT("youtube_search_failed")
     });
@@ -422,7 +431,7 @@ app.get("/api/soundcloud/search", async (request, response) => {
     });
     response.json({ results });
   } catch (error) {
-    console.error("SoundCloud search failed");
+    reportProviderError(error, request, "music.search", "soundcloud");
     response.status(502).json({
       error: serverT("soundcloud_search_failed")
     });
@@ -445,7 +454,7 @@ app.get("/api/soundcloud/resolve", async (request, response) => {
   try {
     response.json({ result: await trackedProvider(() => soundCloudApi.resolveTrack(parsed.data.url, requestSignal(request))) });
   } catch (error) {
-    console.error("SoundCloud URL resolution failed");
+    telemetry.log("warn", "music.resolve.failed", { operation: "music.resolve", provider: "soundcloud" });
     response.status(400).json({
       error: serverT("could_not_resolve_that_soundcloud_url")
     });
@@ -465,7 +474,7 @@ app.get("/api/mixcloud/search", async (request, response) => {
     mixcloudSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Mixcloud search failed");
+    reportProviderError(error, request, "music.search", "mixcloud");
     response.status(502).json({ error: serverT("mixcloud_search_failed") });
   }
 });
@@ -497,7 +506,7 @@ app.get("/api/spotify/search", async (request, response) => {
     spotifySearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Spotify search failed");
+    reportProviderError(error, request, "music.search", "spotify");
     response.status(502).json({ error: serverT("spotify_search_failed") });
   }
 });
@@ -534,7 +543,7 @@ app.get("/api/apple/search", async (request, response) => {
     appleMusicSearchCache.set(key, { results, expiresAt: Date.now() + 5 * 60 * 1000 });
     response.json({ results });
   } catch (error) {
-    console.error("Apple Music search failed");
+    reportProviderError(error, request, "music.search", "apple");
     response.status(502).json({ error: serverT("apple_music_search_failed") });
   }
 });
@@ -578,7 +587,7 @@ app.get("/api/giphy", async (request, response) => {
   try {
     response.json({ results: await trackedProvider(() => giphyApi.gifs(parsed.data.q, requestSignal(request))) });
   } catch (error) {
-    console.error("GIPHY request failed");
+    reportProviderError(error, request, "music.search", "giphy");
     response.status(502).json({
       error: serverT("could_not_load_gifs")
     });
@@ -602,8 +611,9 @@ app.get("/api/music/connections", async (request, response) => {
           product?: string;
         }>(token, "/me", { signal: requestSignal(request) }));
         spotifyProfile = { displayName: profile.display_name || "Spotify account", product: profile.product };
-      } catch {
+      } catch (error) {
         // The saved connection remains useful even when profile metadata is temporarily unavailable.
+        reportProviderError(error, request, "music.profile.lookup", "spotify");
       }
     }
     response.json({
@@ -615,6 +625,7 @@ app.get("/api/music/connections", async (request, response) => {
       apple: { configured: appleMusicApi.configured }
     });
   } catch (error) {
+    reportProviderError(error, request, "music.connections.load");
     response.status(500).json({ error: serverT("could_not_load_music_connections") });
   }
 });
@@ -626,6 +637,7 @@ app.delete("/api/spotify/connection", async (request, response) => {
     await spotifyAccounts.disconnect(userId);
     response.status(204).end();
   } catch (error) {
+    reportProviderError(error, request, "music.connection.disconnect", "spotify");
     response.status(500).json({ error: serverT("could_not_disconnect_spotify") });
   }
 });
@@ -646,6 +658,7 @@ app.get("/api/spotify/devices", async (request, response) => {
   try {
     response.json(await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player/devices", { signal: requestSignal(request) })));
   } catch (error) {
+    reportProviderError(error, request, "music.devices.load", "spotify");
     response.status(502).json({ error: serverT("could_not_load_spotify_devices") });
   }
 });
@@ -657,6 +670,7 @@ app.get("/api/spotify/playback", async (request, response) => {
     const state = await spotifyForUser(userId, (token) => spotifyApi.request(token, "/me/player", { signal: requestSignal(request) }));
     response.json({ state });
   } catch (error) {
+    reportProviderError(error, request, "music.playback.read", "spotify");
     response.status(502).json({ error: serverT("could_not_read_spotify_playback") });
   }
 });
@@ -695,6 +709,7 @@ app.post("/api/spotify/playback", express.json({ limit: "4kb" }), async (request
     });
     response.status(204).end();
   } catch (error) {
+    reportProviderError(error, request, "music.playback.write", "spotify");
     response.status(502).json({ error: serverT("spotify_playback_failed") });
   }
 });
@@ -707,6 +722,7 @@ app.get("/api/apple/token", async (request, response) => {
   try {
     response.json({ developerToken: appleMusicApi.getDeveloperToken(), storefront: appleMusicApi.storefront });
   } catch (error) {
+    reportProviderError(error, request, "music.token.create", "apple");
     response.status(500).json({ error: serverT("could_not_create_an_apple_music_token") });
   }
 });

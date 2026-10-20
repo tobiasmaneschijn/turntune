@@ -5,6 +5,7 @@ import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
 import type { SoundCloudApi } from "../../integrations/soundcloud.js";
 import type { Room } from "../../types.js";
+import { createServerProviderRegistry } from "./provider-registry.js";
 const track = { provider: "youtube" as const, providerId: "dQw4w9WgXcQ", title: "Saved title" };
 const room = () => ({ id: "test-room" }) as Room;
 test("saved Mixcloud shows are verified and keep their source metadata and mapping", async () => {
@@ -21,6 +22,27 @@ test("saved Mixcloud shows are verified and keep their source metadata and mappi
   assert.equal(result.durationMs, 3_600_000);
   assert.deepEqual(Object.keys(result.mappings || {}), ["mixcloud"]);
   await assert.rejects(resolve({ ...input, providerId: "/dj/different/" }, new AbortController().signal), /different show/);
+});
+
+test("saved source verification uses its registered provider and reuses verified metadata", async () => {
+  let sourceCalls = 0;
+  const providers = createServerProviderRegistry({ soundCloud: { configured: true, resolveTrack: async () => { throw new Error("Another provider must not handle this source"); } } });
+  providers.spotify = {
+    resolveSource: async (input, signal) => {
+      signal.throwIfAborted();
+      sourceCalls++;
+      return { track: { ...input, title: "Verified recording", durationMs: 180_000 }, isrc: "USABC1234567", mapping: { providerId: "a".repeat(22), matchMethod: "source" }, duration: { durationMs: 180_000, durationVerified: true, isLive: false } };
+    },
+    catalog: { configured: () => true, findByIsrc: async () => undefined, searchTracks: async () => [] }
+  };
+  const resolve = createSavedSetResolver({ providers, allowSpotify: true });
+  const result = await resolve({ provider: "spotify", providerId: "5bJ1DrEM4hNCafcDd1oxHx", title: "Saved title" }, new AbortController().signal);
+  assert.equal(sourceCalls, 1);
+  assert.equal(result.title, "Verified recording");
+  assert.equal(result.canonicalId, "isrc:USABC1234567");
+  assert.equal(result.mappings?.spotify?.providerId, "a".repeat(22));
+  assert.equal(result.durationVerified, true);
+  assert.equal(result.durationMs, 180_000);
 });
 test("set verification preserves intended order and explains every unavailable source", async () => {
   const inputs = [track, { ...track, title: "Unavailable" }, { ...track, title: "Third" }];

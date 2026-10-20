@@ -24,7 +24,7 @@ export function mountManagedUploadRoutes(app: Express, options: ManagedUploadRou
           response.locals.uploadComplete = true
           response.json({ storagePath })
         } catch (error) {
-          const failure = publicRequestFailure(error, 'Image uploads are unavailable. Try again later.')
+          const failure = publicRequestFailure(error, 'Image uploads are unavailable. Try again later.', { operation: 'upload.create' })
           response.status(failure.status).json({ error: failure.message })
         }
       })
@@ -42,7 +42,7 @@ export function mountManagedUploadRoutes(app: Express, options: ManagedUploadRou
       if (error) throw error
       response.json({ ok: true })
     } catch (error) {
-      const failure = publicRequestFailure(error, 'Could not remove this upload. Try again later.')
+      const failure = publicRequestFailure(error, 'Could not remove this upload. Try again later.', { operation: 'upload.cleanup' })
       response.status(failure.status).json({ error: failure.message })
     }
   })
