@@ -180,6 +180,13 @@ Staging's host loopback binding is `127.0.0.1:3001:3000`; production uses
 `127.0.0.1:3002:3000`. Keep WebSockets enabled and prevent direct public backend access.
 A triggered deployment is not a completed release.
 
+Empty or malformed Dokploy polling responses are retried briefly; they do not count as
+deployment or process-exit evidence. Compose mutations are sent once. If a run
+fails after starting the replacement, inspect the deployment and running image
+before retrying: the container may already be healthy even though GitHub has
+no verified deployment evidence. Fix the reported failure, then start a fresh
+staging run or re-run all staging jobs; do not promote the failed run.
+
 The workflow does not apply database migrations, open public ingress or approve
 the remaining hosted release gates. Keep public ingress closed until the full
 evidence review permits it. Existing dated evidence remains historical evidence
