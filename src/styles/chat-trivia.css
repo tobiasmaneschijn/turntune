@@ -1,0 +1,22 @@
+.chat-trivia { width: min(440px, 100%); min-width: 0; margin-block: 4px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); }
+.chat-trivia-heading, .chat-trivia-heading > span, .chat-trivia-footer { display: flex; align-items: center; gap: 8px; }
+.chat-trivia-heading { justify-content: space-between; flex-wrap: wrap; }
+.chat-trivia-heading strong { font-size: 13px; font-weight: 600; }
+.chat-trivia-time, .chat-trivia-footer { color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+.chat-trivia-time, .chat-trivia-count { font-variant-numeric: tabular-nums; }
+.chat-trivia-question { margin: 8px 0; font-size: var(--chat-text-size, 14px); line-height: 20px; overflow-wrap: anywhere; }
+.chat-trivia-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.chat-trivia-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--foreground); font: inherit; font-size: 13px; line-height: 18px; text-align: left; cursor: pointer; }
+.chat-trivia-option-copy { display: flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.chat-trivia-option-copy svg { flex: 0 0 auto; }
+.chat-trivia-option:not(:disabled):hover { background: var(--accent); }
+.chat-trivia-option:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.chat-trivia-option[aria-pressed="true"] { border-color: var(--primary); background: color-mix(in oklch, var(--primary) 10%, var(--background)); }
+.chat-trivia-option[data-correct="true"] { border-color: var(--primary); color: var(--primary-text); }
+.chat-trivia-option:disabled { cursor: default; }
+.chat-trivia-count { flex: 0 0 auto; color: var(--muted-foreground); font-size: 12px; }
+.chat-trivia-footer { justify-content: space-between; flex-wrap: wrap; margin-top: 8px; }
+.chat-trivia-recovery { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.chat-trivia-recovery p { min-width: 0; margin: 0; color: var(--destructive); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+@media (max-width: 640px), (pointer: coarse) { .chat-trivia-option, .chat-trivia-recovery > button { min-height: 44px; } }
+@media (max-width: 440px) { .chat-trivia-options { grid-template-columns: minmax(0, 1fr); } }

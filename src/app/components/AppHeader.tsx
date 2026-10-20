@@ -33,12 +33,15 @@ interface AppHeaderProps {
   skipTo?: string;
   navigation?: ReactNode;
   publicActions?: ReactNode;
+  context?: ReactNode;
+  actions?: ReactNode;
+  showAppearance?: boolean;
 }
 
-/** Global navigation stays in the same place; page and room actions live below it. */
+/** Shared navigation can also carry room context and actions. */
 export function AppHeader({ currentUser, page, onHome, homeHref = "/", onProfile, onAdmin, onSignOut,
   onSettings, settings, beforeNavigate, navigationDisabled = false, roomSlug, diagnosticContext,
-  skipTo = "#main-content", navigation, publicActions }: AppHeaderProps) {
+  skipTo = "#main-content", navigation, publicActions, context, actions, showAppearance = true }: AppHeaderProps) {
   const { t } = useTranslation("public");
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -72,8 +75,10 @@ export function AppHeader({ currentUser, page, onHome, homeHref = "/", onProfile
         <a className="shared-header-brand" href={homeHref} onClick={home} aria-label={t("brandHome")} aria-disabled={navigationDisabled || undefined}><Brand /></a>
         {currentUser ? <a className="shared-header-rooms" href={homeHref} onClick={home} aria-current={page === "rooms" ? "page" : undefined} aria-disabled={navigationDisabled || undefined}>{t("rooms")}</a>
           : navigation && <div className="shared-header-links">{navigation}</div>}
+        {context}
       </nav>
       <div className="shared-header-actions">
+        {actions}
         {currentUser ? <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger render={<Button ref={accountRef} variant="ghost" className="shared-account-trigger" aria-label={t("accountMenu")} data-navigation-focus={roomSlug ? "room-profile" : "lobby-profile"} />}>
             <Avatar user={currentUser} size={30} /><ChevronDown className="shared-account-chevron" aria-hidden="true" />
@@ -83,10 +88,10 @@ export function AppHeader({ currentUser, page, onHome, homeHref = "/", onProfile
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={navigationDisabled || !onProfile} onClick={() => { accountRef.current?.focus(); navigate(onProfile); }}><UserRound /> {t("yourProfile")}</DropdownMenuItem>
             <DropdownMenuItem disabled={!onSettings && !settings} onClick={() => { if (onSettings) onSettings(); else setSettingsOpen(true); }}><Settings /> {t("settings")}</DropdownMenuItem>
-            <DropdownMenuSub>
+            {showAppearance && <DropdownMenuSub>
               <DropdownMenuSubTrigger><Palette /> {t("appearance")}</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="shared-appearance-menu"><ThemeMenuItems /></DropdownMenuSubContent>
-            </DropdownMenuSub>
+            </DropdownMenuSub>}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setChangelogOpen(true)}><History /> {t("changelog")}</DropdownMenuItem>
             <DropdownMenuItem onClick={() => { setFeedbackMounted(true); setFeedbackOpen(true); }}><MessageSquare /> {t("sendFeedback")}</DropdownMenuItem>

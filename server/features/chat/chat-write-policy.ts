@@ -1,5 +1,6 @@
 import { serverT } from "../../lib/i18n.js";
 import { immutableMessageKey, type ChatMessageInput } from "./chat-validation.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 import { PublicRequestError } from "../../lib/public-request-error.js";
 
@@ -13,6 +14,7 @@ export function createChatWritePolicy(now = Date.now) {
   const receipts = new Map<string, { key: string; expiresAt: number }>();
   const rates = new Map<string, { count: number; expiresAt: number }>();
   const consume = (key: string, maximum: number) => {
+    if (localRateLimitsDisabled()) return;
     const current = rates.get(key);
     const entry = current && current.expiresAt > now() ? current : { count: 0, expiresAt: now() + CHAT_WRITE_WINDOW_MS };
     if (entry.count >= maximum) throw new ChatRateLimit("Too many chat requests. Try again shortly.");

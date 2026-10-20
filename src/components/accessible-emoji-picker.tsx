@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next'
-import { useId, useMemo, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import EmojiPicker, { Categories, Emoji, EmojiStyle, type EmojiClickData, type Props, type SkinTones } from 'emoji-picker-react'
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes'
 import emojiData from 'emoji-picker-react/dist/data/emojis.json'
+import { Search, X } from 'lucide-react'
 import { getChatEmojiUrl } from './platform-emoji-text'
+import '../styles/chat-pickers.css'
 
 const tones = [
   ['neutral', 'toneDefault'], ['1f3fb', 'toneLight'], ['1f3fc', 'toneMediumLight'],
@@ -17,19 +19,28 @@ const emojis = Object.values((emojiData as EmojiData).emojis).flat()
 export default function AccessibleEmojiPicker(props: Props) {
   const { t, i18n } = useTranslation('chat')
   const [query, setQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
   const resultsId = useId()
   const term = query.trim().toLocaleLowerCase(i18n.resolvedLanguage)
   const results = useMemo(() => term ? emojis.filter((emoji) => emoji.n.some((name) => name.toLocaleLowerCase(i18n.resolvedLanguage).includes(term))) : [], [term, i18n.resolvedLanguage])
   const categories = Object.values(Categories).map((category) => ({ category, name: t(`category.${category}`) }))
   const tone = props.defaultSkinTone || 'neutral'
   const getEmojiUrl = props.getEmojiUrl ?? getChatEmojiUrl
-  const height = typeof props.height === 'number' ? Math.max(100, props.height - 48) : props.height
+  const toneLabel = t(tones.find(([value]) => value === tone)?.[1] || 'toneDefault')
+  const height = typeof props.height === 'number' ? Math.max(100, props.height - 52) : props.height
   return <div className="chat-accessible-emoji-picker">
     <div className="chat-emoji-search-row">
-      <input type="search" aria-label={t('searchEmoji')} aria-controls={resultsId} placeholder={props.searchPlaceholder || t('searchEmoji')} autoFocus={props.autoFocusSearch !== false} value={query} onChange={(event) => setQuery(event.target.value)} />
-      <select aria-label={t('emojiSkinTone')} value={tone} onChange={(event) => props.onSkinToneChange?.(event.target.value as SkinTones)}>
-        {tones.map(([value, label]) => <option value={value} key={value}>{t(label)}</option>)}
-      </select>
+      <div className="chat-emoji-search-field">
+        <Search size={16} aria-hidden="true" />
+        <input ref={searchRef} type="search" aria-label={t('searchEmoji')} aria-controls={resultsId} placeholder={props.searchPlaceholder || t('searchEmoji')} autoFocus={props.autoFocusSearch !== false} value={query} onChange={(event) => setQuery(event.target.value)} />
+        {query && <button type="button" aria-label={t('clearEmojiSearch')} onClick={() => { setQuery(''); searchRef.current?.focus() }}><X size={14} /></button>}
+      </div>
+      <label className="chat-emoji-tone" title={`${t('emojiSkinTone')}: ${toneLabel}`}>
+        <span aria-hidden="true"><Emoji unified={tone === 'neutral' ? '1f44b' : `1f44b-${tone}`} emojiStyle={props.emojiStyle} getEmojiUrl={getEmojiUrl} size={22} /></span>
+        <select aria-label={t('emojiSkinTone')} value={tone} onChange={(event) => props.onSkinToneChange?.(event.target.value as SkinTones)}>
+          {tones.map(([value, label]) => <option value={value} key={value}>{t(label)}</option>)}
+        </select>
+      </label>
     </div>
     <div id={resultsId}>
       {term ? <>
@@ -47,7 +58,7 @@ export default function AccessibleEmojiPicker(props: Props) {
                 getImageUrl: (style = props.emojiStyle ?? EmojiStyle.APPLE) => getEmojiUrl(unified, style),
               }
               props.onEmojiClick?.(data, event.nativeEvent)
-            }}><Emoji unified={unified} emojiStyle={props.emojiStyle} getEmojiUrl={getEmojiUrl} size={28} /></button>
+            }}><Emoji unified={unified} emojiStyle={props.emojiStyle} getEmojiUrl={getEmojiUrl} size={24} /></button>
           })}
         </div> : <p className="chat-emoji-empty">{t('noEmoji')}</p>}
       </> : <EmojiPicker {...props} getEmojiUrl={getEmojiUrl} categories={categories} height={height} autoFocusSearch={false} searchDisabled skinTonesDisabled previewConfig={{ showPreview: false }} />}

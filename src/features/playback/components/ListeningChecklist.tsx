@@ -7,13 +7,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 export type ListeningProviderState = "ready" | "loading" | "needs-connection" | "unconfigured" | "idle" | "error";
 export type ListeningAudioState = "playing" | "paused" | "quiet" | "muted" | "suppressed" | "error" | "needs-activation" | "loading";
-export function ListeningChecklist({ userId, providerName, providerState, audioState, statusText, onEnableAudio, onOpenSettings, onChooseMusic }: {
+export function ListeningChecklist({ userId, providerName, providerState, audioState, statusText, statusTone, onEnableAudio, onOpenSettings, onChooseMusic }: {
   userId: string;
   providerName: string;
   providerState: ListeningProviderState;
   audioState: ListeningAudioState;
   /** Existing coordinator/provider status, when the parent has more precise evidence. */
   statusText?: string;
+  statusTone?: "error" | "pending" | "quiet" | "live";
   onEnableAudio?: () => void;
   onOpenSettings: () => void;
   onChooseMusic?: () => void;
@@ -30,11 +31,13 @@ export function ListeningChecklist({ userId, providerName, providerState, audioS
   };
   if (dismissed || !userId) return null;
   const ready = providerState === "ready" && ["playing", "paused", "quiet", "muted", "suppressed"].includes(audioState);
+  const audioNeedsExplanation = !["playing", "paused", "suppressed"].includes(audioState) ||
+    statusTone === "error" || statusTone === "pending" || (audioState === "playing" && statusTone === "quiet");
   const run = (action: () => void) => { setExpanded(false); action(); };
   const details = <>
       <div className="listening-checklist-steps">
-        <div><strong>{providerState === "ready" && <><Check /><span className="sr-only">{t("listeningChecklist.ready")}</span></>} {providerName}</strong>{providerState !== "ready" && <p>{providerState === "idle" ? t("listeningChecklist.waitingForATrack") : providerState === "error" ? t("listeningChecklist.couldnTCheckStatusRetryInSettings") : providerState === "unconfigured" ? t("listeningChecklist.unavailableChooseAnotherProvider") : providerState === "needs-connection" ? t("listeningChecklist.connectInSettingsASubscriptionMayBeRequired") : t("listeningChecklist.checking")}</p>}<Button variant="outline" size="sm" onClick={() => run(onOpenSettings)}>{t("listeningChecklist.chooseProvider")}</Button></div>
-        <div><strong>{ready && <Check />}{t("listeningChecklist.yourAudio")}</strong><p>{statusText || (audioState === "needs-activation" ? t("listeningChecklist.audioNeedsPermission") : audioState === "playing" ? t("listeningChecklist.playing") : audioState === "paused" ? t("listeningChecklist.paused") : audioState === "muted" ? t("listeningChecklist.mutedUnmuteInThePlayer") : audioState === "suppressed" ? t("listeningChecklist.usingYourSelectedProvider") : audioState === "error" ? t("listeningChecklist.playbackFailedRetryInThePlayer") : audioState === "quiet" ? t("listeningChecklist.noAudioCheckThePlayer") : t("listeningChecklist.preparingAudio"))}</p>{audioState === "needs-activation" && onEnableAudio && <Button size="sm" onClick={() => run(onEnableAudio)}>{t("listeningChecklist.enableMyAudio")}</Button>}</div>
+        <div><strong>{providerState === "ready" && <><Check /><span className="sr-only">{t("listeningChecklist.ready")}</span></>} {providerName}</strong>{providerState !== "ready" && providerState !== "idle" && <p>{providerState === "error" ? t("listeningChecklist.couldnTCheckStatusRetryInSettings") : providerState === "unconfigured" ? t("listeningChecklist.unavailableChooseAnotherProvider") : providerState === "needs-connection" ? t("listeningChecklist.connectInSettingsASubscriptionMayBeRequired") : t("listeningChecklist.checking")}</p>}<Button variant="outline" size="sm" onClick={() => run(onOpenSettings)}>{t("listeningChecklist.chooseProvider")}</Button></div>
+        <div><strong>{ready && <><Check /><span className="sr-only">{t("listeningChecklist.ready")}</span></>}{t("listeningChecklist.yourAudio")}</strong>{audioNeedsExplanation && <p>{statusText || (audioState === "needs-activation" ? t("listeningChecklist.audioNeedsPermission") : audioState === "muted" ? t("listeningChecklist.mutedUnmuteInThePlayer") : audioState === "error" ? t("listeningChecklist.playbackFailedRetryInThePlayer") : audioState === "quiet" ? t("listeningChecklist.noAudioCheckThePlayer") : t("listeningChecklist.preparingAudio"))}</p>}{audioState === "needs-activation" && onEnableAudio && <Button size="sm" onClick={() => run(onEnableAudio)}>{t("listeningChecklist.enableMyAudio")}</Button>}</div>
         <div><strong>{t("listeningChecklist.dJTurnsOptional")}</strong><p>{t("listeningChecklist.oneSongPerTurnYourQueueIsPrivate")}</p>{onChooseMusic && <Button variant="outline" size="sm" onClick={() => run(onChooseMusic)}>{t("listeningChecklist.chooseMusic")}</Button>}</div>
       </div>
       {ready && <Button variant="secondary" size="sm" onClick={close}>{t("listeningChecklist.readyToListen")}</Button>}

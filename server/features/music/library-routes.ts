@@ -4,11 +4,13 @@ import { libraryMutationSchema, PrivateLibraryDataError } from "./private-librar
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import type { Store } from "../../persistence/store.js";
 import { PublicRequestError, reportUnexpectedRequestError } from "../../lib/public-request-error.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 /** Identity always comes from verified request credentials, never from JSON/query. */
 export function mountPrivateLibraryRoutes(app: express.Express, store: Store, getUserId: (request: express.Request) => Promise<string | null>, now = Date.now) {
   const attempts = new BoundedCache<{ count: number; resetAt: number }>(10_000, now);
   const allow = (userId: string, kind: "read" | "write", response: express.Response): boolean => {
+    if (localRateLimitsDisabled()) return true;
     const key = `${kind}:${userId}`, usage = attempts.get(key) || { count: 0, resetAt: now() + 60_000 };
     if (usage.count >= (kind === "read" ? 120 : 60)) {
       response.setHeader("Retry-After", String(Math.max(1, Math.ceil((usage.resetAt - now()) / 1_000))));

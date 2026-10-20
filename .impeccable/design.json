@@ -3,6 +3,57 @@
   "generatedAt": "2026-10-19T20:07:58.486Z",
   "title": "Design System: turntune",
   "extensions": {
+    "openRoom": {
+      "brief": "docs/design/listening-room.md",
+      "source": "src/styles/open-room.css",
+      "scope": ":root[data-room-design=\"open-room\"]",
+      "appearance": "light, dark, or system via the shared preference",
+      "playerPresentation": "bottom-only",
+      "providerWidgets": "mounted outside the visible interface",
+      "font": {
+        "family": "Inter Variable",
+        "package": "@fontsource-variable/inter"
+      },
+      "colors": {
+        "background": "#ffffff",
+        "foreground": "#20212a",
+        "primary": "#6938d3",
+        "primary-foreground": "#ffffff",
+        "primary-text": "#6131cc",
+        "muted-foreground": "#6a6977",
+        "border": "#e8e7ed"
+      },
+      "darkColors": {
+        "background": "#18181b",
+        "foreground": "#eeeef1",
+        "primary": "#8251d4",
+        "primary-foreground": "#ffffff",
+        "primary-text": "#b99aef",
+        "muted-foreground": "#aaa7b3",
+        "border": "#36333d"
+      },
+      "sizing": {
+        "--room-text-size": "14px",
+        "--room-detail-size": "12px",
+        "--room-header-height": "56px",
+        "--room-player-height": "80px",
+        "--room-player-artwork-size": "44px",
+        "--room-row-height": "54px",
+        "--room-avatar-size": "28px",
+        "--room-space": "16px"
+      },
+      "layoutPresets": {
+        "source": "src/features/rooms/hooks/use-room-layout-presets.ts",
+        "export": "openRoomLayoutPresets",
+        "balanced": { "activity": 16, "chat": 59, "radio": 25 }
+      },
+      "composition": "src/features/rooms/components/OpenRoomWorkspace.tsx",
+      "surfaceStyles": [
+        "src/styles/room-music.css",
+        "src/styles/room-chat.css",
+        "src/styles/room-player.css"
+      ]
+    },
     "colorMeta": {
       "background": {
         "displayName": "Background",

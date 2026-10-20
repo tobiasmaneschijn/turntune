@@ -7,9 +7,9 @@ const searchResults = [
 ];
 const api = (page: Page, callback: string) => page.evaluate((code) => Function("music", code)((window as any).musicQol), callback);
 
-async function open(page: Page, scenario = "default") {
+async function open(page: Page, scenario = "default", inline = false) {
   await page.route("https://i.ytimg.com/**", (route) => route.abort());
-  await page.goto(`/tests/browser/music/harness/music.html?scenario=${scenario}`);
+  await page.goto(`/tests/browser/music/harness/music.html?scenario=${scenario}${inline ? "&inline" : ""}`);
   await expect(page.getByRole("tab", { name: /My queue/ })).toBeVisible();
 }
 
@@ -20,7 +20,7 @@ async function search(page: Page, query = "midnight") {
 }
 
 async function openAddMusic(page: Page) {
-  const dialog = page.getByRole("dialog", { name: "Add music", exact: true });
+  const dialog = page.getByRole(new URL(page.url()).searchParams.has("inline") ? "region" : "dialog", { name: "Add music", exact: true });
   if (!await dialog.isVisible()) await page.getByRole("button", { name: "Add music", exact: true }).click();
   await expect(dialog).toBeVisible();
   return dialog;
@@ -55,17 +55,52 @@ test("follow a room's music-service restrictions when searching and adding a lin
   expect(await api(page, "return music.commands")).toEqual([]);
 });
 
-test("build a private queue from search, recovering a failed add on a phone", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: searchResults } }));
-  await open(page);
-  await search(page);
+test("build a private queue after correcting search and recovering a failed add in a narrow panel", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  let soundCloudSearched = false;
+  await page.route("**/api/soundcloud/search?**", (route) => {
+    soundCloudSearched = true;
+    return route.fulfill({ json: { results: [] } });
+  });
+  const longResults = [...searchResults, ...Array.from({ length: 10 }, (_, index) => ({ id: `extra${String(index).padStart(6, "0")}`, title: `Additional Song ${index + 1}`, artist: "Another Artist", durationMs: 180000 }))];
+  await page.route("**/api/youtube/search?**", (route) => route.fulfill({ json: { results: longResults } }));
+  await open(page, "default", true);
+  const searchPanel = await openAddMusic(page);
+  const query = page.getByRole("textbox", { name: "Search music", exact: true });
+  const submit = page.getByRole("button", { name: "Search", exact: true });
+  await expect(query).toBeFocused();
+  await query.fill("t");
+  await query.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("at least 2 characters");
+  await expect(page.getByRole("button", { name: "Add by link", exact: true })).toBeInViewport({ ratio: 1 });
+  await query.fill("taet");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const provider = page.getByRole("combobox", { name: "Music provider", exact: true });
+  await provider.focus();
+  await provider.press("Enter");
+  await page.getByRole("option", { name: "SoundCloud", exact: true }).press("Enter");
+  await submit.click();
+  await expect.poll(() => soundCloudSearched).toBe(true);
+  await provider.focus();
+  await provider.press("Enter");
+  await page.getByRole("option", { name: "YouTube", exact: true }).press("Enter");
+  await expect(submit).toBeEnabled();
+  await expect(submit).toBeInViewport({ ratio: 1 });
+  await expect.poll(() => page.getByRole("form", { name: "Search music", exact: true }).evaluate(form => form.scrollWidth <= form.clientWidth)).toBe(true);
+  await submit.click();
+  await expect(page.getByRole("button", { name: "Add First Song to your queue", exact: true })).toBeInViewport({ ratio: 1 });
+  await page.getByRole("button", { name: "Add Additional Song 10 to your queue", exact: true }).scrollIntoViewIfNeeded();
+  const addByLink = page.getByRole("button", { name: "Add by link", exact: true });
+  await expect(addByLink).toBeInViewport({ ratio: 1 });
+  await addByLink.click();
+  await expect(page.getByRole("textbox", { name: "Track link", exact: true })).toBeInViewport({ ratio: 1 });
+  await addByLink.click();
   await api(page, "music.deferNextAction()");
   await page.getByRole("button", { name: "Add First Song to your queue", exact: true }).click();
   await expect(page.getByRole("button", { name: "Add Second Song to your queue", exact: true })).toBeDisabled();
   await api(page, "music.resolveNext({ ok: false, error: 'Your room session changed. Join the room again.' })");
   await expect(page.getByRole("alert")).toContainText("room session changed");
-  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
+  await expect(query).toHaveValue("taet");
   const originalAddedMessage = await page.evaluate(async () => {
     const { default: i18n } = await import("/src/i18n.ts");
     const original = i18n.getResource("en", "music", "rail.trackAddedAtPosition") as string;
@@ -78,7 +113,7 @@ test("build a private queue from search, recovering a failed add on a phone", as
     await page.getByRole("button", { name: "Add Second Song to your queue", exact: true }).click();
     await expect(page.locator(".music-action-status")).toContainText("Queued Second Song privately");
     await page.getByRole("button", { name: "View queue", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Add music", exact: true })).toBeHidden();
+    await expect(searchPanel).toBeHidden();
     await expect(page.getByRole("tab", { name: /My queue/ })).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".music-queue-pane .queue-track")).toHaveCount(5);
   } finally {
@@ -89,7 +124,7 @@ test("build a private queue from search, recovering a failed add on a phone", as
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await openAddMusic(page);
-  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
+  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("taet");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Add music", exact: true })).toBeFocused();
 });

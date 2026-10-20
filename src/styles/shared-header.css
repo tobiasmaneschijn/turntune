@@ -11,7 +11,11 @@
 .shared-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .shared-app-header .shared-account-trigger { height: 44px; min-width: 44px; gap: 6px; padding: 4px; }
 .shared-account-trigger .shared-account-chevron { width: 13px; height: 13px; color: var(--muted-foreground); }
-.shared-account-menu { width: 240px; max-width: calc(100vw - 24px); }
+.shared-account-menu, .room-actions-menu { width: min(260px, calc(100vw - 24px)); }
+.shared-appearance-menu, .room-layout-menu { min-width: 210px; max-width: calc(100vw - 24px); }
+/* Header menus share density, including their portaled submenus. */
+:is(.shared-account-menu, .shared-appearance-menu, .room-actions-menu, .room-layout-menu) { --header-menu-row-height: 36px; animation: none !important; }
+:is(.shared-account-menu, .shared-appearance-menu, .room-actions-menu, .room-layout-menu) :is([data-slot=dropdown-menu-item], [data-slot=dropdown-menu-sub-trigger], [data-slot=dropdown-menu-radio-item]) { min-height: var(--header-menu-row-height); padding-inline: 10px; }
 .shared-account-name { overflow-wrap: anywhere; color: var(--foreground); }
 .shared-header-brand:focus-visible, .shared-header-rooms:focus-visible, .shared-header-links a:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 4px; }
 .shared-app-header [aria-disabled=true] { opacity: .5; cursor: default; }
@@ -40,5 +44,5 @@
   .room-context-actions .invite-button > span { display: none; }
 }
 @media (max-width: 640px), (pointer: coarse) {
-  .shared-account-menu [data-slot=dropdown-menu-item], .shared-account-menu [data-slot=dropdown-menu-sub-trigger], .shared-appearance-menu [data-slot=dropdown-menu-radio-item] { min-height: 44px; }
+  :is(.shared-account-menu, .shared-appearance-menu, .room-actions-menu, .room-layout-menu) { --header-menu-row-height: 44px; }
 }

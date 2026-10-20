@@ -6,7 +6,11 @@ import type { SocketReply } from "../../../../src/lib/socket-request";
 import type { Provider, RoomSnapshot, Track, User } from "../../../../src/types";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
+import "../../../../src/styles/open-room.css";
 import "./music.css";
+
+const inlinePanel = new URLSearchParams(location.search).has("inline");
+if (inlinePanel) document.documentElement.setAttribute("data-room-design", "open-room");
 
 const self: User = { id: "self", name: "Alex", avatarSeed: "alex", avatarKey: "pulse" };
 const other: User = { id: "other", name: "Casey", avatarSeed: "casey", avatarKey: "pulse" };
@@ -131,7 +135,7 @@ function Harness() {
     openQueue: () => controlsRef.current?.openQueue()
   };
 
-  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} controlsRef={controlsRef} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
+  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined, width: inlinePanel ? 320 : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} controlsRef={controlsRef} inlineAddMusic={inlinePanel} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Harness /></ThemeProvider>);

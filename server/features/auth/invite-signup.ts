@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { z } from "zod";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 export const inviteSignupSchema = z.object({
   displayName: z.string().trim().min(1).max(32).optional(),
@@ -24,6 +25,7 @@ export class SignupAttemptLimiter {
   ) {}
 
   consume(key: string, now = Date.now()) {
+    if (localRateLimitsDisabled()) return true;
     if (this.attempts.size >= 10_000) {
       for (const [attemptKey, attempt] of this.attempts) {
         if (attempt.resetAt <= now) this.attempts.delete(attemptKey);

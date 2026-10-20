@@ -1,0 +1,75 @@
+/* Shared by composer and reaction pickers, including their portaled surfaces. */
+.chat-picker-popover { z-index: 50; width: min(360px, calc(100% - 24px)); max-height: none; border-radius: 8px; color: var(--popover-foreground); }
+.chat-picker-header, .chat-picker-tabs { min-height: 44px; }
+.chat-picker-header { padding-inline: 8px 4px; border-bottom: 1px solid var(--border); }
+.chat-picker-tabs { padding: 0; gap: 12px; }
+.chat-picker-tabs > button { position: relative; min-height: 44px; padding: 0 4px; border-radius: 0; font-size: 13px; }
+.chat-picker-tabs > button.active, .chat-picker-tabs > button:hover:not(:disabled) { background: transparent; color: var(--foreground); }
+.chat-picker-tabs > button.active::after { content: ''; position: absolute; inset-inline: 0; bottom: 0; height: 2px; background: var(--primary-text); }
+.chat-picker-close { width: 32px; height: 32px; }
+.chat-emoji-panel, .chat-gif-panel { border-top: 0; }
+.chat-gif-panel { display: flex; flex-direction: column; overflow: hidden; }
+.chat-gif-search { flex: 0 0 auto; min-height: 36px; margin: 8px 0; }
+.chat-gif-search input { height: 34px; font-size: 14px; outline: none; }
+.chat-gif-search input::-webkit-search-cancel-button, .chat-emoji-search-field input::-webkit-search-cancel-button { appearance: none; }
+.chat-gif-grid { flex: 1 1 auto; min-height: 0; max-height: none; padding: 2px 4px 4px 2px; gap: 6px; }
+.chat-gif-grid > div { gap: 6px; }
+.chat-gif-tile { border-radius: 4px; }
+.chat-gif-status { flex: 1 1 auto; min-height: 0; padding: 16px 8px; font-size: 13px; }
+.chat-gif-footer { flex: 0 0 auto; margin: 0; padding: 6px 2px 0; font-size: 10px; }
+.chat-reaction-picker-header { min-height: 40px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.chat-reaction-picker-header > button { width: 36px; height: 36px; }
+.chat-emoji-search-row { flex: 0 0 auto; min-height: 52px; gap: 4px; padding: 8px; border-bottom: 0; }
+.chat-emoji-search-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding-inline: 8px 4px; border: 1px solid var(--input); border-radius: 6px; background: var(--background); color: var(--muted-foreground); }
+.chat-emoji-search-field:focus-within { border-color: var(--ring); outline: 2px solid var(--ring); outline-offset: 2px; }
+.chat-emoji-search-field input { min-height: 0; height: 34px; padding: 0; border: 0; border-radius: 0; background: transparent; font: inherit; font-size: 14px; box-shadow: none; outline: none; }
+.chat-emoji-search-field input::placeholder { color: var(--muted-foreground); }
+.chat-emoji-search-field > button { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; padding: 0; border: 0; border-radius: 4px; color: var(--muted-foreground); }
+.chat-emoji-search-field > button:hover { background: var(--secondary); color: var(--foreground); }
+.chat-emoji-tone { position: relative; display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; border-radius: 6px; }
+.chat-emoji-tone:hover { background: var(--secondary); }
+.chat-emoji-tone:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
+.chat-emoji-tone > span { display: grid; place-items: center; pointer-events: none; }
+.chat-emoji-search-row .chat-emoji-tone select { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; opacity: 0; cursor: pointer; }
+.chat-emoji-results { height: 100%; max-height: 100% !important; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); align-content: start; gap: 2px; padding: 4px 8px 8px; scrollbar-width: thin; scrollbar-color: var(--input) transparent; }
+.chat-emoji-results > button { min-height: 36px; padding: 4px; border-radius: 4px; }
+.chat-emoji-empty { margin: 0; padding: 16px 12px; font-size: 13px; }
+.chat-picker-popover .EmojiPickerReact, .chat-reaction-picker .EmojiPickerReact {
+  --epr-emoji-size: 24px;
+  --epr-emoji-padding: 6px;
+  --epr-category-navigation-button-size: 28px;
+  --epr-category-icon-active-color: var(--primary-text);
+  --epr-category-icon-inactive-color: var(--muted-foreground);
+  --epr-dark-category-icon-active-color: var(--primary-text);
+  --epr-dark-category-icon-inactive-color: var(--muted-foreground);
+  --epr-dark-hover-bg-color: var(--secondary);
+  --epr-dark-focus-bg-color: var(--secondary);
+  --epr-category-label-height: 28px;
+  --epr-category-label-padding: 0 4px;
+  --epr-category-label-text-color: var(--muted-foreground);
+  --epr-horizontal-padding: 8px;
+  --epr-header-padding: 0 8px 8px;
+  height: 100% !important;
+  font-family: inherit;
+}
+.chat-picker-popover .epr-emoji-category-label, .chat-reaction-picker .epr-emoji-category-label { font-size: 12px; font-weight: 500; }
+.chat-picker-popover .epr-emoji, .chat-reaction-picker .epr-emoji { border-radius: 4px; }
+.chat-picker-popover .epr-cat-btn, .chat-reaction-picker .epr-cat-btn { display: inline-grid; place-items: center; }
+.chat-picker-popover .epr-cat-btn svg, .chat-reaction-picker .epr-cat-btn svg { width: 20px; height: 20px; }
+.chat-picker-popover .epr-cat-btn:focus::before, .chat-reaction-picker .epr-cat-btn:focus::before { border-radius: 4px; }
+@media (max-width: 640px), (pointer: coarse) {
+  .chat-picker-popover { width: auto; }
+  .chat-picker-close, .chat-reaction-picker-header > button { width: 44px; height: 44px; }
+  .chat-emoji-search-row { min-height: 60px; }
+  .chat-emoji-search-field { height: 44px; }
+  .chat-emoji-search-field input { height: 42px; font-size: 16px; }
+  .chat-emoji-search-field > button { width: 44px; height: 44px; }
+  .chat-emoji-tone { width: 44px; height: 44px; flex-basis: 44px; }
+  .chat-gif-search { min-height: 44px; }
+  .chat-gif-search input { height: 42px; font-size: 16px; }
+  .chat-emoji-results { grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); }
+  .chat-emoji-results > button { min-height: 44px; }
+  .chat-picker-popover .EmojiPickerReact, .chat-reaction-picker .EmojiPickerReact { --epr-emoji-padding: 10px; --epr-category-navigation-button-size: 44px; }
+  .chat-picker-popover .epr-category-nav, .chat-reaction-picker .epr-category-nav { justify-content: flex-start; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--input) transparent; }
+  .chat-picker-popover .epr-cat-btn, .chat-reaction-picker .epr-cat-btn { flex: 0 0 44px; }
+}

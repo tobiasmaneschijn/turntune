@@ -1,0 +1,16 @@
+.chat-song-attachment { display: flex; align-items: center; gap: 8px; width: min(360px, 100%); min-width: 0; margin-block: 4px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); }
+.chat-song-artwork { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; overflow: hidden; border-radius: 4px; color: var(--muted-foreground); background: var(--muted); }
+.chat-song-artwork img { width: 100%; height: 100%; object-fit: cover; }
+.chat-song-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; color: var(--foreground); text-decoration: none; line-height: 18px; }
+.chat-song-copy strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.chat-song-copy span { overflow: hidden; color: var(--muted-foreground); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+a.chat-song-copy:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.chat-song-position { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chat-composer > .chat-song-attachment { margin: 0 0 6px; }
+.chat-game-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 28px; color: var(--muted-foreground); }
+.chat-game-result code { font-size: 12px; overflow-wrap: anywhere; }
+.chat-game-result strong { color: var(--foreground); font-size: var(--chat-text-size, 14px); overflow-wrap: anywhere; }
+.chat-text-link { color: var(--primary-text); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+@media (max-width: 640px), (pointer: coarse) {
+  .chat-song-attachment > button { min-width: 44px; min-height: 44px; }
+}

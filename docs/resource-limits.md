@@ -1,5 +1,17 @@
 # Resource limits
 
+## Local development
+
+`npm run dev` and `npm run dev:server` disable application request-rate limits
+when the development server binds to `127.0.0.1` or `::1`. HTTP admission,
+socket-action, chat, search, and other local request windows are bypassed.
+Production, tests, and development servers bound to a public interface retain
+their limits. No additional environment flag is needed.
+
+Authentication, room permissions, stored-data quotas, and bounded provider,
+database, upload, and crypto work remain enforced. Provider-side and hosted
+database limits are independent of the local bypass.
+
 Resource limits live in service-only database configuration. Every account uses
 the `free` plan unless a trusted operator assigns another plan. This release adds
 no payments, subscriptions, self-service plan changes, or administration dashboard.
@@ -16,8 +28,17 @@ no payments, subscriptions, self-service plan changes, or administration dashboa
 | Imports | 50 tracks; 2/minute; 1 in flight | Existing provider admission remains |
 | Saved rooms | 100 favorites; 100 explicit memberships | Owner memberships use the owned-room budget |
 | Chat history | — | Latest 10,000 messages, within 90 days |
+| Pinned chat messages | — | 50/room |
 | Uploads in progress | 2 across purposes | 4/server |
 | Room uploads | — | 1,000 objects; 1 GiB |
+
+Chat link previews allow 120 requests/minute/account and 600/minute/server.
+At most four fetch jobs run together; identical requests share work. Each fetch
+allows 256 KiB HTML, three redirects and an eight-second network deadline.
+Thumbnails allow 512 KiB input and four million pixels, then become a single
+WebP frame of at most 72 KiB. The 128-entry cache retains successful previews for
+one hour and failures for five minutes. The local request-rate bypass does not
+remove these concurrency, download or image-processing bounds.
 
 Casual listening in a public or unlisted room does not add permanent membership.
 Invitations and explicit role grants can create membership. Existing memberships

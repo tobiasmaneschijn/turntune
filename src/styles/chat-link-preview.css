@@ -1,0 +1,21 @@
+.chat-link-preview-slot { width: 100%; min-height: 1px; }
+.chat-link-preview { position: relative; width: min(420px, 100%); margin-top: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--popover); }
+.chat-link-preview-main { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding-right: 22px; color: var(--foreground); text-decoration: none; }
+.chat-link-preview-main > img { width: 88px; height: 72px; flex: 0 0 auto; border-radius: 4px; object-fit: cover; }
+.chat-link-preview-main > .chat-link-preview-cover { width: 56px; height: 56px; }
+.chat-link-preview-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-link-preview-site { display: flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.chat-link-preview-site svg { flex: 0 0 auto; }
+.chat-link-preview-copy strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 13px; line-height: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.chat-link-preview-main:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.chat-link-preview-description { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted-foreground); font-size: 12px; line-height: 17px; overflow-wrap: anywhere; }
+.chat-link-preview > .chat-link-preview-hide { position: absolute; top: 2px; right: 2px; width: 28px; height: 28px; min-height: 28px; color: var(--muted-foreground); }
+.chat-link-preview-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.chat-link-preview-actions > button { min-height: 32px; padding-inline: 8px; color: var(--primary-text); font-size: 12px; }
+.chat-link-preview-error { margin: 6px 0 0; color: var(--destructive); font-size: 12px; line-height: 18px; }
+@media (max-width: 640px), (pointer: coarse) {
+  .chat-link-preview-main { padding-right: 32px; }
+  .chat-link-preview-main > img { width: 56px; height: 56px; }
+  .chat-link-preview > .chat-link-preview-hide { width: 44px; height: 44px; min-height: 44px; }
+  .chat-link-preview-actions > button { min-height: 44px; }
+}

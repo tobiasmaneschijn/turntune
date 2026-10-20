@@ -546,8 +546,6 @@
 .panel-error-card code { overflow-wrap: anywhere; color: var(--muted-foreground); font-size: 12px; }
 
 /* Room actions and navigation remain available in every workspace size. */
-.room-actions-menu { width: min(260px, calc(100vw - 24px)); }
-.room-layout-menu { min-width: 210px; }
 .room-people-dialog { max-height: calc(100dvh - 32px); grid-template-rows: auto auto minmax(0, 1fr); }
 .room-people-list { min-height: 0; max-height: 55dvh; overflow-y: auto; overscroll-behavior-y: contain; }
 .room-person { width: 100%; min-height: 60px; height: auto; padding: 10px 8px; display: flex; justify-content: flex-start; gap: 12px; text-align: left; }
@@ -559,11 +557,6 @@
 .room-keyboard-help dl > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 14px; align-items: center; }
 .room-keyboard-help dd { margin: 0; }
 .room-keyboard-help kbd { padding: 3px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--secondary); font-size: 12px; }
-.room-actions-menu [data-slot="dropdown-menu-item"],
-.room-actions-menu [data-slot="dropdown-menu-sub-trigger"],
-.room-layout-menu [data-slot="dropdown-menu-item"],
-.room-layout-menu [data-slot="dropdown-menu-radio-item"] { min-height: 36px; padding-inline: 10px; }
-.room-actions-menu, .room-layout-menu { animation: none !important; }
 .room-connection-banner { height: 56px; padding: 6px 16px; display: flex; justify-content: center; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--warning), var(--background) 90%); color: var(--foreground); font-size: 12px; }
 .room-is-reconnecting .room-layout { height: calc(100dvh - 120px); }
 .room-layout:focus { outline: none; }
@@ -576,10 +569,6 @@
 }
 @media (max-width: 640px) {
   .room-layout, .room-layout.compact-player-layout { grid-template-rows: minmax(0, 1fr) 54px; }
-  .room-actions-menu [data-slot="dropdown-menu-item"],
-  .room-actions-menu [data-slot="dropdown-menu-sub-trigger"],
-  .room-layout-menu [data-slot="dropdown-menu-item"],
-  .room-layout-menu [data-slot="dropdown-menu-radio-item"] { min-height: 44px; }
   .rail-track-row > button, .queue-track-actions button { width: 44px; height: 44px; }
   .rail-track-row:not(.queue-track) { grid-template-columns: 40px minmax(0, 1fr) 44px; }
   .music-tabs button, .dj-lineup-heading button, .rail-add-button { min-height: 44px; }
@@ -588,13 +577,6 @@
 @media (max-height: 650px) {
   .now-playing:not(.compact) .track-stage { height: clamp(120px, 28dvh, 220px); min-height: 120px; }
   .now-playing:not(.compact) .bang-meter { margin-top: 12px; }
-}
-
-@media (pointer: coarse) {
-  .room-actions-menu [data-slot="dropdown-menu-item"],
-  .room-actions-menu [data-slot="dropdown-menu-sub-trigger"],
-  .room-layout-menu [data-slot="dropdown-menu-item"],
-  .room-layout-menu [data-slot="dropdown-menu-radio-item"] { min-height: 44px; }
 }
 
 .light .room-lobby,

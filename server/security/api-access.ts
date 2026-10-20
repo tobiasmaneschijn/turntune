@@ -4,6 +4,7 @@ import { SecurityLimitError, type SecurityBudget } from "./security-budget.js";
 import type { ResourceAdmission } from "../resources/resource-admission.js";
 import type { ResourcePolicyStore } from "../resources/resource-policy.js";
 import type { PlatformSecurity } from "./platform-security.js";
+import { localRateLimitsDisabled } from "./local-development.js";
 
 export interface ApiAccessOptions {
   getApiUserId: (request: express.Request) => Promise<string | null>;
@@ -28,10 +29,12 @@ export function mountApiAccess(app: express.Express, options: ApiAccessOptions) 
       const roomSlug=request.path.match(/^\/rooms\/([a-z0-9-]{3,48})(?:\/|$)/)?.[1];
       if(roomSlug&&!await platform.activeRoom(roomSlug))return void response.status(404).json({error:serverT("room_not_found")});
       if(roomSlug)blockedRooms.delete(roomSlug);
-      if(!securityBudget.consume([{key:`http-user:${actor}`,maximum:300,windowMs:60_000}]))return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_requests_wait_a_minute_before_trying_again")});
-      const release=securityBudget.acquire(`http-user-flight:${actor}`,12);
-      if(!release)return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_concurrent_requests")});
-      response.once("finish",release);response.once("close",release);
+      if(!localRateLimitsDisabled()) {
+        if(!securityBudget.consume([{key:`http-user:${actor}`,maximum:300,windowMs:60_000}]))return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_requests_wait_a_minute_before_trying_again")});
+        const release=securityBudget.acquire(`http-user-flight:${actor}`,12);
+        if(!release)return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_concurrent_requests")});
+        response.once("finish",release);response.once("close",release);
+      }
       const roomWrite=roomSlug&&!["GET","HEAD"].includes(request.method)&&!request.path.includes("/chat/")&&!request.path.endsWith("/favorite");
       if(roomWrite) {
         const policy=await resourcePolicies.get(actor);

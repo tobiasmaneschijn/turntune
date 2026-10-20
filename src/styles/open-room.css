@@ -1,0 +1,175 @@
+@import "@fontsource-variable/inter";
+
+/* The room's visual knobs live here; pane proportions live in room-layout-presets. */
+:root[data-room-design="open-room"] {
+  color-scheme: light;
+  --room-font: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --room-text-size: 14px;
+  --room-detail-size: 12px;
+  --room-header-height: 56px;
+  --room-player-height: 80px;
+  --room-player-artwork-size: 44px;
+  --room-row-height: 54px;
+  --room-avatar-size: 28px;
+  --room-space: 16px;
+  --background: #ffffff;
+  --foreground: #20212a;
+  --card: #ffffff;
+  --card-foreground: #20212a;
+  --popover: #ffffff;
+  --popover-foreground: #20212a;
+  --primary: #6938d3;
+  --primary-foreground: #ffffff;
+  --primary-text: #6131cc;
+  --secondary: #f4f3f7;
+  --secondary-foreground: #36343f;
+  --muted: #f5f5f7;
+  --muted-foreground: #6a6977;
+  --accent: #f0ebfc;
+  --accent-foreground: #4e259f;
+  --destructive: #b62842;
+  --border: #e8e7ed;
+  --input: #d8d6e0;
+  --ring: #7649da;
+  --success: #287a55;
+  --warning: #966710;
+  --info: #4266a2;
+  --room-scrollbar: #d4d2dc;
+  --radius: 0.45rem;
+  --line: var(--border);
+  --panel: var(--card);
+  --lime: var(--primary);
+  --purple: var(--primary);
+  --app-header-height: var(--room-header-height);
+  --room-toolbar-height: 0px;
+  font-family: var(--room-font);
+}
+/* Follow the shared appearance preference; portals inherit these tokens too. */
+:root.dark[data-room-design="open-room"] {
+  color-scheme: dark;
+  --background: #18181b;
+  --foreground: #eeeef1;
+  --card: #202024;
+  --card-foreground: #eeeef1;
+  --popover: #252429;
+  --popover-foreground: #eeeef1;
+  --primary: #8251d4;
+  --primary-foreground: #ffffff;
+  --primary-text: #b99aef;
+  --secondary: #2b292f;
+  --secondary-foreground: #dfdee5;
+  --muted: #2b292f;
+  --muted-foreground: #aaa7b3;
+  --accent: #30263e;
+  --accent-foreground: #d2bbff;
+  --destructive: #f18b9b;
+  --border: #36333d;
+  --input: #6a6575;
+  --ring: #b99aef;
+  --success: #79c5a0;
+  --warning: #dbb66a;
+  --info: #92b2ec;
+  --room-scrollbar: #56515f;
+}
+:root[data-room-design="open-room"] * { scrollbar-color: var(--room-scrollbar) transparent; scrollbar-width: thin; }
+:root[data-room-design="open-room"] ::selection { background: var(--primary); color: var(--primary-foreground); }
+:root[data-room-design="open-room"] .track-artwork-fallback { background: var(--muted); color: var(--muted-foreground); }
+
+.open-room {
+  height: var(--room-viewport-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--room-font);
+  font-size: var(--room-text-size);
+  line-height: 1.45;
+  color: var(--foreground);
+  background: var(--background);
+}
+.open-room :is(button, input, textarea, select) { font-family: inherit; }
+.open-room .shared-app-header { height: var(--room-header-height); padding-inline: 24px; gap: 16px; }
+.open-room .shared-header-navigation { flex: 1; min-width: 0; gap: 24px; }
+.open-room .shared-header-actions { gap: 12px; }
+.open-room .logo { font: 550 24px/1 var(--room-font); letter-spacing: -0.04em; }
+.open-room .logo-mark { display: none; }
+.open-room .shared-header-rooms { font-size: 13px; color: var(--primary-text); }
+.open-room .room-context-heading { min-width: 0; flex: 1; display: flex; align-items: center; gap: 16px; }
+.open-room .room-context-heading h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/1.4 var(--room-font); margin: 0; }
+.open-room .room-context-heading .room-listener-count { min-height: 30px; height: 30px; padding: 4px; font-size: var(--room-detail-size); font-weight: 400; color: var(--muted-foreground); }
+.open-room .room-context-actions { display: flex; align-items: center; gap: 6px; }
+.open-room .room-context-actions [data-slot=button] { height: 32px; min-height: 32px; font-size: 12px; border-radius: 6px; }
+.open-room .shared-account-trigger { height: 34px; }
+.open-room .shared-account-trigger .avatar { width: 28px !important; height: 28px !important; }
+.open-room .room-queue-toggle { color: var(--muted-foreground); }
+
+/* One mounted body and one mounted player, independent of viewport changes. */
+.app-shell.open-room .open-room-workspace {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+.open-room .open-room-body { flex: 1; min-height: 0; gap: 0; }
+.open-room .open-room-activity { overflow: auto; background: var(--background); }
+.open-room .open-room-activity-content { height: 100%; min-height: 0; }
+.open-room .open-room-workspace .room-panel { min-width: 0; padding: 0; border: 0; border-radius: 0; background: var(--background); }
+.open-room .open-room-resize { width: 1px; background: var(--border); }
+.open-room .open-room-resize::after { inset: 0 -3px; }
+.open-room .open-room-resize:hover, .open-room .open-room-resize[data-resize-handle-state=drag] { background: var(--primary); }
+.open-room .open-room-music { overflow: hidden; }
+.open-room .open-room-chat { overflow: hidden; }
+.open-room .open-room-player { flex: 0 0 auto; min-height: var(--room-player-height); position: relative; overflow: visible; z-index: 5; border-top: 1px solid var(--border) !important; }
+.open-room .open-room-player .player-column { display: contents; }
+.open-room .open-room-player:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.open-room .room-mobile-tabs { display: none; }
+.open-room .room-workspace-context { flex: 0 0 auto; padding: 4px var(--room-space); max-height: 100px; border-bottom: 1px solid var(--border); }
+.open-room .room-notice-strip { gap: 12px; }
+.open-room .open-room-workspace .panel { border-radius: 0; border: 0; box-shadow: none; }
+.open-room .chat { height: 100%; }
+.open-room .chat-header { min-height: 44px; padding: 8px var(--room-space); border-bottom: 0; }
+.open-room .chat-header strong { font-size: 14px; font-weight: 600; }
+.open-room .chat-presence > small { display: none; }
+.open-room .supabase-chat-body { flex: 1; min-height: 0; }
+.open-room .room-connection-banner { flex: 0 0 auto; }
+.open-room .open-room-workspace[data-music-open=false] .open-room-music-resize { display: none; }
+
+@media (max-width: 1024px) {
+  .open-room { --room-player-height: 68px; }
+  .open-room .shared-header-navigation { gap: 14px; }
+  .open-room .shared-header-rooms { display: none; }
+  .open-room .room-context-heading { gap: 6px; }
+  .open-room .room-context-heading .room-listener-count { display: none; }
+  .open-room .open-room-body { display: block !important; position: relative; }
+  .open-room .open-room-activity, .open-room .open-room-resize { display: none !important; }
+  .open-room .open-room-body > .room-panel { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; transform: none !important; }
+  .open-room .open-room-body > [data-active=false] { visibility: hidden; pointer-events: none; opacity: 0; }
+  .open-room .open-room-music { overflow-y: auto; }
+  .app-shell.open-room .open-room-body .open-room-music { display: flex !important; flex-direction: column; overflow: hidden !important; }
+  .open-room .open-room-mobile-activity { flex: 0 0 auto; max-height: 50%; overflow-y: auto; border-bottom: 1px solid var(--border); }
+  .open-room .open-room-mobile-activity > summary { min-height: 44px; padding: 12px var(--room-space); cursor: pointer; font-weight: 500; }
+  .open-room .open-room-mobile-activity + .private-music-panel { flex: 1; height: auto; min-height: 0; }
+  .open-room .open-room-player { flex: 0 0 auto; height: auto; }
+  .open-room .room-mobile-tabs { display: flex; position: static; flex: 0 0 auto; min-height: 48px; border-radius: 0; border-inline: 0; border-bottom: 0; border-top: 1px solid var(--border); background: var(--background); padding-bottom: env(safe-area-inset-bottom); }
+  .open-room .room-mobile-tabs > button { flex: 1; min-height: 48px; border-radius: 0; }
+}
+@media (max-width: 640px) {
+  .open-room { --room-header-height: 52px; --room-space: 12px; }
+  .open-room .shared-app-header { padding-inline: 12px; gap: 8px; }
+  .open-room .shared-header-navigation { gap: 12px; }
+  .open-room .logo { font-size: 19px; }
+  .open-room .room-context-heading h1 { font-size: 13px; }
+  .open-room .room-context-actions { gap: 0; }
+  .open-room .invite-button { display: none; }
+  .open-room .shared-header-actions { gap: 2px; }
+  .open-room .room-context-actions [data-slot=button], .open-room .shared-account-trigger { min-width: 44px; min-height: 44px; }
+}
+@media (max-height: 440px) {
+  .app-shell.open-room { overflow-y: auto; }
+  .app-shell.open-room .open-room-workspace { min-height: 260px; }
+}

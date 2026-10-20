@@ -11,6 +11,7 @@ import {
 import type { User } from '@/types'
 import { normalizeChatMentions } from '@/features/chat/mentions'
 import { normalizeChatPollOptions, normalizeRealtimePollVote, safeChatMediaUrl } from '@/features/chat/protocol'
+import { normalizeChatGame, normalizeChatSong } from '../../../shared/chat-attachments'
 
 export const CHAT_HISTORY_LIMIT = 200
 export const CHAT_SEARCH_LIMIT = 40
@@ -51,6 +52,8 @@ const CHAT_HISTORY_SELECT = [
   'reply_to_id',
   'poll_options',
   'removed_at',
+  'song',
+  'game',
   'soundspin_message_reactions(emoji, user_id)',
   'soundspin_poll_votes(user_id, option_index, revision)',
 ].join(', ')
@@ -67,6 +70,8 @@ export interface ChatHistoryRow {
   avatar_seed: string
   created_at: string
   removed_at?:string|null
+  song?: unknown
+  game?: unknown
   reply_to_id: string | null
   soundspin_message_reactions: Array<{ emoji: string; user_id: string }> | null
   poll_options?: string[] | null
@@ -211,7 +216,7 @@ function mapChatRows(history: ChatHistoryRow[], rowsById: Map<string, ChatHistor
       },
       replyTo: reply ? {
         id: reply.id,
-        content: reply.content,
+        content: reply.content || normalizeChatSong(reply.song)?.title || '',
         type: reply.message_type,
         mediaUrl: safeChatMediaUrl(reply.media_url),
         mentions: normalizeChatMentions(reply.mentions),
@@ -227,6 +232,8 @@ function mapChatRows(history: ChatHistoryRow[], rowsById: Map<string, ChatHistor
         userName: profileNames.get(reaction.user_id),
       })),
       poll: pollFromRow(row),
+      song: row.removed_at ? undefined : normalizeChatSong(row.song),
+      game: row.removed_at ? undefined : normalizeChatGame(row.game),
       createdAt: row.created_at,
       removedAt:row.removed_at||undefined,
     }
@@ -267,6 +274,8 @@ export async function saveChatMessage(
     reply_to_id: message.replyTo?.id || null,
     poll_options: message.poll?.options || null,
     created_at: message.createdAt,
+    song: message.song || null,
+    game: message.game || null,
   }
   const { error } = await client.from('soundspin_messages').insert(values)
   if (!error) return
@@ -276,7 +285,7 @@ export async function saveChatMessage(
   // Verify the original owned message rather than overwriting or broadcasting it.
   const { data: existing, error: lookupError } = await client
     .from('soundspin_messages')
-    .select('id, room_slug, user_id, content, message_type, media_url, storage_path, mentions, reply_to_id, poll_options, created_at')
+    .select('id, room_slug, user_id, content, message_type, media_url, storage_path, mentions, reply_to_id, poll_options, created_at, song, game')
     .eq('id', message.id)
     .eq('room_slug', roomSlug)
     .eq('user_id', currentUser.id)
@@ -286,6 +295,8 @@ export async function saveChatMessage(
     existing.media_url === values.media_url && existing.storage_path === values.storage_path &&
     existing.reply_to_id === values.reply_to_id &&
     JSON.stringify(existing.poll_options || null) === JSON.stringify(values.poll_options) &&
+    JSON.stringify(existing.song || null) === JSON.stringify(values.song) &&
+    JSON.stringify(existing.game || null) === JSON.stringify(values.game) &&
     new Date(existing.created_at).getTime() === new Date(values.created_at).getTime() &&
     JSON.stringify(normalizeChatMentions(existing.mentions).map(({ userId, userName, handle }) => [userId, userName, handle])) ===
       JSON.stringify(normalizeChatMentions(values.mentions).map(({ userId, userName, handle }) => [userId, userName, handle]))

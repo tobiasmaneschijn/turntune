@@ -1,0 +1,100 @@
+# Listening room
+
+The active room uses the Open room design: Inter typography, neutral surfaces,
+and a violet action color. The shared Appearance menu offers Light, Dark, and
+System; the selected preference persists. The public
+pages, directory, and standalone account surfaces retain the inherited design in
+[DESIGN.md](../../DESIGN.md).
+
+## Composition
+
+Desktop gives the most space to conversation:
+
+- **Left:** shared DJ rotation, Join/Leave rotation, and room listeners.
+- **Center:** room chat and its composer.
+- **Right:** My queue, with cover art, ordering controls, Favorites, and History.
+  Add music replaces the contents of this panel with search and link lookup.
+  Search uses a provider icon picker and a trailing search icon in one input row.
+  Add by link stays at the bottom while results scroll; the search view omits
+  the repeated Private label. Provider names remain in the picker options and
+  accessible labels.
+- **Bottom:** a persistent player dock with track information, playback controls,
+  reactions, local volume, and playback options.
+
+The private panel can close without leaving the room. Resizing and narrow-screen
+navigation change the visible space without restarting playback or clearing a
+chat draft. Narrow layouts switch between music and chat above the same player.
+
+## Personal and shared state
+
+My queue and Favorites belong to the signed-in listener. The shared rotation
+shows people and their position, never another person's waiting tracks. History
+describes tracks already played in the room.
+
+Adding music prepares a private queue; joining rotation is a separate action.
+"First in my queue" changes that listener's order, not the next DJ's turn. An
+eligible queued track can start immediately when its listener joins an idle room.
+Queue changes remain authoritative server mutations with pending, success, and
+recovery feedback.
+
+Room pause, seeking, and skipping retain their permission checks. Mute, volume,
+provider choice, and device preferences remain personal. Provider fallback can
+require explicit approval.
+
+## Where to make changes
+
+| Change | Source |
+| --- | --- |
+| Font, palette, room sizing variables, header, responsive shell | `src/styles/open-room.css` |
+| Default pane proportions and saved layout presets | `src/features/rooms/hooks/use-room-layout-presets.ts`, `openRoomLayoutPresets` |
+| Region composition and pane visibility | `src/features/rooms/components/OpenRoomWorkspace.tsx` |
+| Room wiring, personal panel state, and shared activity target | `src/app/RoomApplication.tsx` |
+| Rotation and listener presentation | `src/features/music/components/RoomActivity.tsx` |
+| Personal panel heading and search/back controls | `src/features/music/components/PrivateMusicHeader.tsx` |
+| Provider logos | `src/features/music/components/ProviderIcon.tsx` |
+| Queue/search behavior and existing music operations | `src/features/music/components/MusicRail.tsx` |
+| Surface-specific presentation | `src/styles/room-music.css`, `room-chat.css`, `room-player.css` |
+| Bottom player and playback options | `src/features/playback/components/NowPlaying.tsx` |
+| Disabled player while the room is empty | `src/features/playback/components/EmptyPlayerDock.tsx` |
+
+Use the semantic variables in `open-room.css` for colors. Its
+`--room-font`, `--room-text-size`, `--room-detail-size`, `--room-header-height`,
+`--room-player-height`, and spacing variables are the room's starting controls;
+local surface rules handle their own content. Keep pane percentages in the layout
+presets rather than duplicating them in CSS.
+
+`useRoomAppearance` sets `data-room-design="open-room"` on the document root while
+the room is mounted, so portalled menus and dialogs receive the same semantic
+tokens. It restores the previous attribute on departure. Keep room overrides
+scoped to `.open-room` or that attribute.
+
+`MusicRail` accepts `activityContainer` to portal shared activity into the left
+region and `inlineAddMusic` to keep search inside the private panel. Its
+`onOpenProfile` and `onClose` callbacks connect room navigation. The existing
+sheet presentation remains available to other callers.
+
+`NowPlaying` uses `presentation="dock"`. The bottom bar is the only player
+surface; it has no expansion view. Provider instances stay mounted while their
+widgets remain outside the visible interface. Keep required connection,
+activation, and recovery actions in the bottom bar. Mixcloud uses device volume.
+
+Empty playback keeps the same bar, with disabled transport and timeline controls.
+Do not inherit the legacy panel's empty-state height. Routine updates such as
+seeking do not appear below the player. Actionable playback errors and provider
+activation appear in an overlay without changing the bar or content height.
+Search controls and feedback stack naturally within the private panel;
+validation and network errors must not stretch to fill it.
+
+## Interaction requirements
+
+Keep keyboard access, visible focus, named fields, reduced motion, and mobile
+actions of at least 44 pixels. Back returns from search to My queue; Close hides
+the private panel. Failed adds
+preserve the search; successful adds prevent another add while authoritative
+queue state catches up. Reordering has keyboard controls, and removal retains
+Undo. Required recovery remains reachable; routine player status stays out of view.
+
+Use the production components in room fixtures. The relevant workflows are in
+`tests/browser/rooms/player/` and `tests/browser/music/`; run their affected checks
+through `npm run test:ui:player-qol` and `npm run test:ui:music-qol`. Check playback
+continuity, chat drafts, privacy, and recovery when changing composition.

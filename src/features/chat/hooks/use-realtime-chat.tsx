@@ -40,6 +40,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
   const [reactionEvents, setReactionEvents] = useState<ChatReactionEvent[]>([])
   const [pollVoteEvents, setPollVoteEvents] = useState<ChatPollVoteEvent[]>([])
   const [typingUserIds, setTypingUserIds] = useState<string[]>([])
+  const [pinRevision, setPinRevision] = useState(0)
   const [removalEvents,setRemovalEvents]=useState<ChatRemovedEvent[]>([])
   const removalMarkersRef=useRef(new Map<string,ChatRemovedEvent>())
   const applyRemoval=useCallback((event:ChatRemovedEvent)=>{removalMarkersRef.current.set(event.messageId,event);setRemovalEvents(current=>current.some(item=>item.messageId===event.messageId)?current:[...current,event])},[])
@@ -56,6 +57,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
 
   useEffect(() => {
     setMessages([])
+    setPinRevision(0)
     setRemovalEvents([])
     removalMarkersRef.current.clear()
     messageBufferRef.current = []
@@ -74,6 +76,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
       onReaction: (event) => setReactionEvents((current) => coalesceReactionEvent(current, event).slice(-4000)),
       onPollVote: applyPollVote,
       onRemoved:applyRemoval,
+      onPinsChanged: () => setPinRevision(current => current + 1),
       onTyping: setTypingUserIds,
       onConnection: (connected) => {
         if (connected) {
@@ -105,13 +108,12 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
       user, mentions, replyTo, createdAt: new Date().toISOString(),
     })
     if (!message) throw new Error(t('invalidMessage'))
-    await session.sendMessage(message)
-    return message
+    return await session.sendMessage(message) || message
   }, [user, t])
-  const prepareMessage = useCallback((content: string, media?: ChatMedia, replyTo?: ChatReply, mentions: ChatMention[] = [], pollOptions?: string[]) => {
+  const prepareMessage = useCallback((content: string, media?: ChatMedia, replyTo?: ChatReply, mentions: ChatMention[] = [], pollOptions?: string[], attachments?: Pick<ChatMessage, 'song' | 'game'>) => {
     const message = normalizeRealtimeMessage({ id: crypto.randomUUID(), content, type: media?.type || 'text', mediaUrl: media?.mediaUrl,
       storagePath: media?.storagePath, user, mentions, replyTo, createdAt: new Date().toISOString(),
-      poll: pollOptions ? { options: pollOptions } : undefined })
+      poll: pollOptions ? { options: pollOptions } : undefined, ...attachments })
     if (!message) throw new Error(t('invalidMessage'))
     return message
   }, [user, t])
@@ -119,8 +121,7 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     if (message.user.id !== user.id) throw new Error(t('otherAccount'))
     const session = sessionRef.current
     if (!session) throw new Error(t('reconnecting'))
-    await session.sendMessage(message)
-    return message
+    return await session.sendMessage(message) || message
   }, [user.id, t])
 
   const broadcastReaction = useCallback(async (event: Omit<ChatReactionEvent, 'id'> & { id?: string }) => {
@@ -131,5 +132,5 @@ export function useRealtimeChat({ client, roomName, user, onConnected, transport
     await sessionRef.current?.sendTyping(active)
   }, [])
 
-  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, pollVoteEvents, applyPollVote,removalEvents,applyRemoval, broadcastTyping, typingUserIds, isConnected }
+  return { messages, sendMessage, prepareMessage, sendExistingMessage, broadcastReaction, reactionEvents, pollVoteEvents, applyPollVote,removalEvents,applyRemoval, broadcastTyping, typingUserIds, pinRevision, isConnected }
 }

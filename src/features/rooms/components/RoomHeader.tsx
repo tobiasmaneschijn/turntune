@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Copy, Keyboard, MoreHorizontal, PanelsTopLeft, RotateCcw, Shield, Users } from "lucide-react";
+import { Copy, Keyboard, ListMusic, MoreHorizontal, PanelsTopLeft, RotateCcw, Shield, Users } from "lucide-react";
 import type { User } from "../../../types";
 import type { FeedbackDiagnosticContext } from "../../feedback/feedback-diagnostics";
 import { AppHeader } from "../../../app/components/AppHeader";
@@ -17,7 +17,7 @@ import "../../../styles/layout-completion.css";
 
 export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, diagnosticContext,
   onHome, onSettings, onRoomSettings, onModeration, moderationCount = 0, onRules, participantActions, onAdmin, onProfile, onSignOut, onResetLayout, onNotice, connected = true, onReconnect,
-  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange }: {
+  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange, unified = false }: {
   roomName: string;
   roomSlug: string;
   listenerCount: number;
@@ -52,6 +52,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   muted?: boolean;
   layoutPreset?: RoomLayoutPreset;
   onLayoutPresetChange?: (preset: RoomLayoutPreset) => void;
+  unified?: boolean;
 }) {
   const { t } = useTranslation("rooms");
   const [copied, setCopied] = useState(false);
@@ -99,15 +100,12 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
     { id: "room-commands-meta", label: t("roomHeader.roomCommands"), key: "k", modifiers: { meta: true, shift: false }, run: () => setCommandsOpen(true) },
   ]);
 
-  return <>
-    <AppHeader currentUser={currentUser} page="room" roomSlug={roomSlug} onHome={onHome} onProfile={onProfile} onAdmin={onAdmin}
-      onSettings={onSettings} onSignOut={onSignOut} diagnosticContext={diagnosticContext} skipTo="#room-workspace" />
-    <section className="room-context-toolbar" aria-label={t("roomHeader.roomControls")}>
-      <div className="room-context-heading">
+  const roomContextHeading = <div className="room-context-heading">
         <h1 title={roomName} tabIndex={-1}>{roomName}</h1>
         {participants && onOpenProfile ? <Button ref={listenersRef} variant="ghost" size="sm" className="room-listener-count" data-navigation-focus="room-listeners" aria-label={t("roomHeader.listenerCountLabel", { count: listenerCount })} onClick={() => { peopleReturnRef.current = listenersRef.current; setPeopleOpen(true); }}><Users aria-hidden="true" /> {t("roomHeader.listenerCount", { count: listenerCount })}</Button> : <small><Users size={14} aria-hidden="true" /> {t("roomHeader.listenerCount", { count: listenerCount })}</small>}
-      </div>
-      <div className="room-context-actions">
+      </div>;
+  const roomContextActions = <div className="room-context-actions">
+        {unified && onOpenQueue && <Button variant="ghost" size="icon" className="room-queue-toggle" aria-label={t("roomHeader.openMyQueue")} title={t("roomHeader.openMyQueue")} onClick={onOpenQueue}><ListMusic /></Button>}
         <Button variant="outline" size="sm" className="invite-button" aria-label={copied ? t("roomHeader.copiedRoomLink") : t("roomHeader.copyRoomLink")} onClick={() => void copyInvite()}><Copy size={17} /><span>{copied ? t("roomHeader.copied") : t("roomHeader.roomLink")}</span></Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button ref={moreRef} variant="ghost" size="icon" className="room-more-actions" data-navigation-focus="room-actions" aria-label={t("roomHeader.moreRoomActions")} />}><MoreHorizontal /></DropdownMenuTrigger>
@@ -119,7 +117,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
                 <DropdownMenuSubContent className="room-layout-menu">
                   {onLayoutPresetChange && <DropdownMenuRadioGroup value={layoutPreset} onValueChange={(value) => { if (value === "balanced" || value === "player" || value === "chat") onLayoutPresetChange(value); }} aria-label={t("roomHeader.roomLayoutPreset")}>
                     <DropdownMenuRadioItem value="balanced" closeOnClick>{t("roomHeader.balancedLayout")}</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="player" closeOnClick>{t("roomHeader.playerFocusLayout")}</DropdownMenuRadioItem>
+                    {!unified && <DropdownMenuRadioItem value="player" closeOnClick>{t("roomHeader.playerFocusLayout")}</DropdownMenuRadioItem>}
                     <DropdownMenuRadioItem value="chat" closeOnClick>{t("roomHeader.chatFocusLayout")}</DropdownMenuRadioItem>
                   </DropdownMenuRadioGroup>}
                   {onLayoutPresetChange && <DropdownMenuSeparator />}
@@ -150,8 +148,16 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-    </section>
+      </div>;
+
+  return <>
+    <AppHeader currentUser={currentUser} page="room" roomSlug={roomSlug} onHome={onHome} onProfile={onProfile} onAdmin={onAdmin}
+      onSettings={onSettings} onSignOut={onSignOut} diagnosticContext={diagnosticContext} skipTo="#room-workspace"
+      context={unified ? roomContextHeading : undefined} actions={unified ? roomContextActions : undefined} />
+    {!unified && <section className="room-context-toolbar" aria-label={t("roomHeader.roomControls")}>
+      {roomContextHeading}
+      {roomContextActions}
+    </section>}
     {!connected && <div className="room-connection-banner" role="status"><span>{t("roomHeader.connectionLostReconnecting")}</span>{onReconnect && <Button size="sm" variant="outline" onClick={onReconnect}>{t("roomHeader.retryConnection")}</Button>}</div>}
     {participants && onOpenProfile && <RoomPeopleDialog open={peopleOpen} onOpenChange={setPeopleOpen} users={participants} currentUserId={currentUser.id} ownerUserId={ownerUserId} moderatorUserIds={moderatorUserIds} djUserId={djUserId} onOpenProfile={onOpenProfile} participantActions={participantActions} finalFocus={peopleReturnRef} anchor={listenersRef} />}
     <RoomCommandMenu open={commandsOpen} onOpenChange={setCommandsOpen} commands={commands} finalFocus={moreRef} />

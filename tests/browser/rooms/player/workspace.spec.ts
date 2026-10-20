@@ -1,4 +1,33 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+test("listeners can change appearance without interrupting playback or losing their draft, and keep their preference", async ({ page }) => {
+  await page.goto("/tests/browser/rooms/player/harness/index.html?workspace");
+  const changeAppearance = async (name: "Light" | "Dark" | "System") => {
+    await page.getByRole("button", { name: "Account menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Appearance", exact: true }).hover();
+    await page.getByRole("menuitemradio", { name, exact: true }).click();
+  };
+  const colorScheme = () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
+  await changeAppearance("Light");
+  await expect.poll(colorScheme).toBe("light");
+  const composer = page.getByRole("textbox", { name: "Message room chat" });
+  await composer.fill("Keep this draft");
+  await changeAppearance("Dark");
+  await expect.poll(colorScheme).toBe("dark");
+  await expect(composer).toHaveValue("Keep this draft");
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).playerQolTest.mounts)).toBe(1);
+  await page.reload();
+  await expect.poll(colorScheme).toBe("dark");
+  await page.getByRole("button", { name: "Account menu", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Appearance", exact: true }).hover();
+  await expect(page.getByRole("menuitemradio", { name: "Dark", exact: true })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "System", exact: true }).click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect.poll(colorScheme).toBe("light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(colorScheme).toBe("dark");
+});
 
 test("listeners can browse their queue and chat without losing playback or their draft", async ({ page }) => {
   const errors: string[] = [];
@@ -8,30 +37,73 @@ test("listeners can browse their queue and chat without losing playback or their
   await page.goto("/tests/browser/rooms/player/harness/index.html?workspace");
   await expect(page.getByRole("heading", { name: "Evening Radio", exact: true })).toBeVisible();
   await expect(page.getByRole("slider", { name: "Volume", exact: true })).toBeVisible();
-  const expectPlayerToFit = async (player: Locator) => {
-    await expect.poll(() => player.evaluate(element => Math.max(...[element, ...element.querySelectorAll("*")]
-      .filter(candidate => candidate === element || /^(auto|scroll)$/.test(getComputedStyle(candidate).overflowY))
-      .map(candidate => candidate.scrollHeight - candidate.clientHeight)))).toBeLessThanOrEqual(1);
-    for (const name of ["Pause room", "Vote Lame", "Vote Banger", "Stop after this track"]) {
-      await expect(player.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 });
-    }
-  };
-  await expectPlayerToFit(page.getByRole("region", { name: "Player", exact: true }));
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeInViewport({ ratio: 1 });
+  await page.evaluate(() => (window as any).playerQolTest.error("Could not start playback."));
+  await expect(page.getByText("Could not start playback.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message room chat" })).toBeInViewport({ ratio: 1 });
+  await page.getByRole("button", { name: "Retry playback", exact: true }).click();
+  await expect(page.getByText("Could not start playback.", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add music", exact: true }).click();
+  const musicSearch = page.getByRole("textbox", { name: "Search music", exact: true });
+  await expect(musicSearch).toBeFocused();
+  await musicSearch.fill("Tycho");
+  await musicSearch.press("Escape");
+  await expect(page.getByText("Sunset Lover", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Close my queue", exact: true }).click();
+  await page.getByRole("button", { name: "Open my queue", exact: true }).click();
+  await expect(page.getByText("Sunset Lover", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand player", exact: true })).toHaveCount(0);
+  await expect(page.getByTitle("Fixture YouTube player")).toHaveCount(1);
+  await expect(page.getByTitle("Fixture YouTube player")).not.toBeInViewport();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expectPlayerToFit(page.getByRole("tabpanel", { name: "Player", exact: true }));
+  await expect(page.getByRole("tab", { name: "Player", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeInViewport({ ratio: 1 });
   await page.getByRole("tab", { name: "Radio", exact: true }).click();
   await expect(page.getByText("Sunset Lover", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Chat", exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Message room chat" });
   await expect(composer).toBeEnabled();
   await composer.fill("One line\nAnother line");
-  await page.getByRole("tab", { name: "Player", exact: true }).click();
   await page.getByRole("button", { name: "Mute my audio", exact: true }).click();
-  await page.getByRole("tab", { name: "Chat", exact: true }).click();
   await expect(composer).toHaveValue("One line\nAnother line");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   expect(errors).toEqual([]);
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(composer).toHaveValue("One line\nAnother line");
   expect(await page.evaluate(() => (window as any).playerQolTest.mounts)).toBe(1);
+  // The native provider stays mounted without becoming another visible player.
+  await page.evaluate(() => (window as any).playerQolTest.useMixcloud());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTitle("Fixture Mixcloud player")).toHaveCount(1);
+  await expect(page.getByTitle("Fixture Mixcloud player")).not.toBeInViewport();
+  await expect(composer).toHaveValue("One line\nAnother line");
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.goto("/tests/browser/rooms/player/harness/index.html?workspace&empty");
+  await expect(page.getByRole("textbox", { name: "Message room chat" })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("button", { name: "Play room", exact: true })).toBeDisabled();
+  await expect(page.getByRole("slider", { name: "Playback position", exact: true })).toBeDisabled();
+  await expect(page.getByRole("tab", { name: "Chat", exact: true })).toBeInViewport({ ratio: 1 });
+  // A short room must still fit the media picker above its persistent player.
+  const draftBeforeEmoji = await page.getByRole("textbox", { name: "Message room chat" }).inputValue();
+  await page.getByRole("button", { name: "Add emoji", exact: true }).click();
+  const emojiPicker = page.getByRole("tabpanel", { name: "Emoji", exact: true });
+  await expect(emojiPicker.getByRole("searchbox", { name: "Search emoji" })).toBeInViewport({ ratio: 1 });
+  const emoji = emojiPicker.getByRole("button", { name: "grinning face", exact: true });
+  await expect(emoji).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("button", { name: "Play room", exact: true })).toBeInViewport({ ratio: 1 });
+  await emoji.click();
+  await expect(page.getByRole("textbox", { name: "Message room chat" })).toBeFocused();
+  const draftWithEmoji = await page.getByRole("textbox", { name: "Message room chat" }).inputValue();
+  expect(draftWithEmoji).toContain("😀");
+  expect(draftWithEmoji.replace("😀", "")).toBe(draftBeforeEmoji);
+  await page.getByRole("tab", { name: "Radio", exact: true }).click();
+  await expect(emojiPicker).toHaveCount(0);
+  await page.getByRole("button", { name: "Add music", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Add by link", exact: true }).click();
+  const link = page.getByRole("textbox", { name: "Track link", exact: true });
+  await link.click();
+  await expect(link).toBeFocused();
+  await expect(link).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("button", { name: "Play room", exact: true })).toBeInViewport({ ratio: 1 });
 });

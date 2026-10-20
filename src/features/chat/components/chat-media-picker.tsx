@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -8,6 +8,7 @@ import { chatPickerEmojiStyle, readEmojiSkinTone, saveEmojiSkinTone } from '@/co
 import { approvedImageUrl } from '@/lib/remote-images'
 import type { GiphyGif } from '@/features/chat/media'
 import type { ChatGifs } from '@/features/chat/hooks/use-chat-gifs'
+import '@/styles/chat-pickers.css'
 
 const EmojiPicker = lazy(() => import('../../../components/accessible-emoji-picker'))
 
@@ -15,22 +16,37 @@ interface ChatMediaPickerProps {
   showEmoji: boolean
   showGiphy: boolean
   mediaPanelId: string
-  height: number
+  bounds: { left: number; top: number; width: number; height: number }
   giphy: ChatGifs
   onTabChange: (emoji: boolean) => void
   onClose: () => void
+  onDismiss: () => void
   onInsertEmoji: (emoji: string) => void
   onSelectGif: (gif: GiphyGif) => void
 }
 
-export function ChatMediaPicker({ showEmoji, showGiphy, mediaPanelId, height, giphy, onTabChange, onClose, onInsertEmoji, onSelectGif }: ChatMediaPickerProps) {
+export function ChatMediaPicker({ showEmoji, showGiphy, mediaPanelId, bounds, giphy, onTabChange, onClose, onDismiss, onInsertEmoji, onSelectGif }: ChatMediaPickerProps) {
   const { t } = useTranslation('chat')
   const { resolvedTheme } = useTheme()
   const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!showEmoji && !showGiphy) return
+    const dismissOutside = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node) || pickerRef.current?.contains(target)) return
+      // The opener handles its own toggle or switches between media panels.
+      if (target instanceof Element && target.closest('button[aria-controls]')?.getAttribute('aria-controls') === mediaPanelId) return
+      onDismiss()
+    }
+    document.addEventListener('pointerdown', dismissOutside, true)
+    return () => document.removeEventListener('pointerdown', dismissOutside, true)
+  }, [showEmoji, showGiphy, mediaPanelId, onDismiss])
+  const { height } = bounds
   if (!showEmoji && !showGiphy) return null
 
   return (
-    <div className="chat-picker-popover" style={{ height, '--chat-picker-body-height': `${Math.max(0, height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
+    <div ref={pickerRef} className="chat-picker-popover" style={{ position: 'fixed', ...bounds, bottom: 'auto', right: 'auto', '--chat-picker-body-height': `${Math.max(0, height - 44)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
       <div className="chat-picker-header">
         <div className="chat-picker-tabs" role="tablist" aria-label={t('messageMedia')} onKeyDown={(event) => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !giphy.configured) return
@@ -84,7 +100,7 @@ export function ChatMediaPicker({ showEmoji, showGiphy, mediaPanelId, height, gi
             <EmojiPicker
               theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
               width="100%"
-              height={Math.max(180, height - 64)}
+              height={Math.max(180, height - 44)}
               lazyLoadEmojis
               emojiStyle={chatPickerEmojiStyle}
               defaultSkinTone={skinTone}
@@ -106,6 +122,8 @@ export function ChatMediaPicker({ showEmoji, showGiphy, mediaPanelId, height, gi
           >
             <Search size={16} aria-hidden="true" />
             <Input
+              type="search"
+              aria-label={t('searchGifs')}
               value={giphy.query}
               onChange={(event) => giphy.setQuery(event.target.value)}
               placeholder={t('searchGifs')}
@@ -133,6 +151,7 @@ export function ChatMediaPicker({ showEmoji, showGiphy, mediaPanelId, height, gi
                       type="button"
                       key={gif.id}
                       className="chat-gif-tile"
+                      aria-label={gif.title || t('giphyGif')}
                       onClick={() => onSelectGif(gif)}
                     >
                       <img referrerPolicy="no-referrer" src={approvedImageUrl(gif.preview)} alt={gif.title} loading="lazy" />

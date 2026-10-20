@@ -1,15 +1,23 @@
 import { Trans, useTranslation } from 'react-i18next'
-import { ArrowDown, Bell, BellOff, ChartNoAxesColumn, ImagePlus, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Bell, BellOff, ChartNoAxesColumn, ImagePlus, Music2, Pin, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
 import { insertComposerText } from '@/features/chat/composer-edit'
 import { prepareUploadedChatImage } from '@/features/chat/image-upload'
-import { chatCommandSuggestions, parseChatCommand, type ChatCommandName } from '@/features/chat/commands'
+import { CHAT_COMMAND_LABEL_KEYS, chatCommandSuggestions, isChatGameCommand, parseChatCommand, type ChatCommandName } from '@/features/chat/commands'
 import { ChatPollComposer } from '@/features/chat/components/chat-poll-composer'
+import { ChatGameComposer, type ChatGameComposerKind } from '@/features/chat/components/chat-game-composer'
+import { ChatGamesMenu } from '@/features/chat/components/chat-games-menu'
 import { ChatModerationDialog } from '@/features/chat/components/chat-moderation-dialog'
 import { ChatMediaPicker } from '@/features/chat/components/chat-media-picker'
 import { ChatMessageList } from '@/features/chat/components/chat-message-list'
 import { ChatHistorySearch } from '@/features/chat/components/chat-history-search'
+import { ChatPinnedMessages } from '@/features/chat/components/chat-pinned-messages'
+import { ChatSongAttachment } from '@/features/chat/components/chat-song-attachment'
+import { useChatPins } from '@/features/chat/hooks/use-chat-pins'
+import { parseChatGameCommand } from '@/features/chat/chat-games'
+import type { ChatSongAttachment as SongAttachment } from '../../../../shared/chat-attachments'
+import type { ChatMessageFeatures } from '../message-features'
 import '@/styles/chat-polls.css'
 import { getScopedSupabaseClient } from '@/lib/supabase'
 import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS } from '@/lib/bounded-operation'
@@ -36,6 +44,7 @@ import {
   CHAT_LIVE_WINDOW_LIMIT,
   recentChatMessages,
   type ChatMessage,
+  type ChatGame,
   type ChatMention,
   type ChatReply,
 } from '@/features/chat/model'
@@ -89,6 +98,10 @@ interface RealtimeChatProps {
   messages?: ChatMessage[]
   onOpenProfile?: (userId: string) => void
   onOpenQueue?: () => void
+  currentSong?: SongAttachment
+  canPinMessages?: boolean
+  onAddMusicLink?: (url: string) => Promise<void>
+  onSaveMusicLink?: (url: string) => Promise<void>
   adminUserIds?: string[]
   roomUsers?: User[]
   isVisible?: boolean
@@ -138,6 +151,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   onSend,
   onOpenProfile,
   onOpenQueue,
+  currentSong, canPinMessages = false, onAddMusicLink, onSaveMusicLink,
   adminUserIds = EMPTY_ADMIN_IDS,
   roomUsers = EMPTY_USERS,
   isVisible = true,
@@ -204,6 +218,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     removalEvents,applyRemoval,
     broadcastTyping,
     typingUserIds,
+    pinRevision,
     isConnected,
   } = useRealtimeChat({
     client,
@@ -225,10 +240,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false)
   const [activeCommandIndex, setActiveCommandIndex] = useState(0)
   const [pollQuestion, setPollQuestion] = useState<string | null>(null)
+  const [gameComposer, setGameComposer] = useState<ChatGameComposerKind | null>(null)
+  const gameComposerGenerationRef = useRef(0)
   const pollComposerGenerationRef = useRef(0)
   const [pollVoteStates, setPollVoteStates] = useState<Record<string, { pending: boolean; error?: string }>>({})
   const pendingPollVotesRef = useRef(new Set<string>())
   const commandCandidates = commandMenuDismissed ? [] : chatCommandSuggestions(draftText)
+  const activeCommand = commandCandidates[activeCommandIndex] || commandCandidates[0]
+  useEffect(() => {
+    if (activeCommand) document.getElementById(`${commandListId}-${activeCommand}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeCommand, commandListId])
   const commandDraft = parseChatCommand(draftText)
   const [hasDraft, setHasDraft] = useState(Boolean(initialDraft?.text.trim()))
   const [draftRestored, setDraftRestored] = useState(Boolean(initialDraft))
@@ -236,6 +257,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
+  const [attachedSong, setAttachedSong] = useState<SongAttachment | undefined>(initialDraft?.song)
+  const attachedSongRef = useRef(attachedSong)
+  const [showPins, setShowPins] = useState(false)
+  const pinsPanelId = useId()
+  const pinsButtonRef = useRef<HTMLButtonElement>(null)
+  const pins = useChatPins({ scope: `${user.id}:${roomName}`, source: historySource, enabled: isConnected })
+  useEffect(() => { if (pinRevision > 0) void pins.refresh() }, [pinRevision, pins.refresh])
+  useEffect(() => {
+    if (!isVisible) { setShowEmoji(false); setShowGiphy(false); gameComposerGenerationRef.current++; setGameComposer(null) }
+  }, [isVisible])
   const [composerError, setComposerError] = useState('')
   const moderation = useChatModeration({
     scope: `${user.id}:${roomName}`,
@@ -252,6 +283,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const canChat=capabilities?.chat!==false
   const canMedia=canChat&&capabilities?.media!==false
   const canPoll=canChat&&capabilities?.polls!==false
+  useEffect(() => { if (!canChat) { gameComposerGenerationRef.current++; setGameComposer(null) } }, [canChat])
   useEffect(()=>{setCooldownUntil(0);setCooldownNow(Date.now())},[roomName,user.id])
   useEffect(()=>{if(slowModeSeconds===0)setCooldownUntil(0)},[slowModeSeconds])
   useEffect(()=>{if(!canMedia){setShowGiphy(false);setPendingImage(null)}},[canMedia])
@@ -262,7 +294,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLFormElement>(null)
   const composerMenuHandsOffFocusRef = useRef(false)
-  const mediaPickerBounds = useChatPickerBounds(showEmoji || showGiphy, composerRef, 'composer')
+  const mediaPickerBounds = useChatPickerBounds(isVisible && (showEmoji || showGiphy), composerRef, 'composer')
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const draftMessageRef = useRef(initialDraft?.text || '')
   const draftRevisionRef = useRef(0)
@@ -272,8 +304,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const draftSnapshotRef = useRef<{ store: typeof draftStore; draft: ChatDraft }>({ store: draftStore, draft: initialDraft || { text: '', mentions: [] } })
   const pendingReactionsRef = useRef(new Set<string>())
   const uploadAbortRef = useRef<AbortController | null>(null)
-  const uploadScopeRef = useRef(`${user.id}:${roomName}`)
-  uploadScopeRef.current = `${user.id}:${roomName}`
+  const chatScopeRef = useRef(`${user.id}:${roomName}`)
+  chatScopeRef.current = `${user.id}:${roomName}`
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const previousMessageIdsRef = useRef(new Set<string>())
   const initializedScrollRef = useRef(false)
@@ -329,24 +361,26 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }, [mentionQuery, roomMentionOptions])
 
   const { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef,
-    sendText, sendPoll, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
+    sendText, sendPoll, sendGame, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
     ownerId: user.id, scope: `${user.id}:${roomName}`, slowModeSeconds,
     isConnected:isConnected&&canChat&&!cooldownRemaining, prepareMessage,
     deliver: (message) => boundedOperation(() => sendExistingMessage(message), { timeoutMs: SUBMISSION_TIMEOUT_MS }),
     persist: onSend ? (message) => boundedOperation(() => Promise.resolve(onSend(message)), { timeoutMs: SUBMISSION_TIMEOUT_MS }) : undefined,
-    composer: () => ({ text: draftMessageRef.current, mentions: activeMentions(draftMessageRef.current.trim(), selectedMentions), replyTo: replyingTo, revision: draftRevisionRef.current }),
+    composer: () => ({ text: draftMessageRef.current, mentions: activeMentions(draftMessageRef.current.trim(), selectedMentions), replyTo: replyingTo, song: attachedSongRef.current, revision: draftRevisionRef.current }),
     onError: setComposerError,
     beforeTextSend: () => requestAnimationFrame(() => { if (lifetimeRef.current.active && !history.context) scrollToBottom('auto') }),
     confirmedSend:()=>{if(slowModeSeconds>0){const until=Date.now()+slowModeSeconds*1000;setCooldownUntil(until);setCooldownNow(Date.now())}},
-    accepted: (snapshot, text) => {
+    accepted: (snapshot, text, submitted) => {
       if (text && draftRevisionRef.current === snapshot.revision && draftMessageRef.current === snapshot.text && replyingTo?.id === snapshot.replyTo?.id &&
           JSON.stringify(activeMentions(draftMessageRef.current.trim(), selectedMentions)) === JSON.stringify(snapshot.mentions)) {
         draftMessageRef.current = ''
-        draftSnapshotRef.current.draft = { text: '', mentions: [] }
+        const remainingSong = submitted.song ? undefined : attachedSongRef.current
+        draftSnapshotRef.current.draft = { text: '', mentions: [], song: remainingSong }
         setDraftText(''); setHasDraft(false); setSelectedMentions([]); setMentionQuery(null); setDraftRestored(false)
         setReplyingTo(null)
+        attachedSongRef.current = remainingSong; setAttachedSong(remainingSong)
         restoredReplyIdRef.current = undefined
-        draftStore.save({ text: '', mentions: [] })
+        draftStore.save({ text: '', mentions: [], song: remainingSong })
         selectionRef.current = { start: 0, end: 0 }
         draftRevisionRef.current++
         stopTyping()
@@ -364,9 +398,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setComposerError('')
     pollComposerGenerationRef.current++
     setPollQuestion(null)
+    gameComposerGenerationRef.current++
+    setGameComposer(null)
     setPollVoteStates({})
     pendingPollVotesRef.current = new Set()
     setCommandMenuDismissed(false)
+    setShowPins(false)
+    attachedSongRef.current = initialDraft?.song; setAttachedSong(initialDraft?.song)
     setDraftText(initialDraft?.text || '')
     draftMessageRef.current = initialDraft?.text || ''
     draftRevisionRef.current++
@@ -387,10 +425,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   useEffect(() => {
     if (draftMessageRef.current !== draftText) return
     draftSnapshotRef.current = { store: draftStore, draft: { text: draftText, mentions: selectedMentions,
-      replyToId: replyingTo?.id || restoredReplyIdRef.current } }
+      replyToId: replyingTo?.id || restoredReplyIdRef.current, song: attachedSong } }
     const timer = setTimeout(() => draftStore.save(draftSnapshotRef.current.draft), 200)
     return () => clearTimeout(timer)
-  }, [draftStore, draftText, selectedMentions, replyingTo])
+  }, [draftStore, draftText, selectedMentions, replyingTo, attachedSong])
 
   useEffect(() => {
     const flush = () => {
@@ -649,6 +687,14 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     stopTyping()
   }, [draftStore, stopTyping])
   const executeCommand = useCallback((name: ChatCommandName, argumentsText = '') => {
+    if (isChatGameCommand(name)) {
+      if (!canChat || cooldownRemaining) { setComposerError(!canChat ? restrictionMessage || t('chatLimited') : t('cooldown', { count: cooldownRemaining })); return }
+      try {
+        const game = parseChatGameCommand(`/${name} ${argumentsText}`.trim())
+        if (game) void sendGame(game)
+      } catch (error) { setComposerError(error instanceof Error ? error.message : t('invalidMessage')) }
+      return
+    }
     if(name==='poll'&&!canPoll){setComposerError(t('pollDisabled'));return}
     if ((name === 'queue' || name === 'mute') && argumentsText) {
       setComposerError(t('commandNoArguments', { command: name })); return
@@ -668,15 +714,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       toast.info(roomMuted ? t('unmutedNotice') : t('mutedNotice'))
       messageInputRef.current?.focus({ preventScroll: true })
     } else if (name === 'search') {
+      setShowPins(false)
       setShowHistorySearch(true)
       setHistorySearchText(argumentsText)
       if (argumentsText) void history.search(argumentsText)
       requestAnimationFrame(() => historySearchInputRef.current?.focus({ preventScroll: true }))
     } else {
+      gameComposerGenerationRef.current++
+      setGameComposer(null)
       pollComposerGenerationRef.current++
       setPollQuestion(argumentsText)
     }
-  }, [clearCommandDraft, history.search, historyRoomSlug, onOpenQueue, roomMuted, setRoomMuted,canPoll, t])
+  }, [clearCommandDraft, history.search, historyRoomSlug, onOpenQueue, roomMuted, setRoomMuted,canPoll,canChat,cooldownRemaining,restrictionMessage,sendGame, t])
   const handleSendMessage = useCallback((event: React.FormEvent) => {
     event.preventDefault()
     if (commandCandidates.length) {
@@ -697,6 +746,41 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setPollQuestion(null)
     requestAnimationFrame(() => messageInputRef.current?.focus({ preventScroll: true }))
   }, [])
+
+  const submitMenuGame = useCallback(async (game: ChatGame) => {
+    if (!isConnected || !canChat || cooldownRemaining) {
+      setComposerError(!canChat ? restrictionMessage || t('chatLimited') : cooldownRemaining ? t('cooldown', { count: cooldownRemaining }) : t('reconnecting'))
+      return false
+    }
+    if (sendingRef.current || uploadingRef.current) return false
+    const scope = `${user.id}:${roomName}`
+    const generation = gameComposerGenerationRef.current
+    const accepted = await sendGame(game, { preserveDraft: true })
+    return accepted && chatScopeRef.current === scope && gameComposerGenerationRef.current === generation
+  }, [isConnected, canChat, cooldownRemaining, restrictionMessage, sendGame, sendingRef, uploadingRef, user.id, roomName, t])
+
+  const closeGameComposer = (generation: number) => {
+    if (gameComposerGenerationRef.current !== generation) return
+    gameComposerGenerationRef.current++
+    setGameComposer(null)
+    messageInputRef.current?.focus({ preventScroll: true })
+  }
+  const chooseGame = (kind: ChatGame['kind']) => {
+    if (!isConnected || !canChat || cooldownRemaining || sendingRef.current || uploadingRef.current) return
+    composerMenuHandsOffFocusRef.current = true
+    setShowEmoji(false); setShowGiphy(false)
+    pollComposerGenerationRef.current++; setPollQuestion(null)
+    gameComposerGenerationRef.current++
+    setGameComposer(null)
+    if (kind === 'flip' || kind === 'roll' || kind === 'trivia') {
+      void submitMenuGame(kind === 'roll' ? { kind, dice: 1, sides: 6 } : { kind }).then(accepted => {
+        if (accepted) messageInputRef.current?.focus({ preventScroll: true })
+      })
+    } else {
+      setComposerError('')
+      setGameComposer(kind)
+    }
+  }
   const handlePostPoll = useCallback(async (question: string, options: string[]) => {
     if(!canPoll||cooldownRemaining)return false
     const lifetime = lifetimeRef.current
@@ -847,7 +931,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     const lifetime = lifetimeRef.current
     const controller = new AbortController()
     const scope = `${user.id}:${roomName}`
-    const isCurrent = () => lifetime.active && uploadScopeRef.current === scope
+    const isCurrent = () => lifetime.active && chatScopeRef.current === scope
     uploadAbortRef.current = controller
     setPendingImage(file)
     uploadingRef.current = true
@@ -936,6 +1020,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   }
 
   const toggleGiphy = () => {
+    gameComposerGenerationRef.current++; setGameComposer(null)
     setShowEmoji(false)
     setShowGiphy((current) => !current)
   }
@@ -945,17 +1030,44 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     history.clearSearch()
     historySearchButtonRef.current?.focus({ preventScroll: true })
   }
-  const historyControls = (historyRoomSlug || notifications) ? (
+  const changeAttachedSong = (song?: SongAttachment) => {
+    draftRevisionRef.current++
+    attachedSongRef.current = song; setAttachedSong(song)
+    draftSnapshotRef.current.draft.song = song
+    draftStore.save(draftSnapshotRef.current.draft)
+    messageInputRef.current?.focus({ preventScroll: true })
+  }
+  const closePins = () => { setShowPins(false); pinsButtonRef.current?.focus({ preventScroll: true }) }
+  const setMessagePinned = useCallback((id: string, pinned: boolean) => {
+    const scope = `${user.id}:${roomName}`
+    void pins.setPinned(id, pinned).then(ok => {
+      if (!ok && chatScopeRef.current === scope) { setShowHistorySearch(false); setShowPins(true) }
+    })
+  }, [pins.setPinned, user.id, roomName])
+  const messageFeatures = useMemo<ChatMessageFeatures>(() => ({
+    trivia: historySource?.loadTrivia && historySource.answerTrivia ? {
+      source: historySource as ChatHistorySource & Required<Pick<ChatHistorySource, 'loadTrivia' | 'answerTrivia'>>,
+      scope: `${user.id}:${roomName}`, disabled: !isConnected || !canChat, active: isVisible,
+    } : undefined,
+    pins: pins.available ? { ids: pins.pinnedIds, pendingIds: pins.pendingIds, canManage: canPinMessages && pins.canManage && isConnected,
+      setPinned: setMessagePinned } : undefined,
+    preview: historyRoomSlug && historySource?.loadLinkPreview ? { roomSlug: historyRoomSlug, accessToken: '', loadPreview: historySource.loadLinkPreview, onAddToQueue: onAddMusicLink, onSave: onSaveMusicLink } : undefined,
+  }), [pins.available, pins.pinnedIds, pins.pendingIds, pins.canManage, canPinMessages, isConnected,
+    setMessagePinned, historyRoomSlug, historySource, user.id, roomName, canChat, isVisible, onAddMusicLink, onSaveMusicLink])
+  const historyControls = (historyRoomSlug || notifications || pins.available) ? (
     <div className={headerActionsContainer ? 'chat-header-tools' : 'chat-history-toolbar'}>
-      {historyRoomSlug && <Button ref={historySearchButtonRef} type="button" variant="ghost" size="icon-sm" aria-label={t('searchRoomMessages')} title={t('searchRoomMessages')} aria-expanded={showHistorySearch} aria-controls={showHistorySearch ? historySearchId : undefined} onClick={() => { if (showHistorySearch) closeHistorySearch(); else setShowHistorySearch(true) }}><Search size={16} /></Button>}
+      {pins.available && <Button ref={pinsButtonRef} type="button" variant="ghost" size="icon-sm" aria-label={t('pins.title')} title={t('pins.title')} aria-expanded={showPins} aria-controls={showPins ? pinsPanelId : undefined} onClick={() => { setShowPins(!showPins); if (!showPins) { setShowHistorySearch(false); void pins.refresh() } }}><Pin size={16} /></Button>}
+      {historyRoomSlug && <Button ref={historySearchButtonRef} type="button" variant="ghost" size="icon-sm" aria-label={t('searchRoomMessages')} title={t('searchRoomMessages')} aria-expanded={showHistorySearch} aria-controls={showHistorySearch ? historySearchId : undefined} onClick={() => { if (showHistorySearch) closeHistorySearch(); else { setShowPins(false); setShowHistorySearch(true) } }}><Search size={16} /></Button>}
       {notifications && <Button type="button" variant="ghost" size="icon-sm" aria-label={roomMuted ? t('roomMuted') : t('muteRoom')} aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title={roomMuted ? t('unmuteNotifications') : t('muteNotifications')}>{roomMuted ? <BellOff size={16} /> : <Bell size={16} />}</Button>}
     </div>
   ) : null
   const composerStatus = !canChat?restrictionMessage||t('chatLimited'):cooldownRemaining?t('slowMode', { count: cooldownRemaining }):uploading ? t('uploading') : !isConnected ? t('draftKept') : draftRestored ? t('draftRestored') : ''
+  const gameComposerGeneration = gameComposerGenerationRef.current
 
   return (
     <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
       {headerActionsContainer ? createPortal(historyControls, headerActionsContainer) : historyControls}
+      {showPins && <ChatPinnedMessages id={pinsPanelId} pins={pins} hiddenIds={hiddenIds} removalEvents={removalEvents} canManage={canPinMessages && pins.canManage && isConnected} onJumpToMessage={id => { setShowPins(false); void jumpToMessage(id) }} onClose={closePins} />}
       {showHistorySearch && <ChatHistorySearch
         id={historySearchId}
         inputRef={historySearchInputRef}
@@ -982,6 +1094,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           </div>
         ) : null}
         <ChatMessageList
+          features={messageFeatures}
           messages={visibleMessages}
           hiddenIds={hiddenIds}
           onHiddenChange={handleHiddenChange}
@@ -1021,21 +1134,25 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         </button>
       )}
 
-      <ChatMediaPicker
+      {isVisible && (showEmoji || showGiphy) && createPortal(<ChatMediaPicker
         showEmoji={showEmoji}
         showGiphy={showGiphy}
         mediaPanelId={mediaPanelId}
-        height={mediaPickerBounds.height}
+        bounds={mediaPickerBounds}
         giphy={giphy}
         onTabChange={(emoji) => { setShowEmoji(emoji); setShowGiphy(!emoji) }}
         onClose={closeMediaPicker}
+        onDismiss={() => { setShowEmoji(false); setShowGiphy(false) }}
         onInsertEmoji={insertEmoji}
         onSelectGif={selectGif}
-      />
+      />, document.body)}
 
       {composerError && <p role="alert" className="px-4 pt-2 text-sm text-destructive">{composerError}</p>}
       {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
       {pollQuestion !== null && <ChatPollComposer key={pollComposerGenerationRef.current} initialQuestion={pollQuestion} onSubmit={handlePostPoll} onClose={closePollComposer} disabled={!isConnected||!canPoll||Boolean(cooldownRemaining) || sending || uploading} />}
+      {gameComposer !== null && <ChatGameComposer key={`${user.id}:${roomName}:${gameComposerGeneration}`} kind={gameComposer}
+        disabled={!isConnected || !canChat || Boolean(cooldownRemaining) || sending || uploading} onSubmit={submitMenuGame}
+        onClose={() => closeGameComposer(gameComposerGeneration)} />}
       <form
         ref={composerRef}
         onSubmit={handleSendMessage}
@@ -1063,6 +1180,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         <div className="chat-typing-indicator" aria-live="polite" aria-atomic="true">
           {typingLabel && <><i /><i /><i /><span>{typingLabel}</span></>}
         </div>
+        {attachedSong && <ChatSongAttachment song={attachedSong} onRemove={() => changeAttachedSong()} />}
         {replyingTo && (
           <div className="chat-reply-composer">
             <Reply className="size-3.5" />
@@ -1111,7 +1229,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             aria-selected={index === activeCommandIndex} className={index === activeCommandIndex ? 'active' : undefined}
             onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActiveCommandIndex(index)}
             onClick={() => executeCommand(name)}
-          ><code>/{name}</code><span>{name === 'queue' ? t('openQueue') : name === 'mute' ? roomMuted ? t('unmuteNotifications') : t('muteNotifications') : name === 'search' ? t('searchRoomMessages') : t('createPoll')}</span></button>)}
+          ><code>/{name}</code><span>{t(name === 'mute' && roomMuted ? 'unmuteNotifications' : CHAT_COMMAND_LABEL_KEYS[name])}</span></button>)}
         </div>}
         <InputGroup className="chat-composer-bar">
           <InputGroupTextarea
@@ -1195,15 +1313,18 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               type="button"
               variant="ghost"
               size="icon"
-              disabled={!isConnected || (!canMedia && !canPoll) || Boolean(cooldownRemaining) || uploading || sending}
+              disabled={!isConnected || !canChat || Boolean(cooldownRemaining) || uploading || sending}
               aria-label={t('addToMessage')}
               title={t('addToMessage')}
             />}><Plus className="size-5" /></DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" className="chat-composer-menu" finalFocus={() => composerMenuHandsOffFocusRef.current ? false : true}>
+              {currentSong && canChat && <DropdownMenuItem onClick={() => { composerMenuHandsOffFocusRef.current = true; changeAttachedSong(currentSong) }}><Music2 />{t('attachCurrentSong')}</DropdownMenuItem>}
               {canMedia && <DropdownMenuItem onClick={() => fileInputRef.current?.click()}><ImagePlus />{t('uploadImage')}</DropdownMenuItem>}
+              {canChat && <ChatGamesMenu onChoose={chooseGame} />}
               {canPoll && <DropdownMenuItem onClick={() => {
                 composerMenuHandsOffFocusRef.current = true
                 setShowEmoji(false); setShowGiphy(false)
+                gameComposerGenerationRef.current++; setGameComposer(null)
                 pollComposerGenerationRef.current++
                 setPollQuestion('')
               }}><ChartNoAxesColumn />{t('newPoll')}</DropdownMenuItem>}
@@ -1216,8 +1337,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             disabled={!isConnected}
             aria-label={t('addEmoji')}
             title={t('addEmoji')}
+            aria-controls={mediaPanelId}
+            aria-expanded={showEmoji}
             onPointerDown={() => { if (messageInputRef.current) selectionRef.current = { start: messageInputRef.current.selectionStart, end: messageInputRef.current.selectionEnd } }}
-            onClick={() => { setShowGiphy(false); setShowEmoji((current) => !current) }}
+            onClick={() => { gameComposerGenerationRef.current++; setGameComposer(null); setShowGiphy(false); setShowEmoji((current) => !current) }}
           >
             <Smile className="size-[18px]" />
           </Button>
@@ -1229,6 +1352,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphy.configured || uploading || sending}
             aria-label={giphy.configured ? t('addGif') : t('gifsUnavailable')}
             title={giphy.configured ? t('addGif') : t('gifsUnavailableRoom')}
+            aria-controls={mediaPanelId}
+            aria-expanded={showGiphy}
             onClick={toggleGiphy}
           >
             <span>{t('gif')}</span>
@@ -1238,7 +1363,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="submit"
             variant="ghost"
             size="icon"
-            disabled={(!isConnected && !commandDraft)||(!commandDraft&&(!canChat||Boolean(cooldownRemaining) || (slowModeSeconds > 0 && sending))) || uploading || !hasDraft}
+            disabled={(!isConnected && !commandDraft)||(!commandDraft&&(!canChat||Boolean(cooldownRemaining) || (slowModeSeconds > 0 && sending))) || uploading || (!hasDraft && !attachedSong)}
             aria-label={commandDraft ? t('runCommand') : t('sendMessage')}
             title={commandDraft ? t('runCommandEnter') : t('sendMessageEnter')}
           >

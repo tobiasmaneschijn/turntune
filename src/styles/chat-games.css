@@ -1,0 +1,19 @@
+.chat-games-menu { width: 224px; max-width: calc(100vw - 16px); border-radius: 6px; animation: none; }
+.chat-composer-menu [data-slot="dropdown-menu-sub-trigger"], .chat-games-menu [data-slot="dropdown-menu-item"] { min-height: 36px; gap: 8px; padding: 6px 8px; }
+.chat-game-composer { flex: 0 0 auto; min-width: 0; max-height: min(220px, 40dvh); overflow-y: auto; padding: 8px var(--room-chat-gutter, 16px) 12px; border-top: 1px solid var(--border); background: var(--card); color: var(--foreground); }
+.chat-game-composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 560px; margin-bottom: 4px; }
+.chat-game-composer h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.chat-game-inputs { display: flex; align-items: end; gap: 8px; max-width: 560px; }
+.chat-game-field { flex: 1; display: grid; gap: 4px; min-width: 0; }
+.chat-game-field label { font-size: 12px; font-weight: 500; }
+.chat-game-field input { width: 100%; min-width: 0; height: 36px; min-height: 36px; background: var(--background); font-size: 14px; }
+.chat-game-inputs > button, .chat-game-choices > button { min-height: 36px; }
+.chat-game-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-game-hint, .chat-game-error { margin: 4px 0 0; font-size: 12px; line-height: 18px; }
+.chat-game-hint { color: var(--muted-foreground); }
+.chat-game-error { color: var(--destructive); }
+@media (max-width: 640px), (pointer: coarse) {
+  .chat-composer-menu [data-slot="dropdown-menu-sub-trigger"], .chat-games-menu [data-slot="dropdown-menu-item"],
+  .chat-game-composer-heading > button, .chat-game-inputs > button, .chat-game-choices > button, .chat-game-field input { min-height: 44px; }
+  .chat-game-composer-heading > button { min-width: 44px; }
+}

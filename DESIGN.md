@@ -1,6 +1,6 @@
 ---
 name: turntune
-description: Shared listening rooms with Geist typography, semantic themes, and a lime accent.
+description: Inherited Geist, semantic themes, and lime tokens; the listening-room brief defines its approved Inter and violet replacement.
 colors:
   background: "oklch(0.085 0.008 285)"
   foreground: "oklch(0.97 0 0)"
@@ -161,7 +161,17 @@ components:
 
 ## Overview
 
-The inherited interface uses Geist, solid semantic surfaces, compact room panes, and a lime accent. Shared Base UI controls carry the same states across public pages, rooms, and dialogs. Keep this existing system when extending the interface.
+The inherited interface uses Geist, solid semantic surfaces, compact room panes,
+and a lime accent. Preserve this system outside the active listening room. Shared
+Base UI controls retain their keyboard, focus, disabled, and error behavior.
+
+The active listening room uses the approved [Open room
+design](docs/design/listening-room.md): Inter, neutral surfaces,
+violet actions, shared activity beside chat and a private cover-art queue, and a
+persistent bottom player with no expansion or visible provider widgets. It has
+light and dark appearances through the shared Appearance menu, including System.
+Its scoped semantic token overrides live in `src/styles/open-room.css`; the frontmatter above describes the
+inherited system used elsewhere.
 
 **Key Characteristics:**
 - One sans-serif family with weight and size establishing hierarchy.
@@ -169,7 +179,11 @@ The inherited interface uses Geist, solid semantic surfaces, compact room panes,
 - Bordered surfaces, restrained depth, and clear control states.
 - Labeled controls, visible focus, and reachable mobile actions.
 
-This is a scan of the current implementation. CSS and production components are the implementation source; the token frontmatter records their reusable values. Unprefixed colors describe the default dark theme; `light-` colors record the corresponding light theme. Apply semantic CSS variables at runtime so the selected theme remains effective.
+This is a scan of the inherited implementation. CSS and production components are
+the implementation source; the token frontmatter records their reusable values.
+Unprefixed colors describe its default dark theme; `light-` colors record the
+corresponding light theme. Apply semantic CSS variables so each surface's active
+appearance remains effective.
 
 ## Colors
 
@@ -193,7 +207,12 @@ The interface has no declared modular type ratio. Use the observed roles and the
 
 ## Layout
 
-Room panes separate music, playback, and conversation. Desktop panes resize; narrower layouts expose the existing pane navigation. Use labeled rows, contextual menus, and progressive disclosure for settings. Keep personal and shared information in their established panes.
+The active room's [surface brief](docs/design/listening-room.md) defines shared
+activity on the left, chat in the center, private music on the right, and the
+player below. Desktop panes resize; narrower layouts expose pane navigation.
+Classic room previews retain their existing music/player/chat arrangement. Use
+labeled rows, contextual menus, and progressive disclosure for settings. Keep
+personal waiting tracks separate from shared room activity.
 
 The shared header is full-width with a bottom border. It becomes more compact on mobile while preserving the account and room controls. Shared cards use the spacing tokens; dense room rows use their established local spacing. Layout breakpoints belong to the affected surface rather than a universal page grid. The landing composition is documented in its surface brief.
 
@@ -207,7 +226,7 @@ Keep reduced-motion behavior and pause, replay, and manual control of the landin
 
 ## Shapes
 
-The radius scale derives from the existing base radius. Shared buttons and fields use `lg`; cards and dialogs use `xl`; compact badges and small controls use `md`. Room panels retain their existing 12-pixel corners. Avatars and genuinely circular controls keep their own shapes. Borders are thin and semantic.
+The radius scale derives from the existing base radius. Shared buttons and fields use `lg`; cards and dialogs use `xl`; compact badges and small controls use `md`. Classic room previews retain their existing 12-pixel panel corners; Open room uses flat regions divided by thin semantic borders. Avatars and genuinely circular controls keep their own shapes.
 
 ## Components
 
@@ -223,13 +242,13 @@ Self-contained previews of the shared primitives are in the sidecar. They docume
 ## Do's and Don'ts
 
 ### Do:
-- **Do** preserve Geist, semantic dark/light themes, and the existing lime accent.
+- **Do** preserve Geist, semantic dark/light themes, and lime outside the active room; follow the listening-room brief inside it.
 - **Do** reuse shared controls and their keyboard, focus, disabled, and error states.
 - **Do** keep mobile actions at least 44 pixels and honor reduced motion.
 - **Do** use short labels and add supporting copy only when it enables the next action.
 
 ### Don't:
-- **Don't** add a separate decorative palette, font pairing, or component system to an existing surface.
+- **Don't** introduce another palette, font pairing, or control system beyond the inherited system and the approved listening-room replacement.
 - **Don't** turn every setting or section into a card with a description.
 - **Don't** use color alone for essential state or remove accessibility names to shorten copy.
 - **Don't** promote the landing page's composition into a global layout requirement.

@@ -2,6 +2,8 @@ import i18n from '../../i18n'
 import { requestSocketAction } from '../../lib/socket-request'
 import { normalizeRealtimeMessage, normalizeRealtimePollVote, normalizeRealtimeReaction, normalizeTypingEvent,normalizeChatRemoved } from './protocol'
 import { CHAT_TYPING_TTL_MS, type ChatSessionFactory } from './realtime'
+import type { SocketReply } from '../../lib/socket-request'
+import { normalizeChatPinEvent } from '../../../shared/chat-pins'
 
 type EventHandler = (payload: unknown) => void
 export type SocketChatTransport = Parameters<typeof requestSocketAction>[0] & {
@@ -24,10 +26,11 @@ export function createSocketChatSessionFactory(socket: SocketChatTransport, room
     const admissionChanged = (next: boolean) => connection(next && socket.connected)
     sessions.add(admissionChanged)
     const envelope = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && (value as { roomId?: unknown }).roomId === roomId ? value as Record<string, unknown> : null
-    const receiveMessage: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const message = normalizeRealtimeMessage(payload.message); if (message) callbacks.onMessage(message) }
+    const receiveMessage: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const message = normalizeRealtimeMessage(payload.message, { trustedGameResults: true }); if (message) callbacks.onMessage(message) }
     const receiveReaction: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const reaction = normalizeRealtimeReaction(payload.reaction); if (reaction) callbacks.onReaction(reaction) }
     const receivePollVote: EventHandler = (value) => { const payload = envelope(value); if (!active || !ready || !payload) return; const vote = normalizeRealtimePollVote(payload.poll); if (vote) callbacks.onPollVote?.(vote) }
     const receiveRemoved:EventHandler=(value)=>{const payload=envelope(value);if(!active||!ready||!payload)return;const removed=normalizeChatRemoved(payload);if(removed)callbacks.onRemoved?.(removed)}
+    const receivePin: EventHandler = value => { const payload = envelope(value); if (active && ready && payload && normalizeChatPinEvent(payload.pin)) callbacks.onPinsChanged?.() }
     const receiveTyping: EventHandler = (value) => {
       const payload = envelope(value)
       if (!active || !ready || !payload) return
@@ -42,15 +45,22 @@ export function createSocketChatSessionFactory(socket: SocketChatTransport, room
     }
     const disconnected: EventHandler = () => { admitted = false; connection(false) }
     const connected: EventHandler = () => connection(false) // Only the parent ACK+fresh-snapshot admission can enable chat.
-    const listeners: Array<[string, EventHandler]> = [['chat:message', receiveMessage], ['chat:reaction', receiveReaction], ['chat:poll', receivePollVote], ['chat:removed',receiveRemoved], ['chat:typing', receiveTyping], ['disconnect', disconnected], ['connect', connected]]
+    const listeners: Array<[string, EventHandler]> = [['chat:message', receiveMessage], ['chat:reaction', receiveReaction], ['chat:poll', receivePollVote], ['chat:removed',receiveRemoved], ['chat:pin', receivePin], ['chat:typing', receiveTyping], ['disconnect', disconnected], ['connect', connected]]
     listeners.forEach(([event, handler]) => socket.on(event, handler))
     queueMicrotask(() => { if (active && !reportedInitial) { reportedInitial = true; callbacks.onConnection(ready) } })
-    const send = (kind: 'message' | 'reaction' | 'typing', payload: unknown) => new Promise<void>((resolve, reject) => {
+    const send = (kind: 'message' | 'reaction' | 'typing', payload: unknown) => new Promise<SocketReply>((resolve, reject) => {
       if (!active || !ready) { reject(new Error(i18n.t('chat:reconnecting'))); return }
-      requestSocketAction(socket, `chat:${kind}`, { roomId, [kind]: payload }, (result) => result.ok ? resolve() : reject(new Error(result.error || i18n.t('chat:eventUnconfirmed'))))
+      requestSocketAction(socket, `chat:${kind}`, { roomId, [kind]: payload }, (result) => result.ok ? resolve(result) : reject(new Error(result.error || i18n.t('chat:eventUnconfirmed'))))
     })
     return {
-      async sendMessage(message) { await send('message', message); if (active) callbacks.onMessage(message) },
+      async sendMessage(message) {
+        const reply = await send('message', message)
+        const accepted = normalizeRealtimeMessage(reply.message, { trustedGameResults: true })
+        if ((message.song || message.game) && (!accepted || accepted.id !== message.id || accepted.user.id !== userId)) throw new Error(i18n.t('chat:eventUnconfirmed'))
+        const canonical = accepted?.id === message.id && accepted.user.id === userId ? accepted : message
+        if (active) callbacks.onMessage(canonical)
+        return canonical
+      },
       async sendReaction(event) { if (!active) return; callbacks.onReaction(event); await send('reaction', event) },
       async sendTyping(value) { try { await send('typing', { active: value }) } catch { /* Ephemeral typing never blocks composition. */ } },
       dispose() { if (!active) return; active = false; clearTyping(); sessions.delete(admissionChanged); listeners.forEach(([event, handler]) => socket.off(event, handler)) },

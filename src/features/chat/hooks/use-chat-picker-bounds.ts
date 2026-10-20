@@ -3,12 +3,16 @@ import { useLayoutEffect, useState, type RefObject } from 'react'
 type Bounds = { left: number; top: number; width: number; height: number }
 type Rectangle = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom' | 'width'>
 
-/** Actual usable space above the composer, including a keyboard-sized visual viewport. */
+/** Prefer space above the composer; short viewports can overlay the chat surface. */
 export function calculateChatPickerBounds(surface: Rectangle, composerTop: number, anchor: Rectangle,
   viewport: { left: number; top: number; width: number; height: number }, placement: 'composer' | 'message'): Bounds {
-  const top = Math.max(surface.top, viewport.top) + 8
-  const bottom = Math.min(composerTop - 8, viewport.top + viewport.height - 8)
-  const width = Math.max(0, Math.min(placement === 'composer' ? 420 : 300, surface.width - 16, viewport.width - 16))
+  let top = Math.max(surface.top, viewport.top) + 8
+  let bottom = Math.min(composerTop - 8, viewport.top + viewport.height - 8)
+  if (bottom - top < 240) {
+    top = viewport.top + 8
+    bottom = Math.min(surface.bottom, viewport.top + viewport.height - 8)
+  }
+  const width = Math.max(0, Math.min(placement === 'composer' ? 360 : 300, surface.width - 16, viewport.width - 16))
   const height = Math.max(0, Math.min(placement === 'composer' ? 454 : 366, bottom - top))
   const left = Math.max(viewport.left + 8, Math.min(anchor.right - width, viewport.left + viewport.width - width - 8))
   return { left, top: placement === 'composer' ? bottom - height : Math.max(top, Math.min(anchor.bottom + 4, bottom - height)), width, height }

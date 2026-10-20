@@ -16,6 +16,7 @@ import { runtimeMetrics } from "../../lib/runtime-metrics.js";
 import { telemetry } from "../../observability/index.js";
 import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 import { spotifyAccessAllowed, spotifyRoomContext, type SpotifyAccessCheck } from "./spotify-access.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 export interface MusicRouteOptions {
   authEnabled: boolean;
@@ -191,8 +192,8 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
     const ip = request.ip || request.socket.remoteAddress || "unknown";
     const path = `${request.baseUrl}${request.path}`;
     const endpoint = path === "/api/spotify/playback" ? playbackBudget : endpointBudget;
-    if (!ipBudget.consume(ip) || userId && !accountBudget.consume(userId) ||
-      (!userId && !endpoint.consume(`ip:${ip}:${path}`)) || userId && !endpoint.consume(`account:${userId}:${path}`)) {
+    if (!localRateLimitsDisabled() && (!ipBudget.consume(ip) || userId && !accountBudget.consume(userId) ||
+      (!userId && !endpoint.consume(`ip:${ip}:${path}`)) || userId && !endpoint.consume(`account:${userId}:${path}`))) {
       return response.status(429).json({ error: serverT("too_many_music_requests_try_again_shortly") });
     }
     const controller = new AbortController();
@@ -207,6 +208,7 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
     catch (error) { runtimeMetrics.observe("provider_request", Date.now() - started, true); throw error; }
   };
 function consumeProviderSearchLimit(request: express.Request) {
+  if (localRateLimitsDisabled()) return true;
   const now = Date.now();
   const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
   const current = providerSearchLimits.get(rateKey);
@@ -248,16 +250,18 @@ app.get("/api/youtube/live", async (request, response) => {
 
   let pending = youtubeLivePending.get(id);
   if (!pending) {
-    const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
-    const currentLimit = youtubeLiveLimits.get(rateKey);
-    const limit = !currentLimit || currentLimit.resetAt <= now
-      ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-      : currentLimit;
-    if (limit.count >= 30) {
-      return response.status(429).json({ error: serverT("too_many_live_status_requests_please_try_again_in_a_few_minutes") });
+    if (!localRateLimitsDisabled()) {
+      const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
+      const currentLimit = youtubeLiveLimits.get(rateKey);
+      const limit = !currentLimit || currentLimit.resetAt <= now
+        ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+        : currentLimit;
+      if (limit.count >= 30) {
+        return response.status(429).json({ error: serverT("too_many_live_status_requests_please_try_again_in_a_few_minutes") });
+      }
+      limit.count += 1;
+      youtubeLiveLimits.set(rateKey, limit);
     }
-    limit.count += 1;
-    youtubeLiveLimits.set(rateKey, limit);
 
     const lookup = (async () => {
       const params = new URLSearchParams({ key: youtubeApiKey, part: "snippet,liveStreamingDetails", id });
@@ -306,16 +310,18 @@ app.get("/api/youtube/search", async (request, response) => {
   }
 
   const now = Date.now();
-  const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
-  const currentLimit = youtubeSearchLimits.get(rateKey);
-  const limit = !currentLimit || currentLimit.resetAt <= now
-    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-    : currentLimit;
-  if (limit.count >= 30) {
-    return response.status(429).json({ error: serverT("too_many_searches_please_try_again_in_a_few_minutes") });
+  if (!localRateLimitsDisabled()) {
+    const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
+    const currentLimit = youtubeSearchLimits.get(rateKey);
+    const limit = !currentLimit || currentLimit.resetAt <= now
+      ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+      : currentLimit;
+    if (limit.count >= 30) {
+      return response.status(429).json({ error: serverT("too_many_searches_please_try_again_in_a_few_minutes") });
+    }
+    limit.count += 1;
+    youtubeSearchLimits.set(rateKey, limit);
   }
-  limit.count += 1;
-  youtubeSearchLimits.set(rateKey, limit);
 
   const cacheKey = parsed.data.q.toLocaleLowerCase();
   const cached = youtubeSearchCache.get(cacheKey);
@@ -406,16 +412,18 @@ app.get("/api/soundcloud/search", async (request, response) => {
   }
 
   const now = Date.now();
-  const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
-  const currentLimit = soundCloudSearchLimits.get(rateKey);
-  const limit = !currentLimit || currentLimit.resetAt <= now
-    ? { count: 0, resetAt: now + 10 * 60 * 1000 }
-    : currentLimit;
-  if (limit.count >= 30) {
-    return response.status(429).json({ error: serverT("too_many_searches_please_try_again_in_a_few_minutes") });
+  if (!localRateLimitsDisabled()) {
+    const rateKey = verifiedUsers.get(request) || request.ip || request.socket.remoteAddress || "unknown";
+    const currentLimit = soundCloudSearchLimits.get(rateKey);
+    const limit = !currentLimit || currentLimit.resetAt <= now
+      ? { count: 0, resetAt: now + 10 * 60 * 1000 }
+      : currentLimit;
+    if (limit.count >= 30) {
+      return response.status(429).json({ error: serverT("too_many_searches_please_try_again_in_a_few_minutes") });
+    }
+    limit.count += 1;
+    soundCloudSearchLimits.set(rateKey, limit);
   }
-  limit.count += 1;
-  soundCloudSearchLimits.set(rateKey, limit);
 
   const cacheKey = parsed.data.q.toLocaleLowerCase();
   const cached = soundCloudSearchCache.get(cacheKey);

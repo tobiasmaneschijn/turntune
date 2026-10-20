@@ -33,7 +33,11 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 | `src/features/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
 | `src/features/chat/outbox.ts` | Validated session recovery copies, account/room isolation, expiration, capacity and sign-out invalidation. |
 | `src/features/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
-| `src/features/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
+| `src/features/chat/commands.ts`, `chat-games.ts` | Composer slash commands and bounded game intent parsing. |
+| `shared/chat-attachments.ts`, `server/features/chat/chat-attachments.ts` | Public song snapshots, game contracts and authoritative game results. |
+| `server/features/chat/link-preview*.ts`, `src/features/chat/link-previews.ts` | Authorized, bounded preview fetching and room-scoped client loading. |
+| `server/features/chat/chat-pin*.ts`, `src/features/chat/hooks/use-chat-pins.ts` | Moderator-managed pins, persistent storage and stale-scope guards. |
+| `shared/chat-trivia.ts`, `server/features/chat/chat-trivia.ts`, `src/features/chat/components/chat-trivia.tsx` | Shared music trivia, hidden answers, timed results and the compact round card. |
 | `src/features/chat/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
 | `src/features/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
 | `src/features/chat/hooks/use-chat-delivery.ts` | Synchronous composer handoff to recovery storage, ordered delivery and departed-scope guards. |
@@ -198,10 +202,11 @@ history remains available to an admitted user with a chat timeout. Slow mode
 applies to accepted new messages, including media and polls, and exempts staff.
 The client keeps drafts while participation is restricted.
 
-## Commands and polls
+## Commands, polls and games
 
 Typing `/` opens keyboard-accessible command suggestions. Enter or selecting a
-suggestion runs the command; command text is not sent to the room.
+suggestion runs the command. Navigation commands stay local; games create a
+saved room message.
 
 | Command | Action |
 | --- | --- |
@@ -209,6 +214,36 @@ suggestion runs the command; command text is not sent to the room.
 | `/mute` | Toggles this room's notifications. It uses the same preference as the chat header bell. |
 | `/search` or `/search text` | Opens saved room-message search; supplied text is searched immediately. |
 | `/poll` or `/poll question` | Opens a poll form, optionally prefilling its question. |
+| `/roll` or `/roll 2d6` | Rolls dice; defaults to one six-sided die. Supports up to ten dice with 2–100 sides. |
+| `/pick House, Ambient, Disco` | Picks one of 2–20 distinct choices. Commas or pipes separate multiword choices. |
+| `/flip` | Flips a coin. |
+| `/rps rock` | Plays rock, paper, scissors against the server. Choose `rock`, `paper` or `scissors`. |
+| `/8ball Will the next track be a hit?` | Answers a question of up to 200 characters with a Magic 8 Ball response. |
+
+The server generates each game's result once, after checking room participation.
+Its immutable message ID keeps the same result across uncertain delivery, retry
+and reload. Submitted results and untrusted broadcasts cannot supply a result.
+Games use the existing chat and slow-mode restrictions.
+
+The composer **+ → Games** menu starts a coin flip or six-sided die immediately.
+Rock-paper-scissors, random picks and Magic 8 Ball open a compact choice or input
+panel. Menu-started games preserve the existing message, reply and song draft,
+and use the same durable send/retry flow as slash commands.
+
+**+ → Games → Music trivia** posts a shared 30-second question with four choices.
+Each account can answer once. The card shows participation and the caller's saved
+choice, then reveals the correct answer and counts after the server deadline.
+It keeps the question, answers and results in one message. Reloading or changing
+accounts restores only that account's choice. Admitted readers can see results;
+answering follows the room's chat restrictions.
+
+Questions and correct answers live in the server-only, append-only bank in
+`server/features/chat/chat-trivia.ts`. The durable message contains public question
+metadata; the service-only answer table has one row per message/account. The
+answer transaction locks the parent message, rejects late or removed rounds and
+returns an existing choice for an uncertain retry. Visible cards refresh every
+2.5 seconds while a round is live, pause in hidden panes/tabs, and stop once the
+server returns final results. The countdown uses server time.
 
 Polls have a question of up to 200 characters and 2–4 distinct choices of up to
 80 characters. A poll is a text message with immutable `poll.options`; its
@@ -229,6 +264,32 @@ question, choices and results through the normal hidden-message controls.
 
 Apply the chat migrations before deploying the matching server and client.
 Local SQL tests do not apply a live migration.
+
+## Song context, link previews and pins
+
+Use **Add to message → Attach current song** to attach the room's playing song,
+with or without a caption. The attachment stays in the account/room draft until
+accepted. The server resolves public song metadata from current playback or
+played history; private waiting queues are never attachment sources. The saved
+snapshot and timestamp remain with the message after playback changes.
+
+Text links remain clickable and show at most one preview per message. Cards load
+near the visible conversation and fall back to the original link when a site
+cannot be previewed. Music cards have explicit **Add to queue** and **Save**
+actions using the existing room queue and private library APIs. No embedded
+provider player is created. Hidden or removed messages conceal attachments and
+previews.
+
+Preview requests require fresh room access even for cached results. The server
+checks and pins public DNS addresses on every redirect, bounds HTML and image
+downloads, and re-encodes raster thumbnails before returning them. It never
+forwards arbitrary HTML or third-party thumbnail URLs to the browser.
+
+Moderators can pin or unpin from a message's action menu. The header pin button
+opens a compact list and jumps to the original message. Pins are scoped to the
+room, limited to 50, and removed when their message is removed. A failed update
+keeps the current list and offers Retry. Live pin events trigger an authorized
+refresh; old room/account responses cannot populate the new view.
 
 ## Mentions
 
@@ -333,6 +394,13 @@ The chat schema is introduced incrementally by these migrations:
 - `20261008132716_chat_polls.sql` adds immutable poll options and revisioned votes.
 - `20261009073805_durable_room_chat.sql` adds service-only chat receipts,
   cooldowns, removal markers and upload records, and revokes browser media uploads.
+- `20261020120000_chat_song_games.sql` adds public song snapshots and immutable,
+  server-generated game results to durable chat.
+- `20261020121000_chat_pins.sql` adds service-only room pins and removal cleanup.
+- `20261020184034_chat_more_minigames.sql` extends the existing game result function
+  with coin flip, rock-paper-scissors and Magic 8 Ball. It adds no tables or columns.
+- `20261020185454_chat_music_trivia.sql` adds service-only trivia answers and the
+  atomic first-answer transaction, and accepts server-picked public trivia rounds.
 
 Browser code uses only the publishable key and signed-in access token. Secrets
 remain server-side. Direct Data API reads expose only the account's own rows for
