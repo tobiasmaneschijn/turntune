@@ -1,11 +1,12 @@
 import i18n from "../../../i18n";
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import { AlertCircle, CircleHelp, Heart, Info, ThumbsDown, Maximize2, Minimize2, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX } from "lucide-react";
+import { AlertCircle, CircleHelp, Heart, Info, ThumbsDown, Maximize2, Minimize2, MoreHorizontal, RefreshCw, Settings as SettingsIcon, Volume2, VolumeX, X } from "lucide-react";
 import { PauseIcon, PlayIcon, SkipIcon } from "../../../components/Icons";
 import { Button } from "../../../components/ui/button";
 import { Slider } from "../../../components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu";
 import { TrackArtwork, trackArtworkUrl } from "../../music/components/TrackArtwork";
 import { TrackDetailsDialog } from "../../music/components/TrackDetailsDialog";
 import { DeferredDialog } from "../../../components/DeferredDialog";
@@ -13,6 +14,7 @@ import { playbackFeedback, localPlaybackAligned } from "../playback-feedback";
 import { providerLabel } from "../../music/music-presentation";
 import type { SocketReply } from "../../../lib/socket-request";
 import "../../../styles/playback-qol.css";
+import "../../../styles/room-player.css";
 import { allowedRoomProviders, PROVIDER_DEFINITIONS } from "../../../../shared/providers";
 import type { PlaybackAdapterControls, PlayerStatus } from "../provider-playback";
 import type { ProviderPlayerOverrides } from "../provider-registry";
@@ -27,6 +29,13 @@ import type { SoundSpinUserSettings } from "../../settings/user-settings";
 import { useCoalescedDecoration, useVisibleDecorations } from "../../../hooks/use-visible-decorations";
 import { notifyWithAttention } from "../../../lib/notifications";
 import { useRoomNotificationMuted } from "../../rooms/hooks/use-room-notifications";
+import { EmptyPlayerDock } from "./EmptyPlayerDock";
+import { PlaybackTimeline } from "./PlaybackTimeline";
+import { formatPlaybackTime } from "../format-playback-time";
+import { useArtworkColor } from "../use-artwork-color";
+import { LiveReactionFaces } from "./LiveReactionFaces";
+import { writeSongDrag, songFromTrack } from "../../music/song-drag";
+import type { ChatSongMoment } from "../../chat/song-moments";
 
 const loadUserSettings = () => import("../../settings/UserSettingsDialog").then(module => ({ default: module.UserSettingsDialog }));
 const defaultRequestAction = (event: string, payload: unknown, reply: (result: SocketReply) => void) => requestSocketAction(socket, event, payload, reply);
@@ -42,27 +51,18 @@ export interface NowPlayingLocalState {
   localVolumeSupported?: boolean;
 }
 
-function formatPlaybackTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const rounded = Math.floor(seconds);
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  const remaining = rounded % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
-    : `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
-
 function BangOMeter({
   snapshot,
   currentUserId,
   roomConnected,
-  requestAction
+  requestAction,
+  compact = false
 }: {
   snapshot: RoomSnapshot;
   currentUserId: string;
   roomConnected: boolean;
   requestAction: typeof defaultRequestAction;
+  compact?: boolean;
 }) {
   const { t } = useTranslation("music");
   const track = snapshot.room.playback.track;
@@ -146,7 +146,8 @@ function BangOMeter({
   };
 
   return (
-    <section ref={meterRef} className={`bang-meter ${decorationsEnabled ? "" : "decorations-off"}`} aria-label={t("nowPlaying.meterLabel")}>
+    <section ref={meterRef} className={`bang-meter ${compact ? "bang-meter--compact" : ""} ${decorationsEnabled ? "" : "decorations-off"}`} aria-label={t("nowPlaying.meterLabel")}>
+      {compact && <span className="sr-only">{t("nowPlaying.reactionSummary", { positive: positiveVotes, negative: negativeVotes })}</span>}
       <div className="bang-meter-heading">
         <span>{t("nowPlaying.meterTitle")}</span>
         <small>{t("nowPlaying.reactionCount", { count: votes.length, total: eligibleListenerCount })}</small>
@@ -156,6 +157,9 @@ function BangOMeter({
         role="group"
         aria-label={addedByCurrentUser ? t("nowPlaying.listenerReactions") : t("nowPlaying.reactLabel")}
       >
+      <LiveReactionFaces scope={`${snapshot.room.id}:${currentUserId}:${track?.id || ""}`}
+        votes={Object.fromEntries(Object.entries(vibe?.votes || {}).filter(([userId]) => userId !== track?.addedBy.id))}
+        users={snapshot.users} currentUserId={currentUserId} connected={roomConnected} enabled={decorationsEnabled} />
       <div className="bang-meter-face">
         <div
           key={track?.id}
@@ -198,6 +202,7 @@ function BangOMeter({
             onClick={() => vote(-1)}
           >
             <ThumbsDown size={20} aria-hidden="true" />
+            {compact && <span className="bang-reaction-count" aria-hidden="true">{negativeVotes}</span>}
           </TooltipTrigger>
           <TooltipContent>{t("nowPlaying.lame")}</TooltipContent>
         </Tooltip>
@@ -213,6 +218,7 @@ function BangOMeter({
             onClick={() => vote(1)}
           >
             <Heart size={20} aria-hidden="true" />
+            {compact && <span className="bang-reaction-count" aria-hidden="true">{positiveVotes}</span>}
           </TooltipTrigger>
           <TooltipContent>{t("nowPlaying.banger")}</TooltipContent>
         </Tooltip>
@@ -243,7 +249,10 @@ export function NowPlaying({
   onLocalStateChange,
   requestAction = defaultRequestAction,
   providerPlayers,
-  isolatedPreview = false
+  isolatedPreview = false,
+  presentation = "panel",
+  songMoments,
+  onOpenSongMoment
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
@@ -266,6 +275,10 @@ export function NowPlaying({
   providerPlayers?: ProviderPlayerOverrides;
   /** An offline preview must not change the signed-in listener's provider session. */
   isolatedPreview?: boolean;
+  /** Presentation changes never change the provider's owner or mount position. */
+  presentation?: "panel" | "dock";
+  songMoments?: ChatSongMoment[];
+  onOpenSongMoment?: (messageId: string) => void;
 }) {
   const { t } = useTranslation("music");
   const playback = snapshot.room.playback;
@@ -296,6 +309,7 @@ export function NowPlaying({
   const [pendingCommand, setPendingCommand] = useState("");
   const [syncFeedback, setSyncFeedback] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dismissedError, setDismissedError] = useState("");
   const detailsButtonRef = useRef<HTMLButtonElement>(null);
   const pendingCommandRef = useRef("");
   const syncStartedRef = useRef<number | null>(null);
@@ -314,6 +328,7 @@ export function NowPlaying({
   useEffect(() => {
     pendingCommandRef.current = "";
     setPendingCommand("");
+    setSeekPreview(null);
     setProviderPlaybackError("");
     syncStartedRef.current = null;
     setSyncFeedback("");
@@ -357,7 +372,7 @@ export function NowPlaying({
   }, [playback.track?.id]);
 
   const runCommand = (command: string, event: string, payload: unknown) => {
-    if (!roomConnected || !canControlPlayback || pendingCommandRef.current || !track) return;
+    if (!roomConnected || !canControlPlayback || pendingCommandRef.current || (!track && event !== "playback:resume")) return;
     pendingCommandRef.current = command;
     setPendingCommand(command);
     setPlaybackError("");
@@ -423,6 +438,13 @@ export function NowPlaying({
   });
   const controlsUnavailable = !canControlPlayback || !roomConnected || Boolean(pendingCommand);
   const providerActionRequired = fallbackNeedsApproval || fallbackSuppressed || needsConnection;
+  const playbackNeedsExplanation = !roomConnected || providerActionRequired || !playerStatus.ready || playerStatus.buffering ||
+    (typeof playerStatus.playing === "boolean" && playerStatus.playing !== playback.playing);
+  const docked = presentation === "dock";
+  const artworkColor = useArtworkColor(`${track?.id || ""}:${track ? trackArtworkUrl(track) || "" : ""}`);
+  const errorNoticeKey = `${identity}:${localPlaybackError}:${connectionError}`;
+  useEffect(() => { if (!localPlaybackError && !connectionError) setDismissedError(""); }, [localPlaybackError, connectionError]);
+  const currentDj = snapshot.users.find(user => user.id === snapshot.room.djUserId);
   const setVolume = (next: number) => onUserSettingsChange({
     ...userSettings, playback: { ...userSettings.playback, defaultVolume: next }
   });
@@ -454,21 +476,37 @@ export function NowPlaying({
     notifyWithAttention({ key: `${currentUserId}:${snapshot.room.id}:playback-error:${track?.id}:${message}`, title: i18n.t("music:nowPlaying.errorNotification"), body: message, backgroundOnly: userSettings.notifications.backgroundOnly, muted: roomNotificationsMuted });
   }, [localPlaybackError, userSettings.notifications.playbackErrors, userSettings.notifications.backgroundOnly, roomNotificationsMuted, currentUserId, snapshot.room.id, track?.id]);
 
+  const commandFeedback = (pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>;
+  const retryFailedPlayback = () => {
+    if (!track && snapshot.room.radio?.stopped && snapshot.room.capabilities?.djsPlayback) {
+      runCommand(i18n.t("music:nowPlaying.resuming"), "playback:resume", {});
+    } else syncPlayback();
+  };
+  const recoveryFeedback = (!docked || dismissedError !== errorNoticeKey) && (localPlaybackError || connectionError) && <div className="player-recovery-stack">
+    {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={retryFailedPlayback}>{t("nowPlaying.retry")}</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>{t("nowPlaying.generalSettings")}</Button>}</div>}
+    {connectionError && connectionError !== localPlaybackError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>{t("nowPlaying.retryConnection")}</Button></div>}
+    {docked && <Button variant="ghost" size="icon-sm" className="playback-notice-dismiss" aria-label={t("nowPlaying.dismissError", { defaultValue: "Dismiss error" })} onClick={() => setDismissedError(errorNoticeKey)}><X size={16} /></Button>}
+  </div>;
+
   return (
     <>
-      <section className={`now-playing panel ${compact ? "compact" : ""}`}>
-      <div className="now-playing-heading">
+      <section className={`now-playing panel ${!docked && compact ? "compact" : ""} ${docked ? "now-playing--dock" : ""} ${docked && !track ? "now-playing--empty" : ""}`}
+        style={docked && track ? artworkColor.style : undefined}
+        data-needs-attention={docked ? providerActionRequired || Boolean(localPlaybackError || connectionError) : undefined}>
+      {!docked && <div className="now-playing-heading">
         <h2 className="section-kicker">{t("nowPlaying.title")}</h2>
-        <Button variant="ghost" size="sm" type="button" onClick={onToggleCompact} title={compact ? t("nowPlaying.focusPlayerTitle") : t("nowPlaying.focusChatTitle")}>
+        <Button variant="ghost" size="sm" type="button"
+          onClick={onToggleCompact}
+          title={compact ? t("nowPlaying.focusPlayerTitle") : t("nowPlaying.focusChatTitle")}>
           {compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}
           <span>{compact ? t("nowPlaying.focusPlayer") : t("nowPlaying.focusChat")}</span>
         </Button>
-      </div>
+      </div>}
       {persistentPlayer}
       {track ? (
         <>
           <div className="now-playing-main">
-          <div className={`track-stage ${registration?.artworkPreview && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""} ${registration?.stageClassName || ""}`}>
+          <div data-provider={effectiveProvider} className={`track-stage ${registration?.artworkPreview && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""} ${registration?.stageClassName || ""}`}>
             <TrackArtwork track={track} />
             {registration?.artworkPreview && previewArtwork && (
               <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={t("nowPlaying.artwork", { title: track.title })} />
@@ -494,7 +532,12 @@ export function NowPlaying({
           </div>
           <div className="player-details">
           <div className="current-track">
-            <div>
+            {docked && <span className="dock-song-drag" draggable={roomConnected}
+              title={t("nowPlaying.dragSongToChat")}
+              onDragStart={event => {
+                if (!roomConnected || !writeSongDrag(event.dataTransfer, snapshot.room.id, songFromTrack(track, playerStatus.currentTime))) event.preventDefault();
+              }}><TrackArtwork track={track} compact className="dock-track-artwork" onImageReady={artworkColor.onArtworkReady} /></span>}
+            <div className="current-track-copy">
               <div className="current-track-title">
                 <h3 title={track.title}>{track.title}</h3>
                 <Button ref={detailsButtonRef} variant="ghost" size="icon" className="track-details-action" aria-label={t("nowPlaying.trackDetails")} title={t("nowPlaying.trackDetails")} onClick={() => setDetailsOpen(true)}><Info size={16} /></Button>
@@ -506,24 +549,37 @@ export function NowPlaying({
                   <a href={track.permalinkUrl} target="_blank" rel="noreferrer">{providerLabel(track.provider)}</a>
                 ) : providerLabel(track.provider)}
               </p>
+              {docked && currentDj && <small className="dock-track-dj">{t("nowPlaying.djBy", { name: currentDj.name, defaultValue: "DJ {{name}}" })}</small>}
             </div>
           </div>
+          {docked && <div className="dock-player-actions"><DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t("nowPlaying.controls")} title={t("nowPlaying.controls")} />}><MoreHorizontal size={18} /></DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="dock-player-menu">
+              {onOpenSettings && <DropdownMenuItem onClick={onOpenSettings}><SettingsIcon />{t("nowPlaying.settings")}</DropdownMenuItem>}
+              <DropdownMenuItem onClick={() => setDetailsOpen(true)}><Info />{t("nowPlaying.trackDetails")}</DropdownMenuItem>
+              {localPlaybackError && <DropdownMenuItem onClick={syncPlayback}><RefreshCw />{t("nowPlaying.retry")}</DropdownMenuItem>}
+              {connectionError && <DropdownMenuItem onClick={loadConnections}><RefreshCw />{t("nowPlaying.retryConnection")}</DropdownMenuItem>}
+              {snapshot.room.settings.skipVote?.enabled && track.addedBy.id !== currentUserId && <DropdownMenuCheckboxItem checked={snapshot.room.radio?.skipVote.voted ?? false} disabled={!roomConnected || Boolean(pendingCommand)} onCheckedChange={() => runCommand(i18n.t("music:nowPlaying.savingSkipVote"), "playback:skip-vote", { trackId: track.id, vote: !snapshot.room.radio?.skipVote.voted })}>{snapshot.room.radio?.skipVote.voted ? t("nowPlaying.retractSkipVote") : t("nowPlaying.voteSkip")} · {snapshot.room.radio?.skipVote.count ?? 0}/{snapshot.room.radio?.skipVote.required ?? 3}</DropdownMenuCheckboxItem>}
+              {snapshot.room.capabilities?.djsPlayback && <DropdownMenuCheckboxItem checked={snapshot.room.radio?.stopAfterTrackId === track.id} disabled={!roomConnected || Boolean(pendingCommand)} onCheckedChange={() => runCommand(i18n.t("music:nowPlaying.updatingStopAfter"), "playback:stop-after", { enabled: snapshot.room.radio?.stopAfterTrackId !== track.id })}>{snapshot.room.radio?.stopAfterTrackId === track.id ? t("nowPlaying.cancelStopAfter") : t("nowPlaying.stopAfter")}</DropdownMenuCheckboxItem>}
+              <DropdownMenuSeparator />
+              {!localPlaybackError && !connectionError && playbackNeedsExplanation && <p className="dock-menu-help">{feedback.text}</p>}
+              <p className="dock-menu-help">{!localVolumeSupported ? t("nowPlaying.mixcloudVolume") : !roomConnected ? t("nowPlaying.reconnectHelp") : canControlPlayback ? t("nowPlaying.localVolumeHelp") : t("nowPlaying.djLocalVolumeHelp")}</p>
+            </DropdownMenuContent>
+          </DropdownMenu></div>}
           <div className="player-transport">
           <div className="playback-progress">
             {isLive ? <span>{t("nowPlaying.live")}</span> : (
               <>
                 <span>{formatPlaybackTime(shownPosition)}</span>
-                <Slider
-                  min={0}
-                  max={Math.max(playerStatus.duration, 1)}
-                  step={1}
-                  value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
+                <PlaybackTimeline key={identity}
+                  duration={playerStatus.duration} value={shownPosition}
                   disabled={controlsUnavailable || !playerStatus.duration}
-                  aria-label={t("nowPlaying.position")}
-                  getAriaValueText={(_formatted, value) => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
-                  onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
-                  onValueCommitted={commitSeek}
-                />
+                  readOnly={docked && !canControlPlayback}
+                  label={t("nowPlaying.position")}
+                  songMoments={songMoments} onOpenSongMoment={onOpenSongMoment}
+                  valueText={value => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
+                  onPreview={value => setSeekPreview(typeof value === "number" ? value : value[0])}
+                  onCommit={commitSeek} />
                 <span>{formatPlaybackTime(playerStatus.duration)}</span>
               </>
             )}
@@ -541,9 +597,9 @@ export function NowPlaying({
           </div>
           </div>
           <div className="player-utilities">
-            <div className="sync-status" data-status={feedback.tone} data-expanded={feedback.tone === "error" || feedback.tone === "pending" || locallyMuted || !playback.playing} role="status" title={feedback.text}>
+            {(!docked || feedback.tone !== "error") && <div className="sync-status" data-status={feedback.tone} data-expanded={feedback.tone === "error" || feedback.tone === "pending" || locallyMuted || !playback.playing} role="status" title={feedback.text}>
               <span />{feedback.text}
-            </div>
+            </div>}
             {providerFallback && <small className="provider-fallback">{t("nowPlaying.fallbackStatus", { context: `${preferredAllowed ? "noMatch" : "disabled"}${fallbackNeedsApproval ? "Awaiting" : fallbackSuppressed ? "Silent" : "Using"}`, preferredProvider: providerLabel(preferredProvider), effectiveProvider: effectiveProvider ? providerLabel(effectiveProvider) : providerName })}</small>}
             <div className="volume-control">
               <Button variant="ghost" size="icon" disabled={!localVolumeSupported} onClick={toggleMute} aria-label={locallyMuted ? t("nowPlaying.unmute") : t("nowPlaying.mute")} aria-pressed={locallyMuted}>{locallyMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</Button>
@@ -564,24 +620,25 @@ export function NowPlaying({
             </details>
             {onOpenSettings && <Button variant="ghost" size="sm" className="playback-device-action" aria-label={t(playbackPreference === "spotify-desktop" ? "nowPlaying.desktopSettingsLabel" : "nowPlaying.settingsLabel", { provider: providerName })} title={t("nowPlaying.settings")} onClick={onOpenSettings}><SettingsIcon size={18} aria-hidden="true" /><span>{t("nowPlaying.settings")}</span></Button>}
           </div>
-          {(pendingCommand || syncFeedback) && <p className="playback-command-feedback" role="status">{pendingCommand || syncFeedback}</p>}
-          {localPlaybackError && <div className="playback-recovery" role="alert"><AlertCircle size={16} /><span>{localPlaybackError}</span><Button variant="outline" size="sm" onClick={syncPlayback}>{t("nowPlaying.retry")}</Button>{onOpenSettings && <Button variant="ghost" size="sm" onClick={onOpenSettings}>{t("nowPlaying.generalSettings")}</Button>}</div>}
-          {connectionError && <div className="playback-recovery" role="alert"><span>{connectionError}</span><Button variant="outline" size="sm" onClick={loadConnections}>{t("nowPlaying.retryConnection")}</Button></div>}
+          {!docked && commandFeedback}
+          {!docked && recoveryFeedback}
           </div>
           </div>
-          <BangOMeter snapshot={snapshot} currentUserId={currentUserId} roomConnected={roomConnected} requestAction={requestAction} />
-          <div className="player-session-actions">
+          <BangOMeter snapshot={snapshot} currentUserId={currentUserId} roomConnected={roomConnected} requestAction={requestAction} compact={docked} />
+          {!docked && <div className="player-session-actions">
           {snapshot.room.settings.skipVote?.enabled && track.addedBy.id!==currentUserId && <Button variant="outline" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.skipVote.voted??false} onClick={()=>runCommand(i18n.t("music:nowPlaying.savingSkipVote"),"playback:skip-vote",{trackId:track.id,vote:!snapshot.room.radio?.skipVote.voted})}>{snapshot.room.radio?.skipVote.voted?t("nowPlaying.retractSkipVote"):t("nowPlaying.voteSkip")} · {snapshot.room.radio?.skipVote.count??0}/{snapshot.room.radio?.skipVote.required??3}</Button>}
           {snapshot.room.capabilities?.djsPlayback && <Button variant="ghost" size="sm" disabled={!roomConnected||Boolean(pendingCommand)} aria-pressed={snapshot.room.radio?.stopAfterTrackId===track.id} onClick={()=>runCommand(i18n.t("music:nowPlaying.updatingStopAfter"),"playback:stop-after",{enabled:snapshot.room.radio?.stopAfterTrackId!==track.id})}>{snapshot.room.radio?.stopAfterTrackId===track.id?t("nowPlaying.cancelStopAfter"):t("nowPlaying.stopAfter")}</Button>}
-          </div>
+          </div>}
         </>
-      ) : (
+      ) : docked ? <EmptyPlayerDock volume={volume} stopped={snapshot.room.radio?.stopped} onResume={snapshot.room.radio?.stopped && snapshot.room.capabilities?.djsPlayback && canControlPlayback ? () => runCommand(i18n.t("music:nowPlaying.resuming"), "playback:resume", {}) : undefined} resumeDisabled={!roomConnected || Boolean(pendingCommand)} /> : (
         <div className="empty-player">
           <span className="empty-disc"><PlayIcon size={28} /></span>
           <h2>{snapshot.room.radio?.stopped ? t("nowPlaying.stopped") : t("nowPlaying.empty")}</h2>
           {snapshot.room.radio?.stopped ? snapshot.room.capabilities?.djsPlayback&&<Button disabled={!roomConnected||Boolean(pendingCommand)} onClick={()=>runCommand(i18n.t("music:nowPlaying.resuming"),"playback:resume",{})}>{t("nowPlaying.resume")}</Button> : onAddTrack ? <Button type="button" onClick={onAddTrack}>{t("nowPlaying.addTrack")}</Button> : <p>{t("nowPlaying.addTrackHelp")}</p>}
         </div>
       )}
+      {docked && commandFeedback}
+      {docked && recoveryFeedback}
       </section>
       <TrackDetailsDialog track={track} open={detailsOpen} onOpenChange={setDetailsOpen} durationMs={track?.durationMs || playerStatus.duration * 1000} isLive={isLive} returnFocusRef={detailsButtonRef} />
       {settingsOpen && (

@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { useCallback, useState } from 'react'
-import '@fontsource-variable/geist'
+import '@fontsource-variable/inter'
 import '../../../../src/styles/shadcn.css'
 import '../../../../src/styles/index.css'
 import { RoomProfileDialog } from '../../../../src/features/profile/components/RoomProfileDialog'

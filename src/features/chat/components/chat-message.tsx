@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { approvedImageUrl } from "../../../lib/remote-images"
 import { lazy, memo, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Eye, EyeOff, MoreHorizontal, Reply, SmilePlus, X,Flag,Trash2 } from 'lucide-react'
+import { Eye, EyeOff, MoreHorizontal, Pin, PinOff, Reply, SmilePlus, X,Flag,Trash2 } from 'lucide-react'
 import type { SkinTones, Theme } from 'emoji-picker-react'
 import { useTheme } from 'next-themes'
 
@@ -23,6 +23,10 @@ import { ChatPollView } from '@/features/chat/components/chat-poll'
 import { DevFlair } from '@/components/DevFlair'
 import { useChatPickerBounds } from '@/features/chat/hooks/use-chat-picker-bounds'
 import { useChatMediaUrl } from '@/features/chat/hooks/use-chat-media-url'
+import { splitChatLinks } from '../link-previews'
+import type { ChatMessageFeatures } from '../message-features'
+import { ChatMessageExtras } from './chat-message-extras'
+import { ChatGameResult } from './chat-game-result'
 import {
   chatPickerEmojiStyle,
   PlatformEmojiText,
@@ -52,11 +56,14 @@ function MentionText({
       >
         {part.text}
       </button>
-    ) : <PlatformEmojiText text={part.text} key={`text:${index}`} />
+    ) : splitChatLinks(part.text).map((link, linkIndex) => link.url
+      ? <a key={`link:${index}:${linkIndex}`} href={link.url} target="_blank" rel="noopener noreferrer" className="chat-text-link">{link.text}</a>
+      : <PlatformEmojiText text={link.text} key={`text:${index}:${linkIndex}`} />)
   )
 }
 
 interface ChatMessageItemProps {
+  features?: ChatMessageFeatures
   message: ChatMessage
   isOwnMessage: boolean
   currentUserId: string
@@ -88,6 +95,7 @@ interface ChatMessageItemProps {
 }
 
 export const ChatMessageItem = memo(function ChatMessageItem({
+  features,
   message,
   isOwnMessage,
   currentUserId,
@@ -210,6 +218,9 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             </>}
             {onReport&&!isOwnMessage&&<DropdownMenuItem onClick={()=>onReport(message)}><Flag/>{t('report')}</DropdownMenuItem>}
             {onRemove&&!message.removedAt&&<DropdownMenuItem onClick={()=>onRemove(message)}><Trash2/>{t('removeMessage')}</DropdownMenuItem>}
+            {features?.pins?.canManage && !message.removedAt && !isHidden && <DropdownMenuItem disabled={features.pins.pendingIds.has(message.id)} onClick={() => features.pins?.setPinned(message.id, !features.pins.ids.has(message.id))}>
+              {features.pins.ids.has(message.id) ? <PinOff /> : <Pin />}{t(features.pins.ids.has(message.id) ? 'pins.unpin' : 'pins.pin')}
+            </DropdownMenuItem>}
             <DropdownMenuItem onClick={() => {
               setShowReactionPicker(false)
               onHiddenChange(message.id, !isHidden)
@@ -310,12 +321,13 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             </a>
           )}
           {media.failed && <Button size="sm" variant="ghost" onClick={media.retry}>{t('retryImage')}</Button>}
-          {message.content && message.type === 'text' && <MentionText message={message} onOpenProfile={onOpenProfile} />}
+          {message.game ? <ChatGameResult game={message.game} messageId={message.id} features={features} /> : message.content && message.type === 'text' && <MentionText message={message} onOpenProfile={onOpenProfile} />}
           {message.content && message.type !== 'text' && (
             <span className="sr-only">{message.content}</span>
           )}
           {message.poll && <ChatPollView poll={message.poll} currentUserId={currentUserId} onVote={(optionIndex) => onVotePoll?.(message, optionIndex)} voting={pollVoting} disabled={pollVotingDisabled} error={pollVoteError} />}
         </div>}
+        {!isHidden && !message.removedAt && <ChatMessageExtras message={message} features={features} />}
         {saveStatus && saveStatus.state !== 'saved' && saveStatus.state !== 'sent-live' && !message.removedAt && (
           <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : 'status'}>
             {saveStatus.state === 'queued' ? t('queued') : saveStatus.state === 'sending' ? t('sending') : saveStatus.state === 'send-failed' ? <><span>{t('confirmSendFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>{t('retrySend')}</Button></> : saveStatus.state === 'saving' ? t('saving') : <><span>{t('confirmSaveFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>{t('retrySave')}</Button></>}

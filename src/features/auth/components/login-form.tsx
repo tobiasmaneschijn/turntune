@@ -17,11 +17,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 export function LoginForm({
   client,
   onNavigate,
+  showTitle = true,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
   client: SupabaseClient
   onNavigate: (path: string) => void
+  showTitle?: boolean
 }) {
   const { t } = useTranslation("public");
   const [email, setEmail] = useState('')
@@ -49,12 +51,10 @@ export function LoginForm({
   return (
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">{t("signIn")}</CardTitle>
-        </CardHeader>
+        {showTitle && <CardHeader><CardTitle>{t("signIn")}</CardTitle></CardHeader>}
         <CardContent>
           <form onSubmit={handleLogin}>
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="email">{t("email")}</Label>
                 <Input

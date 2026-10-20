@@ -13,7 +13,7 @@ import { generateKeyPairSync } from "node:crypto";
 function isolatedProductionEnvironment(overrides = {}) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (/^(SUPABASE_|VITE_|SPOTIFY_|SOUNDCLOUD_|APPLE_MUSIC_|PROVIDER_TOKEN_|SIGNUP_|YOUTUBE_|GIPHY_)/.test(key)) delete env[key];
+    if (/^(SUPABASE_|VITE_|SPOTIFY_|SOUNDCLOUD_|APPLE_MUSIC_|PROVIDER_|SIGNUP_|YOUTUBE_|GIPHY_)/.test(key)) delete env[key];
   }
   delete env.NODE_OPTIONS;
   return { ...env, NODE_ENV: "production", PORT: "0", HOST: "127.0.0.1",
@@ -141,30 +141,33 @@ test("the compiled production entrypoint serves the SPA, assets and readiness", 
   assert.doesNotMatch(errors, /blocked an unexpected outbound request/);
 });
 
-test("the packaged start rejects an inherited inline JWKS override before listening", { timeout: 20_000 }, async () => {
+test("the packaged start identifies rejected configuration without exposing its values", { timeout: 35_000 }, async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
   const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const inlineJwks = JSON.stringify({ keys: [{ ...publicKey.export({ format: "jwk" }), kid: "inline-startup-fixture", alg: "RS256" }] });
-  // This is the same otherwise valid configuration proven by the positive
-  // smoke case. A real ephemeral key models a leftover test/development key.
-  const env = isolatedProductionEnvironment({ SUPABASE_JWKS: inlineJwks });
   const fixture = new URL("./production-network-fixture.mjs", import.meta.url).href;
-  const child = spawn(process.execPath, ["--import", fixture, path.join(root, "dist-server/server/start-production.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "", stderr = "";
-  child.stdout.on("data", data => { stdout += data.toString(); });
-  child.stderr.on("data", data => { stderr += data.toString(); });
-  let code;
-  try { [code] = await once(child, "exit", { signal: AbortSignal.timeout(15_000) }); }
-  finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      const terminated = once(child, "exit"); child.kill("SIGKILL"); await terminated;
+  // Both start from the valid configuration proven above. The inherited key
+  // and excessive provider budget must identify the setting, never its value.
+  for (const [setting, value] of [["SUPABASE_JWKS", inlineJwks], ["PROVIDER_REQUESTS_PER_MINUTE", "4242424242"]]) {
+    const env = isolatedProductionEnvironment({ [setting]: value });
+    const child = spawn(process.execPath, ["--import", fixture, path.join(root, "dist-server/server/start-production.js")], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", data => { stdout += data.toString(); });
+    child.stderr.on("data", data => { stderr += data.toString(); });
+    let code;
+    try { [code] = await once(child, "exit", { signal: AbortSignal.timeout(15_000) }); }
+    finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const terminated = once(child, "exit"); child.kill("SIGKILL"); await terminated;
+      }
     }
+    assert.notEqual(code, 0, `${setting} must prevent startup.`);
+    assert.doesNotMatch(stdout, /listening on/i);
+    assert.ok(stderr.includes(`"setting":"${setting}"`), "Startup errors must identify the rejected setting.");
+    assert.doesNotMatch(stderr, /blocked an unexpected outbound request/);
+    assert.ok(!`${stdout}${stderr}`.includes(value), "Startup errors must not print the rejected value.");
+    assert.ok(!`${stdout}${stderr}`.includes(env.SUPABASE_SECRET_KEY), "Startup errors must not print server credentials.");
   }
-  assert.notEqual(code, 0);
-  assert.doesNotMatch(stdout, /listening on/i);
-  assert.match(stderr, /SUPABASE_JWKS/);
-  assert.doesNotMatch(stderr, /blocked an unexpected outbound request/);
-  assert.ok(!stderr.includes(inlineJwks), "Startup errors must not print the inherited key material.");
 });
 
 

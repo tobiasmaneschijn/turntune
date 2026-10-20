@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#09090b" />
+    <meta name="theme-color" content="#18181b" />
     <link rel="license" href="/LICENSE" />
     <link rel="license" href="/third-party-notices.txt" title="Third-party notices" />
     <script>
@@ -16,7 +16,7 @@
           const effectiveTheme = resolved === "light" ? "light" : "dark";
           document.documentElement.classList.add(effectiveTheme);
           document.documentElement.style.colorScheme = effectiveTheme;
-          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", effectiveTheme === "light" ? "#f7f7f2" : "#09090b");
+          document.querySelector('meta[name="theme-color"]')?.setAttribute("content", effectiveTheme === "light" ? "#ffffff" : "#18181b");
         } catch {
           document.documentElement.classList.add("dark");
           document.documentElement.style.colorScheme = "dark";

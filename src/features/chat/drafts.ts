@@ -1,6 +1,7 @@
 import { activeMentions, normalizeChatMentions } from './mentions'
 import type { ChatMention } from './model'
 import { clearUserChatOutbox } from './outbox'
+import { normalizeChatSong, type ChatSongAttachment } from '../../../shared/chat-attachments'
 
 const PREFIX = 'soundspin-chat-draft:'
 export const CHAT_DRAFT_TTL_MS = 12 * 60 * 60 * 1000
@@ -10,6 +11,7 @@ export interface ChatDraft {
   text: string
   mentions: ChatMention[]
   replyToId?: string
+  song?: ChatSongAttachment
 }
 
 interface DraftStorage {
@@ -26,7 +28,7 @@ function sessionDraftStorage(): DraftStorage | undefined {
 
 const ownerPrefix = (userId: string) => `${PREFIX}${encodeURIComponent(userId)}:`
 
-/** Stores text and identifiers only; attachments, credentials, and media blobs stay out. */
+/** Stores text, reply identifiers and public song metadata; credentials and media blobs stay out. */
 export function createChatDraftStore(userId: string, roomName: string, storage = sessionDraftStorage()) {
   const key = `${ownerPrefix(userId)}${encodeURIComponent(roomName)}`
   const ownerVersion = ownerVersions.get(userId) || 0
@@ -47,15 +49,16 @@ export function createChatDraftStore(userId: string, roomName: string, storage =
           text: value.text,
           mentions: activeMentions(value.text, normalizeChatMentions(value.mentions)),
           replyToId: typeof value.replyToId === 'string' && value.replyToId.length <= 100 ? value.replyToId : undefined,
+          song: normalizeChatSong(value.song),
         }
       } catch { return null }
     },
     save(draft: ChatDraft, now = Date.now()) {
       if (!storage || !isCurrent()) return
       try {
-        if (!draft.text && !draft.replyToId) storage.removeItem(key)
+        if (!draft.text && !draft.replyToId && !draft.song) storage.removeItem(key)
         else storage.setItem(key, JSON.stringify({ version: 1, updatedAt: now, text: draft.text.slice(0, 500),
-          mentions: activeMentions(draft.text, normalizeChatMentions(draft.mentions)), replyToId: draft.replyToId }))
+          mentions: activeMentions(draft.text, normalizeChatMentions(draft.mentions)), replyToId: draft.replyToId, song: normalizeChatSong(draft.song) }))
       } catch { /* Draft saving must never interrupt typing. */ }
     },
   }

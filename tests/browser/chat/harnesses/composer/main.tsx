@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import '@fontsource-variable/geist'
+import '@fontsource-variable/inter'
 import '../../../../../src/styles/shadcn.css'
 import '../../../../../src/styles/index.css'
 import { RealtimeChat } from '../../../../../src/features/chat/components/realtime-chat'

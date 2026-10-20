@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../../src/styles/shadcn.css";
 import "../../../../../src/styles/index.css";
 import { App } from "../../../../../src/app/App";

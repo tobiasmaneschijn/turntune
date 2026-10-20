@@ -19,6 +19,11 @@ import {
 import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
 import { resolveChatMediaUrl, signDurableChatHistoryMedia } from './chat-media.js'
 import { PublicRequestError, trustedSqlRequestError } from '../../lib/public-request-error.js'
+import { localRateLimitsDisabled } from '../../security/local-development.js'
+import { normalizeChatGame, normalizeChatSong, type ChatSongAttachment } from '../../../shared/chat-attachments.js'
+import { resolveChatGame, resolveSongAttachment } from './chat-attachments.js'
+import type { ChatTriviaState } from '../../../shared/chat-trivia.js'
+import { addTriviaAnswer, CHAT_TRIVIA_MAX_PLAYERS, triviaState, type TriviaAnswer } from './chat-trivia.js'
 
 export type ChatParticipationKind = 'message' | 'media' | 'links' | 'poll' | 'reaction' | 'typing' | 'remove'
 export interface ChatCommandAuthorization {
@@ -36,6 +41,8 @@ export interface ChatCommandServiceOptions {
   getUser: (userId: string, roomId: string) => Promise<User | null>
   /** Current authorized room audience; missing resolver fails closed for mentions. */
   getMentionAudience?: (roomId: string, senderId: string) => Promise<User[]>
+  /** Resolves only the public current track or played room history. */
+  resolveSong?: (roomId: string, trackId: string) => Promise<ChatSongAttachment | null>
   /** Must check fresh admission and current room policy. Removal checks staff capability. */
   authorize: (
     userId: string,
@@ -85,6 +92,7 @@ interface LocalChatData {
   removals: ChatRemovalLog[]
   tombstones: Record<string, { roomId: string; removedAt: string }>
   mentionBudgets: Record<string, { count: number; expiresAt: number }>
+  triviaAnswers: Record<string, TriviaAnswer[]>
 }
 export interface ChatReadCursor {
   createdAt: string
@@ -106,11 +114,13 @@ export interface ChatReadRow {
   poll_options: string[] | null
   removed_at: string | null
   immutable_fingerprint?: string | null
+  song?: ChatSongAttachment | null
+  game?: unknown
   soundspin_message_reactions: Array<{ user_id: string; emoji: string }>
   soundspin_poll_votes: Array<{ user_id: string; option_index: number; revision: number }>
 }
 interface CommittedChatRow extends ChatReadRow { reply?: ChatReadRow | null }
-const BASE_SELECT = 'id,room_slug,user_id,user_name,avatar_seed,content,message_type,created_at,media_url,storage_path,mentions,reply_to_id,poll_options,removed_at,immutable_fingerprint'
+const BASE_SELECT = 'id,room_slug,user_id,user_name,avatar_seed,content,message_type,created_at,media_url,storage_path,mentions,reply_to_id,poll_options,removed_at,immutable_fingerprint,song,game'
 const SELECT = `${BASE_SELECT},soundspin_message_reactions(user_id,emoji),soundspin_poll_votes(user_id,option_index,revision)`
 const RECEIPT_TTL_MS = 24 * 60 * 60_000
 const MAX_ROOM_RECEIPTS = 10_000
@@ -130,7 +140,7 @@ const tombstone = (message: RelayMessage, removedAt: string): RelayMessage => ({
 
 /** Both HTTP and socket commands commit the same immutable operation before delivery. */
 export class ChatCommandService {
-  private data: LocalChatData = { messages: {}, receipts: {}, cooldowns: {}, removals: [], tombstones: {}, mentionBudgets: {} }
+  private data: LocalChatData = { messages: {}, receipts: {}, cooldowns: {}, removals: [], tombstones: {}, mentionBudgets: {}, triviaAnswers: {} }
   private initialized?: Promise<void>
   private chain: Promise<unknown> = Promise.resolve()
   private readonly now: () => number
@@ -150,6 +160,58 @@ export class ChatCommandService {
   }
   pollVote(roomId: string, userId: string, messageId: string, optionIndex: number, operationId = randomUUID()) {
     return this.roomOperation(roomId, () => this.savePollVote(roomId, userId, messageId, optionIndex, operationId))
+  }
+  triviaAnswer(roomId: string, userId: string, messageId: string, optionIndex: number): Promise<ChatTriviaState> {
+    return this.roomOperation(roomId, async () => {
+      if (!uuid.test(messageId) || !Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex > 3)
+        throw new PublicRequestError('Choose a trivia answer.', 400)
+      await this.options.authorize(userId, roomId, 'reaction')
+      this.policy.pollVote(roomId, userId)
+      if (this.options.client) {
+        await this.options.authorize(userId, roomId, 'reaction')
+        const { error } = await this.options.client.rpc('soundspin_chat_trivia_answer', {
+          p_room: roomId, p_user: userId, p_message: messageId, p_option: optionIndex
+        })
+        if (error) throw trustedSqlRequestError(error, {
+          'This trivia round is unavailable.': 404,
+          'This trivia round has ended.': 409,
+          'This trivia round is full.': 429,
+          'Choose a trivia answer.': 400
+        }, 'Your answer could not be saved. Try again.')
+      } else await this.local(async draft => {
+        await this.options.authorize(userId, roomId, 'reaction')
+        const record = draft.messages[messageId]
+        const game = record?.message.game
+        if (!record || record.roomId !== roomId || record.removedAt || game?.kind !== 'trivia' || !game.round)
+          throw new PublicRequestError('This trivia round is unavailable.', 404)
+        addTriviaAnswer(game.round, draft.triviaAnswers[messageId] ||= [], userId, optionIndex, this.now())
+      })
+      return this.triviaState(roomId, userId, messageId)
+    })
+  }
+  /** The HTTP reader checks fresh room admission before and after this bounded read. */
+  async triviaState(roomId: string, userId: string, messageId: string): Promise<ChatTriviaState> {
+    if (!uuid.test(messageId)) throw new PublicRequestError('This trivia round is unavailable.', 404)
+    let game: ReturnType<typeof normalizeChatGame>, answers: TriviaAnswer[]
+    if (this.options.client) {
+      const { data, error } = await this.options.client.from('soundspin_messages').select('room_slug,game,removed_at')
+        .eq('id', messageId).eq('room_slug', roomId).is('removed_at', null).maybeSingle()
+      if (error) throw error
+      game = normalizeChatGame(data?.game)
+      if (game?.kind !== 'trivia' || !game.round) throw new PublicRequestError('This trivia round is unavailable.', 404)
+      const result = await this.options.client.from('soundspin_chat_trivia_answers').select('user_id,option_index')
+        .eq('message_id', messageId).limit(CHAT_TRIVIA_MAX_PLAYERS)
+      if (result.error) throw result.error
+      answers = (result.data || []).map(answer => ({ userId: answer.user_id, optionIndex: answer.option_index }))
+    } else {
+      await this.init()
+      const record = this.data.messages[messageId]
+      game = record?.message.game
+      if (!record || record.roomId !== roomId || record.removedAt || game?.kind !== 'trivia' || !game.round)
+        throw new PublicRequestError('This trivia round is unavailable.', 404)
+      answers = this.data.triviaAnswers[messageId] || []
+    }
+    return triviaState(messageId, game.round!, answers, userId, this.now())
   }
   removeMessage(roomId: string, actorId: string, messageId: string, operationId: string, reason = '') {
     return this.roomOperation(roomId, () => this.removeStoredMessage(roomId, actorId, messageId, operationId, reason))
@@ -219,7 +281,7 @@ export class ChatCommandService {
       soundspin_poll_votes: (row.soundspin_poll_votes || []).slice(0, CHAT_MAX_POLL_VOTERS) }
   }
   private reserveMentions(data: LocalChatData, userId: string, targets: ChatMessageInput['mentions']) {
-    if (!targets.length) return
+    if (!targets.length || localRateLimitsDisabled()) return
     const keys = [[`sender:${userId}`, targets.length, 20] as const,
       ...targets.map(target => [`recipient:${target.userId}`, 1, 5] as const)]
     for (const [key, cost, max] of keys) {
@@ -290,6 +352,8 @@ export class ChatCommandService {
     const removed = existing?.removedAt || state.removal?.removedAt
     if (existing && (existing.roomId !== roomId || existing.userId !== userId || existing.fingerprint !== fingerprint))
       throw new PublicRequestError(serverT("this_message_id_belongs_to_different_content_account_or_room"), 409)
+    if (!removed && input.song) message.song = existing?.message.song || await resolveSongAttachment(roomId, input.song, this.options.resolveSong)
+    if (!removed && input.game) message.game = existing?.message.game || (this.options.client && input.game.kind !== 'trivia' ? input.game : resolveChatGame(input.game, undefined, this.now()))
     this.policy.message(roomId, userId, input, Boolean(existing))
     if (message.storagePath && !removed)
       message.mediaUrl = (
@@ -486,6 +550,7 @@ export class ChatCommandService {
           record.removedAt ||= removedAt
           record.message = tombstone(record.message, record.removedAt)
         }
+        delete draft.triviaAnswers[messageId]
         draft.removals.push({
           id: randomUUID(),
           action: 'remove-message',
@@ -553,7 +618,7 @@ export class ChatCommandService {
           const message = source.message
           record.message.replyTo = {
             id: message.id,
-            content: message.content,
+            content: message.content || message.song?.title || '',
             type: message.type,
             mediaUrl: message.mediaUrl,
             mentions: message.mentions,
@@ -600,7 +665,7 @@ export class ChatCommandService {
     if (row.reply_to_id) {
       const source = reply?.room_slug === row.room_slug ? this.fromRow(reply) : undefined
       message.replyTo = source ? {
-        id: source.id, content: source.content, type: source.type, mediaUrl: source.mediaUrl,
+        id: source.id, content: source.content || source.song?.title || '', type: source.type, mediaUrl: source.mediaUrl,
         mentions: source.mentions, user: { id: source.user.id, name: source.user.name }, removedAt: source.removedAt
       } : undefined
     }
@@ -655,6 +720,8 @@ export class ChatCommandService {
             }))
           }
         : undefined,
+      song: row.removed_at ? undefined : normalizeChatSong(row.song),
+      game: row.removed_at ? undefined : normalizeChatGame(row.game),
       removedAt: row.removed_at || undefined,
       ...{ reactions: (row.soundspin_message_reactions || []).slice(0, CHAT_MAX_REACTIONS_PER_MESSAGE).map((r) => ({ userId: r.user_id, emoji: r.emoji })) }
     }
@@ -665,7 +732,7 @@ export class ChatCommandService {
     const m = target.message
     return {
       id: m.id,
-      content: m.content,
+      content: m.content || m.song?.title || '',
       type: m.type,
       mediaUrl: m.mediaUrl,
       mentions: m.mentions,
@@ -691,6 +758,8 @@ export class ChatCommandService {
       poll_options: m.poll?.options || null,
       removed_at: record.removedAt || null,
       immutable_fingerprint: record.fingerprint,
+      song: record.removedAt ? null : m.song || null,
+      game: record.removedAt ? null : m.game || null,
       soundspin_message_reactions: (
         (m as RelayMessage & { reactions?: Array<{ userId: string; emoji: string }> }).reactions || []
       ).map((r) => ({ user_id: r.userId, emoji: r.emoji })),
@@ -820,6 +889,8 @@ export class ChatCommandService {
               storage_path: null,
               mentions: [],
               poll_options: null,
+              song: null,
+              game: null,
               soundspin_message_reactions: [],
               soundspin_poll_votes: []
             }
@@ -830,6 +901,21 @@ export class ChatCommandService {
   async readMessage(roomId: string, id: string) {
     const record = await this.loadMessage(id)
     return record?.roomId === roomId ? this.readPayload(roomId, [this.toRow(record)]) : null
+  }
+  /** Caller checks fresh admission before requesting a bounded set of room IDs. */
+  async readMessages(roomId: string, ids: string[]) {
+    const selected = [...new Set(ids)]
+    if (selected.length > CHAT_MAX_HISTORY_MESSAGES || selected.some(id => !uuid.test(id))) throw new PublicRequestError('Choose up to 50 room messages.', 400)
+    let rows: ChatReadRow[] = []
+    if (selected.length && this.options.client) {
+      const { data, error } = await this.options.client.from('soundspin_messages').select(SELECT).eq('room_slug', roomId).in('id', selected)
+      if (error) throw error
+      rows = data as ChatReadRow[] || []
+    } else if (selected.length) {
+      await this.init()
+      rows = selected.flatMap(id => { const record = this.data.messages[id]; return record?.roomId === roomId ? [this.toRow(record)] : [] })
+    }
+    return this.readPayload(roomId, rows)
   }
   async readContext(roomId: string, id: string) {
     const record = await this.loadMessage(id)

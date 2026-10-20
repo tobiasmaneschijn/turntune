@@ -5,7 +5,7 @@ import { ThemeProvider } from "../../../../src/components/theme-provider";
 import { TooltipProvider } from "../../../../src/components/ui/tooltip";
 import type { RoomDirectoryEntry } from "../../../../src/types";
 import { readUserSettings, USER_SETTINGS_STORAGE_KEY } from "../../../../src/features/settings/user-settings";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
 

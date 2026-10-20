@@ -207,6 +207,7 @@ export interface RoomPresence {
 
 export interface SocketReply {
   ok: boolean;
+  message?: unknown;
   error?: string;
   requiresPassword?: boolean;
   started?: boolean;

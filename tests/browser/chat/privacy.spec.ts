@@ -16,6 +16,7 @@ const writes = new WeakMap<Page, string[]>()
 const messageRow = (page: Page, index: number) => page.locator(`#chat-message-${id(index)}`)
 const actions = (row: Locator) => row.getByRole('button', { name: 'Message actions for Mira', exact: true })
 async function setHidden(page: Page, row: Locator, hidden: boolean) {
+  await row.hover()
   await actions(row).click()
   await page.getByRole('menuitem', { name: hidden ? 'Hide message' : 'Unhide message', exact: true }).click()
   await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
@@ -54,6 +55,7 @@ test.beforeEach(async ({ page }) => {
 test('Hide a message from the conversation, reply and search previews, then restore it', async ({ page }) => {
   const target = messageRow(page, 1)
   const reply = messageRow(page, 2).locator('.chat-message-reply')
+  await target.hover()
   await actions(target).click()
   await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
   const composer = page.getByRole('textbox', { name: 'Message room chat' })

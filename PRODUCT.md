@@ -12,6 +12,19 @@ Room controls include reports, warnings, invitations, optional versioned rules, 
 
 ## Interface constraints
 
-Preserve the incumbent Geist typography, semantic dark/light theme tokens, shared Base UI controls, room panes, and responsive dialogs. Use labeled rows, contextual menus, and progressive disclosure. Avoid repetitive descriptions and a card for every setting. Controls retain keyboard access, visible focus, named fields, clear errors/status, and 44-pixel mobile actions.
+The app uses the approved Open room system throughout: Inter, neutral light/dark
+surfaces, violet actions, and a shared Light, Dark, or System preference. The room
+places shared activity beside conversation and a private cover-art queue, with
+one persistent bottom player. Provider widgets and an expanded player are not
+part of the room UI. See [DESIGN.md](DESIGN.md) for shared tokens and
+[the listening-room brief](docs/design/listening-room.md) for room composition.
+
+Reuse shared Base UI controls and responsive dialogs. Use labeled rows,
+contextual menus, and progressive disclosure. Avoid repetitive descriptions and
+a card for every setting. Controls retain keyboard access, visible focus, named
+fields, clear errors/status, and 44-pixel mobile actions.
+
+Omit routine status subtext. Supporting text should explain a restriction,
+error, consequence, or action that is not already clear from the controls.
 
 Volume, device/provider preferences within room allowances, notifications, appearance, and panel layout remain personal. Moderator tools never expose another person's waiting queue or library.

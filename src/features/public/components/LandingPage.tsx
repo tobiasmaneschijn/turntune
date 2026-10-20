@@ -25,7 +25,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
   const { t } = useTranslation("public");
   const cloudLink = (className?: string) => <a
     href="/login"
-    className={cn(buttonVariants({ size: "lg" }), className)}
+    className={cn(buttonVariants(), className)}
     onClick={event => navigateInsideApp(event, "/login", onNavigate)}
   >{t("landing.openCloud")} <ArrowRight data-icon="inline-end" /></a>;
 
@@ -50,9 +50,8 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         <p>{t("landing.intro")}</p>
         <div className="landing-hero-actions">
           {cloudLink()}
-          <a href="#hosting" className={buttonVariants({ variant: "outline", size: "lg" })}>{t("landing.selfHost")} <ArrowDown data-icon="inline-end" /></a>
+          <a href="#hosting" className={buttonVariants({ variant: "outline" })}>{t("landing.selfHost")} <ArrowDown data-icon="inline-end" /></a>
         </div>
-        <p className="landing-hosting-note">{t("landing.hostingNote")}</p>
         <a className="landing-demo-link" href="#how-it-works">{t("landing.watchDemo")} <ArrowDown size={16} aria-hidden="true" /></a>
       </div>
     </section>
@@ -88,7 +87,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
           <h3><Server aria-hidden="true" /> {t("landing.selfHost")}</h3>
           <p>{t("landing.selfHostDescription")}</p>
           <ul><li><Check aria-hidden="true" /> {t("landing.dockerCompose")}</li><li><Check aria-hidden="true" /> {t("landing.manageServer")}</li></ul>
-          <div className="landing-hosting-action"><a href={SELF_HOST_GUIDE} className={buttonVariants({ variant: "outline", size: "lg" })}>{t("landing.selfHostGuide")} <ArrowUpRight data-icon="inline-end" /></a><span>{t("landing.selfHostRequirements")}</span></div>
+          <div className="landing-hosting-action"><a href={SELF_HOST_GUIDE} className={buttonVariants({ variant: "outline" })}>{t("landing.selfHostGuide")} <ArrowUpRight data-icon="inline-end" /></a><span>{t("landing.selfHostRequirements")}</span></div>
         </article>
       </div>
     </section>

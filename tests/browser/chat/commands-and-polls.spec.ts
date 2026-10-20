@@ -5,16 +5,37 @@ import type { ChatHistoryRow } from '../../../src/features/chat/persistence'
 const pollId = '20000000-0000-4000-8000-000000000002'
 const noteId = '20000000-0000-4000-8000-000000000001'
 type Row = ChatHistoryRow & { room_slug: string }
-type Database = { rows: Row[]; messages: ChatMessage[]; votes: Array<{ messageId: string; userId: string; optionIndex: number }>; searches: string[]; failVote: boolean }
-type HarnessWindow = { chatCommandsTest: { broadcasts: ChatMessage[]; saves: ChatMessage[]; failSend: boolean; holdDelivery: boolean; releaseDelivery(): void; peerVote(event: ChatPollVoteEvent, roomId?: string): void } }
+type Database = {
+  rows: Row[]; messages: ChatMessage[]; votes: Array<{ messageId: string; userId: string; optionIndex: number }>
+  searches: string[]; failVote: boolean
+  triviaAnswers: Array<{ messageId: string; userId: string; optionIndex: number }>
+  triviaClockOffset: number; failTriviaResponseOnce: boolean
+  triviaLoadDelay: number; triviaActiveLoads: number; triviaMaxActiveLoads: number
+}
+type HarnessWindow = { chatCommandsTest: { broadcasts: ChatMessage[]; saves: ChatMessage[]; acceptedMessages: Record<string, ChatMessage>; failSend: boolean; holdDelivery: boolean; releaseDelivery(): void; peerVote(event: ChatPollVoteEvent, roomId?: string): void } }
 const databases = new WeakMap<Page, Database>()
 const composer = (page: Page) => page.getByRole('textbox', { name: 'Message room chat' })
 const pollRow = (page: Page, id = pollId) => page.locator(`#chat-message-${id}`)
 const voteOption = (row: Locator, option: string) => row.getByRole('button', { name: new RegExp(`^${option}, \\d+ votes?`) })
 
+function commitRoomMessage(database: Database, room: string, message: ChatMessage) {
+  if (database.rows.some(row => row.id === message.id)) return
+  database.rows.push({ id: message.id, room_slug: room, content: message.content, message_type: message.type,
+    media_url: message.mediaUrl || null, storage_path: message.storagePath || null, mentions: message.mentions || [],
+    user_id: message.user.id, user_name: message.user.name, avatar_seed: message.user.avatarSeed || message.user.id,
+    created_at: message.createdAt, reply_to_id: message.replyTo?.id || null, soundspin_message_reactions: [],
+    poll_options: message.poll?.options || null, soundspin_poll_votes: [], song: message.song || null, game: message.game || null })
+}
+
 async function runCommand(page: Page, command: string) {
   await composer(page).fill(command)
   await composer(page).press('Enter')
+}
+
+async function openGames(page: Page) {
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Games', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Coin flip', exact: true })).toBeVisible()
 }
 
 async function peerVote(page: Page, event: ChatPollVoteEvent, roomId = 'lounge') {
@@ -33,10 +54,14 @@ test.beforeEach(async ({ page }) => {
     created_at: '2026-10-08T10:00:00Z', reply_to_id: null, soundspin_message_reactions: [] }
   const database: Database = { rows: [base, { ...base, id: pollId, content: 'Next room vibe?', created_at: '2026-10-08T10:01:00Z',
     poll_options: ['House', 'Ambient', 'Disco'], soundspin_poll_votes: [{ user_id: 'bob', option_index: 0, revision: 1 }] }],
-    messages: [], votes: [], searches: [], failVote: false }
+    messages: [], votes: [], searches: [], failVote: false, triviaAnswers: [], triviaClockOffset: 0, failTriviaResponseOnce: false,
+    triviaLoadDelay: 0, triviaActiveLoads: 0, triviaMaxActiveLoads: 0 }
   databases.set(page, database)
+  // The real socket commits before its ACK. Keep new trivia available to its
+  // first reader even when the separate HTTP persistence request arrives later.
+  await page.exposeFunction('commitFixtureRoomMessage', (room: string, message: ChatMessage) => commitRoomMessage(database, room, message))
   await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false } }))
-  await page.route('**/api/rooms/*/chat/**', (route) => {
+  await page.route('**/api/rooms/*/chat/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const parts = url.pathname.split('/')
@@ -47,14 +72,44 @@ test.beforeEach(async ({ page }) => {
     const userId = authorization.slice('Bearer '.length).replace(/-token$/, '')
     const scope = database.rows.filter((row) => row.room_slug === room)
     const payload = (selected: Row[]) => ({ rows: selected, replies: scope, profiles: [] })
+    if (action === 'pins') return route.fulfill({ json: { pins: [], rows: [], replies: [], profiles: [] } })
+    if (action === 'trivia') {
+      const row = scope.find((row) => row.id === parts[6])
+      const game = row?.game as Extract<NonNullable<ChatMessage['game']>, { kind: 'trivia' }> | undefined
+      if (!row || !game?.round) return route.fulfill({ status: 404, json: { error: 'This trivia round is unavailable.' } })
+      if (request.method() === 'GET') {
+        database.triviaActiveLoads++
+        database.triviaMaxActiveLoads = Math.max(database.triviaMaxActiveLoads, database.triviaActiveLoads)
+        const delay = database.triviaLoadDelay
+        database.triviaLoadDelay = 0
+        try { if (delay) await new Promise((resolve) => setTimeout(resolve, delay)) }
+        finally { database.triviaActiveLoads-- }
+      }
+      const now = Date.now() + database.triviaClockOffset
+      const closed = now >= Date.parse(game.round.endsAt)
+      let answers = database.triviaAnswers.filter((answer) => answer.messageId === row.id)
+      if (request.method() === 'POST' && parts[7] === 'answer') {
+        const { optionIndex } = request.postDataJSON() as { optionIndex: number }
+        if (!answers.some((answer) => answer.userId === userId)) {
+          if (closed) return route.fulfill({ status: 409, json: { error: 'This trivia round has ended.' } })
+          database.triviaAnswers.push({ messageId: row.id, userId, optionIndex })
+          answers = database.triviaAnswers.filter((answer) => answer.messageId === row.id)
+        }
+        if (database.failTriviaResponseOnce) {
+          database.failTriviaResponseOnce = false
+          return route.fulfill({ status: 503, json: { error: "Couldn't confirm your answer. Try again." } })
+        }
+      }
+      return route.fulfill({ json: { messageId: row.id, endsAt: game.round.endsAt, serverNow: new Date(now).toISOString(),
+        answered: answers.length, selectedOption: answers.find((answer) => answer.userId === userId)?.optionIndex,
+        ...(closed ? { correctOption: 0, counts: game.round.options.map((_, index) => answers.filter((answer) => answer.optionIndex === index).length) } : {}),
+      } })
+    }
     if (request.method() === 'POST' && action === 'messages') {
-      const message = request.postDataJSON() as ChatMessage
+      const input = request.postDataJSON() as ChatMessage
+      const message = await page.evaluate(message => (window as unknown as HarnessWindow).chatCommandsTest.acceptedMessages[message.id] || message, input)
       database.messages.push(message)
-      database.rows.push({ id: message.id, room_slug: room, content: message.content, message_type: message.type,
-        media_url: message.mediaUrl || null, storage_path: message.storagePath || null, mentions: message.mentions || [],
-        user_id: userId, user_name: message.user.name, avatar_seed: message.user.avatarSeed || userId,
-        created_at: message.createdAt, reply_to_id: message.replyTo?.id || null, soundspin_message_reactions: [],
-        poll_options: message.poll?.options || null, soundspin_poll_votes: [] })
+      commitRoomMessage(database, room, message)
       return route.fulfill({ json: {} })
     }
     if (request.method() === 'POST' && action === 'polls' && parts[7] === 'vote') {
@@ -88,6 +143,12 @@ test('Use chat commands to open the queue and find room messages', async ({ page
   await runCommand(page, '/search needle')
   await expect(page.getByRole('button', { name: 'View message from Mira: needle track notes', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Close room message search' }).click()
+  await composer(page).fill('/')
+  await composer(page).press('ArrowUp')
+  const lastCommand = page.getByRole('option', { name: '/8ball Ask the Magic 8 Ball', exact: true })
+  await expect(lastCommand).toHaveAttribute('aria-selected', 'true')
+  await expect(lastCommand).toBeInViewport({ ratio: 1 })
+  await composer(page).press('Escape')
   await runCommand(page, '/unsupported')
   await expect(page.getByRole('alert').filter({ hasText: 'Unknown command.' })).toBeVisible()
   await expect(composer(page)).toHaveValue('/unsupported')
@@ -134,4 +195,174 @@ test('Create a poll, change a vote and keep the result after returning', async (
   await voteOption(row, 'House').click()
   await expect(row.getByRole('alert')).toHaveText('Join this room before voting.')
   await expect(voteOption(row, 'Ambient')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('Play chat games with confirmed results while keeping an invalid command for correction', async ({ page }) => {
+  await runCommand(page, '/roll 99d999')
+  await expect(page.getByRole('alert')).toBeVisible()
+  await expect(composer(page)).toHaveValue('/roll 99d999')
+  expect(databases.get(page)!.messages).toHaveLength(0)
+
+  await page.evaluate(() => { (window as unknown as HarnessWindow).chatCommandsTest.holdDelivery = true })
+  await runCommand(page, '/roll 2d6')
+  await expect(composer(page)).toHaveValue('')
+  await expect.poll(() => page.evaluate(() => (window as unknown as HarnessWindow).chatCommandsTest.broadcasts.length)).toBe(1)
+  const sent = await page.evaluate(() => (window as unknown as HarnessWindow).chatCommandsTest.broadcasts[0])
+  expect(sent.game?.result).toBeUndefined()
+  const roll = pollRow(page, sent.id).getByRole('group', { name: 'Dice roll', exact: true })
+  await expect(roll).toContainText('/roll 2d6')
+  await expect(roll.getByText('4 + 4 = 8', { exact: true })).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as HarnessWindow).chatCommandsTest.releaseDelivery())
+  await expect(roll.getByText('4 + 4 = 8', { exact: true })).toBeVisible()
+  await expect.poll(() => databases.get(page)!.messages.length).toBe(1)
+  expect(databases.get(page)!.messages[0].game?.result).toEqual([4,4])
+  await page.reload()
+  await expect(roll.getByText('4 + 4 = 8', { exact: true })).toBeVisible()
+
+  await runCommand(page, '/pick deep house, ambient')
+  const pick = page.getByRole('group', { name: 'Random pick', exact: true })
+  await expect(pick).toContainText('/pick deep house, ambient')
+  await expect(pick.getByText('ambient', { exact: true })).toBeVisible()
+  await expect.poll(() => databases.get(page)!.messages.length).toBe(2)
+
+  await composer(page).fill('/8b')
+  await expect(page.getByRole('listbox', { name: 'Chat commands' }).getByRole('option', { name: '/8ball Ask the Magic 8 Ball', exact: true })).toBeVisible()
+  await runCommand(page, '/flip')
+  const flip = page.getByRole('group', { name: 'Coin flip', exact: true })
+  await expect(flip.getByText('Heads', { exact: true })).toBeVisible()
+  await runCommand(page, '/rps rock')
+  const rps = page.getByRole('group', { name: 'Rock, paper, scissors', exact: true })
+  await expect(rps).toContainText('vs scissors · Win')
+  await runCommand(page, '/8ball Will the next track be a hit?')
+  const eightball = page.getByRole('group', { name: 'Magic 8 Ball', exact: true })
+  await expect(eightball.getByText('Ask again later', { exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(composer(page)).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await expect.poll(() => databases.get(page)!.messages.length).toBe(5)
+  await page.reload()
+  await expect(flip.getByText('Heads', { exact: true })).toBeVisible()
+  await expect(rps).toContainText('vs scissors · Win')
+  await expect(eightball.getByText('Ask again later', { exact: true })).toBeVisible()
+})
+
+test('Start games from the add menu while keeping a reply draft and correcting game input', async ({ page }) => {
+  await page.goto('/tests/browser/chat/harnesses/commands/index.html?text-only')
+  await expect(composer(page)).toBeEnabled()
+  const noteRow = pollRow(page, noteId)
+  await noteRow.hover()
+  await noteRow.getByRole('button', { name: 'Message actions for Mira', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+  await composer(page).fill('Keep this reply draft')
+  const reply = page.locator('.chat-reply-composer')
+  await expect(reply).toContainText('needle track notes')
+
+  await openGames(page)
+  await expect(page.getByRole('menuitem', { name: 'Upload image', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: 'New poll', exact: true })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: 'Coin flip', exact: true }).click()
+  await expect(page.getByRole('group', { name: 'Coin flip', exact: true })).toContainText('Heads')
+  await expect(composer(page)).toHaveValue('Keep this reply draft')
+  await expect(reply).toContainText('needle track notes')
+  await expect(composer(page)).toBeFocused()
+  await expect.poll(() => databases.get(page)!.messages.length).toBe(1)
+  expect(databases.get(page)!.messages[0].replyTo).toBeUndefined()
+
+  await openGames(page)
+  await page.getByRole('menuitem', { name: 'Rock, paper, scissors', exact: true }).click()
+  const rps = page.getByRole('region', { name: 'Rock, paper, scissors', exact: true })
+  await expect(rps.getByRole('button', { name: 'Rock', exact: true })).toBeVisible()
+  await rps.getByRole('button', { name: 'Rock', exact: true }).press('Escape')
+  await expect(rps).toHaveCount(0)
+  await expect(composer(page)).toBeFocused()
+
+  await openGames(page)
+  await page.getByRole('menuitem', { name: 'Pick between options', exact: true }).click()
+  const pick = page.getByRole('region', { name: 'Pick between options', exact: true })
+  const choices = pick.getByRole('textbox', { name: 'Choices', exact: true })
+  await expect(choices).toBeFocused()
+  await choices.fill('House, House')
+  await pick.getByRole('button', { name: 'Pick', exact: true }).click()
+  await expect(pick.getByRole('alert')).toBeVisible()
+  await expect(choices).toHaveValue('House, House')
+  expect(databases.get(page)!.messages).toHaveLength(1)
+  await choices.fill('House, Ambient')
+  await pick.getByRole('button', { name: 'Pick', exact: true }).click()
+  await expect(pick).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Random pick', exact: true })).toContainText('Ambient')
+  await expect(composer(page)).toHaveValue('Keep this reply draft')
+  await expect(reply).toContainText('needle track notes')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openGames(page)
+  await expect(page.getByRole('menuitem', { name: 'Magic 8 Ball', exact: true })).toBeInViewport({ ratio: 1 })
+  await page.getByRole('menuitem', { name: 'Magic 8 Ball', exact: true }).click()
+  const eightball = page.getByRole('region', { name: 'Magic 8 Ball', exact: true })
+  await expect(eightball.getByRole('textbox', { name: 'Question', exact: true })).toBeFocused()
+  await expect(eightball.getByRole('button', { name: 'Ask', exact: true })).toBeVisible()
+  await expect(page.getByRole('menu', { includeHidden: true })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await eightball.getByRole('button', { name: 'Close game', exact: true }).click()
+  await expect(composer(page)).toHaveValue('Keep this reply draft')
+  await expect(composer(page)).toBeFocused()
+  await expect(reply).toContainText('needle track notes')
+})
+
+test('Play a shared trivia round, recover a saved answer and reveal the room result', async ({ page }) => {
+  const database = databases.get(page)!
+  // A slow first read must finish instead of being cancelled by the next refresh.
+  database.triviaLoadDelay = 3100
+  await composer(page).fill('Keep this track recommendation')
+  await openGames(page)
+  await page.getByRole('menuitem', { name: 'Music trivia', exact: true }).click()
+  const trivia = page.getByRole('region', { name: 'Music trivia', exact: true })
+  const daftPunk = trivia.getByRole('button', { name: /^Daft Punk(?:,|$)/ })
+  const justice = trivia.getByRole('button', { name: /^Justice(?:,|$)/ })
+  await expect(trivia).toContainText('Who released the album Discovery?')
+  await expect(composer(page)).toHaveValue('Keep this track recommendation')
+  await expect(daftPunk).toBeEnabled()
+  expect(database.triviaMaxActiveLoads).toBe(1)
+  await expect(trivia).toContainText('0 answered')
+  await expect(trivia.getByText('Correct', { exact: true })).toHaveCount(0)
+
+  // The server saved Alice's answer but its response was lost. Recovery must
+  // restore that locked answer instead of offering another attempt.
+  database.failTriviaResponseOnce = true
+  await daftPunk.click()
+  await expect(trivia.getByRole('alert')).toContainText("Couldn't confirm your answer.")
+  expect(database.triviaAnswers).toHaveLength(1)
+  await trivia.getByRole('button', { name: 'Retry trivia', exact: true }).click()
+  await expect(daftPunk).toHaveAttribute('aria-pressed', 'true')
+  await expect(justice).toBeDisabled()
+  await page.reload()
+  await expect(daftPunk).toHaveAttribute('aria-pressed', 'true')
+  await expect(justice).toBeDisabled()
+  await expect(trivia).toContainText('Answer saved')
+  await expect(composer(page)).toHaveValue('Keep this track recommendation')
+
+  await page.getByRole('button', { name: 'Switch account', exact: true }).click()
+  await expect(daftPunk).toBeEnabled()
+  await expect(daftPunk).toHaveAttribute('aria-pressed', 'false')
+  await expect(trivia).toContainText('1 answered')
+  await justice.click()
+  await expect(justice).toHaveAttribute('aria-pressed', 'true')
+  await expect(daftPunk).toBeDisabled()
+  await expect(trivia).toContainText('2 answered')
+  await expect(trivia.getByText('Incorrect', { exact: true })).toHaveCount(0)
+  expect(database.triviaAnswers).toHaveLength(2)
+
+  await page.getByRole('button', { name: 'Switch account', exact: true }).click()
+  await expect(daftPunk).toHaveAttribute('aria-pressed', 'true')
+  await expect(trivia).toContainText('2 answered')
+  database.triviaClockOffset = 31_000
+  await expect(trivia.getByText('Correct', { exact: true })).toBeVisible()
+  await expect(daftPunk).toHaveAccessibleName(/correct answer, 1 answer/)
+  await expect(justice).toBeDisabled()
+  await expect(composer(page)).toHaveValue('Keep this track recommendation')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(trivia).toBeInViewport({ ratio: 1 })
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  const answerBounds = await daftPunk.boundingBox()
+  expect(answerBounds!.height).toBeGreaterThanOrEqual(44)
 })

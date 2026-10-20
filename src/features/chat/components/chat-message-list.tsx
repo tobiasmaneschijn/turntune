@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { shouldShowMessageHeader, startsNewDay, type ChatMessage } from '@/features/chat/model'
 import type { ChatSaveStates } from '@/features/chat/delivery'
 import { ChatMessageItem } from '@/features/chat/components/chat-message'
+import type { ChatMessageFeatures } from '../message-features'
 
 interface ChatMessageListProps {
   messages: ChatMessage[]
@@ -26,6 +27,7 @@ interface ChatMessageListProps {
   onReport?: (message: ChatMessage) => void
   canRemoveMessage?: (message: ChatMessage) => boolean
   participationDisabled?: boolean
+  features?: ChatMessageFeatures
 }
 
 export const ChatMessageList = memo(function ChatMessageList({
@@ -50,6 +52,7 @@ export const ChatMessageList = memo(function ChatMessageList({
   onReport,
   canRemoveMessage,
   participationDisabled,
+  features,
 }: ChatMessageListProps) {
   const { t, i18n } = useTranslation('chat')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
@@ -90,6 +93,7 @@ export const ChatMessageList = memo(function ChatMessageList({
             )}
             <ChatMessageItem
               message={message}
+              features={features}
               isHidden={hiddenIds.has(message.id)}
               isReplyHidden={Boolean(message.replyTo && hiddenIds.has(message.replyTo.id))}
               onHiddenChange={onHiddenChange}

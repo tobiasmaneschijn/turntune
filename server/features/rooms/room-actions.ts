@@ -17,6 +17,7 @@ import type { Room, User, Track } from "../../types.js";
 import type { LibraryTrack } from "../music/private-library.js";
 import type { resolveTrackMappings } from "../music/provider-mappings.js";
 import { defaultResourcePolicy, type ResolvedResourcePolicy } from "../../../shared/resource-policy.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 interface Membership { room: Room; user: User }
 interface RoomActionOptions {
@@ -239,7 +240,7 @@ export function mountRoomActions(options: RoomActionOptions) {
     const reason=trackEligibility(draft,track!);if(!reason||!(/Duration|minute limit/.test(reason)))fail("This track does not need a length exception.");
     const moderation=ensureModeration(draft);
     if(moderation.reports.some(r=>r.trackId===input.trackId&&r.status==="open"))return{result:{}};
-    if(moderation.reports.filter(r=>r.reporterId===member.user.id&&r.createdAt>Date.now()-3600000).length>=5)fail("Too many reports. Try again in an hour.");
+    if(!localRateLimitsDisabled()&&moderation.reports.filter(r=>r.reporterId===member.user.id&&r.createdAt>Date.now()-3600000).length>=5)fail("Too many reports. Try again in an hour.");
     moderation.reports.push({id:crypto.randomUUID(),reporterId:member.user.id,targetUserId:member.user.id,trackId:input.trackId,category:"track-exception",reason:track!.title,createdAt:Date.now(),status:"open"});return{result:{}};
   });
   onAction("fallback:set",async(payload,reply)=>{

@@ -1,10 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./shadcn-variants.css";
+@import "@fontsource-variable/inter";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -34,61 +36,83 @@
 }
 
 :root {
-  --radius: 0.7rem;
-  --background: oklch(0.975 0.004 106);
-  --foreground: oklch(0.17 0.012 285);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.17 0.012 285);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.17 0.012 285);
-  --primary: oklch(0.71 0.18 115);
-  --primary-foreground: oklch(0.16 0.03 115);
-  --primary-text: oklch(0.39 0.11 115);
-  --secondary: oklch(0.94 0.007 106);
-  --secondary-foreground: oklch(0.24 0.012 285);
-  --muted: oklch(0.94 0.007 106);
-  --muted-foreground: oklch(0.45 0.012 285);
-  --accent: oklch(0.92 0.02 112);
-  --accent-foreground: oklch(0.23 0.02 112);
-  --destructive: oklch(0.58 0.22 25);
-  --border: oklch(0.2 0.01 285 / 13%);
-  --input: oklch(0.2 0.01 285 / 18%);
-  --ring: oklch(0.62 0.17 115);
-  --success: oklch(0.55 0.15 150);
-  --warning: oklch(0.68 0.15 75);
-  --info: oklch(0.58 0.14 255);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --text-size: 14px;
+  --detail-size: 12px;
+  --control-height: 34px;
+  --row-height: 44px;
+  --radius: 0.45rem;
+  --background: #ffffff;
+  --foreground: #20212a;
+  --card: #ffffff;
+  --card-foreground: #20212a;
+  --popover: #ffffff;
+  --popover-foreground: #20212a;
+  --primary: #6938d3;
+  --primary-foreground: #ffffff;
+  --primary-text: #6131cc;
+  --secondary: #f4f3f7;
+  --secondary-foreground: #36343f;
+  --muted: #f5f5f7;
+  --muted-foreground: #6a6977;
+  --accent: #f0ebfc;
+  --accent-foreground: #4e259f;
+  --destructive: #b62842;
+  --border: #e8e7ed;
+  --input: #d8d6e0;
+  --ring: #7649da;
+  --success: #287a55;
+  --warning: #966710;
+  --info: #4266a2;
+  --scrollbar: #d4d2dc;
 }
 
 .dark {
-  --background: oklch(0.085 0.008 285);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.135 0.009 285);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.16 0.01 285);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.91 0.18 115);
-  --primary-foreground: oklch(0.16 0.03 115);
-  --primary-text: var(--primary);
-  --secondary: oklch(0.19 0.01 285);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.19 0.01 285);
-  --muted-foreground: oklch(0.72 0.008 285);
-  --accent: oklch(0.22 0.015 285);
-  --accent-foreground: oklch(0.97 0 0);
-  --destructive: oklch(0.65 0.22 25);
-  --border: oklch(1 0 0 / 11%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.91 0.18 115);
-  --success: oklch(0.73 0.17 150);
-  --warning: oklch(0.8 0.16 75);
-  --info: oklch(0.73 0.14 255);
+  --background: #18181b;
+  --foreground: #eeeef1;
+  --card: #202024;
+  --card-foreground: #eeeef1;
+  --popover: #252429;
+  --popover-foreground: #eeeef1;
+  --primary: #8251d4;
+  --primary-foreground: #ffffff;
+  --primary-text: #b99aef;
+  --secondary: #2b292f;
+  --secondary-foreground: #dfdee5;
+  --muted: #2b292f;
+  --muted-foreground: #aaa7b3;
+  --accent: #30263e;
+  --accent-foreground: #d2bbff;
+  --destructive: #f18b9b;
+  --border: #36333d;
+  --input: #6a6575;
+  --ring: #b99aef;
+  --success: #79c5a0;
+  --warning: #dbb66a;
+  --info: #92b2ec;
+  --scrollbar: #56515f;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-color: var(--scrollbar) transparent;
+    scrollbar-width: thin;
   }
+  ::selection { background: var(--primary); color: var(--primary-foreground); }
   html { color-scheme: light; }
   html.dark { color-scheme: dark; }
   body { @apply bg-background text-foreground antialiased; }
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+  [data-slot="button"], [data-slot="toggle"], [data-slot="tabs-trigger"],
+  [data-slot="select-trigger"], [data-slot="input"], [data-slot="input-group"],
+  [data-slot="input-group-control"],
+  [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-sub-trigger"],
+  [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="select-item"] { min-height: 44px; }
+  [data-slot="button"] { min-width: 44px; }
+  [data-slot="tabs-list"] { min-height: 50px; }
+  [data-slot="input"], [data-slot="textarea"], [data-slot="input-group-control"] { font-size: 16px; }
 }

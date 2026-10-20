@@ -1,5 +1,6 @@
 import { serverT } from "../lib/i18n.js";
 import type { Provider } from "../../shared/provider-definitions.js";
+import { localRateLimitsDisabled } from "../security/local-development.js";
 import type { MetricOptions } from "../../shared/observability.js";
 import { telemetry } from "../observability/index.js";
 /** Fixed provider names keep both admission state and metrics cardinality bounded. */
@@ -96,15 +97,18 @@ export async function providerJson<T>(provider: ProviderService, fetcher: typeof
     // Spotify includes the app's 1.5-second per-listener playback polling. Catalog
     // providers do not need that throughput; each keeps a lower spend ceiling.
     const maximumRequests = provider === "spotify" ? spotifyRequestsPerMinute : catalogRequestsPerMinute;
-    const window = windows.get(provider);
+    const rateLimited = !localRateLimitsDisabled();
+    const window = rateLimited ? windows.get(provider) : undefined;
     const budget = !window || window.resetAt <= now ? { count: 0, resetAt: now + 60_000 } : window;
-    if ((active.get(provider) || 0) >= providerConcurrent || totalActive >= globalConcurrent || budget.count >= maximumRequests) {
+    if ((active.get(provider) || 0) >= providerConcurrent || totalActive >= globalConcurrent || rateLimited && budget.count >= maximumRequests) {
       result.outcome = "rejected";
       result.reason = "capacity";
       throw new Error(serverT("provider_request_capacity_reached_try_again_shortly"));
     }
-    budget.count++;
-    windows.set(provider, budget);
+    if (rateLimited) {
+      budget.count++;
+      windows.set(provider, budget);
+    }
     active.set(provider, (active.get(provider) || 0) + 1);
     totalActive++;
     admitted = true;
@@ -118,10 +122,10 @@ export async function providerJson<T>(provider: ProviderService, fetcher: typeof
       const location = response.headers.get("location");
       await response.body?.cancel();
       const target = location ? new URL(location, url) : null;
-      if (!target || target.protocol !== "https:" || target.username || target.password || !options.allowedRedirectOrigins.includes(target.origin) || budget.count >= maximumRequests) {
+      if (!target || target.protocol !== "https:" || target.username || target.password || !options.allowedRedirectOrigins.includes(target.origin) || rateLimited && budget.count >= maximumRequests) {
         throw new Error(serverT("provider_returned_an_unsafe_redirect"));
       }
-      budget.count++;
+      if (rateLimited) budget.count++;
       stage = "fetch";
       // A failed second fetch has no final response status.
       result.status = undefined;

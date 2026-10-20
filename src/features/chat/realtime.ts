@@ -12,6 +12,7 @@ export interface RealtimeChatCallbacks {
   onRemoved?: (event:ChatRemovedEvent)=>void
   onTyping: (userIds: string[]) => void
   onConnection: (connected: boolean) => void
+  onPinsChanged?: () => void
 }
 
 /** One room's transport lifetime, independent of React render timing. */
@@ -131,5 +132,10 @@ export function createRealtimeChatSession(
   }
 }
 
-export type RealtimeChatSession = ReturnType<typeof createRealtimeChatSession>
+export interface RealtimeChatSession {
+  sendMessage(message: ChatMessage): Promise<ChatMessage | void>
+  sendReaction(event: ChatReactionEvent): Promise<void>
+  sendTyping(active: boolean): Promise<void>
+  dispose(): void
+}
 export type ChatSessionFactory = (userId: string, callbacks: RealtimeChatCallbacks) => RealtimeChatSession

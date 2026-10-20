@@ -1,579 +1,634 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-19T20:07:58.486Z",
+  "generatedAt": "2026-10-20T19:25:01.742Z",
   "title": "Design System: turntune",
   "extensions": {
+    "openRoom": {
+      "brief": "docs/design/listening-room.md",
+      "source": "src/styles/shadcn.css",
+      "scope": ":root, .dark",
+      "appearance": "app-wide light, dark, or system via the shared preference",
+      "playerPresentation": "bottom-only",
+      "providerWidgets": "mounted outside the visible interface",
+      "font": {
+        "family": "Inter Variable",
+        "package": "@fontsource-variable/inter"
+      },
+      "colors": {
+        "background": "#ffffff",
+        "foreground": "#20212a",
+        "primary": "#6938d3",
+        "primary-foreground": "#ffffff",
+        "primary-text": "#6131cc",
+        "muted-foreground": "#6a6977",
+        "border": "#e8e7ed"
+      },
+      "darkColors": {
+        "background": "#18181b",
+        "foreground": "#eeeef1",
+        "primary": "#8251d4",
+        "primary-foreground": "#ffffff",
+        "primary-text": "#b99aef",
+        "muted-foreground": "#aaa7b3",
+        "border": "#36333d"
+      },
+      "sizing": {
+        "--room-text-size": "14px",
+        "--room-detail-size": "12px",
+        "--room-header-height": "56px",
+        "--room-player-height": "80px",
+        "--room-player-artwork-size": "44px",
+        "--room-row-height": "54px",
+        "--room-avatar-size": "28px",
+        "--room-space": "16px"
+      },
+      "layoutPresets": {
+        "source": "src/features/rooms/hooks/use-room-layout-presets.ts",
+        "export": "openRoomLayoutPresets",
+        "balanced": {
+          "activity": 16,
+          "chat": 59,
+          "radio": 25
+        }
+      },
+      "composition": "src/features/rooms/components/OpenRoomWorkspace.tsx",
+      "surfaceStyles": [
+        "src/styles/room-music.css",
+        "src/styles/room-chat.css",
+        "src/styles/room-player.css"
+      ]
+    },
     "colorMeta": {
       "background": {
         "displayName": "Background",
         "tonalRamp": [
-          "oklch(0.15 0.008 285)",
-          "oklch(0.26 0.008 285)",
-          "oklch(0.38 0.008 285)",
-          "oklch(0.49 0.008 285)",
-          "oklch(0.61 0.008 285)",
-          "oklch(0.72 0.008 285)",
-          "oklch(0.84 0.008 285)",
-          "oklch(0.95 0.008 285)"
+          "oklch(0.15 0.0059 285.9)",
+          "oklch(0.26 0.0059 285.9)",
+          "oklch(0.38 0.0059 285.9)",
+          "oklch(0.49 0.0059 285.9)",
+          "oklch(0.61 0.0059 285.9)",
+          "oklch(0.72 0.0059 285.9)",
+          "oklch(0.84 0.0059 285.9)",
+          "oklch(0.95 0.0059 285.9)"
         ]
       },
       "foreground": {
         "displayName": "Foreground",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0040 286.3)",
+          "oklch(0.26 0.0040 286.3)",
+          "oklch(0.38 0.0040 286.3)",
+          "oklch(0.49 0.0040 286.3)",
+          "oklch(0.61 0.0040 286.3)",
+          "oklch(0.72 0.0040 286.3)",
+          "oklch(0.84 0.0040 286.3)",
+          "oklch(0.95 0.0040 286.3)"
         ]
       },
       "card": {
         "displayName": "Card",
         "tonalRamp": [
-          "oklch(0.15 0.009 285)",
-          "oklch(0.26 0.009 285)",
-          "oklch(0.38 0.009 285)",
-          "oklch(0.49 0.009 285)",
-          "oklch(0.61 0.009 285)",
-          "oklch(0.72 0.009 285)",
-          "oklch(0.84 0.009 285)",
-          "oklch(0.95 0.009 285)"
+          "oklch(0.15 0.0075 285.8)",
+          "oklch(0.26 0.0075 285.8)",
+          "oklch(0.38 0.0075 285.8)",
+          "oklch(0.49 0.0075 285.8)",
+          "oklch(0.61 0.0075 285.8)",
+          "oklch(0.72 0.0075 285.8)",
+          "oklch(0.84 0.0075 285.8)",
+          "oklch(0.95 0.0075 285.8)"
         ]
       },
       "card-foreground": {
         "displayName": "Card Foreground",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0040 286.3)",
+          "oklch(0.26 0.0040 286.3)",
+          "oklch(0.38 0.0040 286.3)",
+          "oklch(0.49 0.0040 286.3)",
+          "oklch(0.61 0.0040 286.3)",
+          "oklch(0.72 0.0040 286.3)",
+          "oklch(0.84 0.0040 286.3)",
+          "oklch(0.95 0.0040 286.3)"
         ]
       },
       "popover": {
         "displayName": "Popover",
         "tonalRamp": [
-          "oklch(0.15 0.01 285)",
-          "oklch(0.26 0.01 285)",
-          "oklch(0.38 0.01 285)",
-          "oklch(0.49 0.01 285)",
-          "oklch(0.61 0.01 285)",
-          "oklch(0.72 0.01 285)",
-          "oklch(0.84 0.01 285)",
-          "oklch(0.95 0.01 285)"
+          "oklch(0.15 0.0093 294.9)",
+          "oklch(0.26 0.0093 294.9)",
+          "oklch(0.38 0.0093 294.9)",
+          "oklch(0.49 0.0093 294.9)",
+          "oklch(0.61 0.0093 294.9)",
+          "oklch(0.72 0.0093 294.9)",
+          "oklch(0.84 0.0093 294.9)",
+          "oklch(0.95 0.0093 294.9)"
         ]
       },
       "popover-foreground": {
         "displayName": "Popover Foreground",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0040 286.3)",
+          "oklch(0.26 0.0040 286.3)",
+          "oklch(0.38 0.0040 286.3)",
+          "oklch(0.49 0.0040 286.3)",
+          "oklch(0.61 0.0040 286.3)",
+          "oklch(0.72 0.0040 286.3)",
+          "oklch(0.84 0.0040 286.3)",
+          "oklch(0.95 0.0040 286.3)"
         ]
       },
       "primary": {
         "displayName": "Primary",
         "tonalRamp": [
-          "oklch(0.15 0.18 115)",
-          "oklch(0.26 0.18 115)",
-          "oklch(0.38 0.18 115)",
-          "oklch(0.49 0.18 115)",
-          "oklch(0.61 0.18 115)",
-          "oklch(0.72 0.18 115)",
-          "oklch(0.84 0.18 115)",
-          "oklch(0.95 0.18 115)"
+          "oklch(0.15 0.1927 296.9)",
+          "oklch(0.26 0.1927 296.9)",
+          "oklch(0.38 0.1927 296.9)",
+          "oklch(0.49 0.1927 296.9)",
+          "oklch(0.61 0.1927 296.9)",
+          "oklch(0.72 0.1927 296.9)",
+          "oklch(0.84 0.1927 296.9)",
+          "oklch(0.95 0.1927 296.9)"
         ]
       },
       "primary-foreground": {
         "displayName": "Primary Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.03 115)",
-          "oklch(0.26 0.03 115)",
-          "oklch(0.38 0.03 115)",
-          "oklch(0.49 0.03 115)",
-          "oklch(0.61 0.03 115)",
-          "oklch(0.72 0.03 115)",
-          "oklch(0.84 0.03 115)",
-          "oklch(0.95 0.03 115)"
+          "oklch(0.15 0.0000 0.0)",
+          "oklch(0.26 0.0000 0.0)",
+          "oklch(0.38 0.0000 0.0)",
+          "oklch(0.49 0.0000 0.0)",
+          "oklch(0.61 0.0000 0.0)",
+          "oklch(0.72 0.0000 0.0)",
+          "oklch(0.84 0.0000 0.0)",
+          "oklch(0.95 0.0000 0.0)"
         ]
       },
       "primary-text": {
         "displayName": "Primary Text",
         "tonalRamp": [
-          "oklch(0.15 0.18 115)",
-          "oklch(0.26 0.18 115)",
-          "oklch(0.38 0.18 115)",
-          "oklch(0.49 0.18 115)",
-          "oklch(0.61 0.18 115)",
-          "oklch(0.72 0.18 115)",
-          "oklch(0.84 0.18 115)",
-          "oklch(0.95 0.18 115)"
+          "oklch(0.15 0.1236 300.2)",
+          "oklch(0.26 0.1236 300.2)",
+          "oklch(0.38 0.1236 300.2)",
+          "oklch(0.49 0.1236 300.2)",
+          "oklch(0.61 0.1236 300.2)",
+          "oklch(0.72 0.1236 300.2)",
+          "oklch(0.84 0.1236 300.2)",
+          "oklch(0.95 0.1236 300.2)"
         ]
       },
       "secondary": {
         "displayName": "Secondary",
         "tonalRamp": [
-          "oklch(0.15 0.01 285)",
-          "oklch(0.26 0.01 285)",
-          "oklch(0.38 0.01 285)",
-          "oklch(0.49 0.01 285)",
-          "oklch(0.61 0.01 285)",
-          "oklch(0.72 0.01 285)",
-          "oklch(0.84 0.01 285)",
-          "oklch(0.95 0.01 285)"
+          "oklch(0.15 0.0112 300.9)",
+          "oklch(0.26 0.0112 300.9)",
+          "oklch(0.38 0.0112 300.9)",
+          "oklch(0.49 0.0112 300.9)",
+          "oklch(0.61 0.0112 300.9)",
+          "oklch(0.72 0.0112 300.9)",
+          "oklch(0.84 0.0112 300.9)",
+          "oklch(0.95 0.0112 300.9)"
         ]
       },
       "secondary-foreground": {
         "displayName": "Secondary Foreground",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0095 292.8)",
+          "oklch(0.26 0.0095 292.8)",
+          "oklch(0.38 0.0095 292.8)",
+          "oklch(0.49 0.0095 292.8)",
+          "oklch(0.61 0.0095 292.8)",
+          "oklch(0.72 0.0095 292.8)",
+          "oklch(0.84 0.0095 292.8)",
+          "oklch(0.95 0.0095 292.8)"
         ]
       },
       "muted": {
         "displayName": "Muted",
         "tonalRamp": [
-          "oklch(0.15 0.01 285)",
-          "oklch(0.26 0.01 285)",
-          "oklch(0.38 0.01 285)",
-          "oklch(0.49 0.01 285)",
-          "oklch(0.61 0.01 285)",
-          "oklch(0.72 0.01 285)",
-          "oklch(0.84 0.01 285)",
-          "oklch(0.95 0.01 285)"
+          "oklch(0.15 0.0112 300.9)",
+          "oklch(0.26 0.0112 300.9)",
+          "oklch(0.38 0.0112 300.9)",
+          "oklch(0.49 0.0112 300.9)",
+          "oklch(0.61 0.0112 300.9)",
+          "oklch(0.72 0.0112 300.9)",
+          "oklch(0.84 0.0112 300.9)",
+          "oklch(0.95 0.0112 300.9)"
         ]
       },
       "muted-foreground": {
         "displayName": "Muted Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.008 285)",
-          "oklch(0.26 0.008 285)",
-          "oklch(0.38 0.008 285)",
-          "oklch(0.49 0.008 285)",
-          "oklch(0.61 0.008 285)",
-          "oklch(0.72 0.008 285)",
-          "oklch(0.84 0.008 285)",
-          "oklch(0.95 0.008 285)"
+          "oklch(0.15 0.0174 297.4)",
+          "oklch(0.26 0.0174 297.4)",
+          "oklch(0.38 0.0174 297.4)",
+          "oklch(0.49 0.0174 297.4)",
+          "oklch(0.61 0.0174 297.4)",
+          "oklch(0.72 0.0174 297.4)",
+          "oklch(0.84 0.0174 297.4)",
+          "oklch(0.95 0.0174 297.4)"
         ]
       },
       "accent": {
         "displayName": "Accent",
         "tonalRamp": [
-          "oklch(0.15 0.015 285)",
-          "oklch(0.26 0.015 285)",
-          "oklch(0.38 0.015 285)",
-          "oklch(0.49 0.015 285)",
-          "oklch(0.61 0.015 285)",
-          "oklch(0.72 0.015 285)",
-          "oklch(0.84 0.015 285)",
-          "oklch(0.95 0.015 285)"
+          "oklch(0.15 0.0447 302.9)",
+          "oklch(0.26 0.0447 302.9)",
+          "oklch(0.38 0.0447 302.9)",
+          "oklch(0.49 0.0447 302.9)",
+          "oklch(0.61 0.0447 302.9)",
+          "oklch(0.72 0.0447 302.9)",
+          "oklch(0.84 0.0447 302.9)",
+          "oklch(0.95 0.0447 302.9)"
         ]
       },
       "accent-foreground": {
         "displayName": "Accent Foreground",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0965 299.8)",
+          "oklch(0.26 0.0965 299.8)",
+          "oklch(0.38 0.0965 299.8)",
+          "oklch(0.49 0.0965 299.8)",
+          "oklch(0.61 0.0965 299.8)",
+          "oklch(0.72 0.0965 299.8)",
+          "oklch(0.84 0.0965 299.8)",
+          "oklch(0.95 0.0965 299.8)"
         ]
       },
       "destructive": {
         "displayName": "Destructive",
         "tonalRamp": [
-          "oklch(0.15 0.22 25)",
-          "oklch(0.26 0.22 25)",
-          "oklch(0.38 0.22 25)",
-          "oklch(0.49 0.22 25)",
-          "oklch(0.61 0.22 25)",
-          "oklch(0.72 0.22 25)",
-          "oklch(0.84 0.22 25)",
-          "oklch(0.95 0.22 25)"
+          "oklch(0.15 0.1248 10.5)",
+          "oklch(0.26 0.1248 10.5)",
+          "oklch(0.38 0.1248 10.5)",
+          "oklch(0.49 0.1248 10.5)",
+          "oklch(0.61 0.1248 10.5)",
+          "oklch(0.72 0.1248 10.5)",
+          "oklch(0.84 0.1248 10.5)",
+          "oklch(0.95 0.1248 10.5)"
         ]
       },
       "border": {
         "displayName": "Border",
         "tonalRamp": [
-          "oklch(0.15 0 0 / 11%)",
-          "oklch(0.26 0 0 / 11%)",
-          "oklch(0.38 0 0 / 11%)",
-          "oklch(0.49 0 0 / 11%)",
-          "oklch(0.61 0 0 / 11%)",
-          "oklch(0.72 0 0 / 11%)",
-          "oklch(0.84 0 0 / 11%)",
-          "oklch(0.95 0 0 / 11%)"
+          "oklch(0.15 0.0179 299.1)",
+          "oklch(0.26 0.0179 299.1)",
+          "oklch(0.38 0.0179 299.1)",
+          "oklch(0.49 0.0179 299.1)",
+          "oklch(0.61 0.0179 299.1)",
+          "oklch(0.72 0.0179 299.1)",
+          "oklch(0.84 0.0179 299.1)",
+          "oklch(0.95 0.0179 299.1)"
         ]
       },
       "input": {
         "displayName": "Input",
         "tonalRamp": [
-          "oklch(0.15 0 0 / 15%)",
-          "oklch(0.26 0 0 / 15%)",
-          "oklch(0.38 0 0 / 15%)",
-          "oklch(0.49 0 0 / 15%)",
-          "oklch(0.61 0 0 / 15%)",
-          "oklch(0.72 0 0 / 15%)",
-          "oklch(0.84 0 0 / 15%)",
-          "oklch(0.95 0 0 / 15%)"
+          "oklch(0.15 0.0256 299.8)",
+          "oklch(0.26 0.0256 299.8)",
+          "oklch(0.38 0.0256 299.8)",
+          "oklch(0.49 0.0256 299.8)",
+          "oklch(0.61 0.0256 299.8)",
+          "oklch(0.72 0.0256 299.8)",
+          "oklch(0.84 0.0256 299.8)",
+          "oklch(0.95 0.0256 299.8)"
         ]
       },
       "ring": {
         "displayName": "Ring",
         "tonalRamp": [
-          "oklch(0.15 0.18 115)",
-          "oklch(0.26 0.18 115)",
-          "oklch(0.38 0.18 115)",
-          "oklch(0.49 0.18 115)",
-          "oklch(0.61 0.18 115)",
-          "oklch(0.72 0.18 115)",
-          "oklch(0.84 0.18 115)",
-          "oklch(0.95 0.18 115)"
+          "oklch(0.15 0.1236 300.2)",
+          "oklch(0.26 0.1236 300.2)",
+          "oklch(0.38 0.1236 300.2)",
+          "oklch(0.49 0.1236 300.2)",
+          "oklch(0.61 0.1236 300.2)",
+          "oklch(0.72 0.1236 300.2)",
+          "oklch(0.84 0.1236 300.2)",
+          "oklch(0.95 0.1236 300.2)"
         ]
       },
       "success": {
         "displayName": "Success",
         "tonalRamp": [
-          "oklch(0.15 0.17 150)",
-          "oklch(0.26 0.17 150)",
-          "oklch(0.38 0.17 150)",
-          "oklch(0.49 0.17 150)",
-          "oklch(0.61 0.17 150)",
-          "oklch(0.72 0.17 150)",
-          "oklch(0.84 0.17 150)",
-          "oklch(0.95 0.17 150)"
+          "oklch(0.15 0.0933 162.0)",
+          "oklch(0.26 0.0933 162.0)",
+          "oklch(0.38 0.0933 162.0)",
+          "oklch(0.49 0.0933 162.0)",
+          "oklch(0.61 0.0933 162.0)",
+          "oklch(0.72 0.0933 162.0)",
+          "oklch(0.84 0.0933 162.0)",
+          "oklch(0.95 0.0933 162.0)"
         ]
       },
       "warning": {
         "displayName": "Warning",
         "tonalRamp": [
-          "oklch(0.15 0.16 75)",
-          "oklch(0.26 0.16 75)",
-          "oklch(0.38 0.16 75)",
-          "oklch(0.49 0.16 75)",
-          "oklch(0.61 0.16 75)",
-          "oklch(0.72 0.16 75)",
-          "oklch(0.84 0.16 75)",
-          "oklch(0.95 0.16 75)"
+          "oklch(0.15 0.1041 84.1)",
+          "oklch(0.26 0.1041 84.1)",
+          "oklch(0.38 0.1041 84.1)",
+          "oklch(0.49 0.1041 84.1)",
+          "oklch(0.61 0.1041 84.1)",
+          "oklch(0.72 0.1041 84.1)",
+          "oklch(0.84 0.1041 84.1)",
+          "oklch(0.95 0.1041 84.1)"
         ]
       },
       "info": {
         "displayName": "Info",
         "tonalRamp": [
-          "oklch(0.15 0.14 255)",
-          "oklch(0.26 0.14 255)",
-          "oklch(0.38 0.14 255)",
-          "oklch(0.49 0.14 255)",
-          "oklch(0.61 0.14 255)",
-          "oklch(0.72 0.14 255)",
-          "oklch(0.84 0.14 255)",
-          "oklch(0.95 0.14 255)"
+          "oklch(0.15 0.0910 262.0)",
+          "oklch(0.26 0.0910 262.0)",
+          "oklch(0.38 0.0910 262.0)",
+          "oklch(0.49 0.0910 262.0)",
+          "oklch(0.61 0.0910 262.0)",
+          "oklch(0.72 0.0910 262.0)",
+          "oklch(0.84 0.0910 262.0)",
+          "oklch(0.95 0.0910 262.0)"
         ]
       },
       "light-background": {
         "displayName": "Light Background",
         "tonalRamp": [
-          "oklch(0.15 0.004 106)",
-          "oklch(0.26 0.004 106)",
-          "oklch(0.38 0.004 106)",
-          "oklch(0.49 0.004 106)",
-          "oklch(0.61 0.004 106)",
-          "oklch(0.72 0.004 106)",
-          "oklch(0.84 0.004 106)",
-          "oklch(0.95 0.004 106)"
+          "oklch(0.15 0.0000 0.0)",
+          "oklch(0.26 0.0000 0.0)",
+          "oklch(0.38 0.0000 0.0)",
+          "oklch(0.49 0.0000 0.0)",
+          "oklch(0.61 0.0000 0.0)",
+          "oklch(0.72 0.0000 0.0)",
+          "oklch(0.84 0.0000 0.0)",
+          "oklch(0.95 0.0000 0.0)"
         ]
       },
       "light-foreground": {
         "displayName": "Light Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.012 285)",
-          "oklch(0.26 0.012 285)",
-          "oklch(0.38 0.012 285)",
-          "oklch(0.49 0.012 285)",
-          "oklch(0.61 0.012 285)",
-          "oklch(0.72 0.012 285)",
-          "oklch(0.84 0.012 285)",
-          "oklch(0.95 0.012 285)"
+          "oklch(0.15 0.0170 280.1)",
+          "oklch(0.26 0.0170 280.1)",
+          "oklch(0.38 0.0170 280.1)",
+          "oklch(0.49 0.0170 280.1)",
+          "oklch(0.61 0.0170 280.1)",
+          "oklch(0.72 0.0170 280.1)",
+          "oklch(0.84 0.0170 280.1)",
+          "oklch(0.95 0.0170 280.1)"
         ]
       },
       "light-card": {
         "displayName": "Light Card",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0000 0.0)",
+          "oklch(0.26 0.0000 0.0)",
+          "oklch(0.38 0.0000 0.0)",
+          "oklch(0.49 0.0000 0.0)",
+          "oklch(0.61 0.0000 0.0)",
+          "oklch(0.72 0.0000 0.0)",
+          "oklch(0.84 0.0000 0.0)",
+          "oklch(0.95 0.0000 0.0)"
         ]
       },
       "light-card-foreground": {
         "displayName": "Light Card Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.012 285)",
-          "oklch(0.26 0.012 285)",
-          "oklch(0.38 0.012 285)",
-          "oklch(0.49 0.012 285)",
-          "oklch(0.61 0.012 285)",
-          "oklch(0.72 0.012 285)",
-          "oklch(0.84 0.012 285)",
-          "oklch(0.95 0.012 285)"
+          "oklch(0.15 0.0170 280.1)",
+          "oklch(0.26 0.0170 280.1)",
+          "oklch(0.38 0.0170 280.1)",
+          "oklch(0.49 0.0170 280.1)",
+          "oklch(0.61 0.0170 280.1)",
+          "oklch(0.72 0.0170 280.1)",
+          "oklch(0.84 0.0170 280.1)",
+          "oklch(0.95 0.0170 280.1)"
         ]
       },
       "light-popover": {
         "displayName": "Light Popover",
         "tonalRamp": [
-          "oklch(0.15 0 0)",
-          "oklch(0.26 0 0)",
-          "oklch(0.38 0 0)",
-          "oklch(0.49 0 0)",
-          "oklch(0.61 0 0)",
-          "oklch(0.72 0 0)",
-          "oklch(0.84 0 0)",
-          "oklch(0.95 0 0)"
+          "oklch(0.15 0.0000 0.0)",
+          "oklch(0.26 0.0000 0.0)",
+          "oklch(0.38 0.0000 0.0)",
+          "oklch(0.49 0.0000 0.0)",
+          "oklch(0.61 0.0000 0.0)",
+          "oklch(0.72 0.0000 0.0)",
+          "oklch(0.84 0.0000 0.0)",
+          "oklch(0.95 0.0000 0.0)"
         ]
       },
       "light-popover-foreground": {
         "displayName": "Light Popover Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.012 285)",
-          "oklch(0.26 0.012 285)",
-          "oklch(0.38 0.012 285)",
-          "oklch(0.49 0.012 285)",
-          "oklch(0.61 0.012 285)",
-          "oklch(0.72 0.012 285)",
-          "oklch(0.84 0.012 285)",
-          "oklch(0.95 0.012 285)"
+          "oklch(0.15 0.0170 280.1)",
+          "oklch(0.26 0.0170 280.1)",
+          "oklch(0.38 0.0170 280.1)",
+          "oklch(0.49 0.0170 280.1)",
+          "oklch(0.61 0.0170 280.1)",
+          "oklch(0.72 0.0170 280.1)",
+          "oklch(0.84 0.0170 280.1)",
+          "oklch(0.95 0.0170 280.1)"
         ]
       },
       "light-primary": {
         "displayName": "Light Primary",
         "tonalRamp": [
-          "oklch(0.15 0.18 115)",
-          "oklch(0.26 0.18 115)",
-          "oklch(0.38 0.18 115)",
-          "oklch(0.49 0.18 115)",
-          "oklch(0.61 0.18 115)",
-          "oklch(0.72 0.18 115)",
-          "oklch(0.84 0.18 115)",
-          "oklch(0.95 0.18 115)"
+          "oklch(0.15 0.2204 290.5)",
+          "oklch(0.26 0.2204 290.5)",
+          "oklch(0.38 0.2204 290.5)",
+          "oklch(0.49 0.2204 290.5)",
+          "oklch(0.61 0.2204 290.5)",
+          "oklch(0.72 0.2204 290.5)",
+          "oklch(0.84 0.2204 290.5)",
+          "oklch(0.95 0.2204 290.5)"
         ]
       },
       "light-primary-foreground": {
         "displayName": "Light Primary Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.03 115)",
-          "oklch(0.26 0.03 115)",
-          "oklch(0.38 0.03 115)",
-          "oklch(0.49 0.03 115)",
-          "oklch(0.61 0.03 115)",
-          "oklch(0.72 0.03 115)",
-          "oklch(0.84 0.03 115)",
-          "oklch(0.95 0.03 115)"
+          "oklch(0.15 0.0000 0.0)",
+          "oklch(0.26 0.0000 0.0)",
+          "oklch(0.38 0.0000 0.0)",
+          "oklch(0.49 0.0000 0.0)",
+          "oklch(0.61 0.0000 0.0)",
+          "oklch(0.72 0.0000 0.0)",
+          "oklch(0.84 0.0000 0.0)",
+          "oklch(0.95 0.0000 0.0)"
         ]
       },
       "light-primary-text": {
         "displayName": "Light Primary Text",
         "tonalRamp": [
-          "oklch(0.15 0.11 115)",
-          "oklch(0.26 0.11 115)",
-          "oklch(0.38 0.11 115)",
-          "oklch(0.49 0.11 115)",
-          "oklch(0.61 0.11 115)",
-          "oklch(0.72 0.11 115)",
-          "oklch(0.84 0.11 115)",
-          "oklch(0.95 0.11 115)"
+          "oklch(0.15 0.2198 289.3)",
+          "oklch(0.26 0.2198 289.3)",
+          "oklch(0.38 0.2198 289.3)",
+          "oklch(0.49 0.2198 289.3)",
+          "oklch(0.61 0.2198 289.3)",
+          "oklch(0.72 0.2198 289.3)",
+          "oklch(0.84 0.2198 289.3)",
+          "oklch(0.95 0.2198 289.3)"
         ]
       },
       "light-secondary": {
         "displayName": "Light Secondary",
         "tonalRamp": [
-          "oklch(0.15 0.007 106)",
-          "oklch(0.26 0.007 106)",
-          "oklch(0.38 0.007 106)",
-          "oklch(0.49 0.007 106)",
-          "oklch(0.61 0.007 106)",
-          "oklch(0.72 0.007 106)",
-          "oklch(0.84 0.007 106)",
-          "oklch(0.95 0.007 106)"
+          "oklch(0.15 0.0054 297.7)",
+          "oklch(0.26 0.0054 297.7)",
+          "oklch(0.38 0.0054 297.7)",
+          "oklch(0.49 0.0054 297.7)",
+          "oklch(0.61 0.0054 297.7)",
+          "oklch(0.72 0.0054 297.7)",
+          "oklch(0.84 0.0054 297.7)",
+          "oklch(0.95 0.0054 297.7)"
         ]
       },
       "light-secondary-foreground": {
         "displayName": "Light Secondary Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.012 285)",
-          "oklch(0.26 0.012 285)",
-          "oklch(0.38 0.012 285)",
-          "oklch(0.49 0.012 285)",
-          "oklch(0.61 0.012 285)",
-          "oklch(0.72 0.012 285)",
-          "oklch(0.84 0.012 285)",
-          "oklch(0.95 0.012 285)"
+          "oklch(0.15 0.0194 293.7)",
+          "oklch(0.26 0.0194 293.7)",
+          "oklch(0.38 0.0194 293.7)",
+          "oklch(0.49 0.0194 293.7)",
+          "oklch(0.61 0.0194 293.7)",
+          "oklch(0.72 0.0194 293.7)",
+          "oklch(0.84 0.0194 293.7)",
+          "oklch(0.95 0.0194 293.7)"
         ]
       },
       "light-muted": {
         "displayName": "Light Muted",
         "tonalRamp": [
-          "oklch(0.15 0.007 106)",
-          "oklch(0.26 0.007 106)",
-          "oklch(0.38 0.007 106)",
-          "oklch(0.49 0.007 106)",
-          "oklch(0.61 0.007 106)",
-          "oklch(0.72 0.007 106)",
-          "oklch(0.84 0.007 106)",
-          "oklch(0.95 0.007 106)"
+          "oklch(0.15 0.0027 286.4)",
+          "oklch(0.26 0.0027 286.4)",
+          "oklch(0.38 0.0027 286.4)",
+          "oklch(0.49 0.0027 286.4)",
+          "oklch(0.61 0.0027 286.4)",
+          "oklch(0.72 0.0027 286.4)",
+          "oklch(0.84 0.0027 286.4)",
+          "oklch(0.95 0.0027 286.4)"
         ]
       },
       "light-muted-foreground": {
         "displayName": "Light Muted Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.012 285)",
-          "oklch(0.26 0.012 285)",
-          "oklch(0.38 0.012 285)",
-          "oklch(0.49 0.012 285)",
-          "oklch(0.61 0.012 285)",
-          "oklch(0.72 0.012 285)",
-          "oklch(0.84 0.012 285)",
-          "oklch(0.95 0.012 285)"
+          "oklch(0.15 0.0218 288.9)",
+          "oklch(0.26 0.0218 288.9)",
+          "oklch(0.38 0.0218 288.9)",
+          "oklch(0.49 0.0218 288.9)",
+          "oklch(0.61 0.0218 288.9)",
+          "oklch(0.72 0.0218 288.9)",
+          "oklch(0.84 0.0218 288.9)",
+          "oklch(0.95 0.0218 288.9)"
         ]
       },
       "light-accent": {
         "displayName": "Light Accent",
         "tonalRamp": [
-          "oklch(0.15 0.02 112)",
-          "oklch(0.26 0.02 112)",
-          "oklch(0.38 0.02 112)",
-          "oklch(0.49 0.02 112)",
-          "oklch(0.61 0.02 112)",
-          "oklch(0.72 0.02 112)",
-          "oklch(0.84 0.02 112)",
-          "oklch(0.95 0.02 112)"
+          "oklch(0.15 0.0233 299.4)",
+          "oklch(0.26 0.0233 299.4)",
+          "oklch(0.38 0.0233 299.4)",
+          "oklch(0.49 0.0233 299.4)",
+          "oklch(0.61 0.0233 299.4)",
+          "oklch(0.72 0.0233 299.4)",
+          "oklch(0.84 0.0233 299.4)",
+          "oklch(0.95 0.0233 299.4)"
         ]
       },
       "light-accent-foreground": {
         "displayName": "Light Accent Foreground",
         "tonalRamp": [
-          "oklch(0.15 0.02 112)",
-          "oklch(0.26 0.02 112)",
-          "oklch(0.38 0.02 112)",
-          "oklch(0.49 0.02 112)",
-          "oklch(0.61 0.02 112)",
-          "oklch(0.72 0.02 112)",
-          "oklch(0.84 0.02 112)",
-          "oklch(0.95 0.02 112)"
+          "oklch(0.15 0.1816 291.2)",
+          "oklch(0.26 0.1816 291.2)",
+          "oklch(0.38 0.1816 291.2)",
+          "oklch(0.49 0.1816 291.2)",
+          "oklch(0.61 0.1816 291.2)",
+          "oklch(0.72 0.1816 291.2)",
+          "oklch(0.84 0.1816 291.2)",
+          "oklch(0.95 0.1816 291.2)"
         ]
       },
       "light-destructive": {
         "displayName": "Light Destructive",
         "tonalRamp": [
-          "oklch(0.15 0.22 25)",
-          "oklch(0.26 0.22 25)",
-          "oklch(0.38 0.22 25)",
-          "oklch(0.49 0.22 25)",
-          "oklch(0.61 0.22 25)",
-          "oklch(0.72 0.22 25)",
-          "oklch(0.84 0.22 25)",
-          "oklch(0.95 0.22 25)"
+          "oklch(0.15 0.1768 16.4)",
+          "oklch(0.26 0.1768 16.4)",
+          "oklch(0.38 0.1768 16.4)",
+          "oklch(0.49 0.1768 16.4)",
+          "oklch(0.61 0.1768 16.4)",
+          "oklch(0.72 0.1768 16.4)",
+          "oklch(0.84 0.1768 16.4)",
+          "oklch(0.95 0.1768 16.4)"
         ]
       },
       "light-border": {
         "displayName": "Light Border",
         "tonalRamp": [
-          "oklch(0.15 0.01 285 / 13%)",
-          "oklch(0.26 0.01 285 / 13%)",
-          "oklch(0.38 0.01 285 / 13%)",
-          "oklch(0.49 0.01 285 / 13%)",
-          "oklch(0.61 0.01 285 / 13%)",
-          "oklch(0.72 0.01 285 / 13%)",
-          "oklch(0.84 0.01 285 / 13%)",
-          "oklch(0.95 0.01 285 / 13%)"
+          "oklch(0.15 0.0081 293.9)",
+          "oklch(0.26 0.0081 293.9)",
+          "oklch(0.38 0.0081 293.9)",
+          "oklch(0.49 0.0081 293.9)",
+          "oklch(0.61 0.0081 293.9)",
+          "oklch(0.72 0.0081 293.9)",
+          "oklch(0.84 0.0081 293.9)",
+          "oklch(0.95 0.0081 293.9)"
         ]
       },
       "light-input": {
         "displayName": "Light Input",
         "tonalRamp": [
-          "oklch(0.15 0.01 285 / 18%)",
-          "oklch(0.26 0.01 285 / 18%)",
-          "oklch(0.38 0.01 285 / 18%)",
-          "oklch(0.49 0.01 285 / 18%)",
-          "oklch(0.61 0.01 285 / 18%)",
-          "oklch(0.72 0.01 285 / 18%)",
-          "oklch(0.84 0.01 285 / 18%)",
-          "oklch(0.95 0.01 285 / 18%)"
+          "oklch(0.15 0.0138 295.3)",
+          "oklch(0.26 0.0138 295.3)",
+          "oklch(0.38 0.0138 295.3)",
+          "oklch(0.49 0.0138 295.3)",
+          "oklch(0.61 0.0138 295.3)",
+          "oklch(0.72 0.0138 295.3)",
+          "oklch(0.84 0.0138 295.3)",
+          "oklch(0.95 0.0138 295.3)"
         ]
       },
       "light-ring": {
         "displayName": "Light Ring",
         "tonalRamp": [
-          "oklch(0.15 0.17 115)",
-          "oklch(0.26 0.17 115)",
-          "oklch(0.38 0.17 115)",
-          "oklch(0.49 0.17 115)",
-          "oklch(0.61 0.17 115)",
-          "oklch(0.72 0.17 115)",
-          "oklch(0.84 0.17 115)",
-          "oklch(0.95 0.17 115)"
+          "oklch(0.15 0.2093 292.1)",
+          "oklch(0.26 0.2093 292.1)",
+          "oklch(0.38 0.2093 292.1)",
+          "oklch(0.49 0.2093 292.1)",
+          "oklch(0.61 0.2093 292.1)",
+          "oklch(0.72 0.2093 292.1)",
+          "oklch(0.84 0.2093 292.1)",
+          "oklch(0.95 0.2093 292.1)"
         ]
       },
       "light-success": {
         "displayName": "Light Success",
         "tonalRamp": [
-          "oklch(0.15 0.15 150)",
-          "oklch(0.26 0.15 150)",
-          "oklch(0.38 0.15 150)",
-          "oklch(0.49 0.15 150)",
-          "oklch(0.61 0.15 150)",
-          "oklch(0.72 0.15 150)",
-          "oklch(0.84 0.15 150)",
-          "oklch(0.95 0.15 150)"
+          "oklch(0.15 0.0987 160.1)",
+          "oklch(0.26 0.0987 160.1)",
+          "oklch(0.38 0.0987 160.1)",
+          "oklch(0.49 0.0987 160.1)",
+          "oklch(0.61 0.0987 160.1)",
+          "oklch(0.72 0.0987 160.1)",
+          "oklch(0.84 0.0987 160.1)",
+          "oklch(0.95 0.0987 160.1)"
         ]
       },
       "light-warning": {
         "displayName": "Light Warning",
         "tonalRamp": [
-          "oklch(0.15 0.15 75)",
-          "oklch(0.26 0.15 75)",
-          "oklch(0.38 0.15 75)",
-          "oklch(0.49 0.15 75)",
-          "oklch(0.61 0.15 75)",
-          "oklch(0.72 0.15 75)",
-          "oklch(0.84 0.15 75)",
-          "oklch(0.95 0.15 75)"
+          "oklch(0.15 0.1105 75.8)",
+          "oklch(0.26 0.1105 75.8)",
+          "oklch(0.38 0.1105 75.8)",
+          "oklch(0.49 0.1105 75.8)",
+          "oklch(0.61 0.1105 75.8)",
+          "oklch(0.72 0.1105 75.8)",
+          "oklch(0.84 0.1105 75.8)",
+          "oklch(0.95 0.1105 75.8)"
         ]
       },
       "light-info": {
         "displayName": "Light Info",
         "tonalRamp": [
-          "oklch(0.15 0.14 255)",
-          "oklch(0.26 0.14 255)",
-          "oklch(0.38 0.14 255)",
-          "oklch(0.49 0.14 255)",
-          "oklch(0.61 0.14 255)",
-          "oklch(0.72 0.14 255)",
-          "oklch(0.84 0.14 255)",
-          "oklch(0.95 0.14 255)"
+          "oklch(0.15 0.1044 260.1)",
+          "oklch(0.26 0.1044 260.1)",
+          "oklch(0.38 0.1044 260.1)",
+          "oklch(0.49 0.1044 260.1)",
+          "oklch(0.61 0.1044 260.1)",
+          "oklch(0.72 0.1044 260.1)",
+          "oklch(0.84 0.1044 260.1)",
+          "oklch(0.95 0.1044 260.1)"
         ]
       }
     },
@@ -603,32 +658,22 @@
       {
         "name": "panel",
         "value": "none",
-        "purpose": "Room panels use borders and tonal separation; src/styles/room.css."
+        "purpose": "Flat Open room regions separated by semantic borders; src/styles/open-room.css."
       },
       {
         "name": "card-ring",
-        "value": "0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent)",
-        "purpose": "Shared Card ring; src/components/ui/card.tsx."
+        "value": "none",
+        "purpose": "Shared Card uses a 1px semantic border; src/components/ui/card.tsx."
       },
       {
         "name": "active-music-tab",
         "value": "0 1px 3px rgb(0 0 0 / .28)",
-        "purpose": "Active room music tab; src/styles/room.css."
-      },
-      {
-        "name": "media",
-        "value": "0 12px 32px rgb(0 0 0 / .45)",
-        "purpose": "Embedded provider media; src/styles/app.css."
+        "purpose": "Filled music-tab variant; src/styles/room.css."
       },
       {
         "name": "toast",
         "value": "0 10px 30px rgb(0 0 0 / .28)",
         "purpose": "Transient app toast; src/styles/app.css."
-      },
-      {
-        "name": "album-art",
-        "value": "0 20px 52px rgb(0 0 0 / .52)",
-        "purpose": "Album artwork in the playback stage; src/styles/room.css."
       }
     ],
     "motion": [
@@ -653,6 +698,21 @@
         "purpose": "Shared artwork motion primitive; src/styles/motion.css."
       },
       {
+        "name": "motion-reorder",
+        "value": "200ms",
+        "purpose": "Confirmed queue order changes; src/styles/motion.css."
+      },
+      {
+        "name": "motion-handoff",
+        "value": "800ms",
+        "purpose": "Incoming DJ avatar highlight; src/styles/motion.css."
+      },
+      {
+        "name": "motion-result",
+        "value": "280ms",
+        "purpose": "Revealed trivia answer proportions; src/styles/motion.css."
+      },
+      {
         "name": "motion-ease-out",
         "value": "cubic-bezier(.2,.8,.2,1)",
         "purpose": "Shared control and pane easing; src/styles/motion.css."
@@ -664,7 +724,7 @@
       },
       {
         "name": "landing-step",
-        "value": "160ms ease",
+        "value": "150ms ease",
         "purpose": "Landing demo step color and border changes; src/styles/landing.css."
       }
     ],
@@ -688,10 +748,6 @@
       {
         "name": "room-single-pane",
         "value": "1024px"
-      },
-      {
-        "name": "landing-gap-reduction",
-        "value": "1100px"
       }
     ]
   },
@@ -702,7 +758,7 @@
       "refersTo": "button-primary",
       "description": "Observed shared Button primary variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-primary\" type=\"button\">Sign in</button>",
-      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--primary, oklch(0.91 0.18 115));color:var(--primary-foreground, oklch(0.16 0.03 115));}.ds-btn-primary:hover:not(:disabled){background:color-mix(in oklch,var(--primary, oklch(0.91 0.18 115)) 85%,transparent);}.ds-btn-primary:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-primary:active:not(:disabled){translate:0 1px;}.ds-btn-primary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-primary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-primary{transition:none;}.ds-btn-primary:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-primary{transition:none;}:host-context(.reduced-motion) .ds-btn-primary:active{translate:none;}"
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--primary);color:var(--primary-foreground);}.ds-btn-primary:hover:not(:disabled){background:color-mix(in oklch,var(--primary) 85%,transparent);}.ds-btn-primary:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-primary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-primary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-primary{transition:none;}}"
     },
     {
       "name": "Outline Button",
@@ -710,7 +766,7 @@
       "refersTo": "button-outline",
       "description": "Observed shared Button outline variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-outline\" type=\"button\">Cancel</button>",
-      "css": ".ds-btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));border-color:var(--border, oklch(1 0 0 / 11%));background:var(--background, oklch(0.085 0.008 285));color:var(--foreground, oklch(0.97 0 0));}.ds-btn-outline:hover:not(:disabled){background:var(--muted, oklch(0.19 0.01 285));}.ds-btn-outline:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-outline:active:not(:disabled){translate:0 1px;}.ds-btn-outline:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-outline{border-color:var(--input, oklch(1 0 0 / 15%));background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 30%,transparent);}:host-context(.dark) .ds-btn-outline:hover{background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 50%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-outline{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-outline{transition:none;}.ds-btn-outline:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-outline{transition:none;}:host-context(.reduced-motion) .ds-btn-outline:active{translate:none;}"
+      "css": ".ds-btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));border-color:var(--input);background:var(--background);color:var(--foreground);}.ds-btn-outline:hover:not(:disabled){background:var(--secondary);}.ds-btn-outline:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-outline:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-outline{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-outline{transition:none;}}"
     },
     {
       "name": "Secondary Button",
@@ -718,7 +774,7 @@
       "refersTo": "button-secondary",
       "description": "Observed shared Button secondary variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-secondary\" type=\"button\">Replay</button>",
-      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--secondary, oklch(0.19 0.01 285));color:var(--secondary-foreground, oklch(0.97 0 0));}.ds-btn-secondary:hover:not(:disabled){background:color-mix(in oklch,var(--secondary, oklch(0.19 0.01 285)),var(--foreground, oklch(0.97 0 0)) 5%);}.ds-btn-secondary:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-secondary:active:not(:disabled){translate:0 1px;}.ds-btn-secondary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-secondary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-secondary{transition:none;}.ds-btn-secondary:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-secondary{transition:none;}:host-context(.reduced-motion) .ds-btn-secondary:active{translate:none;}"
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:var(--secondary);color:var(--secondary-foreground);}.ds-btn-secondary:hover:not(:disabled){background:color-mix(in oklch,var(--secondary),var(--foreground) 5%);}.ds-btn-secondary:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-secondary:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-secondary{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-secondary{transition:none;}}"
     },
     {
       "name": "Ghost Button",
@@ -726,7 +782,7 @@
       "refersTo": "button-ghost",
       "description": "Observed shared Button ghost variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-ghost\" type=\"button\">Close</button>",
-      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--foreground, oklch(0.97 0 0));}.ds-btn-ghost:hover:not(:disabled){background:var(--muted, oklch(0.19 0.01 285));}.ds-btn-ghost:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-ghost:active:not(:disabled){translate:0 1px;}.ds-btn-ghost:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-ghost:hover{background:color-mix(in oklch,var(--muted, oklch(0.19 0.01 285)) 50%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-ghost{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-ghost{transition:none;}.ds-btn-ghost:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-ghost{transition:none;}:host-context(.reduced-motion) .ds-btn-ghost:active{translate:none;}"
+      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--foreground);}.ds-btn-ghost:hover:not(:disabled){background:var(--muted);}.ds-btn-ghost:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-ghost:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-ghost{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-ghost{transition:none;}}"
     },
     {
       "name": "Destructive Button",
@@ -734,7 +790,7 @@
       "refersTo": "button-destructive",
       "description": "Observed shared Button destructive variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-destructive\" type=\"button\">Remove</button>",
-      "css": ".ds-btn-destructive{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 10%,transparent);color:var(--destructive, oklch(0.65 0.22 25));}.ds-btn-destructive:hover:not(:disabled){background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}.ds-btn-destructive:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-destructive:active:not(:disabled){translate:0 1px;}.ds-btn-destructive:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-destructive{background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}:host-context(.dark) .ds-btn-destructive:hover{background:color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 30%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-destructive{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-destructive{transition:none;}.ds-btn-destructive:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-destructive{transition:none;}:host-context(.reduced-motion) .ds-btn-destructive:active{translate:none;}"
+      "css": ".ds-btn-destructive{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:color-mix(in oklch,var(--destructive) 10%,transparent);color:var(--destructive);}.ds-btn-destructive:hover:not(:disabled){background:color-mix(in oklch,var(--destructive) 20%,transparent);}.ds-btn-destructive:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-destructive:disabled{pointer-events:none;opacity:.5;}:host-context(.dark) .ds-btn-destructive{background:color-mix(in oklch,var(--destructive) 20%,transparent);}:host-context(.dark) .ds-btn-destructive:hover{background:color-mix(in oklch,var(--destructive) 30%,transparent);}@media(max-width:640px),(pointer:coarse){.ds-btn-destructive{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-destructive{transition:none;}}"
     },
     {
       "name": "Link Button",
@@ -742,7 +798,7 @@
       "refersTo": "button-link",
       "description": "Observed shared Button link variant; use the production Base UI component.",
       "html": "<button class=\"ds-btn-link\" type=\"button\">View profile</button>",
-      "css": ".ds-btn-link{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg,.7rem);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--primary, oklch(0.91 0.18 115));text-underline-offset:4px;}.ds-btn-link:hover:not(:disabled){text-decoration:underline;}.ds-btn-link:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-btn-link:active:not(:disabled){translate:0 1px;}.ds-btn-link:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-link{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-link{transition:none;}.ds-btn-link:active{translate:none;}}:host-context(.reduced-motion) .ds-btn-link{transition:none;}:host-context(.reduced-motion) .ds-btn-link:active{translate:none;}"
+      "css": ".ds-btn-link{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--control-height);padding:0 12px;border:1px solid transparent;border-radius:var(--radius-lg);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;line-height:20px;letter-spacing:-.01em;white-space:nowrap;cursor:pointer;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));background:transparent;color:var(--primary-text);text-underline-offset:4px;}.ds-btn-link:hover:not(:disabled){text-decoration:underline;}.ds-btn-link:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-btn-link:disabled{pointer-events:none;opacity:.5;}@media(max-width:640px),(pointer:coarse){.ds-btn-link{min-width:44px;min-height:44px;}}@media(prefers-reduced-motion:reduce){.ds-btn-link{transition:none;}}"
     },
     {
       "name": "Input Field",
@@ -750,7 +806,7 @@
       "refersTo": "input-field",
       "description": "Shared labeled field with semantic border, focus, placeholder, and invalid state.",
       "html": "<label class=\"ds-field-label\" for=\"ds-room-name\">Room name</label><input class=\"ds-field\" id=\"ds-room-name\" placeholder=\"Room name\" />",
-      "css": ".ds-field-label{display:block;margin-bottom:8px;color:var(--foreground, oklch(0.97 0 0));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;font-weight:500;}.ds-field{width:100%;min-width:0;height:36px;padding:6px 12px;border:1px solid var(--input, oklch(1 0 0 / 15%));border-radius:var(--radius-lg,.7rem);background:transparent;color:var(--foreground, oklch(0.97 0 0));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:16px;line-height:24px;letter-spacing:-.01em;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));}.ds-field::placeholder{color:var(--muted-foreground, oklch(0.72 0.008 285));}.ds-field:hover:not(:disabled){border-color:var(--input, oklch(1 0 0 / 15%));}.ds-field:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:2px;border-color:var(--ring, oklch(0.91 0.18 115));box-shadow:0 0 0 3px color-mix(in oklch,var(--ring, oklch(0.91 0.18 115)) 50%,transparent);}.ds-field:disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}.ds-field[aria-invalid=true]{border-color:var(--destructive, oklch(0.65 0.22 25));box-shadow:0 0 0 3px color-mix(in oklch,var(--destructive, oklch(0.65 0.22 25)) 20%,transparent);}:host-context(.dark) .ds-field{background:color-mix(in oklch,var(--input, oklch(1 0 0 / 15%)) 30%,transparent);}@media(min-width:768px){.ds-field{font-size:14px;line-height:20px;}}@media(max-width:640px),(pointer:coarse){.ds-field{min-height:44px;font-size:16px;}}@media(prefers-reduced-motion:reduce){.ds-field{transition:none;}}"
+      "css": ".ds-field-label{display:block;margin-bottom:8px;color:var(--foreground);font-family:var(--font-sans);font-size:var(--text-size);font-weight:500;}.ds-field{width:100%;min-width:0;height:var(--control-height);padding:6px 12px;border:1px solid var(--input);border-radius:var(--radius-lg);background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:16px;line-height:24px;letter-spacing:-.01em;transition:background-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),border-color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),color var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1)),box-shadow var(--motion-control,150ms) var(--motion-ease-out,cubic-bezier(.2,.8,.2,1));}.ds-field::placeholder{color:var(--muted-foreground);}.ds-field:hover:not(:disabled){border-color:var(--input);}.ds-field:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-color:var(--ring);box-shadow:0 0 0 2px color-mix(in oklch,var(--ring) 50%,transparent);}.ds-field:disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}.ds-field[aria-invalid=true]{border-color:var(--destructive);box-shadow:0 0 0 2px color-mix(in oklch,var(--destructive) 20%,transparent);}@media(min-width:768px){.ds-field{font-size:var(--text-size);line-height:20px;}}@media(max-width:640px),(pointer:coarse){.ds-field{min-height:44px;font-size:16px;}}@media(prefers-reduced-motion:reduce){.ds-field{transition:none;}}"
     },
     {
       "name": "Primary Badge",
@@ -758,15 +814,15 @@
       "refersTo": "badge-primary",
       "description": "Compact primary status label from the shared Badge component.",
       "html": "<span class=\"ds-badge\">Owner</span>",
-      "css": ".ds-badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;width:fit-content;height:20px;padding:0 6px;border:1px solid transparent;border-radius:var(--radius-md,.56rem);background:var(--primary, oklch(0.91 0.18 115));color:var(--primary-foreground, oklch(0.16 0.03 115));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:11px;font-weight:500;line-height:16.5px;white-space:nowrap;}"
+      "css": ".ds-badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;width:fit-content;height:20px;padding:0 6px;border:1px solid transparent;border-radius:var(--radius-md);background:var(--primary);color:var(--primary-foreground);font-family:var(--font-sans);font-size:11px;font-weight:500;line-height:16.5px;white-space:nowrap;}"
     },
     {
       "name": "Card",
       "kind": "card",
       "refersTo": "card",
-      "description": "Shared card surface with the production ring, default spacing, and title.",
+      "description": "Shared card surface with a semantic border, default spacing, and title.",
       "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Appearance</h2><div class=\"ds-card-content\">Theme</div></section>",
-      "css": ".ds-card{display:flex;flex-direction:column;gap:16px;padding:16px 0;overflow:hidden;border-radius:var(--radius-xl,.98rem);background:var(--card, oklch(0.135 0.009 285));color:var(--card-foreground, oklch(0.97 0 0));box-shadow:0 0 0 1px color-mix(in oklch,var(--foreground, oklch(0.97 0 0)) 10%,transparent);font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;font-size:14px;line-height:20px;letter-spacing:-.01em;}.ds-card-title{margin:0;padding:0 16px;font-size:16px;font-weight:500;line-height:1.375;}.ds-card-content{padding:0 16px;}"
+      "css": ".ds-card{display:flex;flex-direction:column;gap:16px;padding:16px 0;overflow:hidden;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--card);color:var(--card-foreground);font-family:var(--font-sans);font-size:var(--text-size);line-height:20px;letter-spacing:-.01em;}.ds-card-title{margin:0;padding:0 16px;font-size:16px;font-weight:500;line-height:1.375;}.ds-card-content{padding:0 16px;}"
     },
     {
       "name": "Shared Navigation",
@@ -774,20 +830,20 @@
       "refersTo": "navigation",
       "description": "Observed shared header: main navigation, bottom border, compact mobile spacing, and visible focus.",
       "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a class=\"ds-nav-brand\" href=\"#home\">turntune</a><a class=\"ds-nav-link\" href=\"#rooms\" aria-current=\"page\">Rooms</a></nav>",
-      "css": ".ds-nav{display:flex;align-items:center;gap:24px;height:64px;padding:0 24px;border-bottom:1px solid var(--border, oklch(1 0 0 / 11%));background:var(--background, oklch(0.085 0.008 285));font-family:\"Geist Variable\", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;letter-spacing:-.01em;}.ds-nav-brand,.ds-nav-link{display:inline-flex;align-items:center;min-height:44px;min-width:44px;text-decoration:none;}.ds-nav-brand{color:var(--foreground, oklch(0.97 0 0));font-size:15px;font-weight:600;letter-spacing:-.02em;}.ds-nav-link{color:var(--muted-foreground, oklch(0.72 0.008 285));font-size:14px;font-weight:500;}.ds-nav-link:hover,.ds-nav-link[aria-current=page]{color:var(--foreground, oklch(0.97 0 0));}.ds-nav a:focus-visible{outline:2px solid var(--ring, oklch(0.91 0.18 115));outline-offset:4px;border-radius:4px;}@media(max-width:640px){.ds-nav{height:56px;padding:0 12px;gap:20px;}}"
+      "css": ".ds-nav{display:flex;align-items:center;gap:24px;height:56px;padding:0 24px;border-bottom:1px solid var(--border);background:var(--background);font-family:var(--font-sans);letter-spacing:-.01em;}.ds-nav-brand,.ds-nav-link{display:inline-flex;align-items:center;min-height:44px;min-width:44px;text-decoration:none;}.ds-nav-brand{color:var(--foreground);font-size:24px;font-weight:550;letter-spacing:-.04em;}.ds-nav-link{color:var(--muted-foreground);font-size:var(--text-size);font-weight:500;}.ds-nav-link:hover,.ds-nav-link[aria-current=page]{color:var(--foreground);}.ds-nav a:focus-visible{outline:2px solid var(--ring);outline-offset:4px;border-radius:4px;}@media(max-width:640px){.ds-nav{height:56px;padding:0 12px;gap:20px;}}"
     }
   ],
   "narrative": {
-    "overview": "The inherited interface uses Geist, solid semantic surfaces, compact room panes, and a lime accent. Shared Base UI controls carry the same states across public pages, rooms, and dialogs. Keep this existing system when extending the interface.",
+    "overview": "The app uses the approved Open room system throughout: Inter, neutral light/dark surfaces, violet actions, and compact shared controls. src/styles/shadcn.css owns the global tokens.",
     "keyCharacteristics": [
       "One sans-serif family with weight and size establishing hierarchy.",
-      "Dark and light semantic themes with a single lime brand accent.",
-      "Bordered surfaces, restrained depth, and clear control states.",
+      "Neutral light and dark themes with violet primary actions.",
+      "Flat bordered surfaces, compact rows, and clear control states.",
       "Labeled controls, visible focus, and reachable mobile actions."
     ],
     "rules": [],
     "dos": [
-      "**Do** preserve Geist, semantic dark/light themes, and the existing lime accent.",
+      "**Do** use the shared Inter font, semantic themes, and violet action tokens across the app.",
       "**Do** reuse shared controls and their keyboard, focus, disabled, and error states.",
       "**Do** keep mobile actions at least 44 pixels and honor reduced motion.",
       "**Do** use short labels and add supporting copy only when it enables the next action."

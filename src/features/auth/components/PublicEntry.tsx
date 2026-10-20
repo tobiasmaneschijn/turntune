@@ -55,10 +55,10 @@ function AuthScreen({
   const { t } = useTranslation("public");
 
   const form = path === "/sign-up"
-    ? <SignUpForm client={client} onNavigate={onNavigate} className="w-full" />
+    ? <SignUpForm client={client} onNavigate={onNavigate} showTitle={false} className="w-full" />
     : path === "/forgot-password"
-      ? <ForgotPasswordForm client={client} onNavigate={onNavigate} className="w-full" />
-      : <LoginForm client={client} onNavigate={onNavigate} className="w-full" />;
+      ? <ForgotPasswordForm client={client} onNavigate={onNavigate} showTitle={false} className="w-full" />
+      : <LoginForm client={client} onNavigate={onNavigate} showTitle={false} className="w-full" />;
 
   return (
     <main className="welcome auth-welcome">
@@ -89,7 +89,7 @@ export function PasswordRecoveryScreen({
         <div className="auth-intro">
           <h1>{t("accountRecovery")}</h1>
         </div>
-        <UpdatePasswordForm client={client} onComplete={onComplete} className="w-full" />
+        <UpdatePasswordForm client={client} onComplete={onComplete} showTitle={false} className="w-full" />
       </section>
       <footer className="app-release-footer"><AppVersion /></footer>
     </main>

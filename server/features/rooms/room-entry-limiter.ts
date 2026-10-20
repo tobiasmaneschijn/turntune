@@ -1,10 +1,12 @@
 import { BoundedCache } from "../../lib/bounded-cache.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 /** Verified identity and peer budgets survive socket reconnects. */
 export class RoomEntryLimiter {
   private attempts: BoundedCache<{ count: number; resetAt: number }>;
   constructor(private readonly now: () => number = Date.now) { this.attempts = new BoundedCache(10_000, now); }
   private consume(key: string, limit: number, windowMs: number) {
+    if (localRateLimitsDisabled()) return true;
     const value = this.attempts.get(key) || { count: 0, resetAt: this.now() + windowMs };
     if (value.count >= limit) return false;
     value.count++;

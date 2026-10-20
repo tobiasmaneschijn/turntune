@@ -1,0 +1,6 @@
+/* One short acknowledgement of a newly observed DJ turn. */
+.room-activity-avatar { position: relative; display: inline-flex; flex: 0 0 auto; border-radius: 50%; }
+.room-activity-avatar[data-handoff]::after { content: ""; position: absolute; inset: -3px; border: 1px solid var(--primary); border-radius: inherit; pointer-events: none; animation: room-dj-handoff var(--motion-handoff, 800ms) var(--motion-ease-out, ease-out); }
+@keyframes room-dj-handoff { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .room-activity-avatar[data-handoff]::after { display: none; animation: none; } }
+.reduced-motion .room-activity-avatar[data-handoff]::after { display: none; animation: none; }

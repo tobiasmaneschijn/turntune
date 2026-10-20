@@ -1,0 +1,14 @@
+/* The marker stays inside the row so dragging never changes list geometry. */
+.music-queue-pane .queue-track { position: relative; }
+.music-queue-pane .queue-track[data-drop-edge]::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary);
+  pointer-events: none;
+}
+.music-queue-pane .queue-track[data-drop-edge="before"]::after { top: 0; }
+.music-queue-pane .queue-track[data-drop-edge="after"]::after { bottom: 0; }

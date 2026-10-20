@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../../src/styles/shadcn.css";
 import "../../../../../src/styles/index.css";
 import { RoomAnnouncementBanner } from "../../../../../src/features/rooms/components/RoomAnnouncementBanner";

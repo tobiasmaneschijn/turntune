@@ -173,7 +173,7 @@ integrity, and notice hash; other missing notices still fail.
 
 ## npm dependency inventory
 
-Lockfile SHA-256: `baf9228fd965551f71af9fe3d90b9348b20c60b38baf3ff019e17cdd44ee71ea`.
+Lockfile SHA-256: `96754bf3ecdcc47301f9676e452478e37ad0d2023543b40878b1cbdef5fe73fb`.
 Generated from 463 locked package entries; 343 are installed.
 Scope: production and development dependencies, including optional platform packages.
 Identical notice texts are stored once and referenced by number. A parent-package
@@ -208,7 +208,7 @@ and the third-party notices shipped inside their build directories.
 | `@base-ui/react` | 1.9.0 | production | MIT | [46](#npm-notice-46) |
 | `@base-ui/utils` | 0.5.0 | production | MIT | [46](#npm-notice-46) |
 | `@electric-sql/pglite` | 0.5.8 | development | Apache-2.0 | [55](#npm-notice-55) |
-| `@emnapi/runtime` | 1.11.3 | production, optional | MIT | [177](#npm-notice-177) |
+| `@emnapi/runtime` | 1.11.3 | production, optional | MIT | [178](#npm-notice-178) |
 | `@esbuild/aix-ppc64` | 0.28.2 | development, optional | MIT | Not installed on this platform |
 | `@esbuild/android-arm` | 0.28.2 | development, optional | MIT | Not installed on this platform |
 | `@esbuild/android-arm64` | 0.28.2 | development, optional | MIT | Not installed on this platform |
@@ -234,15 +234,15 @@ and the third-party notices shipped inside their build directories.
 | `@esbuild/sunos-x64` | 0.28.2 | development, optional | MIT | Not installed on this platform |
 | `@esbuild/win32-arm64` | 0.28.2 | development, optional | MIT | Not installed on this platform |
 | `@esbuild/win32-ia32` | 0.28.2 | development, optional | MIT | Not installed on this platform |
-| `@esbuild/win32-x64` | 0.28.2 | development, optional | MIT | [178](#npm-notice-178) |
+| `@esbuild/win32-x64` | 0.28.2 | development, optional | MIT | [179](#npm-notice-179) |
 | `@floating-ui/core` | 1.8.0 | production | MIT | [65](#npm-notice-65) |
 | `@floating-ui/dom` | 1.8.0 | production | MIT | [65](#npm-notice-65) |
 | `@floating-ui/react-dom` | 2.1.9 | production | MIT | [65](#npm-notice-65) |
 | `@floating-ui/utils` | 0.2.12 | production | MIT | [65](#npm-notice-65) |
-| `@fontsource-variable/geist` | 5.3.0 | production | OFL-1.1 | [184](#npm-notice-184) |
-| `@grpc/grpc-js` | 1.14.6 | production | Apache-2.0 | [149](#npm-notice-149) |
-| `@grpc/proto-loader` | 0.8.1 | production | Apache-2.0 | [149](#npm-notice-149) |
-| `@img/colour` | 1.1.0 | production | MIT | [165](#npm-notice-165) |
+| `@fontsource-variable/inter` | 5.3.0 | production | OFL-1.1 | [144](#npm-notice-144) |
+| `@grpc/grpc-js` | 1.14.6 | production | Apache-2.0 | [150](#npm-notice-150) |
+| `@grpc/proto-loader` | 0.8.1 | production | Apache-2.0 | [150](#npm-notice-150) |
+| `@img/colour` | 1.1.0 | production | MIT | [166](#npm-notice-166) |
 | `@img/sharp-darwin-arm64` | 0.35.5 | production, optional | Apache-2.0 | Not installed on this platform |
 | `@img/sharp-darwin-x64` | 0.35.5 | production, optional | Apache-2.0 | Not installed on this platform |
 | `@img/sharp-freebsd-wasm32` | 0.35.5 | production, optional | Apache-2.0 | Not installed on this platform |
@@ -380,11 +380,11 @@ and the third-party notices shipped inside their build directories.
 | `@sentry/node` | 11.8.0 | production | MIT | [10](#npm-notice-10) |
 | `@sentry/opentelemetry` | 11.8.0 | production | MIT | [48](#npm-notice-48) |
 | `@sentry/react` | 11.8.0 | production | MIT | [132](#npm-notice-132) |
-| `@sentry/replay` | 11.8.0 | production | MIT | [156](#npm-notice-156) |
-| `@sentry/replay-canvas` | 11.8.0 | production | MIT | [180](#npm-notice-180) |
+| `@sentry/replay` | 11.8.0 | production | MIT | [157](#npm-notice-157) |
+| `@sentry/replay-canvas` | 11.8.0 | production | MIT | [181](#npm-notice-181) |
 | `@sentry/server-runtime-injection` | 11.8.0 | production | MIT | [89](#npm-notice-89), [137](#npm-notice-137) |
 | `@sentry/server-utils` | 11.8.0 | production | MIT | [89](#npm-notice-89), [85](#npm-notice-85) |
-| `@socket.io/component-emitter` | 3.1.2 | production | MIT | [146](#npm-notice-146) |
+| `@socket.io/component-emitter` | 3.1.2 | production | MIT | [147](#npm-notice-147) |
 | `@supabase/auth-js` | 2.117.3 | production | MIT | [50](#npm-notice-50) |
 | `@supabase/functions-js` | 2.117.3 | production | MIT | [50](#npm-notice-50) |
 | `@supabase/middleware` | 1.0.0 | production | MIT | [135](#npm-notice-135) |
@@ -411,41 +411,41 @@ and the third-party notices shipped inside their build directories.
 | `@tailwindcss/vite` | 4.3.3 | development | MIT | [192](#npm-notice-192) |
 | `@twemoji/api` | 17.0.3 | production | MIT AND CC-BY-4.0 | [40](#npm-notice-40) |
 | `@twemoji/parser` | 17.0.2 | production | MIT | [14](#npm-notice-14) |
-| `@types/babel__core` | 7.20.5 | development | MIT | [163](#npm-notice-163) |
-| `@types/babel__generator` | 7.27.0 | development | MIT | [163](#npm-notice-163) |
-| `@types/babel__template` | 7.4.4 | development | MIT | [163](#npm-notice-163) |
-| `@types/babel__traverse` | 7.28.0 | development | MIT | [163](#npm-notice-163) |
-| `@types/body-parser` | 1.19.6 | development | MIT | [163](#npm-notice-163) |
-| `@types/connect` | 3.4.38 | development | MIT | [163](#npm-notice-163) |
-| `@types/cors` | 2.8.19 | production | MIT | [163](#npm-notice-163) |
-| `@types/estree` | 1.0.9 | production | MIT | [163](#npm-notice-163) |
-| `@types/express` | 5.0.6 | development | MIT | [163](#npm-notice-163) |
-| `@types/express-serve-static-core` | 5.1.3 | development | MIT | [163](#npm-notice-163) |
-| `@types/http-errors` | 2.0.5 | development | MIT | [163](#npm-notice-163) |
-| `@types/node` | 24.19.2 | production | MIT | [163](#npm-notice-163) |
-| `@types/proxy-addr` | 2.0.3 | development | MIT | [163](#npm-notice-163) |
-| `@types/qs` | 6.15.1 | development | MIT | [163](#npm-notice-163) |
-| `@types/range-parser` | 1.2.7 | development | MIT | [163](#npm-notice-163) |
-| `@types/react` | 19.3.0 | production | MIT | [163](#npm-notice-163) |
-| `@types/react-dom` | 19.3.0 | development | MIT | [163](#npm-notice-163) |
-| `@types/send` | 1.2.1 | development | MIT | [163](#npm-notice-163) |
-| `@types/serve-static` | 2.2.0 | development | MIT | [163](#npm-notice-163) |
-| `@types/ws` | 8.18.2 | production | MIT | [163](#npm-notice-163) |
+| `@types/babel__core` | 7.20.5 | development | MIT | [164](#npm-notice-164) |
+| `@types/babel__generator` | 7.27.0 | development | MIT | [164](#npm-notice-164) |
+| `@types/babel__template` | 7.4.4 | development | MIT | [164](#npm-notice-164) |
+| `@types/babel__traverse` | 7.28.0 | development | MIT | [164](#npm-notice-164) |
+| `@types/body-parser` | 1.19.6 | development | MIT | [164](#npm-notice-164) |
+| `@types/connect` | 3.4.38 | development | MIT | [164](#npm-notice-164) |
+| `@types/cors` | 2.8.19 | production | MIT | [164](#npm-notice-164) |
+| `@types/estree` | 1.0.9 | production | MIT | [164](#npm-notice-164) |
+| `@types/express` | 5.0.6 | development | MIT | [164](#npm-notice-164) |
+| `@types/express-serve-static-core` | 5.1.3 | development | MIT | [164](#npm-notice-164) |
+| `@types/http-errors` | 2.0.5 | development | MIT | [164](#npm-notice-164) |
+| `@types/node` | 24.19.2 | production | MIT | [164](#npm-notice-164) |
+| `@types/proxy-addr` | 2.0.3 | development | MIT | [164](#npm-notice-164) |
+| `@types/qs` | 6.15.1 | development | MIT | [164](#npm-notice-164) |
+| `@types/range-parser` | 1.2.7 | development | MIT | [164](#npm-notice-164) |
+| `@types/react` | 19.3.0 | production | MIT | [164](#npm-notice-164) |
+| `@types/react-dom` | 19.3.0 | development | MIT | [164](#npm-notice-164) |
+| `@types/send` | 1.2.1 | development | MIT | [164](#npm-notice-164) |
+| `@types/serve-static` | 2.2.0 | development | MIT | [164](#npm-notice-164) |
+| `@types/ws` | 8.18.2 | production | MIT | [164](#npm-notice-164) |
 | `@vitejs/plugin-react` | 4.7.0 | development | MIT | [186](#npm-notice-186) |
 | `accepts` | 2.0.0 | production | MIT | [117](#npm-notice-117) |
-| `ansi-regex` | 5.0.1 | production | MIT | [152](#npm-notice-152) |
-| `ansi-styles` | 4.3.0 | production | MIT | [152](#npm-notice-152) |
+| `ansi-regex` | 5.0.1 | production | MIT | [153](#npm-notice-153) |
+| `ansi-styles` | 4.3.0 | production | MIT | [153](#npm-notice-153) |
 | `balanced-match` | 4.0.4 | production | MIT | [19](#npm-notice-19) |
 | `baseline-browser-mapping` | 2.11.28 | production | Apache-2.0 | [38](#npm-notice-38) |
 | `body-parser` | 2.3.0 | production | MIT | [83](#npm-notice-83) |
-| `brace-expansion` | 5.0.12 | production | MIT | [179](#npm-notice-179) |
+| `brace-expansion` | 5.0.12 | production | MIT | [180](#npm-notice-180) |
 | `browserslist` | 4.29.3 | production | MIT | [24](#npm-notice-24) |
 | `bytes` | 3.1.2 | production | MIT | [87](#npm-notice-87) |
 | `call-bind-apply-helpers` | 1.0.2 | production | MIT | [33](#npm-notice-33) |
 | `call-bound` | 1.0.4 | production | MIT | [33](#npm-notice-33) |
 | `caniuse-lite` | 1.0.30001815 | production | CC-BY-4.0 | [69](#npm-notice-69) |
-| `chalk` | 4.1.2 | development | MIT | [152](#npm-notice-152) |
-| `supports-color` | 7.2.0 | development | MIT | [152](#npm-notice-152) |
+| `chalk` | 4.1.2 | development | MIT | [153](#npm-notice-153) |
+| `supports-color` | 7.2.0 | development | MIT | [153](#npm-notice-153) |
 | `cjs-module-lexer` | 2.3.0 | production | MIT | [7](#npm-notice-7) |
 | `class-variance-authority` | 0.7.1 | production | Apache-2.0 | [61](#npm-notice-61) |
 | `cliui` | 8.0.1 | production | ISC | [118](#npm-notice-118) |
@@ -460,19 +460,19 @@ and the third-party notices shipped inside their build directories.
 | `cookie-signature` | 1.2.2 | production | MIT | [142](#npm-notice-142) |
 | `cors` | 2.8.6 | production | MIT | [67](#npm-notice-67) |
 | `csstype` | 3.2.3 | production | MIT | [64](#npm-notice-64) |
-| `debug` | 4.4.3 | production | MIT | [164](#npm-notice-164) |
+| `debug` | 4.4.3 | production | MIT | [165](#npm-notice-165) |
 | `depd` | 2.0.0 | production | MIT | [188](#npm-notice-188) |
-| `detect-libc` | 2.1.2 | production | Apache-2.0 | [149](#npm-notice-149) |
-| `dotenv` | 17.4.2 | production | BSD-2-Clause | [176](#npm-notice-176) |
+| `detect-libc` | 2.1.2 | production | Apache-2.0 | [150](#npm-notice-150) |
+| `dotenv` | 17.4.2 | production | BSD-2-Clause | [177](#npm-notice-177) |
 | `dunder-proto` | 1.0.1 | production | MIT | [37](#npm-notice-37) |
-| `ee-first` | 1.1.1 | production | MIT | [157](#npm-notice-157) |
+| `ee-first` | 1.1.1 | production | MIT | [158](#npm-notice-158) |
 | `electron-to-chromium` | 1.5.453 | production | ISC | [104](#npm-notice-104) |
 | `emoji-picker-react` | 4.22.3 | production | MIT | [2](#npm-notice-2) |
-| `emoji-regex` | 8.0.0 | production | MIT | [170](#npm-notice-170) |
+| `emoji-regex` | 8.0.0 | production | MIT | [171](#npm-notice-171) |
 | `encodeurl` | 2.0.0 | production | MIT | [130](#npm-notice-130) |
 | `engine.io` | 6.6.11 | production | MIT | [134](#npm-notice-134) |
-| `engine.io-client` | 6.6.7 | production | MIT | [162](#npm-notice-162) |
-| `engine.io-parser` | 5.2.3 | production | MIT | [162](#npm-notice-162) |
+| `engine.io-client` | 6.6.7 | production | MIT | [163](#npm-notice-163) |
+| `engine.io-parser` | 5.2.3 | production | MIT | [163](#npm-notice-163) |
 | `accepts` | 1.3.8 | production | MIT | [117](#npm-notice-117) |
 | `mime-db` | 1.52.0 | production | MIT | [98](#npm-notice-98) |
 | `mime-types` | 2.1.35 | production | MIT | [117](#npm-notice-117) |
@@ -482,7 +482,7 @@ and the third-party notices shipped inside their build directories.
 | `es-errors` | 1.3.0 | production | MIT | [33](#npm-notice-33) |
 | `es-module-lexer` | 3.0.4 | production | MIT | [45](#npm-notice-45) |
 | `es-object-atoms` | 1.1.2 | production | MIT | [33](#npm-notice-33) |
-| `esbuild` | 0.28.2 | development | MIT | [178](#npm-notice-178) |
+| `esbuild` | 0.28.2 | development | MIT | [179](#npm-notice-179) |
 | `escalade` | 3.2.0 | production | MIT | [32](#npm-notice-32) |
 | `escape-html` | 1.0.3 | production | MIT | [128](#npm-notice-128) |
 | `etag` | 1.8.1 | production | MIT | [44](#npm-notice-44) |
@@ -498,14 +498,14 @@ and the third-party notices shipped inside their build directories.
 | `gensync` | 1.0.0-beta.2 | production | MIT | [28](#npm-notice-28) |
 | `get-caller-file` | 2.0.5 | production | ISC | [141](#npm-notice-141) |
 | `get-intrinsic` | 1.3.0 | production | MIT | [1](#npm-notice-1) |
-| `get-proto` | 1.0.1 | production | MIT | [144](#npm-notice-144) |
-| `glob` | 13.0.6 | production | BlueOak-1.0.0 | [171](#npm-notice-171) |
+| `get-proto` | 1.0.1 | production | MIT | [145](#npm-notice-145) |
+| `glob` | 13.0.6 | production | BlueOak-1.0.0 | [172](#npm-notice-172) |
 | `gopd` | 1.2.0 | production | MIT | [34](#npm-notice-34) |
 | `graceful-fs` | 4.2.11 | production | ISC | [73](#npm-notice-73) |
-| `has-flag` | 4.0.0 | production | MIT | [152](#npm-notice-152) |
+| `has-flag` | 4.0.0 | production | MIT | [153](#npm-notice-153) |
 | `has-symbols` | 1.1.0 | production | MIT | [191](#npm-notice-191) |
 | `hasown` | 2.0.4 | production | MIT | [100](#npm-notice-100) |
-| `html-parse-stringify` | 4.0.1 | production | MIT | [168](#npm-notice-168) |
+| `html-parse-stringify` | 4.0.1 | production | MIT | [169](#npm-notice-169) |
 | `http-errors` | 2.0.1 | production | MIT | [63](#npm-notice-63) |
 | `i18next` | 26.5.2 | production | MIT | [105](#npm-notice-105) |
 | `i18next-browser-languagedetector` | 8.2.1 | production | MIT | [114](#npm-notice-114) |
@@ -515,16 +515,16 @@ and the third-party notices shipped inside their build directories.
 | `import-in-the-middle` | 3.5.2 | production | Apache-2.0 | [38](#npm-notice-38), [26](#npm-notice-26), [78](#npm-notice-78) |
 | `inherits` | 2.0.4 | production | ISC | [30](#npm-notice-30) |
 | `ipaddr.js` | 1.9.1 | production | MIT | [124](#npm-notice-124) |
-| `is-fullwidth-code-point` | 3.0.0 | production | MIT | [152](#npm-notice-152) |
+| `is-fullwidth-code-point` | 3.0.0 | production | MIT | [153](#npm-notice-153) |
 | `is-promise` | 4.0.0 | production | MIT | [39](#npm-notice-39) |
 | `isexe` | 2.0.0 | development | ISC | [8](#npm-notice-8) |
 | `jiti` | 2.7.0 | development | MIT | [185](#npm-notice-185) |
-| `jose` | 6.2.12 | production | MIT | [160](#npm-notice-160) |
+| `jose` | 6.2.12 | production | MIT | [161](#npm-notice-161) |
 | `js-tokens` | 4.0.0 | production | MIT | [84](#npm-notice-84) |
-| `jsesc` | 3.1.0 | production | MIT | [170](#npm-notice-170) |
+| `jsesc` | 3.1.0 | production | MIT | [171](#npm-notice-171) |
 | `json5` | 2.2.3 | production | MIT | [59](#npm-notice-59) |
 | `jsonfile` | 5.0.0 | production | MIT | [81](#npm-notice-81) |
-| `lightningcss` | 1.32.0 | development | MPL-2.0 | [174](#npm-notice-174) |
+| `lightningcss` | 1.32.0 | development | MPL-2.0 | [175](#npm-notice-175) |
 | `lightningcss-android-arm64` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
 | `lightningcss-darwin-arm64` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
 | `lightningcss-darwin-x64` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
@@ -535,34 +535,34 @@ and the third-party notices shipped inside their build directories.
 | `lightningcss-linux-x64-gnu` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
 | `lightningcss-linux-x64-musl` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
 | `lightningcss-win32-arm64-msvc` | 1.32.0 | development, optional | MPL-2.0 | Not installed on this platform |
-| `lightningcss-win32-x64-msvc` | 1.32.0 | development, optional | MPL-2.0 | [174](#npm-notice-174) |
+| `lightningcss-win32-x64-msvc` | 1.32.0 | development, optional | MPL-2.0 | [175](#npm-notice-175) |
 | `lodash.camelcase` | 4.3.0 | production | MIT | [106](#npm-notice-106) |
 | `long` | 5.3.2 | production | Apache-2.0 | [53](#npm-notice-53) |
 | `lru-cache` | 5.1.1 | production | ISC | [8](#npm-notice-8) |
-| `lucide-react` | 1.56.0 | production | ISC | [175](#npm-notice-175) |
-| `magic-string` | 0.30.21 | production | MIT | [153](#npm-notice-153) |
+| `lucide-react` | 1.56.0 | production | ISC | [176](#npm-notice-176) |
+| `magic-string` | 0.30.21 | production | MIT | [154](#npm-notice-154) |
 | `math-intrinsics` | 1.1.0 | production | MIT | [37](#npm-notice-37) |
 | `media-typer` | 1.1.1 | production | MIT | [4](#npm-notice-4) |
-| `merge-descriptors` | 2.0.0 | production | MIT | [158](#npm-notice-158) |
+| `merge-descriptors` | 2.0.0 | production | MIT | [159](#npm-notice-159) |
 | `mime-db` | 1.54.0 | production | MIT | [98](#npm-notice-98) |
 | `mime-types` | 3.0.2 | production | MIT | [117](#npm-notice-117) |
 | `minimatch` | 10.2.6 | production | BlueOak-1.0.0 | [122](#npm-notice-122) |
 | `minipass` | 7.1.3 | production | BlueOak-1.0.0 | [18](#npm-notice-18) |
-| `module-details-from-path` | 1.0.4 | production | MIT | [145](#npm-notice-145) |
-| `ms` | 2.1.3 | production | MIT | [173](#npm-notice-173) |
+| `module-details-from-path` | 1.0.4 | production | MIT | [146](#npm-notice-146) |
+| `ms` | 2.1.3 | production | MIT | [174](#npm-notice-174) |
 | `nanoid` | 3.3.20 | development | MIT | [27](#npm-notice-27) |
 | `negotiator` | 1.1.0 | production | MIT | [91](#npm-notice-91) |
 | `next-themes` | 0.4.6 | production | MIT | [108](#npm-notice-108) |
 | `node-releases` | 2.0.58 | production | MIT | [126](#npm-notice-126) |
 | `object-assign` | 4.1.1 | production | MIT | [23](#npm-notice-23) |
-| `object-inspect` | 1.13.4 | production | MIT | [167](#npm-notice-167) |
+| `object-inspect` | 1.13.4 | production | MIT | [168](#npm-notice-168) |
 | `on-finished` | 2.4.1 | production | MIT | [60](#npm-notice-60) |
 | `once` | 1.4.0 | production | ISC | [8](#npm-notice-8) |
 | `oxc-parser` | 0.152.0 | production | MIT | [58](#npm-notice-58) |
 | `parseurl` | 1.3.3 | production | MIT | [86](#npm-notice-86) |
 | `path-scurry` | 2.0.2 | production | BlueOak-1.0.0 | [18](#npm-notice-18) |
 | `lru-cache` | 11.5.3 | production | BlueOak-1.0.0 | [18](#npm-notice-18) |
-| `path-to-regexp` | 8.4.2 | production | MIT | [169](#npm-notice-169) |
+| `path-to-regexp` | 8.4.2 | production | MIT | [170](#npm-notice-170) |
 | `picocolors` | 1.1.1 | production | ISC | [189](#npm-notice-189) |
 | `picomatch` | 4.0.7 | development | MIT | [99](#npm-notice-99) |
 | `playwright` | 1.64.0 | development | Apache-2.0 | [140](#npm-notice-140), [82](#npm-notice-82), [133](#npm-notice-133) |
@@ -575,25 +575,25 @@ and the third-party notices shipped inside their build directories.
 | `qs` | 6.16.0 | production | BSD-3-Clause | [15](#npm-notice-15) |
 | `range-parser` | 1.3.0 | production | MIT | [107](#npm-notice-107) |
 | `raw-body` | 3.0.2 | production | MIT | [131](#npm-notice-131) |
-| `react` | 19.3.0 | production | MIT | [155](#npm-notice-155) |
-| `react-dom` | 19.3.0 | production | MIT | [155](#npm-notice-155) |
+| `react` | 19.3.0 | production | MIT | [156](#npm-notice-156) |
+| `react-dom` | 19.3.0 | production | MIT | [156](#npm-notice-156) |
 | `react-i18next` | 17.1.0 | production | MIT | [119](#npm-notice-119) |
 | `@babel/runtime` | 7.29.10 | production | MIT | [97](#npm-notice-97) |
-| `react-refresh` | 0.17.0 | development | MIT | [155](#npm-notice-155) |
-| `react-resizable-panels` | 4.14.5 | production | MIT | [159](#npm-notice-159) |
-| `require-directory` | 2.1.1 | production | MIT | [151](#npm-notice-151) |
+| `react-refresh` | 0.17.0 | development | MIT | [156](#npm-notice-156) |
+| `react-resizable-panels` | 4.14.5 | production | MIT | [160](#npm-notice-160) |
+| `require-directory` | 2.1.1 | production | MIT | [152](#npm-notice-152) |
 | `require-in-the-middle` | 8.0.1 | production | MIT | [111](#npm-notice-111) |
 | `reselect` | 5.3.0 | production | MIT | [121](#npm-notice-121) |
 | `rollup` | 4.64.6 | production | MIT | [93](#npm-notice-93) |
 | `router` | 2.2.0 | production | MIT | [56](#npm-notice-56) |
 | `rxjs` | 7.8.2 | development | Apache-2.0 | [120](#npm-notice-120) |
 | `safer-buffer` | 2.1.2 | production | MIT | [123](#npm-notice-123) |
-| `scheduler` | 0.28.0 | production | MIT | [155](#npm-notice-155) |
+| `scheduler` | 0.28.0 | production | MIT | [156](#npm-notice-156) |
 | `semver` | 6.3.1 | production | ISC | [8](#npm-notice-8) |
-| `send` | 1.2.1 | production | MIT | [181](#npm-notice-181) |
+| `send` | 1.2.1 | production | MIT | [182](#npm-notice-182) |
 | `sentry` | 0.45.0 | production | FSL-1.1-Apache-2.0 | [52](#npm-notice-52), [11](#npm-notice-11) |
-| `serve-static` | 2.2.1 | production | MIT | [161](#npm-notice-161) |
-| `setprototypeof` | 1.2.0 | production | ISC | [166](#npm-notice-166) |
+| `serve-static` | 2.2.1 | production | MIT | [162](#npm-notice-162) |
+| `setprototypeof` | 1.2.0 | production | ISC | [167](#npm-notice-167) |
 | `sharp` | 0.35.5 | production | Apache-2.0 | [113](#npm-notice-113) |
 | `semver` | 7.8.5 | production | ISC | [8](#npm-notice-8) |
 | `shell-quote` | 1.12.0 | development | MIT | [92](#npm-notice-92) |
@@ -602,7 +602,7 @@ and the third-party notices shipped inside their build directories.
 | `side-channel-list` | 1.0.1 | production | MIT | [33](#npm-notice-33) |
 | `side-channel-map` | 1.0.1 | production | MIT | [33](#npm-notice-33) |
 | `side-channel-weakmap` | 1.0.2 | production | MIT | [80](#npm-notice-80) |
-| `socket.io` | 4.8.4 | production | MIT | [162](#npm-notice-162) |
+| `socket.io` | 4.8.4 | production | MIT | [163](#npm-notice-163) |
 | `socket.io-adapter` | 2.5.8 | production | MIT | [62](#npm-notice-62) |
 | `socket.io-client` | 4.8.4 | production | MIT | [72](#npm-notice-72) |
 | `socket.io-parser` | 4.2.7 | production | MIT | [62](#npm-notice-62) |
@@ -612,10 +612,10 @@ and the third-party notices shipped inside their build directories.
 | `negotiator` | 0.6.3 | production | MIT | [91](#npm-notice-91) |
 | `sonner` | 2.0.8 | production | MIT | [88](#npm-notice-88) |
 | `source-map-js` | 1.2.2 | development | BSD-3-Clause | [43](#npm-notice-43) |
-| `statuses` | 2.0.2 | production | MIT | [150](#npm-notice-150) |
+| `statuses` | 2.0.2 | production | MIT | [151](#npm-notice-151) |
 | `std-env` | 4.3.0 | production | MIT | [185](#npm-notice-185) |
-| `string-width` | 4.2.3 | production | MIT | [152](#npm-notice-152) |
-| `strip-ansi` | 6.0.1 | production | MIT | [152](#npm-notice-152) |
+| `string-width` | 4.2.3 | production | MIT | [153](#npm-notice-153) |
+| `strip-ansi` | 6.0.1 | production | MIT | [153](#npm-notice-153) |
 | `supports-color` | 8.1.1 | production | MIT | [16](#npm-notice-16) |
 | `tailwind-merge` | 3.7.0 | production | MIT | [127](#npm-notice-127) |
 | `tailwindcss` | 4.3.3 | development | MIT | [192](#npm-notice-192) |
@@ -627,27 +627,27 @@ and the third-party notices shipped inside their build directories.
 | `tsx` | 4.23.15 | development | MIT | [96](#npm-notice-96) |
 | `tw-animate-css` | 1.4.0 | development | MIT | [6](#npm-notice-6) |
 | `type-is` | 2.1.0 | production | MIT | [83](#npm-notice-83) |
-| `typescript` | 5.9.3 | production | Apache-2.0 | [148](#npm-notice-148), [36](#npm-notice-36) |
+| `typescript` | 5.9.3 | production | Apache-2.0 | [149](#npm-notice-149), [36](#npm-notice-36) |
 | `undici` | 6.29.1 | development | MIT | [193](#npm-notice-193) |
 | `undici-types` | 7.24.6 | production | MIT | [193](#npm-notice-193) |
 | `universalify` | 0.1.2 | production | MIT | [29](#npm-notice-29) |
 | `unpipe` | 1.0.0 | production | MIT | [5](#npm-notice-5) |
 | `update-browserslist-db` | 1.3.4 | production | MIT | [13](#npm-notice-13) |
-| `use-sync-external-store` | 1.7.0 | production | MIT | [155](#npm-notice-155) |
+| `use-sync-external-store` | 1.7.0 | production | MIT | [156](#npm-notice-156) |
 | `vary` | 1.1.2 | production | MIT | [4](#npm-notice-4) |
 | `vite` | 7.3.7 | development | MIT | [115](#npm-notice-115) |
-| `web-vitals` | 6.2.3 | production | Apache-2.0 | [147](#npm-notice-147) |
+| `web-vitals` | 6.2.3 | production | Apache-2.0 | [148](#npm-notice-148) |
 | `which` | 2.0.2 | development | ISC | [8](#npm-notice-8) |
 | `wrap-ansi` | 7.0.0 | production | MIT | [16](#npm-notice-16) |
 | `wrappy` | 1.0.2 | production | ISC | [8](#npm-notice-8) |
 | `ws` | 8.21.3 | production | MIT | [79](#npm-notice-79) |
-| `xmlhttprequest-ssl` | 2.1.2 | production | MIT (from LICENSE; metadata absent) | [172](#npm-notice-172) |
+| `xmlhttprequest-ssl` | 2.1.2 | production | MIT (from LICENSE; metadata absent) | [173](#npm-notice-173) |
 | `y18n` | 5.0.8 | production | ISC | [139](#npm-notice-139) |
 | `yallist` | 3.1.1 | production | ISC | [8](#npm-notice-8) |
-| `yaml` | 2.9.1 | production | ISC | [154](#npm-notice-154) |
-| `yargs` | 17.7.2 | production | MIT | [182](#npm-notice-182) |
+| `yaml` | 2.9.1 | production | ISC | [155](#npm-notice-155) |
+| `yargs` | 17.7.2 | production | MIT | [183](#npm-notice-183) |
 | `yargs-parser` | 21.1.1 | production | ISC | [57](#npm-notice-57) |
-| `zod` | 3.25.76 | production | MIT | [183](#npm-notice-183) |
+| `zod` | 3.25.76 | production | MIT | [184](#npm-notice-184) |
 
 ## npm license and notice texts
 
@@ -11674,6 +11674,110 @@ SOFTWARE.
 
 Copied from:
 
+- `node_modules/@fontsource-variable/inter/LICENSE`
+
+```text
+Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter) Inter-Italic[opsz,wght].ttf: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+```
+
+<a id="npm-notice-145"></a>
+
+### Notice 145
+
+Copied from:
+
 - `node_modules/get-proto/LICENSE`
 
 ```text
@@ -11700,9 +11804,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-145"></a>
+<a id="npm-notice-146"></a>
 
-### Notice 145
+### Notice 146
 
 Copied from:
 
@@ -11732,9 +11836,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-146"></a>
+<a id="npm-notice-147"></a>
 
-### Notice 146
+### Notice 147
 
 Copied from:
 
@@ -11767,9 +11871,9 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-147"></a>
+<a id="npm-notice-148"></a>
 
-### Notice 147
+### Notice 148
 
 Copied from:
 
@@ -11980,9 +12084,9 @@ Copied from:
    limitations under the License.
 ```
 
-<a id="npm-notice-148"></a>
+<a id="npm-notice-149"></a>
 
-### Notice 148
+### Notice 149
 
 Copied from:
 
@@ -12046,9 +12150,9 @@ If the Work includes a "NOTICE" text file as part of its distribution, then any 
 END OF TERMS AND CONDITIONS
 ```
 
-<a id="npm-notice-149"></a>
+<a id="npm-notice-150"></a>
 
-### Notice 149
+### Notice 150
 
 Copied from:
 
@@ -12260,9 +12364,9 @@ Copied from:
    limitations under the License.
 ```
 
-<a id="npm-notice-150"></a>
+<a id="npm-notice-151"></a>
 
-### Notice 150
+### Notice 151
 
 Copied from:
 
@@ -12294,9 +12398,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="npm-notice-151"></a>
+<a id="npm-notice-152"></a>
 
-### Notice 151
+### Notice 152
 
 Copied from:
 
@@ -12327,9 +12431,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-152"></a>
+<a id="npm-notice-153"></a>
 
-### Notice 152
+### Notice 153
 
 Copied from:
 
@@ -12354,9 +12458,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-153"></a>
+<a id="npm-notice-154"></a>
 
-### Notice 153
+### Notice 154
 
 Copied from:
 
@@ -12372,9 +12476,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-154"></a>
+<a id="npm-notice-155"></a>
 
-### Notice 154
+### Notice 155
 
 Copied from:
 
@@ -12396,9 +12500,9 @@ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ```
 
-<a id="npm-notice-155"></a>
+<a id="npm-notice-156"></a>
 
-### Notice 155
+### Notice 156
 
 Copied from:
 
@@ -12432,9 +12536,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-156"></a>
+<a id="npm-notice-157"></a>
 
-### Notice 156
+### Notice 157
 
 Copied from:
 
@@ -12464,9 +12568,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-157"></a>
+<a id="npm-notice-158"></a>
 
-### Notice 157
+### Notice 158
 
 Copied from:
 
@@ -12497,9 +12601,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="npm-notice-158"></a>
+<a id="npm-notice-159"></a>
 
-### Notice 158
+### Notice 159
 
 Copied from:
 
@@ -12519,9 +12623,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-159"></a>
+<a id="npm-notice-160"></a>
 
-### Notice 159
+### Notice 160
 
 Copied from:
 
@@ -12551,9 +12655,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-160"></a>
+<a id="npm-notice-161"></a>
 
-### Notice 160
+### Notice 161
 
 Copied from:
 
@@ -12583,9 +12687,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-161"></a>
+<a id="npm-notice-162"></a>
 
-### Notice 161
+### Notice 162
 
 Copied from:
 
@@ -12619,9 +12723,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-162"></a>
+<a id="npm-notice-163"></a>
 
-### Notice 162
+### Notice 163
 
 Copied from:
 
@@ -12654,9 +12758,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-163"></a>
+<a id="npm-notice-164"></a>
 
-### Notice 163
+### Notice 164
 
 Copied from:
 
@@ -12705,9 +12809,9 @@ Copied from:
     SOFTWARE
 ```
 
-<a id="npm-notice-164"></a>
+<a id="npm-notice-165"></a>
 
-### Notice 164
+### Notice 165
 
 Copied from:
 
@@ -12735,9 +12839,9 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-165"></a>
+<a id="npm-notice-166"></a>
 
-### Notice 165
+### Notice 166
 
 Copied from:
 
@@ -12828,9 +12932,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-166"></a>
+<a id="npm-notice-167"></a>
 
-### Notice 166
+### Notice 167
 
 Copied from:
 
@@ -12852,9 +12956,9 @@ OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-<a id="npm-notice-167"></a>
+<a id="npm-notice-168"></a>
 
-### Notice 167
+### Notice 168
 
 Copied from:
 
@@ -12884,9 +12988,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-168"></a>
+<a id="npm-notice-169"></a>
 
-### Notice 168
+### Notice 169
 
 Copied from:
 
@@ -12917,9 +13021,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-169"></a>
+<a id="npm-notice-170"></a>
 
-### Notice 169
+### Notice 170
 
 Copied from:
 
@@ -12949,9 +13053,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="npm-notice-170"></a>
+<a id="npm-notice-171"></a>
 
-### Notice 170
+### Notice 171
 
 Copied from:
 
@@ -12981,9 +13085,9 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-171"></a>
+<a id="npm-notice-172"></a>
 
-### Notice 171
+### Notice 172
 
 Copied from:
 
@@ -13055,9 +13159,9 @@ will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim.***
 ```
 
-<a id="npm-notice-172"></a>
+<a id="npm-notice-173"></a>
 
-### Notice 172
+### Notice 173
 
 Copied from:
 
@@ -13088,9 +13192,9 @@ Copied from:
  OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-173"></a>
+<a id="npm-notice-174"></a>
 
-### Notice 173
+### Notice 174
 
 Copied from:
 
@@ -13120,9 +13224,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-174"></a>
+<a id="npm-notice-175"></a>
 
-### Notice 174
+### Notice 175
 
 Copied from:
 
@@ -13505,9 +13609,9 @@ This Source Code Form is "Incompatible With Secondary Licenses", as
 defined by the Mozilla Public License, v. 2.0.
 ```
 
-<a id="npm-notice-175"></a>
+<a id="npm-notice-176"></a>
 
-### Notice 175
+### Notice 176
 
 Copied from:
 
@@ -13559,9 +13663,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-176"></a>
+<a id="npm-notice-177"></a>
 
-### Notice 176
+### Notice 177
 
 Copied from:
 
@@ -13593,9 +13697,9 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-<a id="npm-notice-177"></a>
+<a id="npm-notice-178"></a>
 
-### Notice 177
+### Notice 178
 
 Copied from:
 
@@ -13625,9 +13729,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-178"></a>
+<a id="npm-notice-179"></a>
 
-### Notice 178
+### Notice 179
 
 Copied from:
 
@@ -13657,9 +13761,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-179"></a>
+<a id="npm-notice-180"></a>
 
-### Notice 179
+### Notice 180
 
 Copied from:
 
@@ -13691,9 +13795,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-180"></a>
+<a id="npm-notice-181"></a>
 
-### Notice 180
+### Notice 181
 
 Copied from:
 
@@ -13723,9 +13827,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-<a id="npm-notice-181"></a>
+<a id="npm-notice-182"></a>
 
-### Notice 181
+### Notice 182
 
 Copied from:
 
@@ -13757,9 +13861,9 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-<a id="npm-notice-182"></a>
+<a id="npm-notice-183"></a>
 
-### Notice 182
+### Notice 183
 
 Copied from:
 
@@ -13789,9 +13893,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-<a id="npm-notice-183"></a>
+<a id="npm-notice-184"></a>
 
-### Notice 183
+### Notice 184
 
 Copied from:
 
@@ -13819,110 +13923,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-```
-
-<a id="npm-notice-184"></a>
-
-### Notice 184
-
-Copied from:
-
-- `node_modules/@fontsource-variable/geist/LICENSE`
-
-```text
-Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font) Geist-Italic[wght].ttf: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
-
-This Font Software is licensed under the SIL Open Font License, Version 1.1.
-This license is copied below, and is also available with a FAQ at:
-http://scripts.sil.org/OFL
-
-
------------------------------------------------------------
-SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
------------------------------------------------------------
-
-PREAMBLE
-The goals of the Open Font License (OFL) are to stimulate worldwide
-development of collaborative font projects, to support the font creation
-efforts of academic and linguistic communities, and to provide a free and
-open framework in which fonts may be shared and improved in partnership
-with others.
-
-The OFL allows the licensed fonts to be used, studied, modified and
-redistributed freely as long as they are not sold by themselves. The
-fonts, including any derivative works, can be bundled, embedded,
-redistributed and/or sold with any software provided that any reserved
-names are not used by derivative works. The fonts and derivatives,
-however, cannot be released under any other type of license. The
-requirement for fonts to remain under this license does not apply
-to any document created using the fonts or their derivatives.
-
-DEFINITIONS
-"Font Software" refers to the set of files released by the Copyright
-Holder(s) under this license and clearly marked as such. This may
-include source files, build scripts and documentation.
-
-"Reserved Font Name" refers to any names specified as such after the
-copyright statement(s).
-
-"Original Version" refers to the collection of Font Software components as
-distributed by the Copyright Holder(s).
-
-"Modified Version" refers to any derivative made by adding to, deleting,
-or substituting -- in part or in whole -- any of the components of the
-Original Version, by changing formats or by porting the Font Software to a
-new environment.
-
-"Author" refers to any designer, engineer, programmer, technical
-writer or other person who contributed to the Font Software.
-
-PERMISSION & CONDITIONS
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of the Font Software, to use, study, copy, merge, embed, modify,
-redistribute, and sell modified and unmodified copies of the Font
-Software, subject to the following conditions:
-
-1) Neither the Font Software nor any of its individual components,
-in Original or Modified Versions, may be sold by itself.
-
-2) Original or Modified Versions of the Font Software may be bundled,
-redistributed and/or sold with any software, provided that each copy
-contains the above copyright notice and this license. These can be
-included either as stand-alone text files, human-readable headers or
-in the appropriate machine-readable metadata fields within text or
-binary files as long as those fields can be easily viewed by the user.
-
-3) No Modified Version of the Font Software may use the Reserved Font
-Name(s) unless explicit written permission is granted by the corresponding
-Copyright Holder. This restriction only applies to the primary font name as
-presented to the users.
-
-4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
-Software shall not be used to promote, endorse or advertise any
-Modified Version, except to acknowledge the contribution(s) of the
-Copyright Holder(s) and the Author(s) or with their explicit written
-permission.
-
-5) The Font Software, modified or unmodified, in part or in whole,
-must be distributed entirely under this license, and must not be
-distributed under any other license. The requirement for fonts to
-remain under this license does not apply to any document created
-using the Font Software.
-
-TERMINATION
-This license becomes null and void if any of the above conditions are
-not met.
-
-DISCLAIMER
-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
-OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
-OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
 <a id="npm-notice-185"></a>
