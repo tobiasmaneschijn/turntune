@@ -3,6 +3,7 @@ import express from "express";
 import { z } from "zod";
 import type { ModerationService } from "./moderation-service.js";
 import { RoomCommandError } from "../../realtime/socket-handler.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 export function mountModerationRoutes(app: express.Express, service: ModerationService, getUserId: (request: express.Request) => Promise<string | null>) {
   const slug = z.string().regex(/^[a-z0-9-]{3,48}$/), query = z.string().max(100), cursor = z.string().max(160).regex(/^(?:\d{1,8}|archive:(?:\d{1,16}:[a-zA-Z0-9_-]{1,100})?)$/).optional();
@@ -12,6 +13,7 @@ export function mountModerationRoutes(app: express.Express, service: ModerationS
       const actor = await getUserId(request); if (!actor) return void response.status(401).json({ error: serverT("sign_in_to_use_room_tools") });
       response.json(await run(request, actor, slug.parse(request.params.slug)));
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "moderation.request" });
       const status = error instanceof z.ZodError ? 400 : error instanceof RoomCommandError ? 403 : 503;
       response.status(status).json({ error: error instanceof z.ZodError ? error.issues[0]?.message || serverT("invalid_room_action") : error instanceof RoomCommandError ? error.message : serverT("could_not_complete_this_room_action_try_again") });
     }

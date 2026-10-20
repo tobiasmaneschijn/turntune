@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
+import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./socket-handler.js";
 import { validateServerConfig } from "../lib/config.js";
 
-test("socket failures are reported to the caller without an unhandled rejection", async () => {
+test("failed room changes return a safe acknowledgement when reporting fails and later commands recover", async () => {
   let result: { ok: boolean; error?: string } | undefined;
   const errors: unknown[] = [];
-  await safeSocketHandler(async () => { throw new Error("Database unavailable"); }, (error) => errors.push(error))
-    ({}, (reply: typeof result) => { result = reply; });
+  const handler = safeSocketHandler(async (payload, reply) => {
+    if (payload === "failure") throw new Error("Database unavailable");
+    if (payload === "denied") throw new RoomCommandError("Only moderators can change this setting.");
+    reply?.({ ok: true });
+  }, error => { errors.push(error); throw new Error("Monitoring unavailable"); });
+  const reply = (value: typeof result) => { result = value; };
+  await handler("failure", reply);
+  assert.equal(result?.ok, false);
+  assert.doesNotMatch(result?.error ?? "", /Database unavailable|Monitoring unavailable/);
+  await handler("denied", reply);
+  assert.equal(result?.error, "Only moderators can change this setting.");
   assert.equal(result?.ok, false);
   assert.equal(errors.length, 1);
+  await handler("success", reply);
+  assert.equal(result?.ok, true);
 });
 
 test("malformed acknowledgements cannot crash a socket listener", async () => {

@@ -93,6 +93,8 @@ Use [`.env.example`](../.env.example) as the configuration reference. Replace it
 placeholders and clear optional credentials for integrations you are not using.
 Store secrets in a restricted runtime environment or secret manager. Never put
 server secrets in `VITE_*` variables, source control, build arguments, or logs.
+See [Observability](observability.md) for optional Sentry error and log reporting,
+OpenTelemetry export, and private source maps.
 
 | Setting | Requirement |
 | --- | --- |
@@ -106,7 +108,7 @@ server secrets in `VITE_*` variables, source control, build arguments, or logs.
 | `SIGNUP_INVITE_PASSWORD` | Required to enable app signup. Use a long, unique random value and share it only with invitees. Blank disables this path. |
 | `CSP_MODE` | Keep `enforce` for public hosting. |
 | `SOUNDSPIN_PORT` | Compose host loopback port; defaults to `3000`. It does not change the container port. |
-| `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: set to the checked-out, reviewed Git commit SHA. It becomes the image's revision label; it does not select or pin the source. The GitHub workflow supplies its revision automatically. |
+| `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: set to the checked-out, reviewed Git commit SHA. It becomes the embedded observability release and image revision label; it does not select or pin the source. The GitHub workflow supplies its revision automatically. |
 | `SOUNDSPIN_IMAGE` | Release Compose only: immutable image reference ending in `@sha256:…`. The GitHub workflow selects the verified digest. |
 | `PORT`, `DATA_DIR` | Direct Node hosting only: defaults are `3000` and `data`. Compose sets `3000` and `/app/data`. |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Optional browser build configuration. Production can use `/api/config` at runtime instead; if supplied, these must match the server's project. |

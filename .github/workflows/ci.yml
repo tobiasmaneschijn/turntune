@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --include=dev
-      - run: node --test scripts/release/*.test.mjs
+      - run: node --test scripts/release/*.test.mjs scripts/observability/*.test.mjs
       - name: Verify release runtime configuration
         run: node scripts/release/check-compose.mjs
 

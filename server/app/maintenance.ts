@@ -4,6 +4,7 @@ import { cleanupManagedUploads } from "../features/uploads/managed-uploads.js";
 import type { AccountDeletionService } from "../features/accounts/account-deletion.js";
 import type { PlatformSecurity } from "../security/platform-security.js";
 import { securityEvent } from "../security/security-events.js";
+import { telemetry } from "../observability/index.js";
 import type { ResourcePolicyStore } from "../resources/resource-policy.js";
 import type { GlobalResourceLimits } from "../../shared/resource-policy.js";
 
@@ -41,12 +42,12 @@ export function createMaintenance(options: MaintenanceOptions) {
     if (!supabaseAdmin || mediaCleanup || isShuttingDown()) return;
     mediaCleanup = cleanupManagedUploads(supabaseAdmin,{maxBatches:20,batchSize:100,maxMs:20_000})
       .then(status=>{storageCleanupStatus={...status,lastRunAt:new Date().toISOString()};if(status.failed)securityEvent("storage_cleanup","failed",{count:status.failed});else if(status.removed)securityEvent("storage_cleanup","success",{count:status.removed});})
-      .catch(()=>{storageCleanupStatus.failed++;securityEvent("storage_cleanup","failed");})
+      .catch(error=>{storageCleanupStatus.failed++;telemetry.captureError(error,{operation:"maintenance.uploads.cleanup"});securityEvent("storage_cleanup","failed");})
       .finally(() => { mediaCleanup = null; });
   }
   function processDeletion(){
     if(!accountDeletion||deletionWork||isShuttingDown())return;
-    deletionWork=accountDeletion.runNext().then(()=>undefined).catch(()=>securityEvent("account_deletion","failed")).finally(()=>{deletionWork=null;});
+    deletionWork=accountDeletion.runNext().then(()=>undefined).catch(error=>{telemetry.captureError(error,{operation:"maintenance.account.delete"});securityEvent("account_deletion","failed");}).finally(()=>{deletionWork=null;});
   }
   function pruneRetention(){
     if(!supabaseAdmin||retentionWork||isShuttingDown())return;
@@ -58,7 +59,7 @@ export function createMaintenance(options: MaintenanceOptions) {
         const counts=[...Object.values(records.data||{}),...Object.values(archives.data||{}),Number(chat.data?.removed??0),Number(chat.data?.updatedReplies??0),chat.data?.hasMoreRooms?1:0];
         if(counts.every(value=>Number(value)===0))break;
       }
-    })().catch(()=>securityEvent("storage_cleanup","failed")).finally(()=>{retentionWork=null;});
+    })().catch(error=>{telemetry.captureError(error,{operation:"maintenance.retention.prune"});securityEvent("storage_cleanup","failed");}).finally(()=>{retentionWork=null;});
   }
   function recheckConnections(){
     if(!authEnabled||connectionChecks||isShuttingDown())return;
@@ -69,8 +70,8 @@ export function createMaintenance(options: MaintenanceOptions) {
       const tasks=[...accounts.filter(userId=>access.accounts.get(userId)===false).map(userId=>()=>restrictAccount(userId)),
         ...rooms.filter(roomId=>access.rooms.get(roomId)===false).map(roomId=>()=>restrictRoom(roomId))];
       let index=0;
-      await Promise.all(Array.from({length:Math.min(8,tasks.length)},async()=>{while(index<tasks.length&&!isShuttingDown()){const task=tasks[index++];try{await task();}catch{securityEvent("upstream_failure","failed");}}}));
-    })().catch(()=>securityEvent("upstream_failure","failed")).finally(()=>{connectionChecks=null;});
+      await Promise.all(Array.from({length:Math.min(8,tasks.length)},async()=>{while(index<tasks.length&&!isShuttingDown()){const task=tasks[index++];try{await task();}catch(error){telemetry.captureError(error,{operation:"maintenance.connections.restrict"});securityEvent("upstream_failure","failed");}}}));
+    })().catch(error=>{telemetry.captureError(error,{operation:"maintenance.connections.check"});securityEvent("upstream_failure","failed");}).finally(()=>{connectionChecks=null;});
   }
   return {
     storageCleanupSnapshot: () => storageCleanupStatus,
@@ -82,8 +83,9 @@ export function createMaintenance(options: MaintenanceOptions) {
         setInterval(pruneRetention, 3600_000),
         setInterval(recheckConnections, 20_000),
         setInterval(() => {
-          void resourcePolicies.getGlobal().then(updateResourcePolicy).catch(() => {
+          void resourcePolicies.getGlobal().then(updateResourcePolicy).catch(error => {
             updateResourcePolicy(null);
+            telemetry.captureError(error, { operation: "maintenance.resources.refresh" });
             securityEvent("configuration_failure", "failed");
           });
         }, 15_000)

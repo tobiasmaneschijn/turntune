@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { z } from "zod";
 import { serverT } from "../../lib/i18n.js";
-import { PublicRequestError } from "../../lib/public-request-error.js";
+import { PublicRequestError, reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 import { SecurityLimitError, type SecurityBudget } from "../../security/security-budget.js";
 import { trustedClientIp } from "../../security/security-http.js";
 import type { PlatformSecurity } from "../../security/platform-security.js";
@@ -63,6 +63,7 @@ export function mountRoomRoutes(app: express.Express, options: RoomRouteOptions)
       const q=typeof request.query.q==="string"?request.query.q.trim().toLowerCase().slice(0,100):"",tag=typeof request.query.tag==="string"?request.query.tag.trim().toLowerCase():"",language=typeof request.query.language==="string"?request.query.language.trim().toLowerCase():"";
       response.json({ rooms: rooms.filter(room=>(!q||`${room.name} ${room.description??""} ${(room.tags??[]).join(" ")}`.toLowerCase().includes(q))&&(!tag||room.tags?.some(t=>t.toLowerCase()===tag))&&(!language||room.language?.toLowerCase()===language)).map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "room.list" });
       response.status(500).json({ error: serverT("could_not_load_rooms") });
     }
   });
@@ -85,9 +86,10 @@ export function mountRoomRoutes(app: express.Express, options: RoomRouteOptions)
       watchIdleRoom(room.id);
       // A full favorites list must not turn a completed creation into a failed
       // request that the user might retry and duplicate.
-      try { await store.setFavorite(room.id, userId, true); } catch { /* Room is created. */ }
+      try { await store.setFavorite(room.id, userId, true); } catch (error) { reportUnexpectedRequestError(error, { operation: "room.favorite" }); /* Room is created. */ }
       response.status(201).json({ room: { slug: room.id, name: room.name } });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "room.create" });
       response.status(error instanceof PublicRequestError?error.status:error instanceof SecurityLimitError?429:error instanceof RoomCommandError?400:503).json({ error: error instanceof RoomCommandError ? error.message : serverT("could_not_create_room_your_room_limit_may_have_been_reached") });
     }
   });
@@ -106,6 +108,7 @@ export function mountRoomRoutes(app: express.Express, options: RoomRouteOptions)
       await store.setFavorite(slug.data, userId, parsed.data.favorite);
       response.json({ favorite: parsed.data.favorite });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "room.favorite" });
       response.status(error instanceof PublicRequestError?error.status:400).json({ error: error instanceof RoomCommandError?error.message:serverT("could_not_update_favorite") });
     }
   });
@@ -138,6 +141,7 @@ export function mountRoomRoutes(app: express.Express, options: RoomRouteOptions)
       }
       response.json({ room: room ? { id: room.id, name: room.name } : null });
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "room.settings.update" });
       response.status(error instanceof SecurityLimitError?429:error instanceof RoomCommandError?403:503).json({ error: error instanceof RoomCommandError ? error.message : serverT("could_not_update_room") });
     } finally {
       watchIdleRoom(slug.data);

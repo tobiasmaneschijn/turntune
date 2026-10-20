@@ -4,6 +4,7 @@ import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { invitePasswordMatches, inviteSignupSchema, SignupAttemptLimiter } from "./invite-signup.js";
 import { securityEvent } from "../../security/security-events.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 export interface SignupRouteOptions {
   admin: Pick<SupabaseClient["auth"]["admin"], "inviteUserByEmail"> | null;
@@ -48,9 +49,13 @@ export function mountSignupRoutes(app: express.Express, options: SignupRouteOpti
       redirectTo: `${origin}/update-password`,
       ...(parsed.data.displayName ? { data: { display_name: parsed.data.displayName } } : {})
     })).then(result => {
-      if (result.error) securityEvent("upstream_failure", "failed", { requestId: response.locals.requestId, durationMs: Date.now() - started });
+      if (result.error) {
+        reportUnexpectedRequestError(result.error, { operation: "signup.invite", durationMs: Date.now() - started });
+        securityEvent("upstream_failure", "failed", { requestId: response.locals.requestId, durationMs: Date.now() - started });
+      }
       return result;
-    }, () => {
+    }, error => {
+      reportUnexpectedRequestError(error, { operation: "signup.invite", durationMs: Date.now() - started });
       securityEvent("upstream_failure", "failed", { requestId: response.locals.requestId, durationMs: Date.now() - started });
     }).finally(() => { active--; });
     // Capacity remains reserved until the underlying SDK call settles, even when

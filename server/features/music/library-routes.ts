@@ -3,7 +3,7 @@ import express from "express";
 import { libraryMutationSchema, PrivateLibraryDataError } from "./private-library.js";
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import type { Store } from "../../persistence/store.js";
-import { PublicRequestError } from "../../lib/public-request-error.js";
+import { PublicRequestError, reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 /** Identity always comes from verified request credentials, never from JSON/query. */
 export function mountPrivateLibraryRoutes(app: express.Express, store: Store, getUserId: (request: express.Request) => Promise<string | null>, now = Date.now) {
@@ -27,7 +27,10 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
       if (!allow(userId, "read", response)) return;
       const [library, policy] = await Promise.all([store.getPrivateLibrary(userId), store.resourcePolicies.get(userId)]);
       response.json({ library, limits: policy.limits });
-    } catch (error) { response.status(error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_load_private_picks_and_sets") }); }
+    } catch (error) {
+      if (!(error instanceof PrivateLibraryDataError)) reportUnexpectedRequestError(error, { operation: "library.read" });
+      response.status(error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_load_private_picks_and_sets") });
+    }
   });
   app.post("/api/library", noStore, express.json({ limit: "1mb" }), async (request, response) => {
     try {
@@ -37,6 +40,9 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
       const parsed = libraryMutationSchema.safeParse(request.body);
       if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message || serverT("invalid_library_action") });
       response.json({ library: await store.updatePrivateLibrary(userId, parsed.data),limits:(await store.resourcePolicies.get(userId)).limits });
-    } catch (error) { response.status(error instanceof PublicRequestError?error.status:error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PublicRequestError||error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_save_private_picks_and_sets") }); }
+    } catch (error) {
+      if (!(error instanceof PrivateLibraryDataError)) reportUnexpectedRequestError(error, { operation: "library.write" });
+      response.status(error instanceof PublicRequestError?error.status:error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PublicRequestError||error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_save_private_picks_and_sets") });
+    }
   });
 }

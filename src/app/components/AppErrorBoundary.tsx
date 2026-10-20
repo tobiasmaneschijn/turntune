@@ -1,5 +1,6 @@
 import i18n from "../../i18n";
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ReactNode } from "react";
+import { telemetry } from "../../../shared/observability";
 import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
@@ -15,8 +16,8 @@ export class AppErrorBoundary extends Component<{ children: ReactNode; onRetry?:
     return { error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("turntune UI crashed", error, info);
+  componentDidCatch(error: Error) {
+    telemetry.captureError(error, { operation: "browser.render.app" });
   }
 
   render() {
@@ -55,8 +56,8 @@ export class PanelErrorBoundary extends Component<
     return { error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(`${this.props.panelName} panel crashed`, error, info);
+  componentDidCatch(error: Error) {
+    telemetry.captureError(error, { operation: "browser.render.panel" });
   }
 
   render() {

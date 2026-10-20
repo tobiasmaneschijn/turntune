@@ -22,6 +22,8 @@ import { LoginForm } from "../../../../src/features/auth/components/login-form";
 import { Toaster } from "../../../../src/components/ui/sonner";
 import { TooltipProvider } from "../../../../src/components/ui/tooltip";
 import { readUserSettings } from "../../../../src/features/settings/user-settings";
+import { initializeBrowserObservability } from "../../../../src/lib/observability/runtime";
+import { telemetry } from "../../../../shared/observability";
 
 const scenario = new URLSearchParams(location.search).get("scenario") || "lobby";
 const user = { id: "qa-admin", name: "QA Admin", avatarSeed: "qa-admin", avatarKey: "pulse", isAppAdmin: true };
@@ -54,6 +56,24 @@ const adminFeedbackData = {
   }))
 };
 let boundaryShouldThrow = true;
+if (scenario === "boundary") {
+  let releaseConfiguration!: (value: unknown) => void;
+  const configuration = new Promise<unknown>(resolve => { releaseConfiguration = resolve; });
+  const monitoring = initializeBrowserObservability({ target: window, loadConfiguration: () => configuration });
+  // Exercise a bundled production stack and its injected Debug ID without
+  // requiring fixture bundles to become a separate production build.
+  const stack = `Error\n    at renderFailedScreen (${location.origin}/assets/fixture-app.js:7:8)`;
+  Object.assign(window, {
+    _sentryDebugIds: { [stack]: "a1234567-1234-4567-89ab-123456789abc" },
+    __monitoring: {
+      releaseConfiguration() { releaseConfiguration({ observability: {
+        provider: "sentry", dsn: "https://publickey@monitoring.invalid/42",
+        environment: "test", release: "fixture-revision", tracesSampleRate: 0
+      } }); },
+      async flush() { await monitoring.ready; await telemetry.flush(2_000); }
+    }
+  });
+}
 const rejectedAuthClient = { auth: { signInWithPassword: async () => ({ error: new Error("Email or password is incorrect.") }) } };
 
 let directoryRequests = 0;
@@ -82,7 +102,9 @@ globalThis.fetch = async (input) => {
 
 function RecoverableFixture() {
   if (boundaryShouldThrow) {
-    throw new Error("Deterministic fixture failure");
+    const error = new Error("Private message fixture-secret-token");
+    error.stack = `Error: Private message fixture-secret-token\n    at renderFailedScreen (${location.origin}/assets/fixture-app.js?token=fixture-secret-token:7:8)`;
+    throw error;
   }
   return <div className="fixture-state"><AsyncState state="empty" title="Interface recovered" description="The error boundary remounted the surface." /></div>;
 }
@@ -119,8 +141,8 @@ function Harness() {
   if (scenario === "settings") return <div className="fixture-page"><UserSettingsDialog settings={readUserSettings()} connections={{ loaded: true, spotifyConfigured: true, spotifyConnected: true, appleConfigured: true }} accessToken="fixture" onSettingsChange={() => {}} onConnectSpotify={() => {}} onDisconnectSpotify={() => {}} onClose={() => {}} /></div>;
   if (scenario === "feedback") return <div className="fixture-state"><Card><CardHeader><CardTitle>Feedback fixture</CardTitle><CardDescription>Open the production feedback dialog.</CardDescription></CardHeader><CardContent><FeedbackButton userId={user.id} /></CardContent></Card></div>;
   if (scenario === "login-error") return <div className="fixture-state"><LoginForm client={rejectedAuthClient as never} onNavigate={() => {}} /></div>;
-  if (scenario === "boundary") return <AppErrorBoundary onRetry={() => { boundaryShouldThrow = false; }}><RecoverableFixture /></AppErrorBoundary>;
+  if (scenario === "boundary") return <AppErrorBoundary onRetry={() => { boundaryShouldThrow = false; telemetry.log("info", "browser.screen.retry", { operation: "browser.screen.retry" }); }}><RecoverableFixture /></AppErrorBoundary>;
   throw new Error(`Unknown fixture scenario: ${scenario}`);
 }
 
-createRoot(document.getElementById("root")!).render(<ThemeProvider><TooltipProvider><Harness /><Toaster /></TooltipProvider></ThemeProvider>);
+createRoot(document.getElementById("root")!, { onCaughtError: () => {} }).render(<ThemeProvider><TooltipProvider><Harness /><Toaster /></TooltipProvider></ThemeProvider>);

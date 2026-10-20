@@ -46,7 +46,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
         }
         response.json(result)
       } catch (error) {
-        const failure = publicRequestFailure(error, 'Chat is unavailable. Try again later.')
+        const failure = publicRequestFailure(error, 'Chat is unavailable. Try again later.', { operation: write ? 'chat.write' : 'chat.read' })
         response.status(failure.status).json({ error: failure.message })
       }
     }

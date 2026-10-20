@@ -8,6 +8,7 @@ import { resolveChatMediaUrl, signChatHistoryMedia } from './chat-media.js'
 import type { ChatCommandService } from './chat-command-service.js'
 import { mountDurableChatRoutes } from './chat-command-routes.js'
 import type { ResolvedResourcePolicy } from '../../../shared/resource-policy.js'
+import { reportUnexpectedRequestError } from '../../lib/public-request-error.js'
 
 interface Cursor { createdAt: string; id: string }
 interface HistoryRow {
@@ -123,7 +124,9 @@ export function mountChatHistoryRoutes(app: Express, options: ChatHistoryRouteOp
       if (!allowed) { response.status(403).json({ error: write ? serverT("join_this_room_before_saving_chat_messages_or_reactions") : serverT("join_this_room_before_reading_its_chat_history") }); return }
       await run(options.client, roomSlug, request, response, userId)
     } catch (error) {
-      response.status(error instanceof ChatRateLimit ? 429 : error instanceof Conflict || error instanceof ChatWriteConflict ? 409 : error instanceof BadRequest ? 400 : 503).json({ error: error instanceof BadRequest || error instanceof Conflict || error instanceof ChatRateLimit || error instanceof ChatWriteConflict ? error.message : write ? serverT("chat_could_not_be_saved_try_again") : serverT("chat_history_could_not_be_loaded_try_again") })
+      const status = error instanceof ChatRateLimit ? 429 : error instanceof Conflict || error instanceof ChatWriteConflict ? 409 : error instanceof BadRequest ? 400 : 503
+      if (status >= 500) reportUnexpectedRequestError(error, { operation: write ? 'chat.write' : 'chat.read' })
+      response.status(status).json({ error: error instanceof BadRequest || error instanceof Conflict || error instanceof ChatRateLimit || error instanceof ChatWriteConflict ? error.message : write ? serverT("chat_could_not_be_saved_try_again") : serverT("chat_history_could_not_be_loaded_try_again") })
     }
   }
   app.get('/api/rooms/:roomSlug/chat/history', authorized(async (client, room, request, response, userId) => {

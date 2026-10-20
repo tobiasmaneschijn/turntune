@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { RequestHandler } from "express";
+import { requestContext } from "../observability/index.js";
+import { traceHttpRequest } from "../observability/performance.js";
 
 type SecurityEvent = "authorization_denied" | "rate_limited" | "admin_change" | "account_deletion" | "storage_cleanup" | "configuration_failure" | "upstream_failure" | "request_failed";
 type SecurityOutcome = "success" | "denied" | "failed";
@@ -40,5 +42,5 @@ export const securityRequestContext: RequestHandler = (_request, response, next)
     else if (response.statusCode === 429) securityEvent("rate_limited", "denied", { requestId, status: 429 });
     else if (response.statusCode >= 500) securityEvent("request_failed", "failed", { requestId, status: response.statusCode });
   });
-  next();
+  requestContext.run({ requestId }, () => traceHttpRequest(_request, response, next));
 };

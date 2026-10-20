@@ -7,6 +7,9 @@ dist/
 dist-server/
 data/
 .env*
+.sentryclirc
+.sentryclirc.*
+sentry.properties
 !.env.example
 .DS_Store
 supabase/.temp/

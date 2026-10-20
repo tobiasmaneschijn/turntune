@@ -13,6 +13,7 @@ import { allowedProvidersSchema, roomSettingsPatchSchema, authorizeRoomSettingsP
 import { accessMode } from "../../shared/room-policy.js";
 import { appendModerationLog, emptyModeration, ensureModeration, isRoomBanned, roleInRoom } from "../features/rooms/room-access.js";
 import { runtimeMetrics } from "../lib/runtime-metrics.js";
+import { telemetry } from "../observability/index.js";
 import type { LibraryMutation, PrivateLibrary } from "../features/music/private-library.js";
 import type {
   DjAccess,
@@ -208,11 +209,11 @@ export class Store {
         change.unchanged ??= !change.metadata && !change.member && !change.memberDeletes?.length && JSON.stringify(draft) === JSON.stringify(room);
         if (!change.unchanged) await this.commitRoom(room, draft, change);
         // Persistence succeeded. A diagnostic/receipt hook cannot turn that into a failed command.
-        try { change.committed?.(); } catch (error) { console.error("Room commit notification failed", error); }
+        try { change.committed?.(); } catch (error) { telemetry.captureError(error, { operation: "room.commit.notify" }); }
         runtimeMetrics.observe("room_command", performance.now() - started);
         return change.result;
       } catch (error) {
-        try { change?.rejected?.(); } catch (rollbackError) { console.error("Room rollback notification failed", rollbackError); }
+        try { change?.rejected?.(); } catch (rollbackError) { telemetry.captureError(rollbackError, { operation: "room.rollback.notify" }); }
         runtimeMetrics.observe("room_command", performance.now() - started, true);
         throw error;
       }
