@@ -1,4 +1,5 @@
 import { serverT } from "../../lib/i18n.js";
+import { MUSIC_PROVIDERS } from "../../../shared/provider-definitions.js";
 import { providerJson, providerSignal } from "../../integrations/provider-http.js";
 import { SignupAttemptLimiter } from "../auth/invite-signup.js";
 import express from "express";
@@ -166,7 +167,7 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
   const youtubeLiveLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const soundCloudSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
   const providerSearchLimits = new BoundedCache<{ count: number; resetAt: number }>(10000);
-  app.use(["/api/youtube", "/api/soundcloud", "/api/mixcloud", "/api/spotify", "/api/apple", "/api/giphy", "/api/music"], async (request, response, next) => {
+  app.use([...MUSIC_PROVIDERS.map(provider => `/api/${provider}`), "/api/giphy", "/api/music"], async (request, response, next) => {
     response.set("Cache-Control", "no-store");
     // OAuth connect/callback are mounted separately and have their own flow quotas.
     if (request.path === "/connect" || request.path === "/callback") return next();

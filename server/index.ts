@@ -69,7 +69,8 @@ import { roomPresence, uniqueUsers } from "./features/rooms/presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./features/rooms/announcements.js";
 import { SoundCloudApi } from "./integrations/soundcloud.js";
 import { AppleMusicApi } from "./integrations/apple-music.js";
-import { resolveTrackMappings } from "./features/music/provider-mappings.js";
+import { resolveProviderMappings } from "./features/music/provider-mappings.js";
+import { createServerProviderRegistry } from "./features/music/provider-registry.js";
 import { SpotifyAccounts } from "./integrations/spotify/spotify-accounts.js";
 import { SpotifyApi } from "./integrations/spotify/spotify.js";
 import { GiphyApi } from "./integrations/giphy.js";
@@ -132,6 +133,7 @@ const soundCloudApi = new SoundCloudApi(
 const spotifyApi = new SpotifyApi();
 const giphyApi = new GiphyApi();
 const appleMusicApi = new AppleMusicApi();
+const musicProviders = createServerProviderRegistry({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi, youtubeApiKey });
 const spotifyAccounts = new SpotifyAccounts(store, spotifyApi);
 const authEnabled = Boolean(
   supabaseUrl &&
@@ -159,8 +161,8 @@ const djEvictions = new GracePeriodRegistry(DJ_DISCONNECT_GRACE_MS);
 const queueUndo = new QueueUndoRegistry();
 const setImports = new SetImportRegistry();
 const roomEntryLimiter = new RoomEntryLimiter();
-const resolveSavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey });
-const resolveSpotifySavedRecording = createSavedSetResolver({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi,youtubeApiKey,allowSpotify:true });
+const resolveSavedRecording = createSavedSetResolver({ providers: musicProviders });
+const resolveSpotifySavedRecording = createSavedSetResolver({ providers: musicProviders, allowSpotify: true });
 const sessionScheduler=new RoomSessionScheduler(roomCommands,broadcast,id=>uniqueUsers(roomUsers.get(id)?.values()??[]).length);
 const announcementExpiries = new AnnouncementExpiryRegistry(async (room) => {
   await roomCommands.execute(room, draft => {
@@ -748,7 +750,10 @@ io.on("connection", (socket) => {
     },
     broadcast, rememberDj: reconcileDjUser, forgetDj: forgetDjUser, cancelEviction: cancelDjEviction,
     watchAnnouncement: room => announcementExpiries.watch(room), queueUndo, setImports,
-    resolveTrack: async (track,room) => {const resolved=await resolveTrackMappings(track,spotifyApi,appleMusicApi,undefined,{allowSpotify:roomAllowsProvider(room.settings,"spotify")});return track.provider==="spotify"||track.provider==="apple"?resolved:{...resolved,...await verifyTrackDuration(track,{youtubeApiKey,soundCloud:soundCloudApi})};},
+    resolveTrack: async (track, room) => {
+      const resolved = await resolveProviderMappings(track, musicProviders, undefined, { allowSpotify: roomAllowsProvider(room.settings, "spotify") });
+      return resolved.durationVerified ? resolved : { ...resolved, ...await verifyTrackDuration(track, { providers: musicProviders }) };
+    },
     resolveSavedRecording:(track,signal,room)=>(roomAllowsProvider(room.settings,"spotify")?resolveSpotifySavedRecording:resolveSavedRecording)(track,signal),
     getResourcePolicy:actor=>resourcePolicies.get(actor),
     runImport:async(actor,operation)=>resourceAdmission.importSet(actor,await resourcePolicies.get(actor),operation),

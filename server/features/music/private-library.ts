@@ -2,7 +2,7 @@ import { serverT } from "../../lib/i18n.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { approvedRemoteImageUrl } from "../../../shared/remote-images.js";
-import { isMixcloudShowKey, mixcloudShowKey } from "../../../shared/mixcloud.js";
+import { MUSIC_PROVIDERS, validateProviderTrackLocator } from "../../../shared/provider-definitions.js";
 import { DEFAULT_PLAN_LIMITS, planLimitsSchema, type PlanLimits } from "../../../shared/resource-policy.js";
 import { PublicRequestError } from "../../lib/public-request-error.js";
 
@@ -11,7 +11,7 @@ export class PrivateLibraryDataError extends Error {
 }
 export const LIBRARY_LIMITS = { picks: DEFAULT_PLAN_LIMITS.libraryPicks, sets: DEFAULT_PLAN_LIMITS.librarySets, setTracks: DEFAULT_PLAN_LIMITS.librarySetTracks };
 export const libraryTrackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
+  provider: z.enum(MUSIC_PROVIDERS),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
@@ -19,14 +19,8 @@ export const libraryTrackSchema = z.object({
   permalinkUrl: z.string().url().startsWith("https://").max(2048).optional(),
   durationMs: z.number().int().positive().max(86_400_000).optional()
 }).superRefine((track, context) => {
-  const valid = track.provider === "youtube" ? /^[\w-]{11}$/.test(track.providerId)
-    : track.provider === "spotify" ? /^[A-Za-z0-9]{22}$/.test(track.providerId)
-    : track.provider === "apple" ? /^\d+$/.test(track.providerId)
-    : track.provider === "mixcloud" ? isMixcloudShowKey(track.providerId)
-    : /^soundcloud:tracks:\d+$/.test(track.providerId);
-  if (!valid) context.addIssue({ code: "custom", path: ["providerId"], message: serverT("invalid_individual_track_identifier") });
-  if (track.provider === "mixcloud" && (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId)) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: serverT("a_matching_mixcloud_show_url_is_required") });
+  for (const issue of validateProviderTrackLocator(track.provider, track, "library")) {
+    context.addIssue({ code: "custom", path: [issue.path], message: serverT(issue.path === "providerId" ? "invalid_individual_track_identifier" : issue.messageKey) });
   }
 });
 const id = z.string().uuid();

@@ -38,10 +38,12 @@ test("Spotify web follows room pause, seek and resume, and listeners can sync pl
   await expect.poll(async () => (await snapshot(page)).state?.position).toBe(85_000);
   await page.evaluate(() => window.playbackHarness.updatePlayback({ playing: true, position: 85 }));
   await expect.poll(async () => (await snapshot(page)).state?.paused).toBe(false);
-  await page.evaluate(() => {
+  const activatedDuringSync = await page.evaluate(() => {
     window.playbackHarness.setSdkState({ positionMs: 5_000 });
     window.playbackHarness.sync();
+    return window.playbackHarness.inspect().commands.some(command => command.action === "activateElement");
   });
+  expect(activatedDuringSync).toBe(true);
   await expect.poll(async () => (await snapshot(page)).state?.position || 0).toBeGreaterThanOrEqual(85_000);
   expect((await snapshot(page)).state?.track_window.current_track.uri).toBe("spotify:track:track-a");
 });

@@ -1,11 +1,12 @@
 import type { ProfileTrack, SoundSpinProfile, SoundSpinProfileOption } from "../../types";
+import { isProvider } from "../../../shared/provider-definitions";
 
 export interface ProfileResponse { profile: SoundSpinProfile; options?: SoundSpinProfileOption[] }
 const nullableString = (value: unknown) => value === null || typeof value === "string";
 function profileTrack(value: unknown): value is ProfileTrack {
   if (!value || typeof value !== "object") return false;
   const track = value as Record<string, unknown>;
-  return ["youtube", "spotify", "apple", "soundcloud", "mixcloud"].includes(String(track.provider)) &&
+  return isProvider(track.provider) &&
     typeof track.providerId === "string" && typeof track.title === "string" && track.title.length > 0 &&
     (track.artist === undefined || typeof track.artist === "string") &&
     ["artworkUrl", "permalinkUrl"].every(key => track[key] === undefined || (typeof track[key] === "string" && /^https:\/\//.test(track[key]))) &&

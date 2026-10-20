@@ -1,6 +1,7 @@
 import { readStoredValue } from "../../lib/browser-storage";
+import { PLAYBACK_PREFERENCES } from "../playback/playback-selection";
 
-export type PlaybackPreference = "source" | "spotify-web" | "spotify-desktop" | "apple";
+export type PlaybackPreference = keyof typeof PLAYBACK_PREFERENCES;
 export type PlaybackFallback = "source" | "ask" | "silent";
 export type ThemeMode = "dark" | "light" | "system";
 
@@ -55,8 +56,8 @@ const defaults: SoundSpinUserSettings = {
 };
 
 function playbackPreference(value: unknown): PlaybackPreference {
-  return value === "spotify-web" || value === "spotify-desktop" || value === "apple" || value === "source"
-    ? value
+  return typeof value === "string" && Object.hasOwn(PLAYBACK_PREFERENCES, value)
+    ? value as PlaybackPreference
     : "source";
 }
 

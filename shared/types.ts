@@ -1,4 +1,5 @@
-export type Provider = "youtube" | "spotify" | "apple" | "soundcloud" | "mixcloud";
+import type { Provider } from "./provider-definitions.js";
+export type { Provider } from "./provider-definitions.js";
 
 export interface User {
   id: string;

@@ -210,6 +210,9 @@ test("two listeners can join, manage private queues, skip idempotently and recon
     assert.equal((await action(listener, "queue:add", track("abcdefghijk"))).ok, false);
     assert.equal((await action(listener, "room:join", { roomId: "restricted-room", user: { id: "alice", name: "Alice", avatarSeed: "alice" } })).ok, true);
     const beforePlayback = structuredClone(state.room.playback);
+    assert.equal((await action(listener, "queue:add", track("invalid-video-id"))).ok, false);
+    assert.deepEqual(state.room.queue, []);
+    assert.deepEqual(state.room.playback, beforePlayback);
     const added = await action(listener, "queue:add", { ...track("abcdefghijk"), addedBy: { id: "bob" } }) as { ok: boolean; started: boolean; position: number };
     assert.deepEqual(added, { ok: true, started: false, position: 1 });
     assert.equal(state.room.queue[0].addedBy.id, "alice");
