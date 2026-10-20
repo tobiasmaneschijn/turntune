@@ -122,14 +122,19 @@ export const ChatMessageItem = memo(function ChatMessageItem({
   const showReactionPicker = reactionPickerOpen ?? localReactionPicker
   const setShowReactionPicker = (open: boolean | ((current: boolean) => boolean)) => {
     const next = typeof open === 'function' ? open(showReactionPicker) : open
-    if (!next && pickerRef.current?.contains(document.activeElement)) reactionTriggerRef.current?.focus({ preventScroll: true })
+    if (!next && pickerRef.current?.contains(document.activeElement)) {
+      const trigger = reactionFromMenuRef.current ? moreTriggerRef.current : reactionTriggerRef.current
+      trigger?.focus({ preventScroll: true })
+    }
     setLocalReactionPicker(next); onReactionPickerOpenChange?.(message.id, next)
   }
   const pickerRef = useRef<HTMLDivElement>(null)
   const reactionTriggerRef = useRef<HTMLButtonElement>(null)
+  const moreTriggerRef = useRef<HTMLButtonElement>(null)
+  const reactionFromMenuRef = useRef(false)
   const pickerOwnsFocusRef = useRef(false)
-  // Reply hands focus to the composer instead of returning to the menu trigger.
-  const replyFromMenuRef = useRef(false)
+  // Reply and React hand focus to their destination after the menu closes.
+  const menuHandsOffFocusRef = useRef(false)
   const rowRef = useRef<HTMLDivElement>(null)
   const pickerBounds = useChatPickerBounds(showReactionPicker && !isHidden, rowRef, 'message')
   useEffect(() => {
@@ -190,12 +195,19 @@ export const ChatMessageItem = memo(function ChatMessageItem({
       </div>
       <div className="chat-message-content">
         <DropdownMenu open={actionMenuOpen} onOpenChange={(open) => {
-          if (open) replyFromMenuRef.current = false
+          if (open) menuHandsOffFocusRef.current = false
           onActionMenuOpenChange?.(message.id, open)
         }}>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="chat-message-more" aria-label={isOwnMessage ? t('ownMessageActions') : t('namedMessageActions', { name: message.user.name })} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => replyFromMenuRef.current ? false : true}>
-            {!isHidden && !message.removedAt&&!participationDisabled&&<DropdownMenuItem onClick={() => { replyFromMenuRef.current = true; onReply(message) }}><Reply /> {t('reply')}</DropdownMenuItem>}
+          <DropdownMenuTrigger render={<Button ref={moreTriggerRef} variant="ghost" size="icon-sm" className="chat-message-more" aria-label={isOwnMessage ? t('ownMessageActions') : t('namedMessageActions', { name: message.user.name })} />}><MoreHorizontal size={17} /></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="chat-message-menu" finalFocus={() => menuHandsOffFocusRef.current ? false : true}>
+            {!isHidden && !message.removedAt&&!participationDisabled&&<>
+              <DropdownMenuItem onClick={() => { menuHandsOffFocusRef.current = true; onReply(message) }}><Reply /> {t('reply')}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                menuHandsOffFocusRef.current = true
+                reactionFromMenuRef.current = true
+                setShowReactionPicker(true)
+              }}><SmilePlus />{t('react')}</DropdownMenuItem>
+            </>}
             {onReport&&!isOwnMessage&&<DropdownMenuItem onClick={()=>onReport(message)}><Flag/>{t('report')}</DropdownMenuItem>}
             {onRemove&&!message.removedAt&&<DropdownMenuItem onClick={()=>onRemove(message)}><Trash2/>{t('removeMessage')}</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => {
@@ -224,7 +236,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
             aria-label={t('moreReactions')}
             aria-haspopup="dialog"
             aria-expanded={showReactionPicker}
-            onClick={() => setShowReactionPicker((current) => !current)}
+            onClick={() => { reactionFromMenuRef.current = false; setShowReactionPicker((current) => !current) }}
           >
             <SmilePlus size={15} />
           </button>
@@ -236,7 +248,7 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           <div ref={pickerRef} className="chat-reaction-picker" role="dialog" aria-label={t('reactTo', { name: message.user.name })} style={{ position: 'fixed', ...pickerBounds, right: 'auto' }}
             onFocusCapture={() => { pickerOwnsFocusRef.current = true }}
             onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) pickerOwnsFocusRef.current = false }}
-            onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowReactionPicker(false); reactionTriggerRef.current?.focus({ preventScroll: true }) } }}>
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowReactionPicker(false) } }}>
             <div className="chat-reaction-picker-header"><span>{t('reactTo', { name: message.user.name })}</span>
             <button
               type="button"
@@ -305,8 +317,8 @@ export const ChatMessageItem = memo(function ChatMessageItem({
           {message.poll && <ChatPollView poll={message.poll} currentUserId={currentUserId} onVote={(optionIndex) => onVotePoll?.(message, optionIndex)} voting={pollVoting} disabled={pollVotingDisabled} error={pollVoteError} />}
         </div>}
         {saveStatus && saveStatus.state !== 'saved' && saveStatus.state !== 'sent-live' && !message.removedAt && (
-          <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : undefined}>
-            {saveStatus.state === 'sending' ? t('sending') : saveStatus.state === 'send-failed' ? <><span>{t('confirmSendFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>{t('retrySend')}</Button></> : saveStatus.state === 'saving' ? t('saving') : <><span>{t('confirmSaveFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>{t('retrySave')}</Button></>}
+          <div className={cn('chat-message-save-state', { 'chat-message-save-failed': saveStatus.state === 'failed' || saveStatus.state === 'send-failed' })} role={saveStatus.state === 'failed' || saveStatus.state === 'send-failed' ? 'alert' : 'status'}>
+            {saveStatus.state === 'queued' ? t('queued') : saveStatus.state === 'sending' ? t('sending') : saveStatus.state === 'send-failed' ? <><span>{t('confirmSendFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySend?.(message.id)}>{t('retrySend')}</Button></> : saveStatus.state === 'saving' ? t('saving') : <><span>{t('confirmSaveFailed')}</span><Button variant="ghost" size="sm" onClick={() => onRetrySave?.(message.id)}>{t('retrySave')}</Button></>}
           </div>
         )}
         {!isHidden&&!message.removedAt && reactionGroups.length > 0 && (

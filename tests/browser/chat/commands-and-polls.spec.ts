@@ -96,8 +96,18 @@ test('Use chat commands to open the queue and find room messages', async ({ page
 })
 
 test('Create a poll, change a vote and keep the result after returning', async ({ page }) => {
-  await runCommand(page, '/poll Next set?')
   const form = page.getByRole('region', { name: 'New poll' })
+  await composer(page).fill('Keep this text draft')
+  await page.getByRole('button', { name: 'Add to message', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New poll', exact: true }).click()
+  await expect(form.getByRole('textbox', { name: 'Question', exact: true })).toBeFocused()
+  await expect(composer(page)).toHaveValue('Keep this text draft')
+  await form.getByRole('button', { name: 'Close poll', exact: true }).click()
+  await expect(form).toHaveCount(0)
+  await expect(composer(page)).toHaveValue('Keep this text draft')
+  await expect(composer(page)).toBeFocused()
+
+  await runCommand(page, '/poll Next set?')
   await expect(form.getByRole('textbox', { name: 'Question', exact: true })).toHaveValue('Next set?')
   await form.getByRole('textbox', { name: 'Option 1', exact: true }).fill('House')
   await form.getByRole('textbox', { name: 'Option 2', exact: true }).fill('house')

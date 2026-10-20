@@ -1,5 +1,5 @@
 import { Trans, useTranslation } from 'react-i18next'
-import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Bell, BellOff, ChartNoAxesColumn, ImagePlus, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
 import { insertComposerText } from '@/features/chat/composer-edit'
@@ -76,7 +76,8 @@ import type { SoundSpinUserSettings } from '@/features/settings/user-settings'
 import { effectiveScrollBehavior, useEffectiveMotion } from '@/hooks/use-effective-motion'
 import { useRealtimeChat } from '@/features/chat/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
-import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { User,RoomCapabilities } from '@/types'
 
 interface RealtimeChatProps {
@@ -260,6 +261,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [unreadMessageIds, setUnreadMessageIds] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLFormElement>(null)
+  const composerMenuHandsOffFocusRef = useRef(false)
   const mediaPickerBounds = useChatPickerBounds(showEmoji || showGiphy, composerRef, 'composer')
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const draftMessageRef = useRef(initialDraft?.text || '')
@@ -328,24 +330,33 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 
   const { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef,
     sendText, sendPoll, sendMedia: sendMediaMessage, sendMediaWithOwnership, retrySend, retrySave } = useChatDelivery({
-    scope: `${user.id}:${roomName}`, isConnected:isConnected&&canChat&&!cooldownRemaining, prepareMessage,
+    ownerId: user.id, scope: `${user.id}:${roomName}`, slowModeSeconds,
+    isConnected:isConnected&&canChat&&!cooldownRemaining, prepareMessage,
     deliver: (message) => boundedOperation(() => sendExistingMessage(message), { timeoutMs: SUBMISSION_TIMEOUT_MS }),
     persist: onSend ? (message) => boundedOperation(() => Promise.resolve(onSend(message)), { timeoutMs: SUBMISSION_TIMEOUT_MS }) : undefined,
     composer: () => ({ text: draftMessageRef.current, mentions: activeMentions(draftMessageRef.current.trim(), selectedMentions), replyTo: replyingTo, revision: draftRevisionRef.current }),
     onError: setComposerError,
     beforeTextSend: () => requestAnimationFrame(() => { if (lifetimeRef.current.active && !history.context) scrollToBottom('auto') }),
     confirmedSend:()=>{if(slowModeSeconds>0){const until=Date.now()+slowModeSeconds*1000;setCooldownUntil(until);setCooldownNow(Date.now())}},
-    confirmed: (snapshot, text) => {
+    accepted: (snapshot, text) => {
       if (text && draftRevisionRef.current === snapshot.revision && draftMessageRef.current === snapshot.text && replyingTo?.id === snapshot.replyTo?.id &&
           JSON.stringify(activeMentions(draftMessageRef.current.trim(), selectedMentions)) === JSON.stringify(snapshot.mentions)) {
         draftMessageRef.current = ''
         draftSnapshotRef.current.draft = { text: '', mentions: [] }
         setDraftText(''); setHasDraft(false); setSelectedMentions([]); setMentionQuery(null); setDraftRestored(false)
+        setReplyingTo(null)
         restoredReplyIdRef.current = undefined
         draftStore.save({ text: '', mentions: [] })
+        selectionRef.current = { start: 0, end: 0 }
+        draftRevisionRef.current++
         stopTyping()
+        messageInputRef.current?.focus({ preventScroll: true })
+      } else if (!text && draftRevisionRef.current === snapshot.revision && replyingTo?.id === snapshot.replyTo?.id) {
+        setReplyingTo(null)
+        restoredReplyIdRef.current = undefined
+        draftSnapshotRef.current.draft.replyToId = undefined
+        draftStore.save(draftSnapshotRef.current.draft)
       }
-      setReplyingTo((current) => draftRevisionRef.current === snapshot.revision && current?.id === snapshot.replyTo?.id ? null : current)
     },
   })
 
@@ -940,7 +951,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       {notifications && <Button type="button" variant="ghost" size="icon-sm" aria-label={roomMuted ? t('roomMuted') : t('muteRoom')} aria-pressed={roomMuted} onClick={() => setRoomMuted(!roomMuted)} title={roomMuted ? t('unmuteNotifications') : t('muteNotifications')}>{roomMuted ? <BellOff size={16} /> : <Bell size={16} />}</Button>}
     </div>
   ) : null
-  const composerStatus = !canChat?restrictionMessage||t('chatLimited'):cooldownRemaining?t('slowMode', { count: cooldownRemaining }):uploading ? t('uploading') : sending ? t('sending') : !isConnected ? t('draftKept') : draftRestored ? t('draftRestored') : ''
+  const composerStatus = !canChat?restrictionMessage||t('chatLimited'):cooldownRemaining?t('slowMode', { count: cooldownRemaining }):uploading ? t('uploading') : !isConnected ? t('draftKept') : draftRestored ? t('draftRestored') : ''
 
   return (
     <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
@@ -1103,18 +1114,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           ><code>/{name}</code><span>{name === 'queue' ? t('openQueue') : name === 'mute' ? roomMuted ? t('unmuteNotifications') : t('muteNotifications') : name === 'search' ? t('searchRoomMessages') : t('createPoll')}</span></button>)}
         </div>}
         <InputGroup className="chat-composer-bar">
-          <Button
-            className="chat-composer-add"
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || uploading || sending}
-            aria-label={t('uploadImage')}
-            title={t('uploadImage')}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Plus className="size-5" />
-          </Button>
           <InputGroupTextarea
             ref={messageInputRef}
             className="chat-composer-input"
@@ -1189,18 +1188,27 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             onPaste={(event) => void pasteMedia(event)}
             placeholder={t('composerPlaceholder')}
           />
-          <Button
-            className="chat-composer-gif"
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphy.configured || uploading || sending}
-            aria-label={giphy.configured ? t('addGif') : t('gifsUnavailable')}
-            title={giphy.configured ? t('addGif') : t('gifsUnavailableRoom')}
-            onClick={toggleGiphy}
-          >
-            <span>{t('gif')}</span>
-          </Button>
+          <InputGroupAddon align="block-end" className="chat-composer-tools" aria-label={t('messageTools')}>
+          <DropdownMenu onOpenChange={(open) => { if (open) composerMenuHandsOffFocusRef.current = false }}>
+            <DropdownMenuTrigger render={<Button
+              className="chat-composer-add"
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={!isConnected || (!canMedia && !canPoll) || Boolean(cooldownRemaining) || uploading || sending}
+              aria-label={t('addToMessage')}
+              title={t('addToMessage')}
+            />}><Plus className="size-5" /></DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="chat-composer-menu" finalFocus={() => composerMenuHandsOffFocusRef.current ? false : true}>
+              {canMedia && <DropdownMenuItem onClick={() => fileInputRef.current?.click()}><ImagePlus />{t('uploadImage')}</DropdownMenuItem>}
+              {canPoll && <DropdownMenuItem onClick={() => {
+                composerMenuHandsOffFocusRef.current = true
+                setShowEmoji(false); setShowGiphy(false)
+                pollComposerGenerationRef.current++
+                setPollQuestion('')
+              }}><ChartNoAxesColumn />{t('newPoll')}</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             type="button"
             variant="ghost"
@@ -1214,15 +1222,29 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             <Smile className="size-[18px]" />
           </Button>
           <Button
+            className="chat-composer-gif"
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphy.configured || uploading || sending}
+            aria-label={giphy.configured ? t('addGif') : t('gifsUnavailable')}
+            title={giphy.configured ? t('addGif') : t('gifsUnavailableRoom')}
+            onClick={toggleGiphy}
+          >
+            <span>{t('gif')}</span>
+          </Button>
+          <Button
             className="chat-send-button"
             type="submit"
+            variant="ghost"
             size="icon"
-            disabled={(!isConnected && !commandDraft)||(!commandDraft&&(!canChat||Boolean(cooldownRemaining))) || uploading || sending || !hasDraft}
-            aria-label={commandDraft ? t('runCommand') : sending ? t('sendingMessage') : t('sendMessage')}
+            disabled={(!isConnected && !commandDraft)||(!commandDraft&&(!canChat||Boolean(cooldownRemaining) || (slowModeSeconds > 0 && sending))) || uploading || !hasDraft}
+            aria-label={commandDraft ? t('runCommand') : t('sendMessage')}
             title={commandDraft ? t('runCommandEnter') : t('sendMessageEnter')}
           >
             <Send className="size-4" />
           </Button>
+          </InputGroupAddon>
         </InputGroup>
         <span id={composerHintId} className="sr-only">{t('composerHint')}</span>
         {(composerStatus || draftText.length >= 450) && <div className="chat-composer-hint">
