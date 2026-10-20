@@ -94,6 +94,15 @@ each environment. Production's `TRUSTED_PROXY_CIDRS` was verified as
 Docker network. Recheck the address after proxy recreation. The configured
 application domains use the HTTPS origins above.
 
+For Sentry, keep DSNs, provider and environment labels in each service's runtime
+settings. Optional private source-map uploads use the repository secret
+`SENTRY_AUTH_TOKEN` and repository variables `SENTRY_ORG`,
+`SENTRY_BROWSER_PROJECT`, `SENTRY_SERVER_PROJECT`, and optional `SENTRY_URL`.
+The reusable image workflow mounts the token as a BuildKit secret, uploads maps
+before publishing, and removes them from runtime output. The embedded release
+revision stays unchanged when the scanned staging digest is promoted. See
+[Observability](observability.md) for configuration and verification.
+
 ## Deploy staging
 
 1. Push the reviewed changes to `develop`. Wait for **App checks**, **Security

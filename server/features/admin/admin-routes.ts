@@ -3,6 +3,7 @@ import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { securityEvent } from "../../security/security-events.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 export type AdminAuthorization = { ok: true; userId: string } | { ok: false; error: string; status: 401 | 403 };
 export interface AdminRouteOptions {
@@ -72,7 +73,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
       try {
         const { data, error } = await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrls(screenshotPaths, 15 * 60);
         if (!error) for (const item of data || []) if (!item.error && item.path && item.signedUrl) signedUrls.set(item.path, item.signedUrl);
-      } catch { /* Previews remain optional when Storage is unavailable. */ }
+      } catch (error) { reportUnexpectedRequestError(error, { operation: "admin.feedback.preview" }); /* Previews remain optional when Storage is unavailable. */ }
     }
 
     const activity = Array.from({ length: 14 }, (_, index) => {
@@ -123,6 +124,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
       }))
     });
   } catch (error) {
+    reportUnexpectedRequestError(error, { operation: "admin.dashboard" });
     response.status(500).json({ error: serverT("could_not_load_admin_data") });
   }
 });
@@ -155,6 +157,7 @@ app.patch("/api/admin/feedback/:feedbackId", express.json({ limit: "8kb" }), asy
       }
     });
   } catch (error) {
+    reportUnexpectedRequestError(error, { operation: "admin.feedback.update" });
     response.status(500).json({ error: serverT("could_not_update_feedback") });
   }
 });

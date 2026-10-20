@@ -93,7 +93,8 @@ test("hostile and opaque origins, wrong host and ambiguous forwarded protocols a
 
 test("approved legacy domains serve HTTP while headers protect success and rejection", async (t) => {
   const app = express();
-  configureHttpSecurity(app, { ...production, APP_ORIGINS: "https://lydman.test,https://legacy.test:8443", TRUSTED_PROXY_CIDRS: "127.0.0.1/32,::1/128", CSP_MODE: "report-only" });
+  configureHttpSecurity(app, { ...production, APP_ORIGINS: "https://lydman.test,https://legacy.test:8443", TRUSTED_PROXY_CIDRS: "127.0.0.1/32,::1/128", CSP_MODE: "report-only",
+    OBSERVABILITY_PROVIDER: "sentry", SENTRY_DSN: "https://serverkey@server-monitoring.invalid/1", SENTRY_BROWSER_DSN: "https://browserkey@browser-monitoring.invalid/2" });
   app.get("/", (req, res) => res.json({ ip: trustedClientIp(req) }));
   const server = createServer(app);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -115,6 +116,9 @@ test("approved legacy domains serve HTTP while headers protect success and rejec
   assert.equal(response.headers["x-content-type-options"], "nosniff");
   assert.match(response.headers["content-security-policy"] as string, /frame-ancestors 'none'/);
   assert.match(response.headers["content-security-policy-report-only"] as string, /project\.supabase\.co wss:\/\/project\.supabase\.co/);
+  const connectionPolicy = (response.headers["content-security-policy-report-only"] as string).split(";").find(value => value.trim().startsWith("connect-src"))!;
+  assert.match(connectionPolicy, /https:\/\/browser-monitoring\.invalid/);
+  assert.doesNotMatch(connectionPolicy, /server-monitoring|serverkey|browserkey/);
   for (const host of ["lydman.test", "legacy.test:8443"]) {
     const legacy = await read({ host, origin: `https://${host}`, "x-forwarded-proto": "https" });
     assert.equal(legacy.response.statusCode, 200);

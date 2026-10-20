@@ -37,7 +37,7 @@ export function mountFeedbackRoutes(app: Express, options: { client: SupabaseCli
       if (!actor) { response.status(401).json({ error: serverT("sign_in_to_send_feedback") }); return }
       if (!options.client) { response.status(503).json({ error: serverT("feedback_is_unavailable") }); return }
       response.locals.feedbackActor = actor; next()
-    } catch (error) { const failure = publicRequestFailure(error, 'Feedback is unavailable. Try again later.'); response.status(failure.status).json({ error: failure.message }) }
+    } catch (error) { const failure = publicRequestFailure(error, 'Feedback is unavailable. Try again later.', { operation: 'feedback.authenticate' }); response.status(failure.status).json({ error: failure.message }) }
   }
   app.post('/api/feedback', authenticate, express.json({ limit: '24kb' }), async (request, response) => {
     response.setHeader('Cache-Control', 'no-store')
@@ -59,7 +59,7 @@ export function mountFeedbackRoutes(app: Express, options: { client: SupabaseCli
       }, 'Feedback is unavailable. Try again later.')
       response.json(data)
     } catch (error) {
-      const failure = publicRequestFailure(error, 'Feedback is unavailable. Try again later.')
+      const failure = publicRequestFailure(error, 'Feedback is unavailable. Try again later.', { operation: 'feedback.submit' })
       response.status(failure.status).json({ error: failure.message })
     }
   })

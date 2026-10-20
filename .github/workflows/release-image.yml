@@ -3,6 +3,10 @@ name: Build release image
 on:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        description: Optional build-only source-map upload token
+        required: false
     outputs:
       image:
         description: Published image pinned to its registry digest
@@ -58,7 +62,15 @@ jobs:
           push: false
           platforms: linux/amd64
           tags: ${{ steps.image.outputs.tag }}
-          build-args: BUILD_REVISION=${{ github.sha }}
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            SENTRY_ORG=${{ vars.SENTRY_ORG }}
+            SENTRY_BROWSER_PROJECT=${{ vars.SENTRY_BROWSER_PROJECT }}
+            SENTRY_SERVER_PROJECT=${{ vars.SENTRY_SERVER_PROJECT }}
+            SENTRY_URL=${{ vars.SENTRY_URL }}
+            SENTRY_UPLOAD_ENABLED=${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

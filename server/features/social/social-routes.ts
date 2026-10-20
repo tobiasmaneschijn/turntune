@@ -3,6 +3,7 @@ import express from "express";
 import { z } from "zod";
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import { SocialError, type SocialStore } from "./social-store.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 const friendAction = z.object({ action: z.enum(["request", "accept", "decline", "remove"]) }).strict();
 const activitySettings = z.object({ shareActivity: z.boolean().optional(), receiveRequests: z.boolean().optional() }).strict().refine(input => input.shareActivity !== undefined || input.receiveRequests !== undefined);
@@ -24,6 +25,7 @@ export function mountSocialRoutes(app: express.Express, store: SocialStore, getU
       attempt.count++; attempts.set(key, attempt);
       response.json(await run(request, actor));
     } catch (error) {
+      reportUnexpectedRequestError(error, { operation: "social.request" });
       const status = error instanceof SocialError ? error.status : error instanceof z.ZodError ? 400 : 500;
       const message = error instanceof z.ZodError ? "Invalid request." : error instanceof SocialError ? error.message : "Could not complete this request. Try again.";
       response.status(status).json({ error: message });

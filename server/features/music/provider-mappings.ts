@@ -1,5 +1,6 @@
 import { MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "../../../shared/provider-definitions.js";
 import { providerSignal } from "../../integrations/provider-http.js";
+import { telemetry } from "../../observability/index.js";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
 import { bestCertainCatalogMatch, type CatalogTrack, type ProviderTrackMapping } from "./music.js";
 import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
@@ -32,9 +33,9 @@ export async function resolveProviderMappings(input: TrackInput, providers: Serv
   }
   try {
     if (!source && sourceProvider.catalog?.configured()) source = await sourceProvider.resolveSource(input, signal);
-  } catch {
+  } catch (error) {
     signal.throwIfAborted();
-    console.warn("Could not resolve source metadata.");
+    telemetry.captureError(error, { operation: "music.source.resolve", provider: input.provider });
   }
   const track = source?.track ?? input;
   mappings[input.provider] = source?.mapping ?? sourceMapping(track);
@@ -49,9 +50,9 @@ export async function resolveProviderMappings(input: TrackInput, providers: Serv
         : bestCertainCatalogMatch(await catalog.searchTracks(query, signal), track);
       if (!result || sourceIsrc && result.isrc && result.isrc !== sourceIsrc) return undefined;
       return { provider, result };
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
-      console.warn(`${PROVIDER_DEFINITIONS[provider].label} counterpart resolution failed.`);
+      telemetry.captureError(error, { operation: "music.counterpart.resolve", provider });
       return undefined;
     }
   }));

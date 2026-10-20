@@ -1,4 +1,5 @@
 import type { Room } from "../../types.js";
+import { telemetry } from "../../observability/index.js";
 import { advanceRadio } from "./radio.js";
 import { radioState, roomSession } from "./radio-policy.js";
 import type { RoomCommandService } from "./room-command-service.js";
@@ -44,6 +45,6 @@ export class RoomSessionScheduler {
     void this.commands.execute(room,draft=>{
       if(draft.playback.track?.id===track.id&&draft.playback.revision===playback.revision&&draft.playback.playing){const current=draft.playback.track;if(current.durationVerified&&current.durationMs&&draft.playback.position+(this.now()-draft.playback.updatedAt)/1000>=current.durationMs/1000)advanceRadio(draft,this.now());}
       return{result:undefined};
-    }).then(()=>this.reconcilePresence(room)).catch(error=>console.error("Could not advance room fallback",error)).finally(()=>this.busy.delete(room.id));
+    }).then(()=>this.reconcilePresence(room)).catch(error=>telemetry.captureError(error,{operation:"room.fallback.advance"})).finally(()=>this.busy.delete(room.id));
   }}
 }

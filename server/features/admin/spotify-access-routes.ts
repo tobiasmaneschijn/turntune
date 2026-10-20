@@ -3,6 +3,7 @@ import { z } from "zod";
 import { serverT } from "../../lib/i18n.js";
 import { RoomCommandError } from "../../realtime/socket-handler.js";
 import { securityEvent } from "../../security/security-events.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 import type { Store } from "../../persistence/store.js";
 import type { PlatformSecurity } from "../../security/platform-security.js";
 import type { Room } from "../../types.js";
@@ -30,6 +31,6 @@ export function mountSpotifyAccessRoutes(app: express.Express, { store, platform
       broadcast(room);
       securityEvent("admin_change","success",{actorId:admin.userId,requestId:response.locals.requestId});
       response.json({enabled:room.settings.spotifyEnabled===true});
-    }catch{response.status(503).json({error:serverT("could_not_change_spotify_access_try_again")});}
+    }catch(error){reportUnexpectedRequestError(error,{operation:"admin.spotify.update"});response.status(503).json({error:serverT("could_not_change_spotify_access_try_again")});}
   });
 }

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { measureOperation, observeOperation } from "../observability/performance.js";
 
 type Operation = "room_save" | "room_command" | "provider_request" | "chat_message" | "chat_reaction" | "chat_typing";
 type DatabaseOperation = "read" | "write" | "rpc" | "auth" | "storage" | "other";
@@ -12,7 +13,8 @@ export class RuntimeMetrics {
   private workflows = new Map<Operation, { count: number; requests: number; maxRequests: number; totalMs: number }>();
   private readonly work = new AsyncLocalStorage<DatabaseWork>();
   pendingRoomCommands = 0;
-  observe(operation: Operation, elapsedMs: number, failed = false) {
+  observe(operation: Operation, elapsedMs: number, failed = false, recordSpan = true) {
+    observeOperation(operation, elapsedMs, failed, "workflow", recordSpan);
     const value = this.observations.get(operation) || { count: 0, failures: 0, totalMs: 0, maxMs: 0 };
     value.count++;
     value.failures += Number(failed);
@@ -25,11 +27,13 @@ export class RuntimeMetrics {
     const work = { requests: 0, totalMs: 0 };
     let failed = true;
     try {
-      const result = await this.work.run(work, run);
-      failed = isFailure?.(result) ?? false;
+      const result = await measureOperation(operation, () => this.work.run(work, run), result => {
+        failed = isFailure?.(result) ?? false;
+        return failed;
+      });
       return result;
     } finally {
-      this.observe(operation, performance.now() - started, failed);
+      this.observe(operation, performance.now() - started, failed, false);
       const value = this.workflows.get(operation) || { count: 0, requests: 0, maxRequests: 0, totalMs: 0 };
       value.count++;
       value.requests += work.requests;
@@ -39,6 +43,7 @@ export class RuntimeMetrics {
     }
   }
   observeDatabase(operation: DatabaseOperation, elapsedMs: number, failed: boolean) {
+    observeOperation(operation, elapsedMs, failed, "database");
     const value = this.database.get(operation) || { count: 0, failures: 0, totalMs: 0, maxMs: 0 };
     value.count++;
     value.failures += Number(failed);

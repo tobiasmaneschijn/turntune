@@ -6,6 +6,7 @@ import type { AdminAuthorization } from "./admin-routes.js";
 import { AccountDeletionService, accountExportCategories } from "../accounts/account-deletion.js";
 import { cleanupManagedUploads } from "../uploads/managed-uploads.js";
 import { securityEvent } from "../../security/security-events.js";
+import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
 
 interface PlatformRoutesOptions {
   client: SupabaseClient | null;
@@ -38,7 +39,7 @@ export function mountPlatformRoutes(app: express.Express, options: PlatformRoute
       if (action === "clear-avatar" || action === "clear-profile") await cleanupManagedUploads(options.client, { maxBatches: 1, batchSize: 20, maxMs: 5000 });
       securityEvent("admin_change", "success", { requestId: response.locals.requestId, actorId: actor.userId });
       response.json({ applied: true });
-    } catch { response.status(503).json({ error: serverT("platform_controls_are_unavailable_try_again") }); }
+    } catch (error) { reportUnexpectedRequestError(error, { operation: "admin.platform.action" }); response.status(503).json({ error: serverT("platform_controls_are_unavailable_try_again") }); }
   });
 
   app.post("/api/account/deletion-request", express.json({ limit: "2kb" }), async (request, response) => {
@@ -66,7 +67,7 @@ export function mountPlatformRoutes(app: express.Express, options: PlatformRoute
       const created = await options.client.from("soundspin_account_deletion_jobs").insert({ user_id: userId, delete_owned_rooms: true, owned_room_count: rooms.count || 0 }).select("id,state,owned_room_count").single();
       if (created.error) throw new Error(serverT("request_creation_unavailable"));
       response.status(202).json({ request: created.data });
-    } catch { response.status(503).json({ error: serverT("could_not_request_deletion_try_again") }); }
+    } catch (error) { reportUnexpectedRequestError(error, { operation: "account.deletion.request" }); response.status(503).json({ error: serverT("could_not_request_deletion_try_again") }); }
   });
 
   app.get("/api/account/export/:category", async (request, response) => {
@@ -87,7 +88,7 @@ export function mountPlatformRoutes(app: express.Express, options: PlatformRoute
       const data = await query.range(page.data * 100, page.data * 100 + 99);
       if (data.error) throw new Error(serverT("export_unavailable"));
       response.json({ category: category.data, page: page.data, pageSize: 100, hasMore: (data.data?.length || 0) === 100, data: data.data || [] });
-    } catch { response.status(503).json({ error: serverT("could_not_export_account_data_try_again") }); }
+    } catch (error) { reportUnexpectedRequestError(error, { operation: "account.export" }); response.status(503).json({ error: serverT("could_not_export_account_data_try_again") }); }
   });
 
   app.get("/api/admin/deletion-requests", async (request, response) => {
@@ -99,7 +100,7 @@ export function mountPlatformRoutes(app: express.Express, options: PlatformRoute
       const jobs = await options.client.from("soundspin_account_deletion_jobs").select("id,user_id,state,owned_room_count,requested_at,stage,last_error").neq("state", "complete").order("requested_at").limit(100);
       if (jobs.error) throw new Error(serverT("queue_unavailable"));
       response.json({ requests: jobs.data || [] });
-    } catch { response.status(503).json({ error: serverT("could_not_load_account_requests") }); }
+    } catch (error) { reportUnexpectedRequestError(error, { operation: "admin.deletion.list" }); response.status(503).json({ error: serverT("could_not_load_account_requests") }); }
   });
 
   app.post("/api/admin/deletion-requests/:id/approve", express.json({ limit: "4kb" }), async (request, response) => {
@@ -119,6 +120,6 @@ export function mountPlatformRoutes(app: express.Express, options: PlatformRoute
       await options.onAccountRestricted(payload.data.userId);
       const result = await options.deletion.runNext();
       response.status(202).json({ approved: true, result });
-    } catch { response.status(503).json({ error: serverT("could_not_approve_deletion_retry_the_recorded_request") }); }
+    } catch (error) { reportUnexpectedRequestError(error, { operation: "admin.deletion.approve" }); response.status(503).json({ error: serverT("could_not_approve_deletion_retry_the_recorded_request") }); }
   });
 }
