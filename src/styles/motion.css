@@ -4,6 +4,9 @@
   --motion-control: 150ms;
   --motion-surface: 200ms;
   --motion-artwork: 280ms;
+  --motion-reorder: 200ms;
+  --motion-handoff: 800ms;
+  --motion-result: 280ms;
   --motion-ease-out: cubic-bezier(.2,.8,.2,1);
   --motion-ease-exit: ease-in;
 }

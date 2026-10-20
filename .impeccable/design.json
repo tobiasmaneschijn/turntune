@@ -698,6 +698,21 @@
         "purpose": "Shared artwork motion primitive; src/styles/motion.css."
       },
       {
+        "name": "motion-reorder",
+        "value": "200ms",
+        "purpose": "Confirmed queue order changes; src/styles/motion.css."
+      },
+      {
+        "name": "motion-handoff",
+        "value": "800ms",
+        "purpose": "Incoming DJ avatar highlight; src/styles/motion.css."
+      },
+      {
+        "name": "motion-result",
+        "value": "280ms",
+        "purpose": "Revealed trivia answer proportions; src/styles/motion.css."
+      },
+      {
         "name": "motion-ease-out",
         "value": "cubic-bezier(.2,.8,.2,1)",
         "purpose": "Shared control and pane easing; src/styles/motion.css."

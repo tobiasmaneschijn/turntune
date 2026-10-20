@@ -55,6 +55,10 @@ require explicit approval.
 | Queue/search behavior and existing music operations | `src/features/music/components/MusicRail.tsx` |
 | Surface-specific presentation | `src/styles/room-music.css`, `room-chat.css`, `room-player.css` |
 | Bottom player and playback options | `src/features/playback/components/NowPlaying.tsx` |
+| Artwork border sampling and fallback | `src/features/playback/use-artwork-color.ts`, `src/features/music/components/TrackArtwork.tsx` |
+| Timeline preview | `src/features/playback/components/PlaybackTimeline.tsx` |
+| Queue order animation and insertion marker | `src/features/music/hooks/use-queue-motion.ts`, `src/styles/queue-motion.css` |
+| DJ handoff and trivia result treatment | `src/styles/room-handoff.css`, `src/styles/chat-trivia.css` |
 | Disabled player while the room is empty | `src/features/playback/components/EmptyPlayerDock.tsx` |
 
 Use shared semantic variables for color and typography. `open-room.css` aliases
@@ -93,6 +97,23 @@ the private panel. Failed adds
 preserve the search; successful adds prevent another add while authoritative
 queue state catches up. Reordering has keyboard controls, and removal retains
 Undo. Required recovery remains reachable; routine player status stays out of view.
+
+## Listening details
+
+The player can use a muted color from readable cover art for its thin top border.
+Text and controls keep the shared palette. Missing artwork or an image that
+cannot be sampled uses the neutral border. Sampling must not restart playback.
+
+The timeline previews a timestamp on hover, focus, or seeking. Previewing does
+not change room playback; committing a seek retains the existing permission checks.
+Queue rows move after confirmed order changes, with an insertion line during a
+drag. The incoming DJ's avatar receives a brief highlight on a turn change.
+Initial snapshots and reconnects do not trigger a handoff highlight.
+
+Trivia reveals thin answer proportion bars in the same card after the server
+reveals results. It does not disclose counts or the correct answer early.
+Timing uses the shared motion tokens in `src/styles/motion.css`; reduced motion
+removes spatial movement and nonessential highlights while preserving state.
 
 Use the production components in room fixtures. The relevant workflows are in
 `tests/browser/rooms/player/` and `tests/browser/music/`; run their affected checks

@@ -18,6 +18,15 @@ const composer = (page: Page) => page.getByRole('textbox', { name: 'Message room
 const pollRow = (page: Page, id = pollId) => page.locator(`#chat-message-${id}`)
 const voteOption = (row: Locator, option: string) => row.getByRole('button', { name: new RegExp(`^${option}, \\d+ votes?`) })
 
+function commitRoomMessage(database: Database, room: string, message: ChatMessage) {
+  if (database.rows.some(row => row.id === message.id)) return
+  database.rows.push({ id: message.id, room_slug: room, content: message.content, message_type: message.type,
+    media_url: message.mediaUrl || null, storage_path: message.storagePath || null, mentions: message.mentions || [],
+    user_id: message.user.id, user_name: message.user.name, avatar_seed: message.user.avatarSeed || message.user.id,
+    created_at: message.createdAt, reply_to_id: message.replyTo?.id || null, soundspin_message_reactions: [],
+    poll_options: message.poll?.options || null, soundspin_poll_votes: [], song: message.song || null, game: message.game || null })
+}
+
 async function runCommand(page: Page, command: string) {
   await composer(page).fill(command)
   await composer(page).press('Enter')
@@ -48,6 +57,9 @@ test.beforeEach(async ({ page }) => {
     messages: [], votes: [], searches: [], failVote: false, triviaAnswers: [], triviaClockOffset: 0, failTriviaResponseOnce: false,
     triviaLoadDelay: 0, triviaActiveLoads: 0, triviaMaxActiveLoads: 0 }
   databases.set(page, database)
+  // The real socket commits before its ACK. Keep new trivia available to its
+  // first reader even when the separate HTTP persistence request arrives later.
+  await page.exposeFunction('commitFixtureRoomMessage', (room: string, message: ChatMessage) => commitRoomMessage(database, room, message))
   await page.route('**/api/config', (route) => route.fulfill({ json: { giphyConfigured: false } }))
   await page.route('**/api/rooms/*/chat/**', async (route) => {
     const request = route.request()
@@ -97,11 +109,7 @@ test.beforeEach(async ({ page }) => {
       const input = request.postDataJSON() as ChatMessage
       const message = await page.evaluate(message => (window as unknown as HarnessWindow).chatCommandsTest.acceptedMessages[message.id] || message, input)
       database.messages.push(message)
-      database.rows.push({ id: message.id, room_slug: room, content: message.content, message_type: message.type,
-        media_url: message.mediaUrl || null, storage_path: message.storagePath || null, mentions: message.mentions || [],
-        user_id: userId, user_name: message.user.name, avatar_seed: message.user.avatarSeed || userId,
-        created_at: message.createdAt, reply_to_id: message.replyTo?.id || null, soundspin_message_reactions: [],
-        poll_options: message.poll?.options || null, soundspin_poll_votes: [], song: message.song || null, game: message.game || null })
+      commitRoomMessage(database, room, message)
       return route.fulfill({ json: {} })
     }
     if (request.method() === 'POST' && action === 'polls' && parts[7] === 'vote') {

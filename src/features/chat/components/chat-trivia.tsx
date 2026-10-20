@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { Check, Music2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -157,12 +157,16 @@ export function ChatTriviaCard({ messageId, round, features }: {
         const isSelected = index === selected
         const correct = index === state?.correctOption
         const count = state?.counts?.[index]
+        const share = answered > 0 && count !== undefined ? Math.max(0, Math.min(1, count / answered)) : 0
         const label = closed ? t(correct ? 'trivia.correctAnswerOption' : 'trivia.answerOption', { option, count: count ?? 0 }) : option
         return <button type="button" key={index} className="chat-trivia-option" aria-label={label} aria-pressed={isSelected}
           data-correct={correct || undefined} disabled={!source || !state || features?.disabled || pending || Boolean(error) || selected !== undefined || remaining === 0 || closed}
           onClick={() => void answer(index)}>
           <span className="chat-trivia-option-copy">{correct && <Check size={14} aria-hidden="true" />}{option}</span>
           {closed && count !== undefined && <span className="chat-trivia-count" aria-hidden="true">{count.toLocaleString(i18n.resolvedLanguage)}</span>}
+          {closed && count !== undefined && <span className="chat-trivia-result" aria-hidden="true">
+            <span style={{ '--trivia-share': share } as CSSProperties} />
+          </span>}
         </button>
       })}
     </div>

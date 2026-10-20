@@ -40,7 +40,7 @@ const socket: SocketChatTransport = {
   timeout() { return { emit(event: string, payload: unknown, reply: (error: Error | null, result?: SocketReply) => void) {
     const input = event === 'chat:message' ? (payload as { message: ChatMessage }).message : undefined
     if (input) harness.broadcasts.push(input)
-    const finish = () => {
+    const finish = async () => {
       if (input && harness.failSend) { reply(null, { ok: false, error: 'Live send unavailable.' }); return }
       if (!input) { reply(null, { ok: true }); return }
       // The fake server commits one canonical answer per message UUID.
@@ -62,6 +62,10 @@ const socket: SocketChatTransport = {
         harness.acceptedMessages[input.id] = accepted
         sessionStorage.setItem(acceptedStorageKey, JSON.stringify(harness.acceptedMessages))
       }
+      const commit = (window as Window & {
+        commitFixtureRoomMessage?: (room: string, message: ChatMessage) => Promise<void>
+      }).commitFixtureRoomMessage
+      if (commit) await commit((payload as { roomId: string }).roomId, accepted)
       reply(null, { ok: true, message: accepted })
     }
     if (event === 'chat:message' && harness.holdDelivery) harness.releaseDelivery = () => { harness.holdDelivery = false; finish() }

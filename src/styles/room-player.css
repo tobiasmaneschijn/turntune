@@ -20,13 +20,18 @@ section.now-playing.now-playing--dock.panel {
   overflow: visible;
   padding: var(--room-player-padding, 8px 16px);
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid color-mix(in oklch, var(--player-artwork-color, var(--border)) 45%, var(--border));
   border-radius: 0;
   background: var(--background);
   color: var(--foreground);
   box-shadow: none;
   container-type: normal;
+  transition: border-color var(--motion-artwork, 280ms) var(--motion-ease-out, ease-out);
 }
+.open-room .open-room-player:has(.now-playing--dock) { border-top: 0 !important; }
+.playback-timeline { position: relative; min-width: 0; flex: 1; display: flex; align-items: center; min-height: 28px; }
+.playback-timeline > [data-slot=slider], .playback-timeline > progress { flex: 1; min-width: 0; }
+.playback-time-preview { position: absolute; z-index: 20; bottom: calc(100% + 4px); width: max-content; max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--popover); color: var(--popover-foreground); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 18px; white-space: nowrap; pointer-events: none; }
 .now-playing.now-playing--dock :is(.now-playing-main, .player-details, .player-utilities) { display: contents; }
 section.now-playing.now-playing--dock.panel .track-stage { display: contents; }
 section.now-playing.now-playing--dock.panel .track-stage > .track-artwork,

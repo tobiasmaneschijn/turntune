@@ -30,6 +30,9 @@ import { useCoalescedDecoration, useVisibleDecorations } from "../../../hooks/us
 import { notifyWithAttention } from "../../../lib/notifications";
 import { useRoomNotificationMuted } from "../../rooms/hooks/use-room-notifications";
 import { EmptyPlayerDock } from "./EmptyPlayerDock";
+import { PlaybackTimeline } from "./PlaybackTimeline";
+import { formatPlaybackTime } from "../format-playback-time";
+import { useArtworkColor } from "../use-artwork-color";
 
 const loadUserSettings = () => import("../../settings/UserSettingsDialog").then(module => ({ default: module.UserSettingsDialog }));
 const defaultRequestAction = (event: string, payload: unknown, reply: (result: SocketReply) => void) => requestSocketAction(socket, event, payload, reply);
@@ -43,17 +46,6 @@ export interface NowPlayingLocalState {
   statusTone: "error" | "pending" | "quiet" | "live";
   muted: boolean;
   localVolumeSupported?: boolean;
-}
-
-function formatPlaybackTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const rounded = Math.floor(seconds);
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  const remaining = rounded % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
-    : `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
 function BangOMeter({
@@ -326,6 +318,7 @@ export function NowPlaying({
   useEffect(() => {
     pendingCommandRef.current = "";
     setPendingCommand("");
+    setSeekPreview(null);
     setProviderPlaybackError("");
     syncStartedRef.current = null;
     setSyncFeedback("");
@@ -438,6 +431,7 @@ export function NowPlaying({
   const playbackNeedsExplanation = !roomConnected || providerActionRequired || !playerStatus.ready || playerStatus.buffering ||
     (typeof playerStatus.playing === "boolean" && playerStatus.playing !== playback.playing);
   const docked = presentation === "dock";
+  const artworkColor = useArtworkColor(`${track?.id || ""}:${track ? trackArtworkUrl(track) || "" : ""}`);
   const errorNoticeKey = `${identity}:${localPlaybackError}:${connectionError}`;
   useEffect(() => { if (!localPlaybackError && !connectionError) setDismissedError(""); }, [localPlaybackError, connectionError]);
   const currentDj = snapshot.users.find(user => user.id === snapshot.room.djUserId);
@@ -487,6 +481,7 @@ export function NowPlaying({
   return (
     <>
       <section className={`now-playing panel ${!docked && compact ? "compact" : ""} ${docked ? "now-playing--dock" : ""} ${docked && !track ? "now-playing--empty" : ""}`}
+        style={docked && track ? artworkColor.style : undefined}
         data-needs-attention={docked ? providerActionRequired || Boolean(localPlaybackError || connectionError) : undefined}>
       {!docked && <div className="now-playing-heading">
         <h2 className="section-kicker">{t("nowPlaying.title")}</h2>
@@ -527,7 +522,7 @@ export function NowPlaying({
           </div>
           <div className="player-details">
           <div className="current-track">
-            {docked && <TrackArtwork track={track} compact className="dock-track-artwork" />}
+            {docked && <TrackArtwork track={track} compact className="dock-track-artwork" onImageReady={artworkColor.onArtworkReady} />}
             <div className="current-track-copy">
               <div className="current-track-title">
                 <h3 title={track.title}>{track.title}</h3>
@@ -562,22 +557,14 @@ export function NowPlaying({
             {isLive ? <span>{t("nowPlaying.live")}</span> : (
               <>
                 <span>{formatPlaybackTime(shownPosition)}</span>
-                {docked && !canControlPlayback ? <progress className="playback-progress-readonly"
-                  max={Math.max(playerStatus.duration, 1)}
-                  value={Math.min(shownPosition, Math.max(playerStatus.duration, 1))}
-                  aria-label={t("nowPlaying.position")}
-                  aria-valuetext={i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(shownPosition), duration: formatPlaybackTime(playerStatus.duration) })}
-                /> : <Slider
-                  min={0}
-                  max={Math.max(playerStatus.duration, 1)}
-                  step={1}
-                  value={[Math.min(shownPosition, Math.max(playerStatus.duration, 1))]}
+                <PlaybackTimeline key={identity}
+                  duration={playerStatus.duration} value={shownPosition}
                   disabled={controlsUnavailable || !playerStatus.duration}
-                  aria-label={t("nowPlaying.position")}
-                  getAriaValueText={(_formatted, value) => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
-                  onValueChange={(value) => setSeekPreview(typeof value === "number" ? value : value[0])}
-                  onValueCommitted={commitSeek}
-                />}
+                  readOnly={docked && !canControlPlayback}
+                  label={t("nowPlaying.position")}
+                  valueText={value => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
+                  onPreview={value => setSeekPreview(typeof value === "number" ? value : value[0])}
+                  onCommit={commitSeek} />
                 <span>{formatPlaybackTime(playerStatus.duration)}</span>
               </>
             )}

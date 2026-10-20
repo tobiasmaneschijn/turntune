@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { type FormEvent, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type DragEvent, type FormEvent, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, Clock3, ExternalLink, GripVertical, Info, ListMusic, Loader2, LockKeyhole, MoreHorizontal, Plus, Search, Trash2, X } from "lucide-react";
 import { Avatar } from "../../../components/Avatar";
@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui
 import { Skeleton } from "../../../components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../../components/ui/sheet";
 import { useMediaQuery } from "../../../hooks/use-media-query";
+import { useQueueMotion } from "../hooks/use-queue-motion";
 import { MusicLibraryPanel } from "./MusicLibraryPanel";
 import { TrackDetailsDialog } from "./TrackDetailsDialog";
 import { PrivateMusicHeader } from "./PrivateMusicHeader";
@@ -30,6 +31,7 @@ import type { Provider, RoomSnapshot, Track } from "../../../types";
 import { allowedRoomProviders, roomAllowsProvider } from "../../../../shared/providers";
 import "../../../styles/music-qol.css";
 import "../../../styles/room-music.css";
+import "../../../styles/queue-motion.css";
 
 export type MusicRailActionName = "queue:add" | "queue:remove" | "queue:undo" | "queue:set-add" | "queue:move" | "queue:play-next" | "queue:exception" | "queue:exception-request" | "dj:join" | "dj:leave";
 export type MusicRailAction = (event: MusicRailActionName, payload: unknown, reply: (result: SocketReply) => void) => void;
@@ -121,6 +123,9 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const [resolvedTrack, setResolvedTrack] = useState<TrackInput | null>(null);
   const [historyFilter, setHistoryFilter] = useState("");
   const [draggedTrackId, setDraggedTrackId] = useState("");
+  const [queueDrop, setQueueDrop] = useState<{ id: string; edge: "before" | "after" } | null>(null);
+  const draggedTrackRef = useRef<{ id: string; scope: string } | null>(null);
+  const queueListRef = useRef<HTMLDivElement>(null);
   const [undoReceipt, setUndoReceipt] = useState<SocketReply["undo"]>();
   const [undoExpired, setUndoExpired] = useState(false);
   const [detailsTrack, setDetailsTrack] = useState<Track | LibraryTrack | null>(null);
@@ -158,6 +163,18 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const historyButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   snapshotRef.current = snapshot;
   tabRef.current = tab;
+  const queueScope = `${snapshot.room.id}:${currentUserId}`;
+  const queueVisible = tab === "queue" && !(inlineAddMusic && addMusicOpen);
+  useQueueMotion(queueListRef, snapshot.room.queue.map(track => track.id).join(","), queueScope, queueVisible && connected);
+
+  const clearQueueDrag = () => {
+    draggedTrackRef.current = null;
+    setDraggedTrackId("");
+    setQueueDrop(null);
+  };
+  useEffect(() => {
+    if (pending || !connected || !queueVisible || draggedTrackRef.current?.scope !== queueScope) clearQueueDrag();
+  }, [pending, connected, queueVisible, queueScope]);
 
   const openAddMusic = () => {
     if (!addMusicOpen) addMusicReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -484,6 +501,45 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     } finally { finishOperation(operation); }
   };
 
+  const queueDropIndex = (id: string, edge: "before" | "after") => {
+    const drag = draggedTrackRef.current;
+    if (!drag || drag.scope !== queueScope || pendingRef.current || !connected) return null;
+    const queue = snapshotRef.current.room.queue;
+    const from = queue.findIndex(track => track.id === drag.id);
+    const target = queue.findIndex(track => track.id === id);
+    if (from < 0 || target < 0) return null;
+    const boundary = target + (edge === "after" ? 1 : 0);
+    return { from, to: boundary - (from < boundary ? 1 : 0) };
+  };
+  const previewQueueDrop = (event: DragEvent, id: string, edge: "before" | "after") => {
+    const move = queueDropIndex(id, edge);
+    if (!move) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setQueueDrop(previous => move.from === move.to ? null : previous?.id === id && previous.edge === edge ? previous : { id, edge });
+  };
+  const commitQueueDrop = (event: DragEvent, id: string, edge: "before" | "after") => {
+    const move = queueDropIndex(id, edge);
+    if (!move) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const source = snapshotRef.current.room.queue[move.from];
+    clearQueueDrag();
+    if (move.from !== move.to) void queueAction("queue:move", source, move.to);
+  };
+  const rowDropEdge = (event: DragEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  };
+  const listDropTarget = (event: DragEvent<HTMLDivElement>) => {
+    const rows = event.currentTarget.querySelectorAll<HTMLElement>(":scope > [data-track-id]");
+    if (!rows.length) return null;
+    const before = event.clientY <= rows[0].getBoundingClientRect().top;
+    const row = rows[before ? 0 : rows.length - 1];
+    return { id: row.dataset.trackId!, edge: before ? "before" as const : "after" as const };
+  };
+
   const undoRemove = async () => {
     if (!undoReceipt || undoExpired) return;
     const operation: PendingOperation = { kind: "queue" };
@@ -618,12 +674,12 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       {inlineAddMusic && linkForm}
   </>;
 
-  const activity = <RoomActivity users={snapshot.users}
+  const activity = <RoomActivity key={snapshot.room.id} users={snapshot.users}
     rotation={[...new Set([...(currentDj ? [currentDj.id] : []), ...upcomingDjs])].flatMap(id => {
       const user = snapshot.djUsers.find(candidate => candidate.id === id) || snapshot.users.find(candidate => candidate.id === id);
       return user ? [user] : [];
     })}
-    currentUserId={currentUserId} currentDjId={snapshot.room.djUserId} membershipAction={djAction}
+    currentUserId={currentUserId} currentDjId={snapshot.room.djUserId} connected={connected} membershipAction={djAction}
     restriction={!canJoinDjQueue && !joinedDjQueue ? djJoinMessage : undefined} membershipError={rotationError}
     overrideAction={!canJoinDjQueue && !joinedDjQueue && snapshot.room.capabilities?.djsPlayback && snapshot.room.ownStatus?.djSuspendedUntil === undefined && snapshot.room.ownStatus?.rulesAccepted !== false
       ? <Button size="sm" variant="outline" disabled={!connected || Boolean(pending)} onClick={() => void toggleDjQueue(true)}>{t('rail.joinWithOverride')}</Button> : undefined}
@@ -676,10 +732,24 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
 
       <TabsContent value="queue" keepMounted className="rail-pane music-queue-pane">
 
-        <div className="rail-track-list">
-          {snapshot.room.queue.map((track, index) => <div className={`rail-track-row queue-track ${draggedTrackId === track.id ? "dragging" : ""}`} key={track.id} data-track-id={track.id} draggable={!pending && connected}
-            onDragStart={(event) => { if (pendingRef.current || !connected) return event.preventDefault(); setDraggedTrackId(track.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", track.id); }} onDragEnd={() => setDraggedTrackId("")} onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => { event.preventDefault(); if (draggedTrackId && draggedTrackId !== track.id && !pendingRef.current) { const source = snapshotRef.current.room.queue.find((item) => item.id === draggedTrackId); if (source) void queueAction("queue:move", source, index); } setDraggedTrackId(""); }}>
+        <div className="rail-track-list" ref={queueListRef}
+          onDragOver={event => { const target = listDropTarget(event); if (target) previewQueueDrop(event, target.id, target.edge); }}
+          onDrop={event => { const target = listDropTarget(event); if (target) commitQueueDrop(event, target.id, target.edge); }}
+          onDragLeave={event => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) setQueueDrop(null);
+          }}>
+          {snapshot.room.queue.map((track, index) => <div className={`rail-track-row queue-track ${draggedTrackId === track.id ? "dragging" : ""}`} key={track.id} data-track-id={track.id}
+            data-drop-edge={queueDrop?.id === track.id ? queueDrop.edge : undefined} draggable={!pending && connected}
+            onDragStart={event => {
+              if (pendingRef.current || !connected || (event.target instanceof Element && event.target.closest("button, a, input"))) return event.preventDefault();
+              draggedTrackRef.current = { id: track.id, scope: queueScope };
+              setDraggedTrackId(track.id);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", track.id);
+            }} onDragEnd={clearQueueDrag}
+            onDragOver={event => previewQueueDrop(event, track.id, rowDropEdge(event))}
+            onDrop={event => commitQueueDrop(event, track.id, rowDropEdge(event))}>
             <span className="queue-drag-handle" title={t('rail.reorderHint')} aria-hidden="true"><span className="queue-position">{index + 1}</span><GripVertical size={14} /></span>
             <TrackArtwork track={track} compact active={tab === "queue"} />
             <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small><span className="sr-only">{t('rail.queuePosition', { position: index + 1 })}</span>{track.artist || providerLabel(track.provider)}</small>{snapshot.room.radio?.ineligibleTracks[track.id] ? <small>{snapshot.room.radio.ineligibleTracks[track.id]}</small> : !roomAllowsProvider(snapshot.room.settings, track.provider) && <small>{t('rail.disabledTrackSkipped')}</small>}</span>

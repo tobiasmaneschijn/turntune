@@ -138,11 +138,34 @@ test("reorder the private queue and undo a removal without changing room playbac
   await page.getByRole("menu", { name: "Actions for Gamma", exact: true }).getByRole("menuitem", { name: "First in my queue", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
   await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).toBeFocused();
+
+  // The lower half inserts after the target, with no optimistic reordering or
+  // second mutation while the first drop waits for the room's acknowledgment.
+  const rows = page.locator(".music-queue-pane .queue-track");
+  const gamma = rows.filter({ has: page.getByText("Gamma", { exact: true }) });
+  const beta = rows.filter({ has: page.getByText("Beta", { exact: true }) });
+  await api(page, "music.deferNextAction()");
+  const betaBox = await beta.boundingBox();
+  await gamma.dragTo(beta, { targetPosition: { x: 12, y: betaBox!.height - 4 } });
+  await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
+  expect(await api(page, "return music.commands.filter(command => command.event === 'queue:move').map(command => command.payload.toIndex)")).toEqual([2]);
+  await expect(page.getByRole("button", { name: "Actions for Gamma", exact: true })).toBeDisabled();
+  await api(page, "music.resolveNext({ ok: true })");
+  await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Alpha", "Beta", "Gamma"]);
+
+  // The upper half also reaches the first position when dragging upward.
+  await gamma.dragTo(rows.filter({ has: page.getByText("Alpha", { exact: true }) }), { targetPosition: { x: 12, y: 4 } });
+  await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
   await page.getByRole("button", { name: "Actions for Beta", exact: true }).click();
   await page.getByRole("menu", { name: "Actions for Beta", exact: true }).getByRole("menuitem", { name: "Remove from my queue", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha"]);
   await page.getByRole("button", { name: "Undo removal", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Gamma", "Alpha", "Beta"]);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Actions for Beta", exact: true }).click();
+  await page.getByRole("menu", { name: "Actions for Beta", exact: true }).getByRole("menuitem", { name: "First in my queue", exact: true }).click();
+  await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Beta", "Gamma", "Alpha"]);
+  expect(await rows.evaluateAll(items => items.every(item => item.getAnimations().every(animation => animation.playState !== "running")))).toBe(true);
   expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
 });
 
