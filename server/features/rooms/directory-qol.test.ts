@@ -11,7 +11,17 @@ test("public discovery remains bounded while all older memberships, favorites an
   tables.soundspin_room_restrictions = [];
   tables.soundspin_account_restrictions = [];
   const lookupSlugs: string[] = [];
-  const client = { from(table: string) {
+  const visibilityBatches: string[][] = [];
+  const client = { async rpc(name: string, input: { p_actor: string; p_rooms: string[]; p_room_slug: string }) {
+    if (name === "soundspin_room_access") {
+      const room = rooms.find(room => room.slug === input.p_room_slug)!;
+      return { data: { exists: true, isPublic: room.is_public, passwordHash: null, role: room.owner_id === input.p_actor ? "owner" : null,
+        banned: false, accessMode: room.access_mode, settings: room.settings, roomActive: true, accountActive: true, readers: [] }, error: null };
+    }
+    assert.equal(name, "soundspin_directory_visibility");
+    visibilityBatches.push(input.p_rooms);
+    return { data: [...input.p_rooms, "unrequested-room"], error: null };
+  }, from(table: string) {
     assert.ok(Object.hasOwn(tables, table), `Unexpected directory table: ${table}`);
     let result = [...tables[table]];
     const query = {
@@ -36,5 +46,7 @@ test("public discovery remains bounded while all older memberships, favorites an
   assert.equal(directory.find((entry) => entry.slug === "owned-private")?.description?.length, 240);
   assert.equal(directory.some((entry) => entry.slug === "revoked-private"), false);
   assert.equal(lookupSlugs.includes("invalid,(injected)"), false);
+  assert.ok(visibilityBatches.every(batch => batch.length <= 100), "directory restrictions use bounded snapshots");
+  assert.equal(directory.some(entry => entry.slug === "unrequested-room"), false);
   assert.equal((await store.getRoomAccess("owned-private", "alice")).role, "owner");
 });

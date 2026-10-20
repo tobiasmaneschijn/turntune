@@ -18,7 +18,7 @@ import { withPublicRoomPreview } from "./directory-preview.js";
 
 export interface RoomRouteOptions {
   store: Pick<Store, "listRooms" | "getRoom" | "createRoom" | "setFavorite" | "getRoomAccess" | "updateRoomSettings">;
-  platform: Pick<PlatformSecurity, "activeAccount" | "activeRoom">;
+  platform: Pick<PlatformSecurity, "checkAccess">;
   securityBudget: SecurityBudget;
   resourcePolicies: Pick<ResourcePolicyStore, "get">;
   getApiUserId: (request: express.Request) => Promise<string | null>;
@@ -126,7 +126,10 @@ export function mountRoomRoutes(app: express.Express, options: RoomRouteOptions)
       const room = await store.updateRoomSettings(slug.data, userId, {
         ...settings,
         passwordHash: parsed.data.password === undefined ? undefined : await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)),
-      },async()=>{if(!await platform.activeAccount(userId)||!await platform.activeRoom(slug.data))throw new RoomCommandError(serverT("room_access_is_unavailable"));});
+      },async()=>{
+        const access = await platform.checkAccess([userId], [slug.data]);
+        if(!access.accounts.get(userId)||!access.rooms.get(slug.data))throw new RoomCommandError(serverT("room_access_is_unavailable"));
+      });
       if (room) {
         for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {
           cancelDjEviction(room.id, id); forgetDjUser(room.id, id);

@@ -17,13 +17,18 @@ import {
   type RelayMessage
 } from './chat-validation.js'
 import { createChatWritePolicy, type ChatWritePolicy } from './chat-write-policy.js'
-import { resolveChatMediaUrl } from './chat-media.js'
+import { resolveChatMediaUrl, signDurableChatHistoryMedia } from './chat-media.js'
 import { PublicRequestError, trustedSqlRequestError } from '../../lib/public-request-error.js'
 
 export type ChatParticipationKind = 'message' | 'media' | 'links' | 'poll' | 'reaction' | 'typing' | 'remove'
 export interface ChatCommandAuthorization {
   slowModeSeconds?: number
   bypassSlowMode?: boolean
+}
+export interface ChatCommandOrigin {
+  socketId: string
+  /** The same admitted socket session and credential lease must remain active. */
+  assertActive: () => void
 }
 export interface ChatCommandServiceOptions {
   client: SupabaseClient | null
@@ -42,7 +47,8 @@ export interface ChatCommandServiceOptions {
     roomId: string,
     event: 'chat:message' | 'chat:reaction' | 'chat:poll' | 'chat:removed',
     payload: unknown,
-    userId: string
+    userId: string,
+    origin?: ChatCommandOrigin
   ) => Promise<void>
   writePolicy?: ChatWritePolicy
   now?: () => number
@@ -103,6 +109,7 @@ export interface ChatReadRow {
   soundspin_message_reactions: Array<{ user_id: string; emoji: string }>
   soundspin_poll_votes: Array<{ user_id: string; option_index: number; revision: number }>
 }
+interface CommittedChatRow extends ChatReadRow { reply?: ChatReadRow | null }
 const BASE_SELECT = 'id,room_slug,user_id,user_name,avatar_seed,content,message_type,created_at,media_url,storage_path,mentions,reply_to_id,poll_options,removed_at,immutable_fingerprint'
 const SELECT = `${BASE_SELECT},soundspin_message_reactions(user_id,emoji),soundspin_poll_votes(user_id,option_index,revision)`
 const RECEIPT_TTL_MS = 24 * 60 * 60_000
@@ -135,11 +142,11 @@ export class ChatCommandService {
   private roomOperation<T>(roomId: string, run: () => Promise<T>) {
     return this.options.withRoomOperation ? this.options.withRoomOperation(roomId, run) : run()
   }
-  message(roomId: string, userId: string, value: unknown) {
-    return this.roomOperation(roomId, () => this.saveMessage(roomId, userId, value))
+  message(roomId: string, userId: string, value: unknown, origin?: ChatCommandOrigin) {
+    return this.roomOperation(roomId, () => this.saveMessage(roomId, userId, value, origin))
   }
-  reaction(roomId: string, userId: string, value: unknown) {
-    return this.roomOperation(roomId, () => this.saveReaction(roomId, userId, value))
+  reaction(roomId: string, userId: string, value: unknown, origin?: ChatCommandOrigin) {
+    return this.roomOperation(roomId, () => this.saveReaction(roomId, userId, value, origin))
   }
   pollVote(roomId: string, userId: string, messageId: string, optionIndex: number, operationId = randomUUID()) {
     return this.roomOperation(roomId, () => this.savePollVote(roomId, userId, messageId, optionIndex, operationId))
@@ -150,8 +157,10 @@ export class ChatCommandService {
   async checkParticipation(roomId: string, userId: string, kind: ChatParticipationKind) {
     return this.options.authorize(userId, roomId, kind)
   }
-  async typing(roomId: string, userId: string) {
+  async typing(roomId: string, userId: string, origin?: ChatCommandOrigin) {
+    origin?.assertActive()
     await this.options.authorize(userId, roomId, 'typing')
+    origin?.assertActive()
     this.policy.typing(roomId, userId)
   }
   private async init() {
@@ -258,13 +267,15 @@ export class ChatCommandService {
       'Mention limit reached. Send a message without mentions.': 429,
       'Chat operation limit reached. Try again later.': 429
     }, 'Chat could not be saved. Try again.')
-    return data as { fresh: boolean; result: unknown }
+    return data as { fresh: boolean; result: unknown; row?: CommittedChatRow | null }
   }
-  private async saveMessage(roomId: string, userId: string, value: unknown): Promise<RelayMessage> {
+  private async saveMessage(roomId: string, userId: string, value: unknown, origin?: ChatCommandOrigin): Promise<RelayMessage> {
+    origin?.assertActive()
     const input = chatMessageSchema.parse(value)
     const fingerprint = hash(immutableMessageKey(input))
     const id = `message:${input.id}`
     let authorization = await this.options.authorize(userId, roomId, 'message')
+    origin?.assertActive()
     if (input.type !== 'text') await this.options.authorize(userId, roomId, 'media')
     if (/https?:\/\/|www\./i.test(input.content)) await this.options.authorize(userId, roomId, 'links')
     if (input.poll) await this.options.authorize(userId, roomId, 'poll')
@@ -274,8 +285,9 @@ export class ChatCommandService {
     if (input.replyTo && !reply) throw new PublicRequestError(serverT("the_replied_to_message_is_unavailable"), 400)
     const audience = input.mentions.length ? await this.options.getMentionAudience?.(roomId, userId) || [] : []
     let message = canonicalMessage(input, user, reply || undefined, audience)
-    const existing = await this.loadMessage(input.id)
-    const removed = existing?.removedAt || (await this.loadTombstone(input.id))?.removedAt
+    const state = await this.loadMessageState(input.id)
+    const existing = state.record
+    const removed = existing?.removedAt || state.removal?.removedAt
     if (existing && (existing.roomId !== roomId || existing.userId !== userId || existing.fingerprint !== fingerprint))
       throw new PublicRequestError(serverT("this_message_id_belongs_to_different_content_account_or_room"), 409)
     this.policy.message(roomId, userId, input, Boolean(existing))
@@ -284,12 +296,19 @@ export class ChatCommandService {
         await resolveChatMediaUrl(this.options.client, roomId, message.storagePath, userId, true, true)
       ).url
     authorization = await this.options.authorize(userId, roomId, 'message')
+    origin?.assertActive()
     let fresh: boolean
-    if (this.options.client)
-      fresh = (await this.rpc('message', roomId, userId, id, fingerprint, message, authorization)).fresh
-    else
+    let record: DurableChatRecord | null | undefined
+    if (this.options.client) {
+      const accepted = await this.rpc('message', roomId, userId, id, fingerprint, message, authorization)
+      fresh = accepted.fresh
+      // The transaction returns its canonical current row, including a removal
+      // that won a send/retry race. Older databases still use the readback path.
+      if (accepted.row) record = this.recordFromRow(accepted.row, accepted.row.reply)
+    } else
       fresh = await this.local(async (draft) => {
         await this.options.authorize(userId, roomId, 'message')
+        origin?.assertActive()
         if (this.checkReceipt(draft, id, roomId, userId, fingerprint)) return false
         const original = draft.messages[input.id]
         if (
@@ -316,7 +335,8 @@ export class ChatCommandService {
         this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: { id: input.id } })
         return !removal
       })
-    const record = await this.loadMessage(input.id)
+    record ||= await this.loadMessage(input.id)
+    origin?.assertActive()
     if (!record) throw new PublicRequestError(serverT("the_saved_message_is_unavailable"), 503)
     message = record.message
     if (record.removedAt)
@@ -324,17 +344,21 @@ export class ChatCommandService {
         roomId,
         'chat:removed',
         { roomId, messageId: message.id, removedAt: record.removedAt },
-        userId
+        userId,
+        origin
       )
-    if (fresh) await this.options.emit(roomId, 'chat:message', { roomId, message }, userId)
+    if (fresh) await this.options.emit(roomId, 'chat:message', { roomId, message }, userId, origin)
+    origin?.assertActive()
     return message
   }
-  private async saveReaction(roomId: string, userId: string, value: unknown) {
+  private async saveReaction(roomId: string, userId: string, value: unknown, origin?: ChatCommandOrigin) {
+    origin?.assertActive()
     const input = chatReactionSchema.parse(value)
     const operationId = input.id || randomUUID()
     const id = `reaction:${operationId}`
     const fingerprint = hash(JSON.stringify([input.messageId, input.action, input.emoji]))
     const authorization = await this.options.authorize(userId, roomId, 'reaction')
+    origin?.assertActive()
     this.policy.reaction(roomId, userId, { ...input, id: operationId })
     const target = await this.loadMessage(input.messageId)
     if (!target || target.roomId !== roomId || target.removedAt) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
@@ -342,10 +366,12 @@ export class ChatCommandService {
     let fresh: boolean
     if (this.options.client) {
       await this.options.authorize(userId, roomId, 'reaction')
+      origin?.assertActive()
       fresh = (await this.rpc('reaction', roomId, userId, id, fingerprint, event, authorization)).fresh
     } else
       fresh = await this.local(async (draft) => {
         await this.options.authorize(userId, roomId, 'reaction')
+        origin?.assertActive()
         if (this.checkReceipt(draft, id, roomId, userId, fingerprint)) return false
         const record = draft.messages[input.messageId]
         if (!record || record.removedAt || record.roomId !== roomId) throw new PublicRequestError(serverT("this_message_is_unavailable"), 404)
@@ -365,7 +391,9 @@ export class ChatCommandService {
         this.commitReceipt(draft, id, { roomId, userId, fingerprint, result: event })
         return true
       })
-    if (fresh) await this.options.emit(roomId, 'chat:reaction', { roomId, reaction: event }, userId)
+    origin?.assertActive()
+    if (fresh) await this.options.emit(roomId, 'chat:reaction', { roomId, reaction: event }, userId, origin)
+    origin?.assertActive()
     return event
   }
   private async savePollVote(
@@ -544,39 +572,43 @@ export class ChatCommandService {
     if (error) throw error
     if (!data) return null
     const row = data as ChatReadRow
-    const { data: receipt, error: receiptError } = await this.options.client
-      .from('soundspin_chat_receipts')
-      .select('fingerprint')
-      .eq('operation_id', `message:${id}`)
-      .maybeSingle()
-    if (receiptError) throw receiptError
-    const message = this.fromRow(row)
+    let legacyFingerprint: string | undefined
+    if (!row.immutable_fingerprint) {
+      const { data: receipt, error: receiptError } = await this.options.client
+        .from('soundspin_chat_receipts')
+        .select('fingerprint')
+        .eq('operation_id', `message:${id}`)
+        .maybeSingle()
+      if (receiptError) throw receiptError
+      legacyFingerprint = receipt?.fingerprint
+    }
+    let reply: ChatReadRow | undefined
     if (row.reply_to_id) {
-      const { data: reply, error: replyError } = await this.options.client
+      const { data, error: replyError } = await this.options.client
         .from('soundspin_messages')
         .select(BASE_SELECT)
         .eq('room_slug', row.room_slug)
         .eq('id', row.reply_to_id)
         .maybeSingle()
       if (replyError) throw replyError
-      if (reply) {
-        const source = this.fromRow(reply as ChatReadRow)
-        message.replyTo = {
-          id: source.id,
-          content: source.content,
-          type: source.type,
-          mediaUrl: source.mediaUrl,
-          mentions: source.mentions,
-          user: { id: source.user.id, name: source.user.name },
-          removedAt: source.removedAt
-        }
-      } else message.replyTo = undefined
+      reply = data as ChatReadRow | undefined
+    }
+    return this.recordFromRow(row, reply, legacyFingerprint)
+  }
+  private recordFromRow(row: ChatReadRow, reply?: ChatReadRow | null, legacyFingerprint?: string): DurableChatRecord {
+    const message = this.fromRow(row)
+    if (row.reply_to_id) {
+      const source = reply?.room_slug === row.room_slug ? this.fromRow(reply) : undefined
+      message.replyTo = source ? {
+        id: source.id, content: source.content, type: source.type, mediaUrl: source.mediaUrl,
+        mentions: source.mentions, user: { id: source.user.id, name: source.user.name }, removedAt: source.removedAt
+      } : undefined
     }
     return {
       roomId: row.room_slug,
       userId: row.user_id,
       message,
-      fingerprint: row.immutable_fingerprint || receipt?.fingerprint || hash(immutableMessageKey(message)),
+      fingerprint: row.immutable_fingerprint || legacyFingerprint || hash(immutableMessageKey(message)),
       removedAt: row.removed_at || undefined
     }
   }
@@ -592,6 +624,13 @@ export class ChatCommandService {
       .maybeSingle()
     if (error) throw error
     return data ? { roomId: data.room_slug, removedAt: data.removed_at } : null
+  }
+  private async loadMessageState(id: string) {
+    if (!this.options.client) return { record: await this.loadMessage(id), removal: await this.loadTombstone(id) }
+    const { data, error } = await this.options.client.rpc('soundspin_chat_message_state', { p_id: id })
+    if (error) throw error
+    const state = data as { row: CommittedChatRow | null; removal: { roomId: string; removedAt: string } | null }
+    return { record: state.row ? this.recordFromRow(state.row, state.row.reply) : null, removal: state.removal }
   }
   private fromRow(row: ChatReadRow): RelayMessage {
     return {
@@ -721,43 +760,27 @@ export class ChatCommandService {
     // A context page combines two bounded 6,000-child pages and one 600-child target.
     if (rows.reduce((count, row) => count + row.soundspin_message_reactions.length + row.soundspin_poll_votes.length, 0) > CHAT_MAX_HISTORY_CHILDREN * 2 + CHAT_MAX_REACTIONS_PER_MESSAGE + CHAT_MAX_POLL_VOTERS)
       throw new PublicRequestError(serverT("chat_history_children_exceed_the_page_limit"), 400)
-    const replies: ChatReadRow[] = [],
-      replyIds = [...new Set(rows.flatMap((row) => (row.reply_to_id ? [row.reply_to_id] : [])))]
+    const loaded = new Map(rows.map(row => [row.id, row])),
+      replyIds = [...new Set(rows.flatMap((row) => (row.reply_to_id ? [row.reply_to_id] : [])))],
+      replies: ChatReadRow[] = replyIds.flatMap(id => loaded.has(id) ? [loaded.get(id)!] : []),
+      missingReplyIds = replyIds.filter(id => !loaded.has(id))
     if (this.options.client) {
-      for (let i = 0; i < replyIds.length; i += 100) {
+      for (let i = 0; i < missingReplyIds.length; i += 100) {
         const { data, error } = await this.options.client
           .from('soundspin_messages')
           .select(BASE_SELECT)
           .eq('room_slug', roomId)
-          .in('id', replyIds.slice(i, i + 100))
+          .in('id', missingReplyIds.slice(i, i + 100))
         if (!error) replies.push(...((data || []) as ChatReadRow[]))
       }
     } else {
-      for (const id of replyIds) {
+      for (const id of missingReplyIds) {
         const record = await this.loadMessage(id)
         if (record?.roomId === roomId) replies.push({ ...this.toRow(record), soundspin_message_reactions: [], soundspin_poll_votes: [] })
       }
     }
-    const sign = async (items: ChatReadRow[]) => {
-      const result = [...items]
-      let next = 0
-      await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
-        while (next < items.length) {
-          const index = next++, row = items[index]
-          if (!row.storage_path || row.removed_at) continue
-          try {
-            result[index] = {
-              ...row,
-              media_url: (await resolveChatMediaUrl(this.options.client, roomId, row.storage_path, undefined, true)).url
-            }
-          } catch {
-            result[index] = { ...row, media_url: null }
-          }
-        }
-      }))
-      return result
-    }
-    const [signedRows, signedReplies] = await Promise.all([sign(rows), sign(replies)])
+    const signed = await signDurableChatHistoryMedia(this.options.client, roomId, [...rows, ...replies])
+    const signedRows = signed.slice(0, rows.length), signedReplies = signed.slice(rows.length)
     const profiles: unknown[] = [],
       markers = new Map<string, string>(),
       ids = [...new Set([...rows, ...replies].map((row) => row.id))]
@@ -807,5 +830,18 @@ export class ChatCommandService {
   async readMessage(roomId: string, id: string) {
     const record = await this.loadMessage(id)
     return record?.roomId === roomId ? this.readPayload(roomId, [this.toRow(record)]) : null
+  }
+  async readContext(roomId: string, id: string) {
+    const record = await this.loadMessage(id)
+    if (!record || record.roomId !== roomId) return null
+    const at = { id, createdAt: record.message.createdAt }
+    const [older, newer] = await Promise.all([
+      this.readPage(roomId, at, 'older', 20), this.readPage(roomId, at, 'newer', 20)
+    ])
+    return {
+      ...(await this.readPayload(roomId, [...older.rows, this.toRow(record), ...newer.rows])),
+      olderCursor: older.cursor || at, newerCursor: newer.cursor || at,
+      hasOlder: older.hasMore, hasNewer: newer.hasMore
+    }
   }
 }

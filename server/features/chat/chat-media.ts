@@ -81,6 +81,48 @@ export async function signChatHistoryMedia<
   )
 }
 
+/** Recheck supplied history rows and upload state before granting Storage URLs. */
+export async function signDurableChatHistoryMedia<
+  T extends { id: string; storage_path?: string | null; media_url?: string | null; removed_at?: string | null }
+>(client: SupabaseClient | null, roomId: string, rows: T[]): Promise<T[]> {
+  const candidates = new Map(rows.filter(row => !row.removed_at && validChatStoragePath(row.storage_path)).map(row => [row.id, row]))
+  const paths = [...new Set([...candidates.values()].map(row => row.storage_path!))], ids = [...candidates.keys()]
+  const checked = new Set<string>(), referenced = new Set<string>(), signed = new Map<string, string>()
+  const registrations = new Map<string, { room_slug: string; message_id: string | null; removed_at: string | null }>()
+  if (client) {
+    for (let offset = 0; offset < Math.max(paths.length, ids.length); offset += 100) {
+      const pathBatch = paths.slice(offset, offset + 100), idBatch = ids.slice(offset, offset + 100)
+      try {
+        const [uploads, messages] = await Promise.all([
+          pathBatch.length ? client.from('soundspin_chat_uploads').select('storage_path,room_slug,message_id,removed_at').in('storage_path', pathBatch) : Promise.resolve({ data: [], error: null }),
+          idBatch.length ? client.from('soundspin_messages').select('id,room_slug,storage_path,removed_at').eq('room_slug', roomId).in('id', idBatch).is('removed_at', null) : Promise.resolve({ data: [], error: null })
+        ])
+        if (!uploads.error) {
+          for (const path of pathBatch) checked.add(path)
+          for (const upload of uploads.data || []) if (pathBatch.includes(upload.storage_path)) registrations.set(upload.storage_path, upload)
+        }
+        if (!messages.error) for (const message of messages.data || []) {
+          if (idBatch.includes(message.id) && message.room_slug === roomId && !message.removed_at &&
+            message.storage_path && candidates.get(message.id)?.storage_path === message.storage_path) referenced.add(message.storage_path)
+        }
+      } catch { /* Failed verification leaves those images without a capability. */ }
+    }
+    const eligible = paths.filter(path => {
+      const upload = registrations.get(path)
+      return checked.has(path) && referenced.has(path) && (!upload || (upload.room_slug === roomId && !upload.removed_at && Boolean(upload.message_id)))
+    })
+    for (let offset = 0; offset < eligible.length; offset += 100) {
+      const batch = eligible.slice(offset, offset + 100)
+      try {
+        const { data, error } = await client.storage.from('chat-media').createSignedUrls(batch, CHAT_MEDIA_URL_TTL_SECONDS)
+        if (!error) for (const item of data || []) if (!item.error && item.path && batch.includes(item.path) && item.signedUrl) signed.set(item.path, item.signedUrl)
+      } catch { /* Keep text and other available images readable. */ }
+    }
+  }
+  return rows.map(row => row.removed_at ? { ...row, media_url: null, storage_path: null }
+    : row.storage_path ? { ...row, media_url: signed.get(row.storage_path) || null } : row)
+}
+
 /** Uploads are admitted by the server, registered privately, then claimed by one message. */
 export async function uploadChatMedia(
   client: SupabaseClient | null,

@@ -145,24 +145,11 @@ test("concurrent room loads share one authoritative object and database read", a
   const started = deferred();
   const release = deferred();
   let reads = 0;
-  const store = new Store({ supabase: client((table) => {
-    const query = {
-      select() { return query; },
-      eq() { return query; },
-      async maybeSingle() {
-        if (table === "soundspin_room_moderation") return { data: null, error: null };
-        reads += 1;
-        started.resolve();
-        await release.promise;
-        return { data: { state: room(), name: "Loaded room", owner_id: "alice", is_public: true, settings: {} }, error: null };
-      },
-      async in() {
-        assert.equal(table, "soundspin_room_members");
-        return { data: [], error: null };
-      }
-    };
-    return query;
-  }) });
+  const store = new Store({ supabase: { async rpc(name: string) {
+    assert.equal(name, "soundspin_load_room"); reads++;
+    started.resolve(); await release.promise;
+    return { data: { state: room(), name: "Loaded room", owner_id: "alice", is_public: true, settings: {}, room_roles: [], moderation: {} }, error: null };
+  } } as unknown as SupabaseClient });
   const first = store.loadRoom("test-room");
   await started.promise;
   const second = store.loadRoom("test-room");
@@ -175,16 +162,10 @@ test("concurrent room loads share one authoritative object and database read", a
 
 test("a failed room read can be retried instead of leaving a rejected cached load", async () => {
   let reads = 0;
-  const store = new Store({ supabase: client(() => {
-    const query = {
-      select() { return query; }, eq() { return query; },
-      async maybeSingle() {
-        reads += 1;
-        return { data: null, error: reads === 1 ? { code: "08006", message: "temporary outage" } : null };
-      }
-    };
-    return query;
-  }) });
+  const store = new Store({ supabase: { async rpc(name: string) {
+    assert.equal(name, "soundspin_load_room"); reads++;
+    return { data: null, error: reads === 1 ? { code: "08006", message: "temporary outage" } : null };
+  } } as unknown as SupabaseClient });
   await assert.rejects(store.loadRoom("missing-room"), /temporary outage/);
   assert.equal(await store.loadRoom("missing-room"), undefined);
   assert.equal(reads, 2);
@@ -207,14 +188,19 @@ test("joining preserves a saved display name rather than overwriting it with bro
 
 test("profile creation handles another connection winning the insert race", async () => {
   let reads = 0;
+  let inserting = false;
   const saved = { user_id: "alice", display_name: "Other connection's name" };
   const store = new Store({ supabase: client(() => {
     const query = {
       select() { return query; }, eq() { return query; },
-      async maybeSingle() { return { data: ++reads === 1 ? null : saved, error: null }; },
-      async upsert(_values: unknown, options: { ignoreDuplicates?: boolean }) {
+      async maybeSingle() {
+        if (inserting) { inserting = false; return { data: null, error: null }; }
+        return { data: ++reads === 1 ? null : saved, error: null };
+      },
+      upsert(_values: unknown, options: { ignoreDuplicates?: boolean }) {
         assert.equal(options.ignoreDuplicates, true);
-        return { error: null };
+        inserting = true;
+        return query;
       }
     };
     return query;

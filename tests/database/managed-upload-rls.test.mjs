@@ -25,6 +25,7 @@ async function fixture(beforeManaged) {
     if (file==='20261013120000_managed_uploads_feedback.sql' && beforeManaged) await beforeManaged(db);
     await db.exec(await readFile(new URL(`../../supabase/migrations/${file}`,import.meta.url),'utf8'));
   }
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261020083649_batch_social_admin_upload_queries.sql',import.meta.url),'utf8'));
   return db;
 }
 async function reserve(db, purpose='avatar', bytes=100, actorId=actor, room=null) {
@@ -131,5 +132,34 @@ test('legacy forged feedback paths cannot delete another actor; legitimate own l
     assert.equal((await db.query('select soundspin_complete_upload_deletions($1,$2)as count',['feedback-screenshots',[{path:own,generation}]])).rows[0].count,1);
     assert.equal((await db.query('select state from soundspin_managed_uploads where storage_path=$1',[victim])).rows[0].state,'committed');
     assert.equal((await db.query('select count(*)::integer as count from soundspin_feedback where id=$1',[legitimate])).rows[0].count,1);
+  }finally{await db.close();}
+});
+
+test('batched upload cleanup preserves claimed and foreign images, and retries only the observed deletion generation',async()=>{
+  const db=await fixture();try{
+    await db.exec('set role service_role');
+    const own=await reserve(db), claimed=await reserve(db), foreign=await reserve(db,'avatar',100,other);
+    await db.query('select soundspin_finish_upload($1,$2)',[claimed.id,actor]);
+    await db.query('insert into soundspin_profiles(user_id)values($1)',[actor]);
+    await db.query('update soundspin_profiles set avatar_path=$1,avatar_url=\'https://avatar\' where user_id=$2',[claimed.storage_path,actor]);
+    await assert.rejects(db.query('select soundspin_cancel_pending_uploads($1,$2::text[])',[actor,[own.storage_path,foreign.storage_path]]),/Invalid upload cleanup/);
+    assert.equal((await db.query('select state from soundspin_managed_uploads where id=$1',[own.id])).rows[0].state,'reserved');
+    await db.query('select soundspin_cancel_pending_uploads($1,$2::text[])',[actor,[own.storage_path,claimed.storage_path]]);
+    assert.equal((await db.query('select state from soundspin_managed_uploads where id=$1',[claimed.id])).rows[0].state,'committed');
+    assert.equal((await db.query('select state from soundspin_managed_uploads where id=$1',[foreign.id])).rows[0].state,'reserved');
+    const before=(await db.query('select * from soundspin_storage_deletion_outbox where storage_path=$1',[own.storage_path])).rows[0];
+    await db.query('select soundspin_retry_upload_deletions($1,$2)',['profile-avatars',[{path:own.storage_path,generation:before.generation}]]);
+    const retried=(await db.query('select attempts,available_at>now() as deferred from soundspin_storage_deletion_outbox where storage_path=$1',[own.storage_path])).rows[0];
+    assert.deepEqual(retried,{attempts:1,deferred:true});
+    await db.query('select soundspin_queue_upload($1,$2,$3,null,0)',['profile-avatars',own.storage_path,actor]);
+    await db.query('select soundspin_retry_upload_deletions($1,$2)',['profile-avatars',[{path:own.storage_path,generation:before.generation}]]);
+    assert.equal((await db.query('select attempts from soundspin_storage_deletion_outbox where storage_path=$1',[own.storage_path])).rows[0].attempts,1);
+    await db.exec('reset role');
+    for(const role of ['anon','authenticated']) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(db.query('select soundspin_cancel_pending_uploads($1,$2::text[])',[actor,[own.storage_path]]),/permission denied/);
+      await assert.rejects(db.query('select soundspin_retry_upload_deletions($1,$2)',['profile-avatars',[]]),/permission denied/);
+      await db.exec('reset role');
+    }
   }finally{await db.close();}
 });

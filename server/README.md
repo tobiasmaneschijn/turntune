@@ -24,5 +24,8 @@ share that queue and resolve the current local data after initialization. Keep
 request identity caches in `security/request-identity.ts` scoped to each request.
 Start maintenance after startup validation and drain it before flushing storage.
 
+See [database access](../docs/database-access.md) for request budgets, fresh
+authorization boundaries and batch-query contracts.
+
 `npm test` discovers nested server tests. Focused test commands in
 `scripts/run-tests.mjs` must keep covering their existing workflows when files move.

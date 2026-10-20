@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { createClient } from '@supabase/supabase-js'
 import { ChatCommandService, type ChatCommandServiceOptions } from './chat-command-service.js'
 import { CHAT_MAX_REACTIONS_PER_MESSAGE, CHAT_MAX_HISTORY_CHILDREN, CHAT_MAX_POLL_VOTERS } from './chat-validation.js'
 
@@ -53,6 +54,64 @@ test('local chat commits before delivery, preserves immutable receipts and coold
   }
 })
 
+test('saved chat uses the committed result without another read and retries return current removal state', async () => {
+  const rows = new Map<string, Record<string, any>>(), requests: string[] = [], events: string[] = []
+  let checks = 0
+  const client = createClient('https://chat.test', 'test-secret', {
+    auth: { persistSession: false },
+    global: { fetch: async (input, init) => {
+      const url = new URL(String(input)), table = url.pathname.split('/').at(-1)!
+      requests.push(table)
+      let data: unknown = null
+      if (table === 'soundspin_chat_command') {
+        const args = JSON.parse(String(init?.body)), value = args.p_payload, prior = rows.get(value.id)
+        const row = prior || {
+          id: value.id, room_slug: args.p_room, user_id: args.p_user,
+          user_name: value.user.name, avatar_seed: value.user.avatarSeed,
+          content: value.content, message_type: value.type, created_at: value.createdAt,
+          media_url: null, storage_path: null, mentions: [], reply_to_id: null, poll_options: null,
+          immutable_fingerprint: args.p_fingerprint, removed_at: null,
+          soundspin_message_reactions: [], soundspin_poll_votes: [], reply: null
+        }
+        rows.set(value.id, row)
+        data = { fresh: !prior, result: { id: value.id }, row }
+      } else if (table === 'soundspin_chat_message_state') {
+        const args = JSON.parse(String(init?.body))
+        data = { row: rows.get(args.p_id) || null, removal: null }
+      } else if (table === 'soundspin_messages') data = rows.get(url.searchParams.get('id')!.slice(3)) || null
+      else if (table === 'soundspin_chat_receipts') data = { fingerprint: 'b'.repeat(64) }
+      else throw new Error(`Unexpected read: ${table}`)
+      return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
+    } }
+  })
+  const options: ChatCommandServiceOptions = {
+    client, now: () => initialTime,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }),
+    authorize: async () => { checks++ },
+    emit: async (_room, event) => { events.push(event) }
+  }
+  const input = message(initialTime), service = new ChatCommandService(options)
+  assert.equal((await service.message('lounge', alice, input)).content, 'Hello')
+  assert.deepEqual(requests, ['soundspin_chat_message_state', 'soundspin_chat_command'])
+  assert.equal(checks, 2)
+  requests.length = 0
+  await new ChatCommandService(options).message('lounge', alice, input)
+  assert.ok(!requests.includes('soundspin_chat_receipts'))
+  assert.equal(requests.filter(table => table === 'soundspin_chat_message_state').length, 1)
+  assert.deepEqual(events, ['chat:message'])
+  Object.assign(rows.get(input.id)!, { content: 'Message removed', removed_at: new Date(initialTime).toISOString() })
+  assert.ok((await new ChatCommandService(options).message('lounge', alice, input)).removedAt)
+  assert.deepEqual(events, ['chat:message', 'chat:removed'])
+  assert.equal(checks, 6)
+  requests.length = 0
+  await service.loadMessage(input.id)
+  assert.deepEqual(requests, ['soundspin_messages'])
+  requests.length = 0
+  rows.get(input.id)!.immutable_fingerprint = null
+  assert.equal((await service.loadMessage(input.id))!.fingerprint, 'b'.repeat(64))
+  assert.deepEqual(requests, ['soundspin_messages', 'soundspin_chat_receipts'])
+})
+
 test('removal wins before a save and after restart, including replies, reactions and polls', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-chat-'))
   const emitted: Array<{ event: string; payload: unknown }> = []
@@ -96,6 +155,9 @@ test('removal wins before a save and after restart, including replies, reactions
     assert.equal((await restarted.loadMessage(quote.id))?.message.replyTo?.content, 'Message removed')
     const lateHistory = await restarted.readPayload('lounge', pendingHistory.rows)
     assert.equal(lateHistory.rows.find((row) => row.id === normal.id)?.content, 'Message removed')
+    const context = await restarted.readContext('lounge', quote.id)
+    assert.ok(context?.rows.some(row => row.id === quote.id))
+    assert.equal(context?.replies.find(row => row.id === normal.id)?.content, 'Message removed')
     assert.equal((await restarted.listRemovalLog('lounge')).length, 2)
     assert.equal((await restarted.readPage('lounge', undefined, 'older', 20, 'Secret')).rows.length, 0)
     assert.equal(emitted.filter((e) => e.event === 'chat:message').length, 3)

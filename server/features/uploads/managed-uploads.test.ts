@@ -86,9 +86,11 @@ test('admission separates deliberate permission errors from internal database te
 test('upload and feedback HTTP routes suppress Storage/SQL errors while keeping exact quota rejections', async () => {
   const secret = 'Too many SQL SELECT refresh_token_ciphertext signed=https://internal.test/key?token=secret'
   let feedbackError: unknown = { code: 'P0001', message: secret }
+  const cancellations: unknown[] = []
   const client = { rpc: async (name: string, args: Record<string, unknown>) => {
     if (name === 'soundspin_reserve_upload') return { data: { id: args.p_id, actor_id: args.p_actor, purpose: args.p_purpose, bucket_id: args.p_bucket, storage_path: args.p_path, size_bytes: args.p_bytes, room_slug: args.p_room, state: 'reserved' }, error: null }
     if (name === 'soundspin_submit_feedback') return { error: feedbackError }
+    if (name === 'soundspin_cancel_pending_uploads') cancellations.push(args)
     return { error: null }
   }, storage: { from: () => ({ upload: async () => ({ error: new Error(secret) }) }) } } as unknown as SupabaseClient
   const app = express(); mountManagedUploadRoutes(app, { client, getUserId: async () => actor }); mountFeedbackRoutes(app, { client, getUserId: async () => actor })
@@ -102,6 +104,10 @@ test('upload and feedback HTTP routes suppress Storage/SQL errors while keeping 
     const unknown = await send(); assert.equal(unknown.status, 503); assert.equal((await unknown.text()).includes('secret'), false)
     feedbackError = { code: 'P0001', message: 'Too many feedback submissions. Try again in an hour.' }
     const limited = await send(); assert.equal(limited.status, 429); assert.match(await limited.text(), /Try again in an hour/)
+    const paths = [`${actor}/${crypto.randomUUID()}.png`, `${actor}/${crypto.randomUUID()}.png`]
+    const cleanup = await fetch(`${base}/api/uploads/cleanup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ storagePaths: paths }) })
+    assert.equal(cleanup.status, 200)
+    assert.deepEqual(cancellations, [{ p_actor: actor, p_paths: paths }], 'cancellation performs one actor-scoped transaction for all selected uploads')
   } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 })
 test('feedback schema rejects forged actors, oversized/nested attachments, unrelated paths, and invalid viewport', () => {
@@ -113,25 +119,30 @@ test('feedback schema rejects forged actors, oversized/nested attachments, unrel
 
 test('cleanup drains 1000 durable keys in bounded batches and exposes backlog signals', async () => {
   const rows = Array.from({ length: 1000 }, (_, index) => ({ bucket_id: 'profile-avatars', storage_path: `${actor}/${index}.png`, queued_at: new Date(0).toISOString(), available_at: new Date(0).toISOString(), attempts: 0, generation: crypto.randomUUID() }))
-  let removals = 0
+  let removals = 0, storageFails = false, retries = 0
   const client = { rpc: async (name: string, args: {p_items?: Array<{path: string; generation: string}>}) => {
+    if (name === 'soundspin_retry_upload_deletions') { retries++; assert.equal(args.p_items?.length, 100); return { error: null } }
     if (name !== 'soundspin_complete_upload_deletions') return { error: null }
     let n = 0
     for (const item of args.p_items || []) { const index = rows.findIndex(row => row.storage_path === item.path && row.generation === item.generation); if (index >= 0) { rows.splice(index, 1); n++ } }
     return { data: n, error: null }
-  }, storage: { from: () => ({ remove: async (paths: string[]) => { removals++; assert.ok(paths.length <= 100); return { error: null } } }) },
+  }, storage: { from: () => ({ remove: async (paths: string[]) => { removals++; assert.ok(paths.length <= 100); return { error: storageFails ? new Error('Storage unavailable') : null } } }) },
     from(table: string) {
-      let action = 'select', paths: string[] = [], limit = 100, head = false
-      const query = { select(_columns: string, options?: { head?: boolean }) { head = Boolean(options?.head); return this }, lte() { return this }, order() { return this }, limit(value: number) { limit = value; return this }, update() { action = 'update'; return this }, delete() { action = 'delete'; return this }, eq(key: string, value: string) { if (key === 'storage_path') paths = [value]; return this }, lt() { return this }, in(_key: string, value: string[]) { paths = value; return this },
+      let action = 'select', paths: string[] = [], limit = 100, counted = false
+      const query = { select(_columns: string, options?: { count?: string }) { counted = options?.count === 'exact'; return this }, lte() { return this }, order() { return this }, limit(value: number) { limit = value; return this }, update() { action = 'update'; return this }, delete() { action = 'delete'; return this }, eq(key: string, value: string) { if (key === 'storage_path') paths = [value]; return this }, lt() { return this }, in(_key: string, value: string[]) { paths = value; return this },
         then(resolve: (value: unknown) => unknown) {
           const acknowledged = table === 'soundspin_storage_deletion_outbox' && action === 'delete' ? rows.filter(row => paths.includes(row.storage_path)) : []
           if (table === 'soundspin_storage_deletion_outbox' && action === 'delete') for (let i = rows.length - 1; i >= 0; i--) if (paths.includes(rows[i].storage_path)) rows.splice(i, 1)
-          return Promise.resolve({ data: action === 'delete' ? acknowledged : table === 'soundspin_storage_deletion_outbox' && action === 'select' ? rows.slice(0, limit) : [], count: head ? rows.length : null, error: null }).then(resolve)
+          return Promise.resolve({ data: action === 'delete' ? acknowledged : table === 'soundspin_storage_deletion_outbox' && action === 'select' ? rows.slice(0, limit) : [], count: counted ? rows.length : null, error: null }).then(resolve)
         } }
       return query
     } } as unknown as SupabaseClient
   const first = await cleanupManagedUploads(client, { maxBatches: 3 })
   assert.equal(first.removed, 300); assert.equal(first.remaining, 700); assert.equal(first.oldestAt, new Date(0).toISOString())
+  storageFails = true
+  const failed = await cleanupManagedUploads(client, { maxBatches: 1 })
+  assert.equal(failed.removed, 0); assert.equal(failed.failed, 100); assert.equal(failed.remaining, 700); assert.equal(retries, 1)
+  storageFails = false
   const second = await cleanupManagedUploads(client)
-  assert.equal(second.removed, 700); assert.equal(second.remaining, 0); assert.equal(removals, 10)
+  assert.equal(second.removed, 700); assert.equal(second.remaining, 0); assert.equal(removals, 11)
 })

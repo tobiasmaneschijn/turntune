@@ -21,6 +21,9 @@ function fixture(hold?: ReturnType<typeof deferred>) {
   const client = {
     rpc(name: string) {
       const promise = (async () => {
+        if (name === 'soundspin_load_room') return { data: { state: structuredClone(state), name: state.name, owner_id: owner,
+          is_public: true, password_hash: null, settings: state.settings, access_mode: 'public', policy_revision: 0,
+          room_roles: erased ? [] : [{ user_id: deleted, role: 'dj' }], moderation: structuredClone(moderation) }, error: null }
         if (name === 'soundspin_moderation_actor_rooms') return { data: erased ? [] : ['test-room'], error: null }
         assert.equal(name, 'soundspin_erase_live_moderation_account')
         started.resolve(); if (hold) await hold.promise

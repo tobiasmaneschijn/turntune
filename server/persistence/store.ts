@@ -27,6 +27,7 @@ import { ProfileRepository } from "./profile-repository.js";
 import { MusicConnectionRepository, type LocalMusicConnectionData } from "./music-connection-repository.js";
 import { PrivateLibraryRepository, type LocalPrivateLibraryData } from "./private-library-repository.js";
 import { resourceQuotaError } from "./quota-errors.js";
+import { RoomAccessRepository, type RoomAdmission } from "./room-access-repository.js";
 
 interface Database extends LocalMusicConnectionData, LocalPrivateLibraryData {
   rooms: Record<string, Room>;
@@ -70,6 +71,7 @@ export class Store {
   private readonly profiles: ProfileRepository;
   private readonly musicConnections: MusicConnectionRepository;
   private readonly privateLibraries: PrivateLibraryRepository;
+  private readonly roomAccess: RoomAccessRepository | null;
   private readonly dataDir: string;
   private readonly dataFile: string;
   private readonly tempFile: string;
@@ -102,6 +104,7 @@ export class Store {
     // runs, while keeping every local repository on the same atomic file queue.
     this.musicConnections = new MusicConnectionRepository(this.supabase, () => this.data, () => this.persistFile());
     this.privateLibraries = new PrivateLibraryRepository(this.supabase, () => this.data, () => this.persistFile(), this.resourcePolicies);
+    this.roomAccess = this.supabase ? new RoomAccessRepository(this.supabase) : null;
   }
 
   get usesSupabase() {
@@ -406,14 +409,10 @@ export class Store {
   private async loadRoomFromDatabase(id: string) {
     const supabase = this.supabase!;
 
-    const { data, error } = await supabase
-      .from("soundspin_rooms")
-      .select("state, name, owner_id, is_public, password_hash, settings, access_mode, policy_revision")
-      .eq("slug", id)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc("soundspin_load_room", { p_room_slug: id });
 
     if (error) {
-      if (error.code === "PGRST205") {
+      if (error.code === "PGRST205" || error.code === "PGRST202") {
         throw new Error(
           serverT("turntune_database_is_not_initialized_deploy_the_migrations_from_github_or_run_the_ini")
         );
@@ -421,14 +420,7 @@ export class Store {
       throw new Error(serverT("could_not_load_room_value1", { value1: error.message }));
     }
     if (!data) return undefined;
-    const { data: roomRoles, error: roomRoleError } = await supabase
-      .from("soundspin_room_members")
-      .select("user_id, role")
-      .eq("room_slug", id)
-      .in("role", ["moderator", "dj"]);
-    if (roomRoleError) throw new Error(serverT("could_not_load_room_roles_value1", { value1: roomRoleError.message }));
-    const { data: privateData, error: privateError } = await supabase.from("soundspin_room_moderation").select("data").eq("room_slug", id).maybeSingle();
-    if (privateError) throw new Error(serverT("could_not_load_room_restrictions_value1", { value1: privateError.message }));
+    const roomRoles = data.room_roles as Array<{ user_id: string; role: RoomRole }>;
 
     // `state` holds the fast-changing radio document. First-class room columns
     // and membership rows win over duplicated values in that JSON because they
@@ -444,7 +436,7 @@ export class Store {
       passwordProtected: Boolean(data.password_hash),
       settings: { ...(data.settings || {}), accessMode: data.access_mode ?? data.settings?.accessMode ?? (data.is_public ? "public" : "members") },
       policyRevision: data.policy_revision ?? (data.state as Room)?.policyRevision ?? 0,
-      moderation: { ...emptyModeration(), ...(privateData?.data as Partial<RoomModerationState> || {}) }
+      moderation: { ...emptyModeration(), ...(data.moderation as Partial<RoomModerationState> || {}) }
     };
     normalizeRadioState(room);
     // A creator may have populated the cache while this read was in flight.
@@ -529,25 +521,11 @@ export class Store {
     ]);
     if (publicResult.error) throw new Error(serverT("could_not_load_public_rooms_value1", { value1: publicResult.error.message }));
     const rooms = [...new Map([...(publicResult.data || []) as DirectoryRow[], ...owned, ...saved].map((room) => [room.slug, room])).values()];
-    const banned = new Set<string>();
-    const owners=new Set(rooms.map(room=>room.owner_id)),disabledOwners=new Set<string>();
-    for(const batchStart of Array.from({length:Math.ceil(owners.size/100)},(_,index)=>index*100)){
-      const {data,error}=await supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",[...owners].slice(batchStart,batchStart+100));
-      if(error)throw new Error(serverT("could_not_verify_room_owners"));
-      for(const entry of data||[])if(entry.state!=="active")disabledOwners.add(entry.user_id);
-    }
-    for (let offset = 0; offset < rooms.length; offset += 100) {
-      const restrictionResult=await supabase.from("soundspin_room_restrictions").select("room_slug,disabled").in("room_slug",rooms.slice(offset,offset+100).map(room=>room.slug));
-      if(restrictionResult.error)throw new Error(serverT("could_not_verify_platform_room_restrictions"));
-      for(const entry of restrictionResult.data||[])if(entry.disabled)banned.add(entry.room_slug);
-      const { data, error } = await supabase.from("soundspin_room_moderation").select("room_slug,data").in("room_slug", rooms.slice(offset, offset + 100).map(room => room.slug));
-      if (error) throw new Error(serverT("could_not_verify_room_restrictions_value1", { value1: error.message }));
-      for (const entry of data || []) if ((entry.data as RoomModerationState)?.restrictions?.some(item => item.userId === userId && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now()))) banned.add(entry.room_slug);
-    }
+    const visible = await this.roomAccess!.visibleRooms(userId, rooms.map(room => room.slug));
 
     return rooms
       // A stale favorite is not permission to disclose a revoked private room.
-      .filter((room) => !disabledOwners.has(room.owner_id)&&!banned.has(room.slug) && ((room.access_mode ?? (room.is_public ? "public" : "members")) === "public" || room.owner_id === userId || roles.has(room.slug) || (room.access_mode === "unlisted" && favoriteSlugs.has(room.slug))))
+      .filter((room) => visible.has(room.slug) && ((room.access_mode ?? (room.is_public ? "public" : "members")) === "public" || room.owner_id === userId || roles.has(room.slug) || (room.access_mode === "unlisted" && favoriteSlugs.has(room.slug))))
       .sort((first, second) => second.updated_at.localeCompare(first.updated_at))
       .map((room): RoomDirectoryEntry => ({
         slug: room.slug,
@@ -639,75 +617,27 @@ export class Store {
     });
   }
 
-  async getRoomAccess(roomSlug: string, userId: string) {
-    if (!this.supabase) {
-      const room = this.getRoom(roomSlug);
-      return room ? {
-        exists: true,
-        isPublic: accessMode(room) !== "members",
-        passwordHash: this.data.roomPasswords?.[roomSlug] || null,
-        role: roleInRoom(room, userId), banned: isRoomBanned(room, userId), accessMode: accessMode(room), settings: room.settings
-      } : { exists: false, isPublic: false, passwordHash: null, role: null, banned: false, accessMode: "members" as const, settings: {} };
-    }
-    const [{ data: room, error }, { data: membership, error: membershipError }, { data: privateData, error: privateError }] = await Promise.all([
-      this.supabase.from("soundspin_rooms").select("owner_id, is_public, password_hash, access_mode, settings").eq("slug", roomSlug).maybeSingle(),
-      this.supabase.from("soundspin_room_members").select("role").eq("room_slug", roomSlug).eq("user_id", userId).maybeSingle(),
-      this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle()
-    ]);
-    if (error) throw new Error(serverT("could_not_check_room_access_value1", { value1: error.message }));
-    if (membershipError) throw new Error(serverT("could_not_check_room_membership_value1", { value1: membershipError.message }));
-    if (privateError) throw new Error(serverT("could_not_check_room_restrictions_value1", { value1: privateError.message }));
-    const mode = room?.access_mode ?? (room?.is_public ? "public" : "members");
-    const banned = Boolean((privateData?.data as RoomModerationState)?.restrictions?.some(item => item.userId === userId && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now())));
-    return {
-      exists: Boolean(room),
-      isPublic: mode !== "members",
-      passwordHash: room?.password_hash || null,
-      role: room?.owner_id === userId ? "owner" as const : (membership?.role as RoomRole | undefined) || null,
-      banned, accessMode: mode as "public" | "unlisted" | "members", settings: (room?.settings || {}) as Room["settings"]
-    };
+  async getRoomAdmission(roomSlug: string, actorId: string | null, readerIds: string[] = []): Promise<RoomAdmission> {
+    if (this.roomAccess) return this.roomAccess.getAccess(roomSlug, actorId, readerIds);
+    const room = this.getRoom(roomSlug);
+    if (!room) return { exists: false, isPublic: false, passwordHash: null, role: null, banned: false,
+      accessMode: "members", settings: {}, roomActive: false, accountActive: true, readers: new Set() };
+    const mode = accessMode(room);
+    return { exists: true, isPublic: mode !== "members", passwordHash: this.data.roomPasswords?.[roomSlug] || null,
+      role: actorId ? roleInRoom(room, actorId) : null, banned: actorId ? isRoomBanned(room, actorId) : false,
+      accessMode: mode, settings: room.settings, roomActive: true, accountActive: true,
+      readers: new Set(readerIds.filter(id => typeof id === "string" && id.length > 0 && id.length <= 100 &&
+        !isRoomBanned(room, id) && (mode !== "members" || Boolean(roleInRoom(room, id))))) };
+  }
+
+  getRoomAccess(roomSlug: string, userId: string) {
+    return this.getRoomAdmission(roomSlug, userId);
   }
 
   /** Caller supplies already-admitted live identities; never discover/add recipients here. */
   async allowedRoomReaders(roomSlug: string, userIds: string[]): Promise<Set<string>> {
-    const ids = [...new Set(userIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 100))];
-    if (!ids.length) return new Set();
-    if (!this.supabase) {
-      const room = this.getRoom(roomSlug);
-      if (!room) return new Set();
-      return new Set(ids.filter(id => !isRoomBanned(room, id) && (accessMode(room) !== "members" || Boolean(roleInRoom(room, id)))));
-    }
-    // Deliberately bypass live-room cache: access can be revoked outside this process.
-    const [{ data: metadata, error }, { data: privateData, error: privateError },roomRestriction] = await Promise.all([
-      this.supabase.from("soundspin_rooms").select("owner_id, is_public, access_mode").eq("slug", roomSlug).maybeSingle(),
-      this.supabase.from("soundspin_room_moderation").select("data").eq("room_slug", roomSlug).maybeSingle(),
-      this.supabase.from("soundspin_room_restrictions").select("disabled").eq("room_slug",roomSlug).maybeSingle()
-    ]);
-    if (error) throw new Error(serverT("could_not_verify_room_readers_value1", { value1: error.message }));
-    if (!metadata) return new Set();
-    if (privateError) throw new Error(serverT("could_not_verify_room_restrictions_value1", { value1: privateError.message }));
-    if(roomRestriction.error)throw new Error(serverT("could_not_verify_platform_room_restrictions"));
-    if(roomRestriction.data?.disabled)return new Set();
-    const disabledAccounts=new Set<string>();
-    const accountIds=[...new Set([...ids,metadata.owner_id])];
-    for(let offset=0;offset<accountIds.length;offset+=100){
-      const accountResult=await this.supabase.from("soundspin_account_restrictions").select("user_id,state").in("user_id",accountIds.slice(offset,offset+100));
-      if(accountResult.error)throw new Error(serverT("could_not_verify_account_restrictions"));
-      for(const entry of accountResult.data||[])if(entry.state!=="active")disabledAccounts.add(entry.user_id);
-    }
-    if(disabledAccounts.has(metadata.owner_id))return new Set();
-    const restrictions = (privateData?.data as RoomModerationState)?.restrictions || [];
-    const eligible = ids.filter(id => !disabledAccounts.has(id)&&!restrictions.some(item => item.userId === id && item.kind === "room-ban" && item.revokedAt === null && (item.expiresAt === null || item.expiresAt > Date.now())));
-    if ((metadata.access_mode ?? (metadata.is_public ? "public" : "members")) !== "members") return new Set(eligible);
-    const allowed = new Set(eligible.filter((id) => id === metadata.owner_id));
-    const others = eligible.filter((id) => id !== metadata.owner_id);
-    for (let offset = 0; offset < others.length; offset += 100) {
-      const batch = others.slice(offset, offset + 100);
-      const { data, error: membershipError } = await this.supabase.from("soundspin_room_members").select("user_id").eq("room_slug", roomSlug).in("user_id", batch);
-      if (membershipError) throw new Error(serverT("could_not_verify_room_readers_value1", { value1: membershipError.message }));
-      for (const member of data || []) if (batch.includes(member.user_id)) allowed.add(member.user_id);
-    }
-    return allowed;
+    if (!userIds.length) return new Set();
+    return (await this.getRoomAdmission(roomSlug, null, userIds)).readers;
   }
 
   async recordRoomMember(roomSlug: string, userId: string, user?: User) {

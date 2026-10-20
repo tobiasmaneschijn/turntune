@@ -15,14 +15,15 @@ export class ProfileRepository {
     if (current) return current;
     // A reconnect carries potentially stale browser profile data. Only seed a
     // missing profile; never reset a saved display name while joining a room.
-    const { error } = await this.supabase
+    const { data, error } = await this.supabase
       .from("soundspin_profiles")
       .upsert(
         { user_id: userId, display_name: displayName, updated_at: new Date().toISOString() },
         { onConflict: "user_id", ignoreDuplicates: true }
-      );
+      ).select(PROFILE_COLUMNS).maybeSingle();
     if (error) throw new Error(serverT("could_not_load_profile_value1", { value1: error.message }));
-    const profile = await this.getProfile(userId);
+    // DO NOTHING returns no row when a concurrent connection won the insert.
+    const profile = (data as SoundSpinProfile | null) ?? await this.getProfile(userId);
     if (!profile) throw new Error(serverT("could_not_load_profile_after_creating_it"));
     return profile;
   }
@@ -56,29 +57,28 @@ export class ProfileRepository {
     if (!this.supabase) return null;
     const update = profileUpdateSchema.parse(input);
     const supabase = this.supabase;
-    const current = await this.getProfile(userId);
-    if (!current) throw new Error(serverT("profile_not_found"));
+    // Ordinary edits return their saved row directly. Only cosmetic selections
+    // need the current keys to preserve an already saved, retired option.
+    const changesOption = Boolean(update.avatarKey || update.themeKey);
+    const current = changesOption ? await this.getProfile(userId) : null;
+    if (changesOption && !current) throw new Error(serverT("profile_not_found"));
 
-    const validateOption = async (
-      key: string,
-      kind: SoundSpinProfileOption["kind"],
-      missingMessage: string
-    ) => {
-      const { data: option, error } = await supabase
-        .from("soundspin_profile_options")
-        .select("key")
-        .eq("key", key)
-        .eq("kind", kind)
-        .maybeSingle();
-      if (error) throw new Error(serverT("could_not_validate_kind_value2", { kind: kind, value2: error.message }));
-      if (!option) throw new Error(missingMessage);
-    };
-
-    if (update.avatarKey && update.avatarKey !== current.avatar_key) {
-      await validateOption(update.avatarKey, "avatar", "That avatar does not exist.");
+    const requestedOptions: Array<{ key: string; kind: SoundSpinProfileOption["kind"]; missingMessage: string }> = [];
+    if (update.avatarKey && update.avatarKey !== current?.avatar_key) {
+      requestedOptions.push({ key: update.avatarKey, kind: "avatar", missingMessage: "That avatar does not exist." });
     }
-    if (update.themeKey && update.themeKey !== current.theme_key) {
-      await validateOption(update.themeKey, "theme", "That theme does not exist.");
+    if (update.themeKey && update.themeKey !== current?.theme_key) {
+      requestedOptions.push({ key: update.themeKey, kind: "theme", missingMessage: "That theme does not exist." });
+    }
+    if (requestedOptions.length) {
+      const { data: options, error } = await supabase
+        .from("soundspin_profile_options")
+        .select("key, kind")
+        .in("key", [...new Set(requestedOptions.map(option => option.key))]);
+      if (error) throw new Error(serverT("could_not_load_profile_options_value1", { value1: error.message }));
+      for (const requested of requestedOptions) {
+        if (!options?.some(option => option.key === requested.key && option.kind === requested.kind)) throw new Error(requested.missingMessage);
+      }
     }
 
     let customAvatarUrl: string | undefined;
@@ -117,6 +117,7 @@ export class ProfileRepository {
       .select(PROFILE_COLUMNS)
       .single();
     if (error?.code === "23505" && update.handle !== undefined) throw new Error(serverT("that_handle_is_taken"));
+    if (error?.code === "PGRST116") throw new Error(serverT("profile_not_found"));
     if (error) throw new Error(serverT("could_not_update_profile_value1", { value1: error.message }));
     return data as SoundSpinProfile;
   }

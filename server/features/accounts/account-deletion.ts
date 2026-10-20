@@ -37,6 +37,18 @@ export class AccountDeletionService {
     if (result.error) throw new Error(serverT("deletion_progress_could_not_be_saved"));
   }
 
+  private async requireStorageDeleted(userId: string, rooms: Array<{ slug: string }>, final: boolean) {
+    const account = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("actor_id", userId);
+    if (account.error || account.count) throw new Error(serverT(final ? "final_storage_cleanup_is_still_pending" : "storage_cleanup_is_still_pending"));
+    // A room may contain uploads from many accounts. Keep the separate room
+    // gate, but query its bounded inventory together instead of one HEAD per room.
+    for (let offset = 0; offset < rooms.length; offset += 100) {
+      const pending = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true })
+        .in("room_slug", rooms.slice(offset, offset + 100).map(room => room.slug));
+      if (pending.error || pending.count) throw new Error(serverT(final ? "final_room_storage_cleanup_is_still_pending" : "room_storage_cleanup_is_still_pending"));
+    }
+  }
+
   private async advance(job: DeletionJob) {
     const restricted = await this.client.rpc("soundspin_restrict_deletion_account", { p_job: job.id });
     if (restricted.error) throw new Error(serverT("account_could_not_be_restricted"));
@@ -58,13 +70,7 @@ export class AccountDeletionService {
     if (connections.error) throw new Error(serverT("provider_credentials_could_not_be_removed"));
     await this.stage(job, "providers-disconnected");
     await cleanupManagedUploads(this.client, { maxBatches: 10, batchSize: 100, maxMs: 20_000 });
-    let pending = this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("actor_id", job.user_id);
-    const accountPending = await pending;
-    if (accountPending.error || accountPending.count) throw new Error(serverT("storage_cleanup_is_still_pending"));
-    for (const room of rooms) {
-      const roomPending = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("room_slug", room.slug);
-      if (roomPending.error || roomPending.count) throw new Error(serverT("room_storage_cleanup_is_still_pending"));
-    }
+    await this.requireStorageDeleted(job.user_id, rooms, false);
     await this.stage(job, "storage-deleted");
     // Parent serializes SQL scrubbing with each room's live command queue and
     // refreshes its cache before ordinary room mutations resume.
@@ -88,12 +94,7 @@ export class AccountDeletionService {
     // Cascade cleanup triggers may safely requeue already removed keys. Drain
     // these durable references before recording the final completion receipt.
     await cleanupManagedUploads(this.client, { maxBatches: 10, batchSize: 100, maxMs: 20_000 });
-    const afterCascade = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("actor_id", job.user_id);
-    if (afterCascade.error || afterCascade.count) throw new Error(serverT("final_storage_cleanup_is_still_pending"));
-    for (const room of rooms) {
-      const roomPending = await this.client.from("soundspin_storage_deletion_outbox").select("storage_path", { count: "exact", head: true }).eq("room_slug", room.slug);
-      if (roomPending.error || roomPending.count) throw new Error(serverT("final_room_storage_cleanup_is_still_pending"));
-    }
+    await this.requireStorageDeleted(job.user_id, rooms, true);
     const completed = await this.client.rpc("soundspin_complete_account_deletion", { p_job: job.id });
     if (completed.error) throw new Error(serverT("deletion_receipt_could_not_be_saved"));
   }

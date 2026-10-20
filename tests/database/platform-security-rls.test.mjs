@@ -40,10 +40,69 @@ async function fixture() {
     insert into public.soundspin_feedback(id,user_id,status,admin_note,updated_at) values('66666666-6666-4666-8666-666666666666','${listener}','new','private',now());
     insert into storage.objects values('feedback-screenshots','${listener}/x.png','${listener}');`);
   await db.exec(await readFile(new URL("../../supabase/migrations/20261013110000_platform_security_privacy.sql",import.meta.url),"utf8"));
+  await db.exec(`alter table public.soundspin_rooms add column password_hash text,add column settings jsonb not null default '{}',
+      add column state jsonb not null default '{}',add column name text not null default 'Room',add column policy_revision bigint not null default 0;
+    create table public.soundspin_room_moderation(room_slug text primary key references public.soundspin_rooms(slug),data jsonb not null default '{}');
+    create table public.soundspin_room_favorites(room_slug text references public.soundspin_rooms(slug),user_id uuid references auth.users(id),primary key(room_slug,user_id));
+    alter table public.soundspin_room_moderation enable row level security;
+    alter table public.soundspin_room_favorites enable row level security;
+    grant select on public.soundspin_room_moderation,public.soundspin_room_members,public.soundspin_room_favorites to service_role;`);
+  await db.exec(await readFile(new URL("../../supabase/migrations/20261020083619_batch_fresh_room_access.sql",import.meta.url),"utf8"));
   return db;
 }
 async function asUser(db,id) { await db.exec(`reset role; set role authenticated; select set_config('request.jwt.claim.sub','${id}',false)`); }
 async function asService(db) { await db.exec("reset role; set role service_role"); }
+
+test("fresh batched access preserves private-room revocation, restrictions and service-only boundaries",async()=>{
+  const db=await fixture();try {
+    const read=async()=> (await db.query("select public.soundspin_room_access('secret-room',$1,$2) as access",[listener,[listener,admin]])).rows[0].access;
+    await db.exec(`insert into public.soundspin_room_members values('secret-room','${listener}','member'),('secret-room','${owner}','moderator');`);
+    for(const role of ['anon','authenticated']){
+      await db.exec(`set role ${role}`);
+      await assert.rejects(read(),/permission denied/);
+      await assert.rejects(db.query("select public.soundspin_access_status($1,$2)",[[listener],['secret-room']]),/permission denied/);
+      await assert.rejects(db.query("select public.soundspin_directory_visibility($1,$2)",[listener,['secret-room']]),/permission denied/);
+      await assert.rejects(db.query("select public.soundspin_load_room('secret-room')"),/permission denied/);
+      await db.exec('reset role');
+    }
+    await asService(db);
+    let access=await read();
+    assert.equal(access.role,'member');assert.equal(access.roomActive,true);assert.equal(access.accountActive,true);
+    assert.deepEqual(new Set(access.readers),new Set([listener,admin]));
+    const directory=async()=> (await db.query("select soundspin_directory_visibility($1,$2) as visible",[listener,['lounge','secret-room']])).rows[0].visible;
+    assert.deepEqual(new Set(await directory()),new Set(['lounge','secret-room']));
+    const snapshot=(await db.query("select soundspin_load_room('secret-room') as room")).rows[0].room;
+    assert.equal(snapshot.owner_id,admin);assert.deepEqual(snapshot.room_roles,[{user_id:owner,role:'moderator'}]);assert.deepEqual(snapshot.moderation,{});
+    assert.equal((await db.query("select soundspin_load_room('missing-room') as room")).rows[0].room,null);
+    await db.exec(`reset role;delete from public.soundspin_room_members where user_id='${listener}';set role service_role;`);
+    access=await read();assert.equal(access.role,null);assert.deepEqual(access.readers,[admin]);
+    assert.deepEqual(await directory(),['lounge'],'revoked private membership also removes directory visibility');
+    await db.exec(`reset role;update soundspin_rooms set access_mode='unlisted' where slug='secret-room';
+      insert into soundspin_room_favorites values('secret-room','${listener}');set role service_role;`);
+    assert.deepEqual(new Set(await directory()),new Set(['lounge','secret-room']),'an unlisted favorite stays reachable');
+    await db.exec(`reset role;delete from soundspin_room_favorites;set role service_role;`);
+    assert.deepEqual(await directory(),['lounge'],'an unlisted room is not discovered without a current grant');
+    await db.exec(`reset role;update soundspin_rooms set access_mode='public' where slug='secret-room';
+      insert into soundspin_room_moderation values('secret-room',jsonb_build_object('restrictions',jsonb_build_array(
+        jsonb_build_object('userId','${listener}','kind','room-ban','revokedAt',null,'expiresAt',null))));set role service_role;`);
+    access=await read();assert.equal(access.banned,true);assert.deepEqual(access.readers,[admin]);
+    assert.deepEqual(await directory(),['lounge'],'room bans hide public rooms without returning moderation documents');
+    await db.exec(`reset role;update soundspin_room_moderation set data='{"restrictions":[{"userId":"${listener}","kind":"room-ban","revokedAt":null,"expiresAt":1}]}';set role service_role;`);
+    access=await read();assert.equal(access.banned,false);assert.ok(access.readers.includes(listener),'expired bans do not deny access');
+    await db.query("select soundspin_platform_action($1,'suspend-account',$2,'review')",[admin,listener]);
+    access=await read();assert.equal(access.accountActive,false);assert.deepEqual(access.readers,[admin]);
+    const status=(await db.query("select soundspin_access_status($1,$2) as status",[[listener,owner],['lounge','secret-room']])).rows[0].status;
+    assert.deepEqual(status.accounts,[owner]);assert.deepEqual(new Set(status.rooms),new Set(['lounge','secret-room']));
+    await db.query("select soundspin_platform_action($1,'disable-room','secret-room','review')",[admin]);
+    access=await read();assert.equal(access.roomActive,false);assert.deepEqual(access.readers,[]);
+    const excess=Array.from({length:101},()=>listener);
+    await assert.rejects(db.query("select soundspin_room_access('secret-room',$1,$2)",[listener,excess]),/Invalid room access request/);
+    await assert.rejects(db.query("select soundspin_access_status($1,$2)",[excess,[]]),/Invalid access status request/);
+    await assert.rejects(db.query("select soundspin_directory_visibility($1,$2)",[listener,Array.from({length:101},()=> 'lounge')]),/Invalid directory visibility request/);
+    const definitions=(await db.query("select prosecdef from pg_proc where proname in ('soundspin_room_access','soundspin_access_status','soundspin_directory_visibility','soundspin_load_room')")).rows;
+    assert.equal(definitions.length,4);assert.ok(definitions.every(row=>row.prosecdef===false));
+  }finally {await db.close();}
+});
 
 test("suspension and room takedown gate existing Auth identities and direct RLS, with reversible audit",async()=>{
   const db=await fixture();try {

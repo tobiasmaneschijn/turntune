@@ -19,7 +19,7 @@ export interface MaintenanceOptions {
   supabaseAdmin: SupabaseClient | null;
   authEnabled: boolean;
   accountDeletion: Pick<AccountDeletionService, "runNext"> | null;
-  platform: Pick<PlatformSecurity, "activeAccount" | "activeRoom">;
+  platform: Pick<PlatformSecurity, "checkConnections">;
   resourcePolicies: Pick<ResourcePolicyStore, "getGlobal">;
   isShuttingDown: () => boolean;
   connectedAccountIds: () => string[];
@@ -64,12 +64,13 @@ export function createMaintenance(options: MaintenanceOptions) {
     if(!authEnabled||connectionChecks||isShuttingDown())return;
     connectionChecks=(async()=>{
       const accounts=[...new Set(connectedAccountIds())];
-      const rooms=cachedRoomIds();
-      const tasks=[...accounts.map(userId=>async()=>{if(!await platform.activeAccount(userId))await restrictAccount(userId);}),
-        ...rooms.map(roomId=>async()=>{if(!await platform.activeRoom(roomId))await restrictRoom(roomId);})];
+      const rooms=[...new Set(cachedRoomIds())];
+      const access = await platform.checkConnections(accounts, rooms);
+      const tasks=[...accounts.filter(userId=>access.accounts.get(userId)===false).map(userId=>()=>restrictAccount(userId)),
+        ...rooms.filter(roomId=>access.rooms.get(roomId)===false).map(roomId=>()=>restrictRoom(roomId))];
       let index=0;
       await Promise.all(Array.from({length:Math.min(8,tasks.length)},async()=>{while(index<tasks.length&&!isShuttingDown()){const task=tasks[index++];try{await task();}catch{securityEvent("upstream_failure","failed");}}}));
-    })().finally(()=>{connectionChecks=null;});
+    })().catch(()=>securityEvent("upstream_failure","failed")).finally(()=>{connectionChecks=null;});
   }
   return {
     storageCleanupSnapshot: () => storageCleanupStatus,

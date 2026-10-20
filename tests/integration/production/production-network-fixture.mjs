@@ -21,6 +21,10 @@ globalThis.fetch = async (input, init) => {
   if (url.origin !== origin) throw new Error("The production smoke blocked an unexpected outbound request.");
   const name = url.pathname.split("/").at(-1);
   if (url.pathname.startsWith("/rest/v1/rpc/") && method === "POST" && maintenance.has(name)) {
+    if (name === 'soundspin_release_ready') {
+      const body = JSON.parse(init?.body || await request?.text() || '{}');
+      if (body.p_contract !== 'database-access-v1') throw new Error('Missing database access contract.');
+    }
     return Response.json(maintenance.get(name));
   }
   if (url.pathname.startsWith("/rest/v1/") && emptyTables.has(name) && ["GET", "HEAD"].includes(method)) {

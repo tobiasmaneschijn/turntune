@@ -1,6 +1,7 @@
 import { serverT } from "../lib/i18n.js";
 import { createAdminClient } from "@supabase/server/core";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { runtimeMetrics } from "../lib/runtime-metrics.js";
 
 const MAX_CONCURRENT = 64;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -52,6 +53,13 @@ export function createBoundedSupabaseFetch(projectUrl: string, fetcher: typeof f
     for (const signal of callerSignals) signal.throwIfAborted();
     if (activeRequests >= maxConcurrent) throw new Error(serverT("supabase_request_capacity_reached_try_again_shortly"));
     activeRequests++;
+    const started = performance.now();
+    const method = (init.method || source?.method || "GET").toUpperCase();
+    const operation = target.pathname.startsWith("/rest/v1/rpc/") ? "rpc"
+      : target.pathname.startsWith("/rest/v1/") ? (["GET", "HEAD"].includes(method) ? "read" : "write")
+      : target.pathname.startsWith("/auth/v1/") ? "auth"
+      : target.pathname.startsWith("/storage/v1/") ? "storage" : "other";
+    let failed = true;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new DOMException("Supabase operation timed out.", "TimeoutError")), timeoutMs);
     const signal = callerSignals.length ? AbortSignal.any([...callerSignals, controller.signal]) : controller.signal;
@@ -67,7 +75,7 @@ export function createBoundedSupabaseFetch(projectUrl: string, fetcher: typeof f
       signal.throwIfAborted();
       if (response.redirected || (response.url && new URL(response.url).origin !== project.origin) ||
         [301, 302, 303, 307, 308].includes(response.status)) throw new Error(serverT("supabase_redirects_are_not_permitted"));
-      if (!response.body) return response;
+      if (!response.body) { failed = !response.ok; return response; }
       const announced = Number(response.headers.get("content-length"));
       if (Number.isFinite(announced) && announced > maxBytes) throw new Error(serverT("supabase_returned_an_oversized_response"));
       reader = response.body.getReader();
@@ -92,6 +100,7 @@ export function createBoundedSupabaseFetch(projectUrl: string, fetcher: typeof f
       // Native fetch decompresses the original bytes; preserve the logical body.
       headers.delete("content-encoding");
       headers.set("content-length", String(bytes));
+      failed = !response.ok;
       return new Response(body, { status: response.status, statusText: response.statusText, headers });
     } finally {
       clearTimeout(timer);
@@ -101,6 +110,7 @@ export function createBoundedSupabaseFetch(projectUrl: string, fetcher: typeof f
       } else if (response) cancel(response.body);
       bufferedBytes -= chargedBytes;
       activeRequests--;
+      runtimeMetrics.observeDatabase(operation, performance.now() - started, failed);
     }
   };
 }

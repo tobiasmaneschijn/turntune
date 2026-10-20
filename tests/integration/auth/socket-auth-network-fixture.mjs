@@ -1,6 +1,7 @@
 // Test-only transport. The real JWT verifier uses an ephemeral public JWKS and
 // every operation remains local: provider/real-project traffic is prohibited.
 import { defaultResourcePolicy } from "../../../shared/resource-policy.ts";
+import { runtimeMetrics } from "../../../server/lib/runtime-metrics.ts";
 const origin = "https://soundspin-socket-auth.invalid";
 const userId = "11111111-1111-4111-8111-111111111111";
 let state = { id: "auth-room", name: "Auth room", ownerUserId: userId, moderatorUserIds: [], djRoleUserIds: [],
@@ -10,7 +11,9 @@ let state = { id: "auth-room", name: "Auth room", ownerUserId: userId, moderator
 const profile = { user_id: userId, display_name: "Verified listener", is_app_admin: false, avatar_key: "default", avatar_url: null };
 const metadata = () => ({ slug: state.id, state, name: state.name, owner_id: userId, is_public: true, access_mode: "public", password_hash: null, settings: state.settings });
 let accountSuspended = false, roomDisabled = false;
+const messages = new Map();
 process.on("message", message => {
+  if (message?.fixture === 'metrics') { process.send?.({ metrics: runtimeMetrics.snapshot() }); return; }
   if (message?.fixture === "account") accountSuspended = message.disabled === true;
   else if (message?.fixture === "room") roomDisabled = message.disabled === true;
   else return;
@@ -36,7 +39,38 @@ globalThis.fetch = async (input, init) => {
       if (body.p_actor !== null && body.p_actor !== userId) throw new Error("Invalid test resource-policy actor.");
       return json(defaultResourcePolicy());
     }
-    if (maintenance.has(table)) return json(maintenance.get(table));
+    if (maintenance.has(table)) {
+      if (table === 'soundspin_release_ready' && body.p_contract !== 'database-access-v1') throw new Error('Missing database access contract.');
+      return json(maintenance.get(table));
+    }
+    if (table === 'soundspin_load_room') return json(body.p_room_slug === state.id ? {
+      ...metadata(), room_roles: [{ user_id: userId, role: 'owner' }], moderation: {}
+    } : null);
+    if (table === 'soundspin_access_status') return json({
+      accounts: accountSuspended ? [] : body.p_accounts.filter(id => id === userId),
+      rooms: roomDisabled || accountSuspended ? [] : body.p_rooms.filter(slug => slug === state.id)
+    });
+    if (table === 'soundspin_room_access') {
+      const exists = body.p_room_slug === state.id;
+      return json({ exists, isPublic: true, passwordHash: null, accessMode: 'public', settings: state.settings,
+        role: body.p_actor === userId ? 'owner' : null, banned: false,
+        accountActive: body.p_actor === userId && !accountSuspended,
+        roomActive: exists && !roomDisabled && !accountSuspended,
+        readers: exists && !roomDisabled && !accountSuspended ? body.p_readers.filter(id => id === userId) : [] });
+    }
+    if (table === 'soundspin_chat_message_state') return json({ row: messages.get(body.p_id) || null, removal: null });
+    if (table === 'soundspin_chat_command' && body.p_kind === 'message') {
+      const payload = body.p_payload;
+      if (body.p_room !== state.id || body.p_user !== userId) throw new Error('Invalid fixture chat actor.');
+      const previous = messages.get(payload.id);
+      const row = previous || { id: payload.id, room_slug: state.id, user_id: userId, user_name: payload.user.name,
+        avatar_seed: payload.user.avatarSeed, content: payload.content, message_type: payload.type,
+        created_at: payload.createdAt, media_url: null, storage_path: null, mentions: [], reply_to_id: null,
+        poll_options: null, removed_at: null, immutable_fingerprint: body.p_fingerprint,
+        soundspin_message_reactions: [], soundspin_poll_votes: [] };
+      messages.set(payload.id, row);
+      return json({ fresh: !previous, result: { id: payload.id }, row });
+    }
     if (table === "soundspin_room_enabled") return json(body.p_room_slug === "auth-room" && !roomDisabled && !accountSuspended);
     if (table === "soundspin_admit_room") {
       if (body.p_slug !== "auth-room" || body.p_user_id !== userId || body.p_password_hash !== null) throw new Error("Invalid test admission request.");

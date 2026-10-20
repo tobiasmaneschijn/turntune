@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { createChatRelay } from './chat-relay.js'
+import { ChatCommandService } from './chat-command-service.js'
 import { canonicalMessage, chatMessageSchema } from './chat-validation.js'
 
 const id = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`
@@ -24,6 +28,60 @@ test('relay rejects unadmitted, guessed-room and freshly revoked sends before an
   state.admitted = true; assert.equal((await relay.handle('socket', 'message', { ...payload, roomId: 'secret-room' })).ok, false)
   state.allowed = false; assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
   assert.equal(state.lookup, 0); assert.equal(state.emits.length, 0)
+})
+test('a departed chat session cannot borrow another tab admission, and rejoining recovers its accepted work', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'chat-relay-'))
+  let admitted = false, allowed = false, credentialActive = true, admissionToken = 'first', emitted = 0
+  let afterAuthorization: (() => void) | undefined, duringDelivery: (() => void) | undefined
+  const commands = new ChatCommandService({
+    // Another tab remains in this room throughout the workflow.
+    client: null, dataDir: dir, getUser: async () => user,
+    authorize: async () => {
+      if (!allowed) throw new Error('This room session has ended.')
+      await Promise.resolve()
+      const action = afterAuthorization; afterAuthorization = undefined; action?.()
+    },
+    emit: async (_room, _event, _payload, _user, origin) => {
+      await Promise.resolve()
+      const action = duringDelivery; duringDelivery = undefined; action?.()
+      origin?.assertActive(); emitted++
+    }
+  })
+  const relay = createChatRelay({ commands,
+    getMembership: () => admitted && credentialActive ? { room: { id: 'lounge' }, user, admissionToken } : null,
+    canWriteRoom: async () => assert.fail('Durable commands own authorization'),
+    loadMessageById: async () => null, loadReply: async () => null, emitToRoom: async () => {}
+  })
+  const payload = { roomId: 'lounge', message: input() }
+  try {
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    admitted = true
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.equal(emitted, 0)
+    allowed = true
+    afterAuthorization = () => { admitted = false }
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.equal(await commands.loadMessage(payload.message.id), null)
+    admitted = true; admissionToken = 'second'
+    afterAuthorization = () => { admissionToken = 'rejoined-during-send' }
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.equal(await commands.loadMessage(payload.message.id), null)
+    afterAuthorization = () => { credentialActive = false }
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.equal(await commands.loadMessage(payload.message.id), null)
+    credentialActive = true
+    duringDelivery = () => { admitted = false }
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.ok(await commands.loadMessage(payload.message.id))
+    assert.equal(emitted, 0)
+    admitted = true; admissionToken = 'recovered'
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, true)
+    assert.equal(emitted, 0)
+    assert.equal((await relay.handle('socket', 'message', { ...payload, message: { ...input(), id: id(2) } })).ok, true)
+    allowed = false
+    assert.equal((await relay.handle('socket', 'message', payload)).ok, false)
+    assert.equal(emitted, 1)
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })
 test('relay stamps trusted sender, validates same-room replies and rejects immutable UUID conflicts', async () => {
   const { state, relay } = harness()
@@ -72,7 +130,8 @@ test('a sender who departs during reply/media awaits cannot publish, and final d
   assert.equal(emitted, 0)
   admitted = true
   assert.equal((await relay.handle('original-socket', 'message', { roomId: 'lounge', message: { ...input(), id: id(2) } })).ok, true)
-  assert.deepEqual(origin, { socketId: 'original-socket', userId: 'alice' })
+  assert.equal((origin as { socketId: string }).socketId, 'original-socket')
+  assert.equal((origin as { userId: string }).userId, 'alice')
 })
 
 test('a fresh relay rejects persisted UUID collisions and confirms identical stored originals without live rebroadcast', async () => {

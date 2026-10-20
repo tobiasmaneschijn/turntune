@@ -10,26 +10,16 @@ function readerDatabase(options: {
   restrictions?: () => unknown[];
   membershipBatches: string[][];
 }) {
-  const known = new Set(["soundspin_rooms", "soundspin_room_members", "soundspin_room_moderation", "soundspin_room_restrictions", "soundspin_account_restrictions"]);
-  return { from(table: string) {
-    assert.ok(known.has(table), `Unexpected reader table: ${table}`);
-    let ids: string[] = [];
-    const rows = () => table === "soundspin_rooms" ? options.metadata()
-      : table === "soundspin_room_moderation" ? { data: { restrictions: options.restrictions?.() || [] } }
-      : table === "soundspin_room_members" ? [...ids, "not-requested"].filter(id => id === "not-requested" || options.members().includes(id)).map(user_id => ({ user_id }))
-      : null;
-    const query = {
-      select() { return query; }, eq(key: string) { assert.ok(["slug", "room_slug", "user_id"].includes(key)); return query; },
-      in(key: string, values: string[]) {
-        assert.ok(["user_id", "room_slug"].includes(key)); ids = values;
-        if (table === "soundspin_room_members") options.membershipBatches.push(values);
-        return query;
-      },
-      async maybeSingle() { const data = rows(); return { data: Array.isArray(data) ? data[0] || null : data, error: null }; },
-      then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
-        const data = rows(); return Promise.resolve({ data: Array.isArray(data) ? data : data ? [data] : [], error: null }).then(resolve, reject);
-      }
-    }; return query;
+  return { async rpc(name: string, input: { p_actor: string | null; p_readers: string[] }) {
+    assert.equal(name, "soundspin_room_access");
+    const metadata = options.metadata(), ids = input.p_readers;
+    options.membershipBatches.push(ids);
+    const bans = (options.restrictions?.() || []) as Array<{ userId: string }>;
+    const readers = metadata ? ids.filter(id => !bans.some(ban => ban.userId === id) && (metadata.is_public || metadata.owner_id === id || options.members().includes(id))) : [];
+    return { error: null, data: { exists: Boolean(metadata), isPublic: metadata?.is_public ?? false, passwordHash: null,
+      role: input.p_actor === metadata?.owner_id ? "owner" : input.p_actor && options.members().includes(input.p_actor) ? "member" : null,
+      banned: bans.some(ban => ban.userId === input.p_actor), accessMode: metadata?.is_public ? "public" : "members", settings: {},
+      roomActive: Boolean(metadata), accountActive: true, readers: [...readers, "not-requested"] } };
   } } as unknown as SupabaseClient;
 }
 
@@ -51,7 +41,12 @@ test("reader admission rechecks fresh private membership, bans and deletion rath
   restrictions = [];
   const before = batches.length;
   assert.deepEqual(await store.allowedRoomReaders("private-room", ["current", "current"]), new Set(["current"]));
-  assert.equal(batches.length, before);
+  assert.equal(batches.length, before + 1, "one fresh RPC also verifies public readers");
+  const admission = await store.getRoomAdmission("private-room", "owner", ["current"]);
+  assert.equal(admission.role, "owner"); assert.equal(admission.accountActive, true);
+  assert.deepEqual(admission.readers, new Set(["current"]));
+  const unavailable = new Store({ supabase: { rpc: async () => ({ data: null, error: { message: "unavailable" } }) } as unknown as SupabaseClient });
+  await assert.rejects(unavailable.allowedRoomReaders("private-room", ["current"]), /Could not check room access/);
 });
 
 test("private reader lookups bound each membership batch and never add unrequested identities", async () => {

@@ -14,6 +14,7 @@ export interface SocialPerson { user: User; state: Exclude<FriendState, "none">;
 export interface SocialInvitation { id: string; from: User; room: { slug: string; name: string }; createdAt: string; expiresAt: string }
 export interface SocialSnapshot { people: SocialPerson[]; invitations: SocialInvitation[]; shareActivity: boolean; blockedPeople: User[]; receiveRequests: boolean }
 interface Relationship { user_low: string; user_high: string; requested_by: string; status: "pending" | "accepted"; updated_at: string }
+interface RelationshipState { state: FriendState; shareActivity: boolean }
 interface Invitation { id: string; sender_id: string; recipient_id: string; room_slug: string; created_at: string; expires_at: string; accepted_at: string | null }
 export interface SocialStoreOptions {
   supabase: SupabaseClient | null;
@@ -43,6 +44,18 @@ const profileUser = (profile: SoundSpinProfile | User): User => "user_id" in pro
   ? { id: profile.user_id, name: profile.display_name, avatarSeed: profile.user_id, avatarKey: profile.avatar_key,
     avatarUrl: profile.avatar_url || undefined, isAppAdmin: profile.is_app_admin }
   : { id: profile.id, name: profile.name, avatarSeed: profile.avatarSeed, avatarKey: profile.avatarKey, avatarUrl: profile.avatarUrl, isAppAdmin: profile.isAppAdmin };
+
+async function mapSocialItems<T, U>(items: T[], visit: (item: T) => Promise<U>): Promise<U[]> {
+  const results = new Array<U>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await visit(items[index]);
+    }
+  }));
+  return results;
+}
 
 const socialMutationError = (error: { code?: string; message: string }): Error => {
   // PL/pgSQL consent/limit rejections have explicit short user-facing messages.
@@ -91,13 +104,16 @@ export class SocialStore {
     }));
     return new Map(entries.filter((entry): entry is readonly [string, User] => entry !== null));
   }
-  private async roomName(slug: string): Promise<string | null> {
+  private async roomNames(slugs: string[]): Promise<Map<string, string>> {
+    const uniqueSlugs = [...new Set(slugs)];
+    if (!uniqueSlugs.length) return new Map();
     if (this.options.supabase) {
-      const { data, error } = await this.options.supabase.from("soundspin_rooms").select("name").eq("slug", slug).maybeSingle();
+      const { data, error } = await this.options.supabase.from("soundspin_rooms").select("slug, name").in("slug", uniqueSlugs);
       if (error) throw new Error(serverT("could_not_load_room_value1", { value1: error.message }));
-      return data?.name || null;
+      return new Map((data || []).map(row => [row.slug as string, row.name as string]));
     }
-    return (await this.options.getRoom?.(slug))?.name || null;
+    const rooms = await Promise.all(uniqueSlugs.map(async slug => [slug, (await this.options.getRoom?.(slug))?.name] as const));
+    return new Map(rooms.filter((row): row is readonly [string, string] => !!row[1]));
   }
   async isBlocked(a: string, b: string): Promise<boolean> {
     const actor = checkedId(a), target = checkedId(b);
@@ -131,7 +147,7 @@ export class SocialStore {
     if (error) throw new Error(serverT("could_not_load_social_settings"));
     return { shareActivity: data?.share_activity === true, receiveRequests: data?.receive_requests !== false };
   }
-  private async blockedPeople(actor: string): Promise<User[]> {
+  private async blockedIds(actor: string): Promise<string[]> {
     let ids: string[];
     if (!this.options.supabase) ids = [...this.blocks].filter(value => value.startsWith(`${actor}:`)).map(value => value.split(":")[1]);
     else {
@@ -139,10 +155,7 @@ export class SocialStore {
       if (error) throw new Error(serverT("could_not_load_blocked_listeners"));
       ids = (data || []).map(row => row.blocked_id as string);
     }
-    const visible = await this.profiles(ids);
-    // Keep owner-held block IDs usable without exposing a hidden subject's
-    // name, managed avatar, provider URLs or administrator status.
-    return ids.map(id => visible.get(id) || { id, name: "Unavailable listener", avatarSeed: id });
+    return ids;
   }
   private expired(row: Relationship): boolean { return row.status === "pending" && Date.parse(row.updated_at) <= this.now() - SOCIAL_LIMITS.requestMs; }
   private async friendRows(userId: string): Promise<Relationship[]> {
@@ -155,25 +168,28 @@ export class SocialStore {
   }
   async getRelationship(viewerId: string, targetId: string): Promise<FriendState> {
     const viewer = checkedId(viewerId), target = checkedId(targetId);
-    if (viewer === target || await this.isBlocked(viewer, target)) return "none";
-    if (!this.options.supabase) {
-      const row = this.relationships.get(key(viewer, target));
-      return stateFor(row && !this.expired(row) ? row : null, viewer);
-    }
-    const [low, high] = pair(viewer, target);
-    const { data, error } = await this.options.supabase.from("soundspin_friendships")
-      .select("requested_by, status, updated_at").eq("user_low", low).eq("user_high", high).maybeSingle();
-    if (error) throw new Error(serverT("could_not_check_friendship_value1", { value1: error.message }));
-    const row = data as Relationship | null;
-    return stateFor(row && !this.expired(row) ? row : null, viewer);
+    return (await this.relationshipStates(viewer, [target])).get(target)?.state || "none";
   }
-  private async sharedActivity(ids: string[]): Promise<Set<string>> {
-    if (!this.options.supabase) return new Set(ids.filter(id => this.activitySettings.get(id)));
-    if (!ids.length) return new Set();
-    const { data, error } = await this.options.supabase.from("soundspin_social_settings").select("user_id")
-      .in("user_id", ids).eq("share_activity", true);
-    if (error) throw new Error(serverT("could_not_load_activity_settings_value1", { value1: error.message }));
-    return new Set((data || []).map(row => row.user_id as string));
+  /** Fresh, bounded consent reads; never cache authorization between requests. */
+  private async relationshipStates(viewer: string, ids: string[]): Promise<Map<string, RelationshipState>> {
+    const targets = [...new Set(ids)].filter(id => id !== viewer);
+    if (!targets.length) return new Map();
+    if (!this.options.supabase) {
+      return new Map(targets.map(id => {
+        const row = this.relationships.get(key(viewer, id));
+        const blocked = this.blocks.has(`${viewer}:${id}`) || this.blocks.has(`${id}:${viewer}`);
+        return [id, { state: stateFor(!blocked && row && !this.expired(row) ? row : null, viewer), shareActivity: this.activitySettings.get(id) === true }];
+      }));
+    }
+    const states = new Map<string, RelationshipState>();
+    for (let offset = 0; offset < targets.length; offset += 500) {
+      const { data, error } = await this.options.supabase.rpc("soundspin_social_states", { p_actor: viewer, p_targets: targets.slice(offset, offset + 500) });
+      if (error) throw new Error(serverT("could_not_check_friendship_value1", { value1: error.message }));
+      for (const row of (data || []) as Array<{ user_id: string; state: FriendState; share_activity: boolean }>) {
+        states.set(row.user_id, { state: row.state, shareActivity: row.share_activity });
+      }
+    }
+    return states;
   }
   private async pendingInvitations(userId: string): Promise<Invitation[]> {
     if (!this.options.supabase) return [...this.invitations.values()].filter(row => row.recipient_id === userId && !row.accepted_at && Date.parse(row.expires_at) > this.now());
@@ -186,43 +202,72 @@ export class SocialStore {
   }
   async snapshot(viewerId: string): Promise<SocialSnapshot> {
     const viewer = checkedId(viewerId);
-    const [rows, pending, settings, blockedPeople] = await Promise.all([this.friendRows(viewer), this.pendingInvitations(viewer), this.ownSettings(viewer), this.blockedPeople(viewer)]);
-    const relationships: Relationship[] = [];
-    for (const row of rows) if (!await this.isBlocked(viewer, row.user_low === viewer ? row.user_high : row.user_low)) relationships.push(row);
-    const friendIds = relationships.filter(row => row.status === "accepted").map(row => row.user_low === viewer ? row.user_high : row.user_low);
-    const allIds = relationships.map(row => row.user_low === viewer ? row.user_high : row.user_low);
-    const [users, shares] = await Promise.all([this.profiles([...allIds, ...pending.map(row => row.sender_id)]), this.sharedActivity(friendIds)]);
-    const people: SocialPerson[] = [];
-    for (const row of relationships) {
-      const id = row.user_low === viewer ? row.user_high : row.user_low, user = users.get(id);
-      if (!user) continue;
-      const state = stateFor(row, viewer) as SocialPerson["state"];
-      const person: SocialPerson = { user, state };
-      if (state === "friends" && shares.has(id)) {
+    const [rows, pending, settings, blocked] = await Promise.all([
+      this.friendRows(viewer), this.pendingInvitations(viewer), this.ownSettings(viewer), this.blockedIds(viewer)
+    ]);
+    const otherId = (row: Relationship) => row.user_low === viewer ? row.user_high : row.user_low;
+    const states = await this.relationshipStates(viewer, [...rows.map(otherId), ...pending.map(row => row.sender_id)]);
+    const relationships = rows.filter(row => {
+      const state = states.get(otherId(row))?.state;
+      return state !== undefined && state !== "none";
+    });
+    const users = await this.profiles([...relationships.map(otherId), ...pending.map(row => row.sender_id), ...blocked]);
+    // Keep owner-held block IDs usable without exposing hidden profile fields.
+    const blockedPeople = blocked.map(id => users.get(id) || { id, name: "Unavailable listener", avatarSeed: id });
+    // Friends often share a room. Coalesce the same room/actor lookup only
+    // within this metadata phase; later snapshots always read fresh authority.
+    const accessReads = new Map<string, Promise<SocialRoomAccess>>();
+    const roomAccess = (slug: string, actor: string) => {
+      const lookup = `${slug}:${actor}`;
+      let pending = accessReads.get(lookup);
+      if (!pending) { pending = this.options.getRoomAccess(slug, actor); accessReads.set(lookup, pending); }
+      return pending;
+    };
+    const activityCandidates = await mapSocialItems(relationships, async row => {
+      const id = otherId(row), user = users.get(id), consent = states.get(id)!;
+      if (!user) return null;
+      const person: SocialPerson = { user, state: consent.state as SocialPerson["state"] };
+      if (consent.state === "friends" && consent.shareActivity) {
         const activity = await this.options.getActivity?.(id);
         if (activity) {
-          const access = await this.options.getRoomAccess(activity.roomSlug, viewer);
-          if (access.exists && !access.banned && (access.isPublic || access.role)) {
-            const name = await this.roomName(activity.roomSlug);
-            // Async metadata/access lookups may yield while a friendship or opt-in is revoked.
-            const [relationship, currentSharing] = await Promise.all([this.getRelationship(viewer, id), this.sharedActivity([id])]);
-            if (name && relationship === "friends" && currentSharing.has(id)) person.room = { slug: activity.roomSlug, name, canJoin: true };
-          }
+          const access = await roomAccess(activity.roomSlug, viewer);
+          if (access.exists && !access.banned && (access.isPublic || access.role)) return { person, roomSlug: activity.roomSlug };
         }
       }
-      people.push(person);
-    }
+      return { person, roomSlug: null };
+    });
+    const invitationCandidates = await mapSocialItems(pending, async row => {
+      if (states.get(row.sender_id)?.state !== "friends") return null;
+      const from = users.get(row.sender_id); if (!from) return null;
+      const [inviter, recipient] = await Promise.all([roomAccess(row.room_slug, row.sender_id), roomAccess(row.room_slug, viewer)]);
+      if (!inviter.exists || !inviter.role || !recipient.exists || inviter.banned || recipient.banned || inviter.canInvite === false) return null;
+      if (inviter.canInvite === undefined && !recipient.isPublic && !recipient.role && inviter.role !== "owner" && inviter.role !== "moderator") return null;
+      return { row, from };
+    });
+    const names = await this.roomNames([
+      ...activityCandidates.flatMap(candidate => candidate?.roomSlug ? [candidate.roomSlug] : []),
+      ...invitationCandidates.flatMap(candidate => candidate ? [candidate.row.room_slug] : [])
+    ]);
+    // Metadata and access reads can yield while consent is revoked. Recheck all
+    // disclosures together after those reads, rather than one query per friend.
+    const current = await this.relationshipStates(viewer, [
+      ...activityCandidates.flatMap(candidate => candidate?.roomSlug ? [candidate.person.user.id] : []),
+      ...invitationCandidates.flatMap(candidate => candidate ? [candidate.row.sender_id] : [])
+    ]);
+    const people = activityCandidates.flatMap(candidate => {
+      if (!candidate) return [];
+      const { person, roomSlug } = candidate, consent = current.get(person.user.id);
+      const name = roomSlug ? names.get(roomSlug) : undefined;
+      if (roomSlug && name && consent?.state === "friends" && consent.shareActivity) person.room = { slug: roomSlug, name, canJoin: true };
+      return [person];
+    });
     people.sort((a, b) => a.user.name.localeCompare(b.user.name) || a.user.id.localeCompare(b.user.id));
-    const invitations: SocialInvitation[] = [];
-    for (const row of pending) {
-      if (!friendIds.includes(row.sender_id)) continue;
-      const from = users.get(row.sender_id); if (!from) continue;
-      const [inviter, recipient] = await Promise.all([this.options.getRoomAccess(row.room_slug, row.sender_id), this.options.getRoomAccess(row.room_slug, viewer)]);
-      if (!inviter.exists || !inviter.role || !recipient.exists || inviter.banned || recipient.banned || inviter.canInvite===false) continue;
-      if (inviter.canInvite===undefined&&!recipient.isPublic && !recipient.role && inviter.role !== "owner" && inviter.role !== "moderator") continue;
-      const name = await this.roomName(row.room_slug);
-      if (name && await this.getRelationship(viewer, row.sender_id) === "friends") invitations.push({ id: row.id, from, room: { slug: row.room_slug, name }, createdAt: row.created_at, expiresAt: row.expires_at });
-    }
+    const invitations: SocialInvitation[] = invitationCandidates.flatMap(candidate => {
+      if (!candidate) return [];
+      const { row, from } = candidate, name = names.get(row.room_slug);
+      return name && current.get(row.sender_id)?.state === "friends"
+        ? [{ id: row.id, from, room: { slug: row.room_slug, name }, createdAt: row.created_at, expiresAt: row.expires_at }] : [];
+    });
     return { people, invitations, ...settings, blockedPeople };
   }
   async searchPeople(viewerId: string, query: string): Promise<User[]> {

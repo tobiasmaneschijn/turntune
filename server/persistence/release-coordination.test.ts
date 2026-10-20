@@ -37,7 +37,10 @@ test("live registration completes before a later ordered revocation runs",async 
 });
 
 test("durable room cache evicts inactive rooms by count and bytes and preserves pinned rooms",async()=>{
-  const db={from(table:string){let id="";const q={select(){return q;},eq(_key:string,value:string){id=value;return q;},in(){return q;},async maybeSingle(){return{data:table==="soundspin_rooms"?{state:{...fixture(id),padding:"x".repeat(500)},name:id,owner_id:"owner",is_public:false,settings:{accessMode:"members"},access_mode:"members"}:table==="soundspin_room_moderation"?{data:emptyModeration()}:null,error:null};},then(resolve:(value:unknown)=>unknown,reject?:(reason:unknown)=>unknown){return Promise.resolve({data:[],error:null}).then(resolve,reject);}};return q;}} as unknown as SupabaseClient;
+  const db={async rpc(name:string,input:{p_room_slug:string}){
+    assert.equal(name,"soundspin_load_room");const id=input.p_room_slug;
+    return{data:{state:{...fixture(id),padding:"x".repeat(500)},name:id,owner_id:"owner",is_public:false,settings:{accessMode:"members"},access_mode:"members",room_roles:[],moderation:emptyModeration()},error:null};
+  }} as unknown as SupabaseClient;
   const store=new Store({supabase:db,maxCachedRooms:2,maxCachedRoomBytes:1800});const pinned=new Set<string>();
   store.setRoomCacheHooks(()=>undefined,id=>pinned.has(id));
   await store.loadRoom("room-a");await store.loadRoom("room-b");
@@ -60,12 +63,12 @@ test("startup loads seventy active sessions without exhausting the bounded Supab
       publishableKeys: { default: "sb_publishable_fixture" },
       secretKeys: { default: "sb_secret_fixture" }
     },
-    fetcher: async input => {
+    fetcher: async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.pathname.endsWith("/soundspin_rooms") && url.searchParams.get("select") === "slug") {
         return Response.json(slugs.map(slug => ({ slug })));
       }
-      if (!url.pathname.endsWith("/soundspin_rooms")) return Response.json([]);
+      assert.ok(url.pathname.endsWith("/rpc/soundspin_load_room"), "cold sessions use one snapshot request");
       metadataRequests++;
       activeMetadata++;
       maximumMetadata = Math.max(maximumMetadata, activeMetadata);
@@ -73,16 +76,17 @@ test("startup loads seventy active sessions without exhausting the bounded Supab
         // Keep concurrent metadata requests in flight so unbounded fanout fails
         // the real SDK fetch budget rather than passing through instant mocks.
         await new Promise(resolve => setTimeout(resolve, 3));
-        const id = url.searchParams.get("slug")?.slice(3);
+        const request = input instanceof Request ? input : null;
+        const id = JSON.parse(String(init?.body || await request?.text() || '{}')).p_room_slug;
         assert.ok(id && slugs.includes(id));
         const room = {
           ...fixture(id), ownerUserId: ownerId, isPublic: true,
           settings: { accessMode: "public" as const, djAccess: "everyone" as const },
           moderation: emptyModeration()
         };
-        return Response.json([{ state: room, name: id, owner_id: ownerId,
+        return Response.json({ state: room, name: id, owner_id: ownerId,
           is_public: true, password_hash: null, settings: room.settings,
-          access_mode: "public", policy_revision: 0 }]);
+          access_mode: "public", policy_revision: 0, room_roles: [], moderation: emptyModeration() });
       } finally {
         activeMetadata--;
       }
