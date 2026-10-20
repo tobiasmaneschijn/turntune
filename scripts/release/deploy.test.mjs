@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createImageManifest } from './image-manifest.mjs';
 import { deployRelease } from './deploy.mjs';
+import { createDokploy } from './clients.mjs';
 import { targets } from './preflight.mjs';
 
 const revision = 'a'.repeat(40);
@@ -56,6 +57,18 @@ function fixture({ neverExits = false, inventoryFailure = false, sourceChanges =
 
 test('An operator deploys the scanned staging image after the old process exits and receives verified evidence', async () => {
   const { options, events, saved } = fixture();
+  const backend = options.dokploy;
+  let logReads = 0;
+  options.dokploy = createDokploy({ url: 'https://deploy.example/api', key: 'fixture-private', wait: async () => {},
+    fetchImpl: async (url, request) => {
+      const endpoint = url.pathname.split('/').at(-1);
+      const parameters = request.method === 'POST' ? JSON.parse(request.body) : Object.fromEntries(url.searchParams);
+      // A temporarily empty poll must recover without replaying stop or launch.
+      if (endpoint === 'deployment.readLogs' && ++logReads === 1) return new Response('', { status: 200 });
+      const result = await backend.call(endpoint, parameters, request.method);
+      return request.method === 'POST' ? new Response(null, { status: 204 }) : Response.json(result);
+    },
+  });
   const result = await deployRelease(options);
   assert.equal(result.verified, true);
   assert.equal(result.deploymentId, 'deployment-1');
@@ -70,6 +83,9 @@ test('An operator deploys the scanned staging image after the old process exits 
   assert.ok(names.indexOf('compose.update') < names.indexOf('compose.deploy'));
   assert.match(events.find(item => item.name === 'compose.update').parameters.composeFile, new RegExp(manifest.digest));
   assert.equal(events.filter(item => item.name === 'compose.deploy').length, 1);
+  assert.equal(events.filter(item => item.name === 'compose.stop').length, 1);
+  assert.equal(events.filter(item => item.name === 'compose.update').length, 1);
+  assert.equal(logReads, 2);
   assert.equal(events.some(item => item.name === 'compose.redeploy'), false);
   assert.equal(JSON.stringify(saved).includes('must-not-appear'), false);
 });
