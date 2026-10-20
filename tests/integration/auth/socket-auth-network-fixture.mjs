@@ -18,7 +18,7 @@ process.on("message", message => {
 });
 // The HTTP listener owns fixture lifetime; IPC must not keep a stopped server alive.
 process.channel?.unref();
-const emptyTables = new Set(["soundspin_account_restrictions", "soundspin_room_restrictions", "soundspin_room_moderation", "soundspin_storage_deletion_outbox"]);
+const emptyTables = new Set(["soundspin_account_restrictions", "soundspin_room_restrictions", "soundspin_room_moderation", "soundspin_storage_deletion_outbox", "soundspin_profile_options"]);
 const maintenance = new Map([["soundspin_release_ready", true], ["soundspin_collect_expired_uploads", 0], ["soundspin_prune_security_retention", {}], ["soundspin_purge_security_archives", {}], ["soundspin_claim_account_deletion", null]]);
 const json = value => Response.json(value);
 

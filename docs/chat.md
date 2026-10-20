@@ -45,7 +45,12 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 | `src/features/chat/hooks/use-chat-media-url.ts` | Visible near-expiry image refresh, one automatic image-error recovery, explicit retry and scope guards. |
 | `src/lib/notifications.ts` | Explicit permission request, one-route attention delivery, deduplication, room mute and history/replay baselines. |
 | `src/features/chat/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
-| `src/features/chat/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
+| `src/features/chat/components/realtime-chat.tsx` | Draft/composer ownership, upload and delivery coordination, live/history composition, scroll, unread tracking, and notifications. |
+| `src/features/chat/components/chat-message-list.tsx` | Memoized transcript rendering, message actions, and timeline separators. |
+| `src/features/chat/components/chat-history-search.tsx` | Saved-history search controls and result selection. |
+| `src/features/chat/components/chat-media-picker.tsx` | Emoji and GIF picker presentation. |
+| `src/features/chat/hooks/use-chat-gifs.ts` | GIF configuration, cached search, debouncing, cancellation, and stale-result guards. |
+| `src/features/chat/hooks/use-chat-moderation.ts`, `src/features/chat/components/chat-moderation-dialog.tsx` | Message report/removal state and dialog. |
 | `src/features/chat/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
 | `src/components/platform-emoji-text.tsx` | Platform-aware emoji rendering and the persisted skin-tone preference. |
 | `src/app/RoomApplication.tsx` (`RoomChat`) | Loads room history, supplies it to the chat component, and persists newly sent messages. |

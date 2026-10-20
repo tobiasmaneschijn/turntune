@@ -1,22 +1,20 @@
 import { Trans, useTranslation } from 'react-i18next'
-import { approvedImageUrl } from "../../../lib/remote-images";
 import { ArrowDown, Bell, BellOff, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
-import type { SkinTones, Theme } from 'emoji-picker-react'
-import { useTheme } from 'next-themes'
 import { insertComposerText } from '@/features/chat/composer-edit'
 import { prepareUploadedChatImage } from '@/features/chat/image-upload'
 import { chatCommandSuggestions, parseChatCommand, type ChatCommandName } from '@/features/chat/commands'
 import { ChatPollComposer } from '@/features/chat/components/chat-poll-composer'
+import { ChatModerationDialog } from '@/features/chat/components/chat-moderation-dialog'
+import { ChatMediaPicker } from '@/features/chat/components/chat-media-picker'
+import { ChatMessageList } from '@/features/chat/components/chat-message-list'
+import { ChatHistorySearch } from '@/features/chat/components/chat-history-search'
 import '@/styles/chat-polls.css'
 import { getScopedSupabaseClient } from '@/lib/supabase'
 import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS } from '@/lib/bounded-operation'
 import {
   forwardRef,
-  lazy,
-  memo,
-  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -25,7 +23,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -38,8 +35,6 @@ import {
   mergeChatMessages,
   CHAT_LIVE_WINDOW_LIMIT,
   recentChatMessages,
-  shouldShowMessageHeader,
-  startsNewDay,
   type ChatMessage,
   type ChatMention,
   type ChatReply,
@@ -55,28 +50,21 @@ import {
 import {
   CHAT_IMAGE_ACCEPT,
   createChatStoragePath,
-  fetchGiphyGifs,
   readPastedChatMedia,
   validateChatImage,
   type GiphyGif,
 } from '@/features/chat/media'
 import { persistReactionChange } from '@/features/chat/persistence'
 import { createChatDraftStore, type ChatDraft } from '@/features/chat/drafts'
-import type { ChatSaveStates } from '@/features/chat/delivery'
 import { useChatDelivery } from '@/features/chat/hooks/use-chat-delivery'
+import { useChatModeration } from '@/features/chat/hooks/use-chat-moderation'
+import { useChatGifs } from '@/features/chat/hooks/use-chat-gifs'
 import type { ChatHistorySource } from '@/features/chat/history-reader'
 import type { ChatSessionFactory } from '@/features/chat/realtime'
 import { cn } from '@/lib/utils'
-import { requestJson } from '@/lib/authenticated-http'
-import { ChatMessageItem } from '@/features/chat/components/chat-message'
 import { Avatar } from '@/components/Avatar'
 import { DevFlair } from '@/components/DevFlair'
-import {
-  chatPickerEmojiStyle,
-  PlatformEmojiText,
-  readEmojiSkinTone,
-  saveEmojiSkinTone,
-} from '@/components/platform-emoji-text'
+import { PlatformEmojiText } from '@/components/platform-emoji-text'
 import { useChatScroll } from '@/features/chat/hooks/use-chat-scroll'
 import { useChatVisibility } from '@/features/chat/hooks/use-chat-visibility'
 import { getVisibleMessagePreview } from '@/features/chat/visibility'
@@ -89,12 +77,7 @@ import { effectiveScrollBehavior, useEffectiveMotion } from '@/hooks/use-effecti
 import { useRealtimeChat } from '@/features/chat/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group'
-import { Input } from '@/components/ui/input'
-import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogFooter} from '@/components/ui/dialog'
-import {Label} from '@/components/ui/label'
 import type { User,RoomCapabilities } from '@/types'
-
-const EmojiPicker = lazy(() => import('../../../components/accessible-emoji-picker'))
 
 interface RealtimeChatProps {
   client: SupabaseClient
@@ -137,130 +120,9 @@ export interface RealtimeChatHandle {
 const TYPING_ROOM_LIMIT = 20
 const TYPING_BROADCAST_THROTTLE_MS = 2_000
 const TYPING_IDLE_MS = 3_000
-const GIPHY_SEARCH_DEBOUNCE_MS = 500
 const EMPTY_MESSAGES: ChatMessage[] = []
 const EMPTY_USERS: User[] = []
 const EMPTY_ADMIN_IDS: string[] = []
-
-interface ChatMessageListProps {
-  messages: ChatMessage[]
-  hiddenIds: ReadonlySet<string>
-  onHiddenChange: (messageId: string, hidden: boolean) => void
-  onResolveMediaUrl?: (storagePath: string) => Promise<string>
-  currentUserId: string
-  liveAdminUserIds: ReadonlySet<string>
-  unreadMessageId?: string
-  onOpenProfile?: (userId: string) => void
-  onReply: (message: ChatMessage) => void
-  onReact: (message: ChatMessage, emoji: string) => void
-  onJumpToMessage: (messageId: string) => void
-  saveStates: ChatSaveStates
-  onRetrySave: (messageId: string) => void
-  onRetrySend: (messageId: string) => void
-  onVotePoll: (message: ChatMessage, optionIndex: number) => void
-  pollVoteStates: Record<string, { pending: boolean; error?: string }>
-  pollVotingEnabled: boolean
-  onRemove?:(message:ChatMessage)=>void
-  onReport?:(message:ChatMessage)=>void
-  canRemoveMessage?:(message:ChatMessage)=>boolean
-  participationDisabled?:boolean
-}
-
-const ChatMessageList = memo(function ChatMessageList({
-  messages,
-  hiddenIds,
-  onHiddenChange,
-  onResolveMediaUrl,
-  currentUserId,
-  liveAdminUserIds,
-  unreadMessageId,
-  onOpenProfile,
-  onReply,
-  onReact,
-  onJumpToMessage,
-  saveStates,
-  onRetrySave,
-  onRetrySend,
-  onVotePoll,
-  pollVoteStates,
-  pollVotingEnabled,
-  onRemove,onReport,canRemoveMessage,participationDisabled,
-}: ChatMessageListProps) {
-  const { t, i18n } = useTranslation('chat')
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
-  const [openPickerId, setOpenPickerId] = useState<string | null>(null)
-  const handleActionMenuOpenChange = useCallback((messageId: string, open: boolean) => {
-    setOpenMenuId((current) => open ? messageId : current === messageId ? null : current)
-    if (open) setOpenPickerId(null)
-  }, [])
-  const handleReactionPickerOpenChange = useCallback((messageId: string, open: boolean) => {
-    setOpenPickerId((current) => open ? messageId : current === messageId ? null : current)
-    if (open) setOpenMenuId(null)
-  }, [])
-  return (
-    <div className="chat-message-list space-y-1">
-      {messages.map((message, index) => {
-        const previousMessage = index > 0 ? messages[index - 1] : undefined
-        const beginsNewDay = startsNewDay(message, previousMessage)
-        const showHeader = shouldShowMessageHeader(message, previousMessage)
-
-        return (
-          <div
-            key={message.id}
-            className="chat-message-wrapper"
-          >
-            {beginsNewDay && (
-              <div className="chat-date-divider">
-                <span>
-                  {new Date(message.createdAt).toLocaleDateString(i18n.resolvedLanguage, {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </span>
-              </div>
-            )}
-            {unreadMessageId === message.id && (
-              <div className="chat-unread-divider"><span>{t('newMessages')}</span></div>
-            )}
-            <ChatMessageItem
-              message={message}
-              isHidden={hiddenIds.has(message.id)}
-              isReplyHidden={Boolean(message.replyTo && hiddenIds.has(message.replyTo.id))}
-              onHiddenChange={onHiddenChange}
-              isOwnMessage={message.user.id === currentUserId}
-              currentUserId={currentUserId}
-              showHeader={showHeader}
-              isAuthorAppAdmin={Boolean(message.user.isAppAdmin || liveAdminUserIds.has(message.user.id))}
-              isReplyAuthorAppAdmin={Boolean(message.replyTo && (
-                message.replyTo.user.isAppAdmin || liveAdminUserIds.has(message.replyTo.user.id)
-              ))}
-              onOpenProfile={onOpenProfile}
-              onReply={onReply}
-              onReact={onReact}
-              onJumpToMessage={onJumpToMessage}
-              saveStatus={message.user.id === currentUserId ? saveStates[message.id] : undefined}
-              onRetrySave={onRetrySave}
-              onRetrySend={onRetrySend}
-              onVotePoll={onVotePoll}
-              pollVoting={pollVoteStates[message.id]?.pending}
-              pollVoteError={pollVoteStates[message.id]?.error}
-              pollVotingDisabled={!pollVotingEnabled}
-              onResolveMediaUrl={onResolveMediaUrl}
-              onRemove={canRemoveMessage&&!canRemoveMessage(message)?undefined:onRemove}
-              onReport={onReport}
-              participationDisabled={participationDisabled}
-              actionMenuOpen={openMenuId === message.id}
-              onActionMenuOpenChange={handleActionMenuOpenChange}
-              reactionPickerOpen={openPickerId === message.id}
-              onReactionPickerOpenChange={handleReactionPickerOpenChange}
-            />
-          </div>
-        )
-      })}
-    </div>
-  )
-})
 
 /**
  * Interactive room chat. `useRealtimeChat` handles low-latency Broadcast
@@ -295,9 +157,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   capabilities,slowModeSeconds=0,restrictionMessage,onRemoveMessage,onReportMessage,canRemoveMessage,
   messages: initialMessages = EMPTY_MESSAGES,
 }, ref) {
-  const { t, i18n } = useTranslation('chat')
+  const { t } = useTranslation('chat')
   const reducedMotion = useEffectiveMotion()
-  const { resolvedTheme } = useTheme()
   const mentionListId = useId()
   const composerHintId = useId()
   const mediaPanelId = useId()
@@ -374,15 +235,15 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const [replyingTo, setReplyingTo] = useState<ChatReply | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [showGiphy, setShowGiphy] = useState(false)
-  const [skinTone, setSkinTone] = useState<SkinTones>(readEmojiSkinTone)
-  const [giphyQuery, setGiphyQuery] = useState('')
-  const [gifs, setGifs] = useState<GiphyGif[]>([])
-  const [gifsLoading, setGifsLoading] = useState(false)
   const [composerError, setComposerError] = useState('')
-  const [moderationTarget,setModerationTarget]=useState<{kind:'remove'|'report';message:ChatMessage}|null>(null)
-  const [moderationReason,setModerationReason]=useState('')
-  const [moderationPending,setModerationPending]=useState(false)
-  const [moderationError,setModerationError]=useState('')
+  const moderation = useChatModeration({
+    scope: `${user.id}:${roomName}`,
+    participantsEnabled: capabilities?.chatParticipants !== false,
+    onRemoveMessage,
+    onReportMessage,
+    canRemoveMessage,
+    applyRemoval,
+  })
   const [cooldownUntil,setCooldownUntil]=useState(0)
   const [cooldownNow,setCooldownNow]=useState(Date.now())
   useEffect(()=>{if(cooldownUntil<=Date.now())return;const timer=setInterval(()=>setCooldownNow(Date.now()),250);return()=>clearInterval(timer)},[cooldownUntil])
@@ -390,7 +251,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const canChat=capabilities?.chat!==false
   const canMedia=canChat&&capabilities?.media!==false
   const canPoll=canChat&&capabilities?.polls!==false
-  useEffect(()=>{setCooldownUntil(0);setCooldownNow(Date.now());setModerationTarget(null)},[roomName,user.id])
+  useEffect(()=>{setCooldownUntil(0);setCooldownNow(Date.now())},[roomName,user.id])
   useEffect(()=>{if(slowModeSeconds===0)setCooldownUntil(0)},[slowModeSeconds])
   useEffect(()=>{if(!canMedia){setShowGiphy(false);setPendingImage(null)}},[canMedia])
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null)
@@ -419,11 +280,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   const typingActiveRef = useRef(false)
   const lastTypingBroadcastRef = useRef(0)
   const typingIdleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const giphyCacheRef = useRef(new Map<string, GiphyGif[]>())
-  const giphyRequestRef = useRef(0)
-  const giphyAbortRef = useRef<AbortController | null>(null)
-  const giphyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [giphyConfigured, setGiphyConfigured] = useState(false)
   const [showHistorySearch, setShowHistorySearch] = useState(false)
   const historySearchId = useId()
   const historySearchInputRef = useRef<HTMLInputElement>(null)
@@ -551,17 +407,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    const controller = new AbortController()
-    void requestJson<{ giphyConfigured?: boolean }>('/api/config', { signal: controller.signal })
-      .then((config: { giphyConfigured?: boolean }) => {
-        setGiphyConfigured(Boolean(config.giphyConfigured))
-      })
-      .catch(() => {
-        // GIF support remains disabled when runtime configuration is unavailable.
-      })
-    return () => controller.abort()
-  }, [])
+  const giphy = useChatGifs({ client, isOpen: showGiphy, lifetimeRef, onError: setComposerError })
 
   const baseMessages = useMemo(
     () => mergeChatMessages(mergeChatMessages(readerWindow || liveWindow, history.olderMessages), outboxMessages),
@@ -1049,77 +895,34 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     }
   }
 
-  const loadGifs = useCallback(async (query = '') => {
-    if (!giphyConfigured) return
-    const requestId = ++giphyRequestRef.current
+  const insertEmoji = (emoji: string) => {
+    const inserted = insertComposerText(draftMessageRef.current, emoji, selectionRef.current.start, selectionRef.current.end, selectedMentions)
+    if (!inserted) return
+    draftRevisionRef.current++
+    draftMessageRef.current = inserted.text
+    draftSnapshotRef.current.draft = { ...draftSnapshotRef.current.draft, text: inserted.text, mentions: inserted.mentions }
+    selectionRef.current = { start: inserted.caret, end: inserted.caret }
+    setSelectedMentions(inserted.mentions)
+    setDraftText(inserted.text)
+    setDraftRestored(false)
+    setHasDraft(Boolean(inserted.text.trim()))
+    noteTyping()
+    requestAnimationFrame(() => {
+      messageInputRef.current?.focus()
+      messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
+    })
+  }
+  const selectGif = (gif: GiphyGif) => {
     const lifetime = lifetimeRef.current
-    giphyAbortRef.current?.abort()
-    const controller = new AbortController()
-    giphyAbortRef.current = controller
-    const normalizedQuery = query.trim()
-    const cacheKey = normalizedQuery.toLocaleLowerCase()
-    const cached = giphyCacheRef.current.get(cacheKey)
-    if (cached) {
-      setGifs(cached)
-      setGifsLoading(false)
-      return
-    }
-
-    setComposerError('')
-    setGifsLoading(true)
-
-    try {
-      const { data } = await client.auth.getSession()
-      if (!lifetime.active || requestId !== giphyRequestRef.current) return
-      const results = await fetchGiphyGifs(normalizedQuery, data.session?.access_token, controller.signal)
-      if (!lifetime.active || requestId !== giphyRequestRef.current) return
-      giphyCacheRef.current.set(cacheKey, results)
-      setGifs(results)
-    } catch (error) {
-      if (!lifetime.active || requestId !== giphyRequestRef.current) return
-      setComposerError(error instanceof Error ? error.message : t('gifsLoadFailed'))
-      setGifs([])
-    } finally {
-      if (lifetime.active && requestId === giphyRequestRef.current) setGifsLoading(false)
-    }
-  }, [client, giphyConfigured, t])
-
-  useEffect(() => {
-    // Invalidate immediately, including cached results, the debounce window,
-    // and closing the picker while a request is still in flight.
-    giphyRequestRef.current += 1
-    giphyAbortRef.current?.abort()
-    if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
-    giphyDebounceRef.current = null
-    if (!showGiphy || !giphyConfigured) {
-      setGifsLoading(false)
-      return
-    }
-
-    const normalizedQuery = giphyQuery.trim()
-    if (normalizedQuery.length === 1) {
-      giphyRequestRef.current += 1
-      setGifs([])
-      setGifsLoading(false)
-      return
-    }
-    if (!normalizedQuery) {
-      void loadGifs()
-    } else {
-      setGifs([])
-      setGifsLoading(true)
-      giphyDebounceRef.current = setTimeout(
-        () => void loadGifs(normalizedQuery),
-        GIPHY_SEARCH_DEBOUNCE_MS
-      )
-    }
-    return () => {
-      giphyRequestRef.current += 1
-      giphyAbortRef.current?.abort()
-      if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
-      giphyDebounceRef.current = null
-    }
-  }, [giphyConfigured, giphyQuery, loadGifs, showGiphy])
+    void sendMediaMessage('gif', gif.url, gif.title || t('giphyGif')).then((sent) => {
+      if (sent && lifetime.active) setShowGiphy(false)
+    })
+  }
+  const closeMediaPicker = () => {
+    setShowEmoji(false)
+    setShowGiphy(false)
+    messageInputRef.current?.focus({ preventScroll: true })
+  }
 
   const toggleGiphy = () => {
     setShowEmoji(false)
@@ -1138,51 +941,21 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     </div>
   ) : null
   const composerStatus = !canChat?restrictionMessage||t('chatLimited'):cooldownRemaining?t('slowMode', { count: cooldownRemaining }):uploading ? t('uploading') : sending ? t('sending') : !isConnected ? t('draftKept') : draftRestored ? t('draftRestored') : ''
-  const openModeration = useCallback((kind: 'remove' | 'report', message: ChatMessage) => {
-    setModerationTarget({ kind, message })
-    setModerationReason('')
-    setModerationError('')
-  }, [])
-  const openRemoveModeration = useCallback((message: ChatMessage) => openModeration('remove', message), [openModeration])
-  const openReportModeration = useCallback((message: ChatMessage) => openModeration('report', message), [openModeration])
-  const submitModeration = async () => {
-    if (!moderationTarget || moderationPending) return
-    const target = moderationTarget
-    const action = target.kind === 'remove' ? onRemoveMessage : onReportMessage
-    if (!action || (target.kind === 'remove' && (
-      capabilities?.chatParticipants === false || (canRemoveMessage && !canRemoveMessage(target.message))
-    ))) {
-      setModerationError(target.kind === 'remove' ? t('removeUnavailable') : t('reportUnavailable'))
-      return
-    }
-    setModerationPending(true)
-    setModerationError('')
-    try {
-      await action(target.message, moderationReason.trim())
-      if (target.kind === 'remove') applyRemoval({ messageId: target.message.id, removedAt: new Date().toISOString() })
-      setModerationTarget(null)
-    } catch (error) {
-      setModerationError(error instanceof Error ? error.message : t('saveFailed'))
-    } finally {
-      setModerationPending(false)
-    }
-  }
 
   return (
     <div data-chat-surface data-chat-visible={isVisible} className="relative flex flex-col h-full w-full bg-background text-foreground antialiased">
       {headerActionsContainer ? createPortal(historyControls, headerActionsContainer) : historyControls}
-      {showHistorySearch && <section id={historySearchId} className="chat-history-search" aria-label={t('searchHistory')} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeHistorySearch() } }}>
-        <form onSubmit={(event) => { event.preventDefault(); void history.search(historySearchText) }}>
-          <Input ref={historySearchInputRef} aria-label={t('searchSavedMessages')} value={historySearchText} maxLength={100} placeholder={t('searchMessageText')} onChange={(event) => setHistorySearchText(event.target.value)} />
-          <Button size="sm" type="submit" disabled={history.searchLoading || historySearchText.trim().length < 2}>{t('search')}</Button>
-          <Button type="button" size="icon-sm" variant="ghost" aria-label={t('closeSearch')} onClick={closeHistorySearch}><X size={15} /></Button>
-        </form>
-        {history.searchLoading && <p role="status">{t('searching')}</p>}
-        {history.searchError && <p role="alert">{history.searchError}</p>}
-        {!history.searchLoading && history.searchTerm && !history.searchError && history.searchResults.length === 0 && <p>{t('noSearchResults', { term: history.searchTerm })}</p>}
-        <div className="chat-history-results">{applyRemovalEvents([...history.searchResults].reverse(),removalEvents).filter(message=>!message.removedAt).map((message) => <button key={message.id} type="button" onClick={() => jumpToMessage(message.id)} aria-label={t('viewMessage', { name: message.user.name, preview: getVisibleMessagePreview(message, hiddenIds) })}><strong>{message.user.name}</strong><time>{new Date(message.createdAt).toLocaleString(i18n.resolvedLanguage)}</time><span>{getVisibleMessagePreview(message, hiddenIds)}</span></button>)}</div>
-        {history.searchHasMore && <Button variant="ghost" size="sm" disabled={history.searchLoading} onClick={() => void history.search(history.searchTerm, true)}>{t('moreResults')}</Button>}
-      </section>}
+      {showHistorySearch && <ChatHistorySearch
+        id={historySearchId}
+        inputRef={historySearchInputRef}
+        query={historySearchText}
+        onQueryChange={setHistorySearchText}
+        onClose={closeHistorySearch}
+        history={history}
+        hiddenIds={hiddenIds}
+        removalEvents={removalEvents}
+        onJumpToMessage={jumpToMessage}
+      />}
       {history.context && <div className="chat-context-banner"><span>{t('earlierMessages')}</span><Button variant="ghost" size="sm" onClick={returnToLive}>{t('backToLive')}</Button></div>}
       {/* Messages */}
       <div ref={containerRef} className="chat-message-scroll flex-1 overflow-y-auto p-4 space-y-4">
@@ -1216,8 +989,8 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           pollVoteStates={pollVoteStates}
           pollVotingEnabled={isConnected&&canChat && Boolean(historySource?.votePoll)}
           participationDisabled={!canChat}
-          onRemove={onRemoveMessage && capabilities?.chatParticipants !== false ? openRemoveModeration : undefined}
-          onReport={onReportMessage ? openReportModeration : undefined}
+          onRemove={onRemoveMessage && capabilities?.chatParticipants !== false ? moderation.openRemove : undefined}
+          onReport={onReportMessage ? moderation.openReport : undefined}
           canRemoveMessage={canRemoveMessage}
         />
         {history.context?.hasNewer && <div className="chat-history-pagination"><Button variant="ghost" size="sm" disabled={history.contextLoading} onClick={() => void history.extendContext('newer')}>{t('loadNewer')}</Button></div>}
@@ -1237,152 +1010,17 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
         </button>
       )}
 
-      {(showEmoji || showGiphy) && (
-        <div className="chat-picker-popover" style={{ height: mediaPickerBounds.height, '--chat-picker-body-height': `${Math.max(0, mediaPickerBounds.height - 64)}px` } as CSSProperties} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) } }}>
-          <div className="chat-picker-header">
-          <div className="chat-picker-tabs" role="tablist" aria-label={t('messageMedia')} onKeyDown={(event) => {
-            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !giphyConfigured) return
-            event.preventDefault()
-            const emoji = event.key === 'End' || (event.key !== 'Home' && !showEmoji)
-            setShowEmoji(emoji); setShowGiphy(!emoji)
-            document.getElementById(`${mediaPanelId}-${emoji ? 'emoji' : 'gif'}`)?.focus()
-          }}>
-            <button
-              type="button"
-              id={`${mediaPanelId}-gif`}
-              role="tab"
-              aria-selected={showGiphy}
-              tabIndex={showGiphy ? 0 : -1}
-              aria-controls={mediaPanelId}
-              className={showGiphy ? 'active' : undefined}
-              disabled={!giphyConfigured}
-              onClick={() => {
-                setShowEmoji(false)
-                setShowGiphy(true)
-              }}
-            >
-              {t('gifs')}
-            </button>
-            <button
-              type="button"
-              id={`${mediaPanelId}-emoji`}
-              role="tab"
-              aria-selected={showEmoji}
-              tabIndex={showEmoji ? 0 : -1}
-              aria-controls={mediaPanelId}
-              className={showEmoji ? 'active' : undefined}
-              onClick={() => {
-                setShowGiphy(false)
-                setShowEmoji(true)
-              }}
-            >
-              {t('emoji')}
-            </button>
-          </div>
-            <button
-              type="button"
-              className="chat-picker-close"
-              aria-label={t('closeMediaPicker')}
-              onClick={() => { setShowEmoji(false); setShowGiphy(false); messageInputRef.current?.focus({ preventScroll: true }) }}
-            >
-              <X size={15} />
-            </button>
-          </div>
-          {showEmoji ? (
-            <div id={mediaPanelId} role="tabpanel" aria-labelledby={`${mediaPanelId}-emoji`} className="chat-emoji-panel">
-              <Suspense fallback={<div className="chat-picker-loading">{t('loadingEmoji')}</div>}>
-                <EmojiPicker
-                  theme={(resolvedTheme === 'light' ? 'light' : 'dark') as Theme}
-                  width="100%"
-                  height={Math.max(180, mediaPickerBounds.height - 64)}
-                  lazyLoadEmojis
-                  emojiStyle={chatPickerEmojiStyle}
-                  defaultSkinTone={skinTone}
-                  previewConfig={{ showPreview: false }}
-                  searchPlaceholder={t('findPerfectEmoji')}
-                  onSkinToneChange={(selectedSkinTone) => {
-                    setSkinTone(selectedSkinTone)
-                    saveEmojiSkinTone(selectedSkinTone)
-                  }}
-                  onEmojiClick={(emoji) => {
-                    const inserted = insertComposerText(draftMessageRef.current, emoji.emoji, selectionRef.current.start, selectionRef.current.end, selectedMentions)
-                    if (!inserted) return
-                    draftRevisionRef.current++
-                    draftMessageRef.current = inserted.text
-                    draftSnapshotRef.current.draft = { ...draftSnapshotRef.current.draft, text: inserted.text, mentions: inserted.mentions }
-                    selectionRef.current = { start: inserted.caret, end: inserted.caret }
-                    setSelectedMentions(inserted.mentions)
-                    setDraftText(inserted.text)
-                    setDraftRestored(false)
-                    setHasDraft(Boolean(inserted.text.trim()))
-                    noteTyping()
-                    requestAnimationFrame(() => {
-                      messageInputRef.current?.focus()
-                      messageInputRef.current?.setSelectionRange(inserted.caret, inserted.caret)
-                    })
-                  }}
-                />
-              </Suspense>
-            </div>
-          ) : (
-            <div id={mediaPanelId} role="tabpanel" aria-labelledby={`${mediaPanelId}-gif`} className="chat-gif-panel">
-              <form
-                className="chat-gif-search"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  if (giphyDebounceRef.current) clearTimeout(giphyDebounceRef.current)
-                  giphyDebounceRef.current = null
-                  void loadGifs(giphyQuery)
-                }}
-              >
-                <Search size={16} aria-hidden="true" />
-                <Input
-                  value={giphyQuery}
-                  onChange={(event) => setGiphyQuery(event.target.value)}
-                  placeholder={t('searchGifs')}
-                  maxLength={50}
-                />
-                {giphyQuery && (
-                  <button type="button" aria-label={t('clearGifSearch')} onClick={() => setGiphyQuery('')}>
-                    <X size={14} />
-                  </button>
-                )}
-                <button type="submit" className="sr-only">{t('searchGifs')}</button>
-              </form>
-              {gifsLoading ? (
-                <div className="chat-gif-status">{t('loadingGifs')}</div>
-              ) : giphyQuery.trim().length === 1 ? (
-                <div className="chat-gif-status">{t('gifSearchMore')}</div>
-              ) : gifs.length === 0 ? (
-                <div className="chat-gif-status">{t('noGifs')}</div>
-              ) : (
-                <div className="chat-gif-grid">
-                  {[0, 1].map((column) => (
-                    <div key={column}>
-                      {gifs.filter((_, index) => index % 2 === column).map((gif) => (
-                        <button
-                          type="button"
-                          key={gif.id}
-                          className="chat-gif-tile"
-                          onClick={() => {
-                            const lifetime = lifetimeRef.current
-                            void sendMediaMessage('gif', gif.url, gif.title || t('giphyGif')).then((sent) => {
-                              if (sent && lifetime.active) setShowGiphy(false)
-                            })
-                          }}
-                        >
-                          <img referrerPolicy="no-referrer" src={approvedImageUrl(gif.preview)} alt={gif.title} loading="lazy" />
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="chat-gif-footer">{t('giphyAttribution')}</p>
-            </div>
-          )}
-        </div>
-      )}
+      <ChatMediaPicker
+        showEmoji={showEmoji}
+        showGiphy={showGiphy}
+        mediaPanelId={mediaPanelId}
+        height={mediaPickerBounds.height}
+        giphy={giphy}
+        onTabChange={(emoji) => { setShowEmoji(emoji); setShowGiphy(!emoji) }}
+        onClose={closeMediaPicker}
+        onInsertEmoji={insertEmoji}
+        onSelectGif={selectGif}
+      />
 
       {composerError && <p role="alert" className="px-4 pt-2 text-sm text-destructive">{composerError}</p>}
       {replyRestoreNotice && <p className="chat-reply-restore-notice">{replyRestoreNotice}</p>}
@@ -1556,9 +1194,9 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
             type="button"
             variant="ghost"
             size="icon"
-            disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphyConfigured || uploading || sending}
-            aria-label={giphyConfigured ? t('addGif') : t('gifsUnavailable')}
-            title={giphyConfigured ? t('addGif') : t('gifsUnavailableRoom')}
+            disabled={!isConnected||!canMedia||Boolean(cooldownRemaining) || !giphy.configured || uploading || sending}
+            aria-label={giphy.configured ? t('addGif') : t('gifsUnavailable')}
+            title={giphy.configured ? t('addGif') : t('gifsUnavailableRoom')}
             onClick={toggleGiphy}
           >
             <span>{t('gif')}</span>
@@ -1592,7 +1230,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           {draftText.length >= 450 && <span>{t('characterCount', { count: draftText.length, limit: 500 })}</span>}
         </div>}
       </form>
-      <Dialog open={Boolean(moderationTarget)} onOpenChange={open=>{if(!open&&!moderationPending)setModerationTarget(null)}}><DialogContent><DialogHeader><DialogTitle>{moderationTarget?.kind==='remove'?t('removeMessage'):t('reportMessage')}</DialogTitle></DialogHeader><form className="grid gap-4" onSubmit={event=>{event.preventDefault();void submitModeration()}}><div className="grid gap-2"><Label htmlFor="chat-moderation-reason">{t(moderationTarget?.kind === 'remove' ? 'reasonOptional' : 'reason')}</Label><Input id="chat-moderation-reason" maxLength={500} value={moderationReason} disabled={moderationPending} required={moderationTarget?.kind==='report'} onChange={event=>setModerationReason(event.target.value)}/></div>{moderationError&&<p role="alert">{moderationError}</p>}<DialogFooter><Button type="button" variant="outline" disabled={moderationPending} onClick={()=>setModerationTarget(null)}>{t('cancel')}</Button><Button type="submit" variant={moderationTarget?.kind==='remove'?'destructive':'default'} disabled={moderationPending||moderationTarget?.kind==='report'&&!moderationReason.trim()}>{moderationPending?t('saving'):moderationTarget?.kind==='remove'?t('remove'):t('report')}</Button></DialogFooter></form></DialogContent></Dialog>
+      <ChatModerationDialog moderation={moderation} />
     </div>
   )
 })
