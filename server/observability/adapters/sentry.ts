@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/node";
+import { createMetricBatch } from "../../../shared/metric-batch.js";
 import { attachSentryDebugIds, sanitizeSentryEnvelope, sanitizeSentryEvent, sanitizeSentryLog, sanitizeSentryMetric, type TelemetryAdapter } from "../../../shared/observability.js";
 import type { observabilityConfig } from "../config.js";
 import { createBoundedSentryTransport } from "./sentry-transport.js";
@@ -27,11 +28,12 @@ export function createSentryAdapter(config: ReturnType<typeof observabilityConfi
       } };
     }
   });
+  const metrics = createMetricBatch((type, name, value, options) => Sentry.metrics[type](name, value, options));
   const adapter: TelemetryAdapter = {
     captureError(error, context) { Sentry.captureException(error, { tags: { operation: context.operation }, extra: { ...context } }); },
     log(level, event, context) { Sentry.logger[level](event, { ...context }); },
-    metric(type, name, value, options) { Sentry.metrics[type](name, value, options); },
-    async flush(timeoutMs) { await client?.flush(timeoutMs); }
+    metric(type, name, value, options) { metrics.record(type, name, value, options); },
+    async flush(timeoutMs) { metrics.flush(); await client?.flush(timeoutMs); }
   };
   const endpoint = config.dsn ? Sentry.getOtlpTracesEndpoint(config.dsn) : undefined;
   return { adapter, traceExporter: endpoint ? createSentryTraceExporter(endpoint) : undefined };

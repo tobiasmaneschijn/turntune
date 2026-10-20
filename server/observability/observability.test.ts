@@ -36,17 +36,23 @@ test("a failed operation reports once with code locations and safe context, and 
 test("application metrics reject invalid measurements and discard private attributes without changing application work", async () => {
   const reports: unknown[] = [];
   const reporter = createTelemetry({ captureError() {}, log() {}, metric(...metric) { reports.push(metric); }, async flush() {} });
-  const attributes = { operation: "provider.request", provider: "spotify", status: 200,
+  const attributes = { operation: "provider.request", provider: "spotify", status: 429, outcome: "failure" as const, reason: "rate_limit" as const,
     requestId: "c1c14747-7193-40f0-a3a3-9e111b8ec264", userId: "private-user", url: "https://private.invalid/?token=private" };
   reporter.metrics.distribution("provider.duration", 12, { unit: "millisecond", attributes });
   assert.deepEqual(reports, [["distribution", "provider.duration", 12, {
-    unit: "millisecond", attributes: { operation: "provider.request", provider: "spotify", status: 200 }
+    unit: "millisecond", attributes: { operation: "provider.request", provider: "spotify", status: 429, outcome: "failure", reason: "rate_limit" }
   }]]);
   reporter.metrics.count("room.save", -1);
   reporter.metrics.gauge("room.queue", Number.NaN);
   reporter.metrics.distribution("room.save", Number.POSITIVE_INFINITY);
   reporter.metrics.count("https://private.invalid");
   assert.equal(reports.length, 1);
+  let increments = 0, errors = 0;
+  reporter.configure({ captureError() { errors++; }, log() {}, metric(_type, _name, value) { increments += value; }, async flush() {} });
+  for (let index = 0; index < 1_000; index++) reporter.metrics.count("provider.request.attempts");
+  reporter.captureError(new Error("private provider failure"), { operation: "provider.request" });
+  assert.equal(increments, 1_000);
+  assert.equal(errors, 1);
   reporter.configure({ captureError() {}, log() {}, metric() { throw new Error("offline"); }, async flush() {} });
   assert.doesNotThrow(() => reporter.metrics.count("room.saved"));
   await reporter.flush();
@@ -102,7 +108,7 @@ test("SDK enrichment cannot export private request, user, breadcrumb or source-c
   const metricEnvelope = sanitizeSentryEnvelope<[unknown, Array<[unknown, Record<string, unknown>]>]>([{}, [[{ type: "trace_metric" }, {
     items: [...Array.from({ length: 101 }, () => ({ name: "browser.app.started", type: "counter", value: 1, timestamp: 1,
       trace_id: "a".repeat(32), span_id: "b".repeat(16), private: "private",
-      attributes: { operation: { value: "browser.start" }, "user.email": { value: "private" }, requestId: { value: "private" },
+      attributes: { operation: { value: "browser.start" }, outcome: { value: "failure" }, reason: { value: "network" }, "user.email": { value: "private" }, requestId: { value: "private" },
         "sentry.environment": { value: "private" }, "sentry.release": { value: "private" } } })),
       { name: "private invalid metric", type: "gauge", value: 1, timestamp: 1 }]
   }]]], { environment: "staging", release: "revision" });
@@ -111,4 +117,12 @@ test("SDK enrichment cannot export private request, user, breadcrumb or source-c
   const payload = metricEnvelope[1][0][1];
   assert.deepEqual(payload.ingest_settings, { infer_ip: "never", infer_user_agent: "never" });
   assert.equal((payload.items as unknown[]).length, 101);
+  assert.match(JSON.stringify(payload), /"outcome":\{"type":"string","value":"failure"\}/);
+  assert.match(JSON.stringify(payload), /"reason":\{"type":"string","value":"network"\}/);
+  const invalid = sanitizeSentryEnvelope<[unknown, Array<[unknown, Record<string, unknown>]>]>([{}, [[{ type: "trace_metric" }, {
+    items: [{ name: "room.join.results", type: "counter", value: 1, timestamp: 1,
+      attributes: { outcome: { value: "private" }, reason: { value: "private" } } }]
+  }]]], { environment: "staging", release: "revision" });
+  assert.ok(invalid);
+  assert.doesNotMatch(JSON.stringify(invalid), /private|outcome|reason/);
 });

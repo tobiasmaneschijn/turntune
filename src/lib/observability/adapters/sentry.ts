@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/react";
+import { createMetricBatch } from "../../../../shared/metric-batch";
 import { attachSentryDebugIds, sanitizeSentryEnvelope, sanitizeSentryEvent, sanitizeSentryLog, sanitizeSentryMetric, type TelemetryAdapter } from "../../../../shared/observability";
 import type { BrowserObservabilityConfig } from "../config";
 
@@ -42,6 +43,7 @@ export function createSentryAdapter(config: BrowserObservabilityConfig): Telemet
       } };
     }
   });
+  const metrics = createMetricBatch((type, name, value, options) => Sentry.metrics[type](name, value, options));
   return {
     captureError(error, context) {
       Sentry.captureException(error, { tags: { operation: context.operation }, extra: { ...context } });
@@ -50,8 +52,8 @@ export function createSentryAdapter(config: BrowserObservabilityConfig): Telemet
       Sentry.logger[level](event, { ...context });
     },
     metric(type, name, value, options) {
-      Sentry.metrics[type](name, value, options);
+      metrics.record(type, name, value, options);
     },
-    async flush(timeoutMs) { await client?.flush(timeoutMs); }
+    async flush(timeoutMs) { metrics.flush(); await client?.flush(timeoutMs); }
   };
 }

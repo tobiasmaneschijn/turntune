@@ -10,9 +10,11 @@ export interface ObservabilityContext {
 }
 export type MetricType = "count" | "gauge" | "distribution";
 export type MetricUnit = "none" | "millisecond" | "second" | "byte" | "percent";
+export type MetricOutcome = "success" | "failure" | "timeout" | "canceled" | "rejected" | "offline";
+export type MetricReason = "network" | "server" | "client" | "rate_limit" | "capacity" | "invalid_response" | "unauthorized" | "autoplay_blocked" | "provider_error" | "unknown";
 export interface MetricOptions {
   unit?: MetricUnit;
-  attributes?: { operation?: string; provider?: string; status?: number };
+  attributes?: { operation?: string; provider?: string; status?: number; outcome?: MetricOutcome; reason?: MetricReason };
 }
 export interface TelemetryAdapter {
   captureError(error: Error, context: ObservabilityContext): void;
@@ -25,6 +27,8 @@ const identifier = /^[a-z][a-z0-9_.-]{0,79}$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const providers = new Set(["youtube", "spotify", "soundcloud", "mixcloud", "apple", "appleMusic", "apple-music", "apple_music", "giphy"]);
 const metricUnits = new Set<unknown>(["none", "millisecond", "second", "byte", "percent"]);
+const metricOutcomes = new Set<unknown>(["success", "failure", "timeout", "canceled", "rejected", "offline"]);
+const metricReasons = new Set<unknown>(["network", "server", "client", "rate_limit", "capacity", "invalid_response", "unauthorized", "autoplay_blocked", "provider_error", "unknown"]);
 
 /** Metrics use bounded dimensions, never request IDs or arbitrary scope data. */
 function sanitizeMetricOptions(options: MetricOptions): MetricOptions {
@@ -33,6 +37,8 @@ function sanitizeMetricOptions(options: MetricOptions): MetricOptions {
   if (typeof source?.operation === "string" && identifier.test(source.operation)) attributes.operation = source.operation;
   if (typeof source?.provider === "string" && providers.has(source.provider)) attributes.provider = source.provider;
   if (typeof source?.status === "number" && Number.isInteger(source.status) && source.status >= 100 && source.status <= 599) attributes.status = source.status;
+  if (metricOutcomes.has(source?.outcome)) attributes.outcome = source!.outcome;
+  if (metricReasons.has(source?.reason)) attributes.reason = source!.reason;
   return { ...(options.unit !== undefined ? { unit: options.unit } : {}), attributes };
 }
 function validMetric(name: unknown, value: unknown, type: string, unit: unknown): boolean {
@@ -108,7 +114,9 @@ export function createTelemetry(initialAdapter?: TelemetryAdapter) {
   function metric(type: MetricType, name: string, value: number, options: MetricOptions = {}) {
     try {
       if (!adapter?.metric || !validMetric(name, value, type, options.unit)) return;
-      if (allowed(`metric:${name}`)) adapter.metric(type, name, value, sanitizeMetricOptions(options));
+      // Sentry adapters aggregate and sample metrics separately. Applying the
+      // error/log throttle here would bias failure rates under normal traffic.
+      adapter.metric(type, name, value, sanitizeMetricOptions(options));
     } catch { /* A metric sink must not interrupt application work. */ }
   }
   const api = {
@@ -268,7 +276,7 @@ export function sanitizeSentryEnvelope<T>(input: T, metadata: { environment: str
         const metrics = payload.items.slice(0, 1_000).flatMap((item: unknown) => {
           const metric = record(item), attributes = record(metric.attributes);
           const safe = sanitizeSentryMetric({ ...metric, attributes: Object.fromEntries(
-            ["operation", "provider", "status"].map(key => [key, record(attributes[key]).value])) });
+            ["operation", "provider", "status", "outcome", "reason"].map(key => [key, record(attributes[key]).value])) });
           if (!safe || typeof metric.timestamp !== "number" || !Number.isFinite(metric.timestamp) || metric.timestamp <= 0) return [];
           const serialized = Object.fromEntries(Object.entries({ ...safe.attributes, "sentry.environment": metadata.environment, "sentry.release": metadata.release })
             .filter(([, value]) => value !== undefined).map(([key, value]) => [key, { type: typeof value === "number" ? "double" : "string", value }]));

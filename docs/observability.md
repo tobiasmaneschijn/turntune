@@ -126,6 +126,45 @@ is available, `browser.page.load` records the completed page-load duration as a
 distribution in milliseconds. React StrictMode does not duplicate these
 measurements.
 
+| Area | Metrics | Meaning |
+| --- | --- | --- |
+| Playback | `playback.attempts`, `playback.results`, `playback.start.duration`, `playback.failures` | Local playback intent to SDK-confirmed playing, split by provider. Failure episodes after startup are counted separately from startup results. |
+| Buffering | `playback.stalls`, `playback.stall.duration` | Actual buffering after playback starts, where the provider exposes it. |
+| Synchronization | `playback.sync.drift` | Absolute difference from the normalized room clock, in seconds, at most once every 30 seconds of steady playback. |
+| Joining rooms | `room.join.attempts`, `room.join.results`, `room.join.duration` | Connect/admission through both a successful acknowledgement and a fresh matching room snapshot. |
+| Connection recovery | `socket.disconnects`, `socket.reconnect.attempts/results/duration`, `socket.recovery.attempts/results/duration` | Transport reconnect attempts are separate from the whole outage until the room is usable again. |
+| Queue actions | `queue.command.attempts/results/duration`, `server.queue.command.attempts/results/duration` | Browser-observed completion and server acknowledgement outcomes, respectively, split by fixed command operation. |
+| Room persistence | `server.operation.results`, `server.operation.duration` | Existing measured workflow operations, including `room_save` and `room_command`. Summing result outcomes gives completed operation volume. |
+| Library saves | `server.library.write.attempts/results/duration` | Application-level library write attempts, including authentication, validation, rate limits, save failures and successful writes. |
+| Music providers | `provider.request.attempts/results/duration` | One logical upstream JSON request, including body consumption and admission rejection. Trusted redirects remain one logical request. |
+| Server capacity | `server.rooms.active`, `server.listeners.connected`, `server.sockets.connected`, `server.room_commands.pending` | Current rooms with admitted listeners, distinct admitted listener accounts, connected transports, and queued room commands. Sampled every 30 seconds without database queries. |
+
+`attempts`, `results`, `failures`, `stalls` and `disconnects` are counters.
+Durations are distributions in milliseconds, except drift which uses seconds.
+Capacity measurements are gauges. Browser and server queue measurements describe
+different boundaries; query each project's results separately.
+
+Use terminal `results` counters, grouped by `outcome`, to calculate success and
+failure rates. Keep `canceled` separate from failures. Filter timing queries to
+successful outcomes when measuring normal operation latency. Provider HTTP 429
+responses carry `reason=rate_limit`; local admission rejection carries
+`reason=capacity`. Raw provider responses and error text are never attributes.
+Server queue `failure` means an unsuccessful acknowledgement and includes
+validation or access denial; admission rate/capacity denials use `rejected`.
+
+Playback startup requires the SDK to confirm playing; it does not detect acoustic
+output. A pending startup has a 30-second observation deadline, without changing
+the player's behavior. Buffering signals are available for YouTube, SoundCloud
+and Mixcloud. Apple Music and Spotify currently expose inferred loading, so they
+do not emit stall measurements. Drift excludes live streams, pause, buffering,
+background tabs and the settling period around seeks or checkpoints.
+
+Room joins have a 30-second observation deadline. Whole connection recovery has
+a 60-second deadline. These report metric timeouts without canceling the network
+operation or changing the UI. Intentional disconnects do not start recovery.
+Invalid JSON rejected before the library route's application-save boundary is
+outside the library-write metrics.
+
 Feature code can use the shared facade. Supply actual values from the operation:
 
 ```typescript
@@ -143,16 +182,28 @@ telemetry.metrics.distribution("provider.response_time", elapsedMs, {
 
 Counts measure events, gauges record current values, and distributions support
 duration and size percentiles. Attribute keys are limited to `operation`,
-`provider` and `status`. Keep names and operations fixed in code; do not include
+`provider`, `status`, `outcome` and `reason`. Outcomes and reasons use fixed
+allowlisted codes. Keep names and operations fixed in code; do not include
 account, room or request IDs, messages, URLs, tokens or track metadata. Environment
 and release come from the existing runtime configuration. Metrics pass through
 the shared privacy filter and a final envelope allowlist that removes SDK scope
 enrichment.
 
-After deploying to staging, load the app and look for `browser.app.started` and
-`browser.page.load` in the browser project's Metrics view, filtered to the staging
-environment and deployed release. The SDK batches metrics; allow time for its
-flush and ingestion. Existing offline and ad-blocker limitations apply.
+Sentry adapters flush application metric batches every 30 seconds and on explicit
+flush or shutdown. Counts are summed and gauges keep their latest value within
+each fixed series. Distribution reservoirs retain at most 16 values per series
+per window, so percentiles describe a bounded sample rather than every request.
+Windows are not weighted by their request volume. Each batch accepts at most 256
+series; additional new series are discarded until the next flush. Metric traffic
+uses its own bounded batching and does not consume the error/log reporting
+budget.
+
+After deploying to staging, load the app, join a room, start playback, change a
+queue item, save a private pick, and disconnect/reconnect the client. Verify the
+corresponding series in the browser and server projects' Metrics views, filtered
+to the staging environment and deployed release. Check outcomes, provider splits
+and capacity gauges without identifiers or user content. Allow time for batching
+and ingestion. Existing offline and ad-blocker limitations apply.
 
 Monitoring is best effort. Capture and export failures do not change request
 results, saving, playback or readiness. Shutdown attempts a bounded flush.
