@@ -1,0 +1,29 @@
+import { serverT } from "../lib/i18n.js";
+/** Only construct from claims returned by credential verification, never decoded client JSON. */
+export function createSocketCredentialLease(userId: string, expiresAtSeconds: unknown, now = Date.now) {
+  if (!userId || typeof expiresAtSeconds !== "number" || !Number.isFinite(expiresAtSeconds)) throw new Error(serverT("your_session_has_expired_sign_in_again"));
+  const expiresAt = expiresAtSeconds * 1000;
+  const assertActive = () => {
+    if (now() >= expiresAt) throw new Error(serverT("your_session_has_expired_reconnect_with_a_refreshed_session"));
+  };
+  assertActive();
+  return {
+    userId,
+    expiresAt,
+    assertActive,
+    scheduleExpiry(onExpired: () => void) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let disposed = false;
+      const check = () => {
+        if (disposed) return;
+        const remaining = expiresAt - now();
+        if (remaining <= 0) { onExpired(); return; }
+        timer = setTimeout(check, Math.min(remaining, 2_147_483_647));
+        timer.unref();
+      };
+      check();
+      return () => { disposed = true; if (timer) clearTimeout(timer); };
+    }
+  };
+}
+export type SocketCredentialLease = ReturnType<typeof createSocketCredentialLease>;

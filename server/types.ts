@@ -6,7 +6,7 @@ export interface Room extends RoomBase {
   djQueues: Record<string, Track[]>;
   /** Private staff records. Never serialize as public room state. */
   moderation?: RoomModerationState;
-  radioState?: import("./radio-policy.js").RadioState;
+  radioState?: import("./features/rooms/radio-policy.js").RadioState;
   /** Legacy persisted shape, consumed by normalization. */
   queue?: Track[];
 }

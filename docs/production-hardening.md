@@ -30,8 +30,8 @@ moderation, export/deletion steps and the detailed data/retention inventory.
   does not make third-party content private or trustworthy.
 - The image runs as UID 1000 (`node`). Compiled assets remain root-owned.
   Compose uses a read-only root filesystem, a 64 MiB temporary filesystem,
-  dropped capabilities, no privilege escalation, an init process, 512 MiB RAM,
-  one CPU and 128 PIDs. Only `/app/data` is a persistent writable mount. These
+  dropped capabilities, no privilege escalation, an init process, 1 GiB RAM,
+  two CPUs and 128 PIDs. Only `/app/data` is a persistent writable mount. These
   initial resource budgets need a staging capacity measurement.
 - Compose publishes only on host loopback. A public TLS ingress must be
   configured separately. The internal loopback health/readiness probe is the
@@ -522,5 +522,5 @@ exists:
 - [ ] Final authenticated end-to-end staging check passed at the intended release
   revision; no unresolved deployment-blocking finding or untested critical flow.
 
-Public launch requires all these gates, plus the remediation acceptance criteria
-in `SECURITY_AUDIT_REPORT.md`. A completed repository change alone is not a GO.
+Public launch requires every gate above to pass and its release evidence to be
+reviewed. A completed repository change alone does not approve a deployment.

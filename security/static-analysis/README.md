@@ -1,17 +1,16 @@
 # Local static analysis release gate
 
-`Security gates / static-analysis` uses **Semgrep Community Edition 1.181.0**.
-It replaces the unavailable GitHub CodeQL integration for this private personal
-repository. GitHub's hosted code scanning entitlement is not required. This
-does not provide the same analysis or coverage as CodeQL.
+The `Security gates / static-analysis` CI job uses **Semgrep Community Edition
+1.181.0**. It runs independently of GitHub's hosted code scanning service. Its
+analysis and coverage differ from CodeQL.
 
 The scanner reads only checked-in local rules. No Semgrep account, App token,
 Registry configuration, Pro engine or source upload is used. Metrics and version
 checks are explicitly disabled. The child process receives an allowlist of OS/CA
 environment variables, no application credentials, and fresh scanner settings.
 Installing the public Python packages requires internet access; scanning does
-not. CI retains reports in the private repository's GitHub Actions artifacts for
-seven days, rather than submitting them to a code-scanning or Semgrep service.
+not. CI uploads reports to GitHub Actions artifacts with seven-day retention.
+It does not submit them to a code-scanning or Semgrep service.
 
 ## Reproducible installation and use
 
@@ -174,7 +173,7 @@ manual penetration testing remain launch requirements.
   artifact retention and the weekly pip update entry were also checked.
 - Two TypeScript constructs required equivalent parser-compatible spelling:
   `RoomMemberRecord` is now a top-level type-only import in `server/index.ts`,
-  and the local `unique` array in `server/social-store.ts` is named `uniqueIds`.
+  and the local `unique` array in `server/features/social/social-store.ts` is named `uniqueIds`.
   Neither changes runtime behavior. Parser errors and legacy rule timeouts were
   rejected by the gate during verification; they were not treated as clean.
 

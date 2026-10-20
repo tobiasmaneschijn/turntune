@@ -15,40 +15,46 @@ an atomic local chat file. Joining or reconnecting loads authorized saved histor
 
 | File | Responsibility |
 | --- | --- |
-| `src/chat/model.ts` | Chat types and pure helpers for merging messages, applying reaction events, grouping reactions, and timeline layout. |
-| `src/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
-| `src/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
-| `src/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
-| `src/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
-| `server/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
-| `server/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
-| `server/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
-| `server/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
-| `server/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
-| `server/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
-| `server/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
-| `src/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
-| `src/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
-| `src/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
-| `src/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
-| `src/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
-| `src/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
-| `src/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
-| `src/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
-| `src/hooks/use-chat-delivery.ts` | Delivery/outbox lifetime, immutable composer snapshots, pending work, and shared completion cleanup for initial sends and retries. |
+| `src/features/chat/model.ts` | Chat types and pure helpers for merging messages, applying reaction events, grouping reactions, and timeline layout. |
+| `src/features/chat/mentions.ts` | Room-scoped handle generation, composer mention detection/insertion, mention validation, and text splitting. |
+| `src/features/chat/media.ts` | Image validation, Storage path creation, pasted-media detection, and the GIPHY response adapter. |
+| `src/features/chat/persistence.ts` | Database-row mapping, safe cursors, and legacy direct-query adapters used by fixtures; production room reads/writes use the authorized server API. |
+| `src/features/chat/history-reader.ts` | Token- and room-scoped history, search, context, save, reaction, and private-image API client. |
+| `server/features/chat/chat-history.ts` | Bounded read/mutation routes, authorization before privileged queries and before response/mutation, original UUID recovery, reply and profile hydration. |
+| `server/features/chat/chat-command-service.ts` | Unified durable commands, immutable receipts, cooldowns, removals, local repository and Supabase repository. |
+| `server/features/chat/chat-command-routes.ts` | Production history/mutation/upload routes backed by the command service. |
+| `server/features/chat/chat-relay.ts` | Authenticated live event validation, immutable-ID deduplication, rate bounds, trusted sender/reply snapshots, and authorized recipient delivery. |
+| `server/features/chat/chat-validation.ts` | Bounded server message/reaction schemas and immutable payload comparison. |
+| `server/features/chat/chat-write-policy.ts` | One message/reaction rate and immutable operation-ID policy shared by live relay and durable HTTP writes. |
+| `server/features/chat/chat-media.ts` | Authorized storage-path resolution and bounded private image URLs. |
+| `src/features/chat/protocol.ts` | Defensive received-payload normalization, safe media URLs, and removal of untrusted admin claims. |
+| `src/features/chat/socket-transport.ts` | Stable production transport lifetime and explicit ACK-plus-snapshot admission bridge. |
+| `src/features/chat/realtime.ts` | Legacy fixture transport, shared transport contract and typing constants. |
+| `src/features/chat/drafts.ts` | Bounded session-local user/room drafts, expiration, and account invalidation. |
+| `src/features/chat/outbox.ts` | Validated session recovery copies, account/room isolation, expiration, capacity and sign-out invalidation. |
+| `src/features/chat/visibility.ts` | Device-local hidden message IDs and concealed previews, scoped by account and room. |
+| `src/features/chat/commands.ts` | Composer slash command parsing and suggestions. Commands execute locally. |
+| `src/features/chat/hooks/use-chat-visibility.ts` | Immediate masking, local storage persistence and cross-tab visibility updates. |
+| `src/features/chat/delivery.ts` | Separate sending/save states, same-payload send retry, save-only retry, and departed-scope guards. |
+| `src/features/chat/hooks/use-chat-delivery.ts` | Synchronous composer handoff to recovery storage, ordered delivery and departed-scope guards. |
 | `src/lib/authenticated-http.ts` | Shared HTTP deadlines, cancellation, JSON/error handling and caller-supplied response validation. |
-| `src/hooks/use-room-session.ts` | Single route state, navigation, underlying room lifetime, admission and reconnect coordination. |
-| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration without restarting room providers when credentials rotate. |
-| `src/hooks/use-chat-history.ts` | Independent live pagination, bounded saved-room search, chronological context pages, and stale-request guards. |
-| `src/hooks/use-chat-scroll.tsx` | Stable reader anchors across prepends and arrivals, unread positioning and effective motion scrolling. |
-| `src/hooks/use-chat-picker-bounds.ts` | Actual pane/visual-viewport/composer geometry for media and portaled reaction controls. |
-| `src/hooks/use-chat-media-url.ts` | Visible near-expiry image refresh, one automatic image-error recovery, explicit retry and scope guards. |
-| `src/notifications.ts` | Explicit permission request, one-route attention delivery, deduplication, room mute and history/replay baselines. |
-| `src/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
-| `src/components/realtime-chat.tsx` | Composer state, replies, reactions, media, GIF search, unread tracking, and coordination between realtime and persistence callbacks. |
-| `src/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
+| `src/features/rooms/hooks/use-room-session.ts` | Single route state, navigation, underlying room lifetime, admission and reconnect coordination. |
+| `src/features/profile/hooks/use-app-profile.ts` | Account-scoped profile restoration without restarting room providers when credentials rotate. |
+| `src/features/chat/hooks/use-chat-history.ts` | Independent live pagination, bounded saved-room search, chronological context pages, and stale-request guards. |
+| `src/features/chat/hooks/use-chat-scroll.tsx` | Stable reader anchors across prepends and arrivals, unread positioning and effective motion scrolling. |
+| `src/features/chat/hooks/use-chat-picker-bounds.ts` | Actual pane/visual-viewport/composer geometry for media and portaled reaction controls. |
+| `src/features/chat/hooks/use-chat-media-url.ts` | Visible near-expiry image refresh, one automatic image-error recovery, explicit retry and scope guards. |
+| `src/lib/notifications.ts` | Explicit permission request, one-route attention delivery, deduplication, room mute and history/replay baselines. |
+| `src/features/chat/hooks/use-realtime-chat.tsx` | React state adapter for the room transport. It does not write chat tables. |
+| `src/features/chat/components/realtime-chat.tsx` | Draft/composer ownership, upload and delivery coordination, live/history composition, scroll, unread tracking, and notifications. |
+| `src/features/chat/components/chat-message-list.tsx` | Memoized transcript rendering, message actions, and timeline separators. |
+| `src/features/chat/components/chat-history-search.tsx` | Saved-history search controls and result selection. |
+| `src/features/chat/components/chat-media-picker.tsx` | Emoji and GIF picker presentation. |
+| `src/features/chat/hooks/use-chat-gifs.ts` | GIF configuration, cached search, debouncing, cancellation, and stale-result guards. |
+| `src/features/chat/hooks/use-chat-moderation.ts`, `src/features/chat/components/chat-moderation-dialog.tsx` | Message report/removal state and dialog. |
+| `src/features/chat/components/chat-message.tsx` | One message row, its action bar, reply context, media, and grouped reaction chips. |
 | `src/components/platform-emoji-text.tsx` | Platform-aware emoji rendering and the persisted skin-tone preference. |
-| `src/App.tsx` (`RoomChat`) | Loads room history, supplies it to the chat component, and persists newly sent messages. |
+| `src/app/RoomApplication.tsx` (`RoomChat`) | Loads room history and supplies the admitted durable socket transport. |
 | `src/styles/chat.css` | Chat layout and interaction styling under the `chat-*` selectors. |
 
 Keep privileged database access in the server modules and production API calls
@@ -60,7 +66,10 @@ only after both its join acknowledgement and fresh room snapshot have arrived.
 
 When a user sends a message:
 
-1. `prepareMessage` creates one message UUID. The optimistic row says Sending.
+1. `prepareMessage` creates one message UUID. A validated recovery copy is saved
+   in session storage under the account and room before the composer clears.
+   If storage is blocked or full, the draft stays in place and no send starts.
+   The optimistic row says Queued or Sending; focus stays in the composer.
 2. `chat:message` sends `{ roomId, message }` on the admitted socket. The server
    stamps the sender from its authenticated membership and resolves any reply
    against the same room. It checks bounded content, safe media, storage ownership
@@ -68,29 +77,35 @@ When a user sends a message:
    live delivery and ACK. Room policy and sanctions share the room operation lock.
 3. The sender merges the acknowledged message. Echoes and duplicate received
    UUIDs merge into the existing row. Failure shows Could not confirm send and
-   Retry send; the draft and original UUID remain available.
-4. `RealtimeChat` invokes `onSend` for HTTP confirmation after socket acceptance.
-5. `RoomChat` calls `historySource.saveMessage` with the same UUID and payload.
-   The route verifies fresh live admission and confirms the same durable receipt.
+   Retry send beside the original message. A later acknowledgement never clears
+   or restores text over the next draft.
+4. Socket acceptance is durable. Production does not submit a second HTTP save.
+   The optional `onSend` persistence seam remains for legacy fixture transports.
 
-An acknowledged socket send is durable even if the later HTTP confirmation
-fails. A persistence failure blocks live delivery and leaves Retry send available.
+An acknowledged socket send is durable. A persistence failure blocks live
+delivery and leaves Retry send available.
 Retry save persists the original message UUID and payload using its original room
 callback, without another live event. If a previous insert succeeded but its
 response was lost, an identical row for the same user and room counts as success.
 A duplicate ID with conflicting content is rejected rather than overwritten.
 
-Only one send or upload can run at a time. Text edited while a send is pending
-is preserved, and completion from a departed room cannot update a new room.
-Submitting an unchanged draft again after an uncertain send retries its original
-UUID. Composer edits mark a new draft; deliberately repeating the same text
-after confirmation remains possible. Successful sends have no persistent status label;
-pending operations and failures retain their status and retry controls.
-Successful initial sends and retries use the same completion path: an unchanged
-composer snapshot is cleared, while a newly typed draft or changed reply remains.
-Completed delivery payloads are released; at most 200 completed status records are
-retained. Failed send/save rows retain their original recovery records, with a
-100-row recovery limit before another new send is accepted.
+Text can be composed and queued while a previous send waits for acknowledgement.
+The queue sends in submission order, one operation at a time, and rechecks current
+connection, participation and cooldown state before each operation. Slow-mode rooms
+keep one pending submission at a time. Media/upload controls retain their ownership
+and busy guards. Completion from a departed room cannot update a new room.
+
+Queued, uncertain and failed recovery records survive room navigation and reload
+for up to 12 hours in this browser tab. Restored records require explicit retry;
+they are never automatically broadcast. Retrying uses the original UUID and payload.
+An acknowledgement arriving after the sending view was disposed keeps its recovery
+row until a retry through the current transport can reconcile it; this prevents a
+message disappearing when returning before its original acknowledgement.
+Recovery storage accepts at most 100 outstanding rows, validates recovered content
+and media URLs, and never recovers another account's message or uploaded path.
+Sign-out clears drafts and outbox records and invalidates old workers before they
+can write. Successful sends have no persistent status label; completed payloads
+are released and at most 200 completed tracker statuses are retained.
 The stable socket factory exposes `setAdmitted(boolean)`. Reconnects update
 connection state without replacing the transport or erasing unsaved live rows.
 Fresh admission reloads durable history and clears obsolete reaction overlays.
@@ -433,7 +448,7 @@ npm run build
 
 Focused tests cover real React chat behavior on desktop/mobile, server routes,
 relay/transport lifetimes, same-UUID retry, authorization denial and SQL grants/
-RLS. `tests/sql/check-chat-rls.mjs` accepts an installed PGlite entry path and runs
+RLS. `tests/database/chat/check-chat-rls.mjs` accepts an installed PGlite entry path and runs
 the exact reviewed chat migrations in a disposable local PostgreSQL instance,
 including storage policies; it does not apply a live migration. Production
 deployment must apply the reviewed migration with the server/client update.

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Laptop, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "./ui/button";
-import { readUserSettings, saveUserSettings, type ThemeMode } from "../playback-settings";
+import { readUserSettings, saveUserSettings, type ThemeMode } from "../features/settings/user-settings";
 import {
   DropdownMenu,
   DropdownMenuContent,

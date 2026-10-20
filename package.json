@@ -26,7 +26,7 @@
     "test:integration": "node scripts/run-tests.mjs integration",
     "test:ui": "node scripts/run-browser-tests.mjs ui",
     "test:ui:behavior": "node scripts/run-browser-tests.mjs behavior --workers=1",
-    "test:ui:live": "playwright test --config=playwright.live.config.ts",
+    "test:ui:live": "playwright test --config=tests/config/playwright/live.config.ts",
     "test:ui:fixtures": "node scripts/run-browser-tests.mjs fixtures",
     "test:users:seed": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.test-users.local scripts/seed-test-users.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",

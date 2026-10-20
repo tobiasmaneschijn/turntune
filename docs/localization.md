@@ -43,7 +43,7 @@ Unsupported languages fall back to English. Calling `i18n.changeLanguage(code)`
 updates subscribed components, the document language/direction, title, and metadata.
 A language picker can be added when another complete translation is available.
 
-Server messages use `server/i18n.ts` and the same locale directory. API responses
+Server messages use `server/lib/i18n.ts` and the same locale directory. API responses
 currently keep English as their stable default, including policy text used by
 existing clients. Shared validation uses `shared/i18n.ts` with `protocol.json` and
 also keeps English as the protocol default. `getServerTranslator(language)` creates a fixed translator;

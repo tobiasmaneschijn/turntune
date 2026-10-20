@@ -83,8 +83,8 @@ project or guessing IDs.
   `https://turntune.app` for production. Verify each configured domain and keep
   `APP_ORIGIN`, Supabase Auth's Site URL and the exact `/update-password` redirect
   allowlist entry aligned with that environment's primary origin.
-- Follow `README.md` (Dokploy deployment), `docs/production-hardening.md` and
-  `SECURITY_RELEASE_STATUS.md` for configuration and release gates. Apply pending
+- Follow `docs/self-hosting.md`, `docs/github-deployments.md`, and
+  `docs/production-hardening.md` for configuration and release gates. Apply pending
   database migrations before deploying the server. Deploy to isolated staging
   and complete the required evidence review before opening public ingress.
 - Keep exactly **one active Node instance per environment**, including during

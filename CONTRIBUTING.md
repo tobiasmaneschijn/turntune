@@ -1,22 +1,37 @@
 # Contributing
 
-Report reproducible bugs and propose changes through
+Report bugs and propose changes through
 [GitHub issues](https://github.com/tobiasmaneschijn/turntune/issues).
 For vulnerabilities, follow [SECURITY.md](SECURITY.md).
 
-## Development
+For a bug report, include the affected version or commit, steps to reproduce,
+expected behavior, and relevant browser or server details. Remove credentials and
+personal data from logs and screenshots.
 
-Use Node.js 24 or newer. Follow the [local development instructions](README.md#local-development)
-and copy `.env.example` to a local `.env` with your own development credentials.
+## Making changes
+
+1. Fork the repository and create a branch for your change.
+2. Follow the [development guide](docs/development.md) to install dependencies and
+   configure a local environment. CI uses Node.js 24.
+3. Make a focused change and run the affected checks.
+4. Open a pull request describing the problem, resulting behavior, and checks run.
+   Link the relevant issue when there is one.
+
 Keep credentials, user data, database exports, and local reports out of commits.
+Use your own development credentials and test accounts.
 
-Keep pull requests focused. Describe the user-facing change and the checks you
-ran. Follow [AGENTS.md](AGENTS.md) for UI, copy, testing, and deployment conventions.
+Follow [AGENTS.md](AGENTS.md) for UI, copy, and testing conventions.
 Use actual production components in browser fixtures and organize tests around
 user actions and outcomes. Add coverage for a concrete regression, security
 boundary, or saved-work failure; routine visual changes do not need new tests.
 
-Run checks appropriate to the change. The main application checks are:
+For UI copy and translations, follow the
+[localization guide](docs/localization.md). English is currently supported, and
+maintained app copy lives in the shared language catalogs.
+
+## Checks
+
+The main application checks are:
 
 ```sh
 npm test
@@ -26,8 +41,8 @@ npm run test:production
 ```
 
 Run the relevant browser workflow for behavior changes. CI also runs dependency,
-secret, static-analysis, and container checks. See [Development checks](README.md#development-checks)
-for focused commands. Never use production accounts or data in tests.
+secret, static-analysis, and container checks. The [development guide](docs/development.md)
+describes browser setup, focused test commands, and test isolation.
 
 ## License and provenance
 

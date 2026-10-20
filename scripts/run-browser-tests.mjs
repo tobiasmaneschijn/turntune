@@ -5,12 +5,12 @@ import { testEnvironment } from "./test-environment.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const playwright = fileURLToPath(new URL("../node_modules/@playwright/test/cli.js", import.meta.url));
 const groups = {
-  ui: ["playwright.config.ts"],
-  fixtures: ["playwright.fixtures.config.ts"],
-  playback: ["playwright.playback.config.ts"],
-  "music-qol": ["playwright.music-qol.config.ts"],
-  "player-qol": ["playwright.player-qol.config.ts"],
-  behavior: ["playwright.fixtures.config.ts", "playwright.playback.config.ts", "playwright.music-qol.config.ts", "playwright.player-qol.config.ts"]
+  ui: ["tests/config/playwright/public.config.ts"],
+  fixtures: ["tests/config/playwright/features.config.ts"],
+  playback: ["tests/config/playwright/playback.config.ts"],
+  "music-qol": ["tests/config/playwright/music.config.ts"],
+  "player-qol": ["tests/config/playwright/room-player.config.ts"],
+  behavior: ["tests/config/playwright/features.config.ts", "tests/config/playwright/playback.config.ts", "tests/config/playwright/music.config.ts", "tests/config/playwright/room-player.config.ts"]
 };
 
 /** Keep local browser suites on their fixed fixture configurations. Ordinary

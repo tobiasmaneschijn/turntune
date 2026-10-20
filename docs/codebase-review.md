@@ -1,5 +1,9 @@
 # Architecture review and implementation — 7 October 2026
 
+Historical record. Counts, dependency versions, and validation results below
+describe the reviewed revision. Use the [documentation index](README.md) for
+current setup and operating guides.
+
 The approved review has been implemented locally. Verification uses isolated
 storage, disposable PostgreSQL databases, fake provider SDKs and browser fixtures.
 No production migration, account change or deployment was performed.

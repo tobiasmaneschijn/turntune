@@ -157,7 +157,7 @@ components:
     height: "64px"
 ---
 
-# Design System: turntune
+# Design system: turntune
 
 ## Overview
 
@@ -183,7 +183,7 @@ Lime identifies primary actions and musical emphasis. Use `primary-foreground` o
 
 `destructive`, `success`, `warning`, and `info` are status roles. Preserve their meaning and use text or an accessible name with status color.
 
-The source definitions are in `src/shadcn.css`. Its dark `primary-text` alias is resolved to the primary value in the frontmatter. Legacy `--lime` and `--purple` both alias the semantic primary; they do not define extra accents.
+The source definitions are in `src/styles/shadcn.css`. Its dark `primary-text` alias is resolved to the primary value in the frontmatter. Legacy `--lime` and `--purple` both alias the semantic primary; they do not define extra accents.
 
 ## Typography
 
