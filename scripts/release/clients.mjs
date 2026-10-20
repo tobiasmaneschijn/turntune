@@ -7,7 +7,10 @@ export function dokployBase(value) {
   return url.href;
 }
 
-export function createDokploy({ url, key, fetchImpl = fetch }) {
+const emptyComposeResponses = new Set(['compose.stop', 'compose.update', 'compose.deploy']);
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+export function createDokploy({ url, key, fetchImpl = fetch, wait = pause }) {
   const base = dokployBase(url);
   if (!key) throw new Error('DOKPLOY_API_KEY is required.');
   return {
@@ -15,13 +18,23 @@ export function createDokploy({ url, key, fetchImpl = fetch }) {
       if (!/^[a-z]+\.[A-Za-z]+$/.test(endpoint)) throw new Error('Invalid Dokploy endpoint.');
       const target = new URL(endpoint, base);
       if (method === 'GET') for (const [name, value] of Object.entries(parameters)) if (value != null) target.searchParams.set(name, String(value));
-      const response = await fetchImpl(target, {
-        method, redirect: 'error', signal: AbortSignal.timeout(20_000),
-        headers: { 'x-api-key': key, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
-        ...(method === 'POST' ? { body: JSON.stringify(parameters) } : {}),
-      });
-      if (!response.ok) throw new Error(`Dokploy ${endpoint}: HTTP ${response.status}.`);
-      return response.json();
+      // A transient incomplete polling response is not evidence of an exited process
+      // or a completed deployment. Retry reads, but never repeat a mutation.
+      const attempts = method === 'GET' ? 3 : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const response = await fetchImpl(target, {
+          method, redirect: 'error', signal: AbortSignal.timeout(20_000),
+          headers: { 'x-api-key': key, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+          ...(method === 'POST' ? { body: JSON.stringify(parameters) } : {}),
+        });
+        if (!response.ok) throw new Error(`Dokploy ${endpoint}: HTTP ${response.status}.`);
+        const body = await response.text();
+        const empty = !body.trim();
+        if (empty && method === 'POST' && emptyComposeResponses.has(endpoint)) return undefined;
+        if (!empty) { try { return JSON.parse(body); } catch {} }
+        if (attempt + 1 < attempts) { await wait(200 * (attempt + 1)); continue; }
+        throw new Error(`Dokploy ${endpoint}: HTTP ${response.status} returned ${empty ? 'empty' : 'invalid'} JSON after ${attempts} attempt(s).`);
+      }
     },
   };
 }
