@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { measureOperation, observeOperation } from "../observability/performance.js";
+import { telemetry } from "../../shared/observability.js";
 
 type Operation = "room_save" | "room_command" | "provider_request" | "chat_message" | "chat_reaction" | "chat_typing";
 type DatabaseOperation = "read" | "write" | "rpc" | "auth" | "storage" | "other";
@@ -15,6 +16,9 @@ export class RuntimeMetrics {
   pendingRoomCommands = 0;
   observe(operation: Operation, elapsedMs: number, failed = false, recordSpan = true) {
     observeOperation(operation, elapsedMs, failed, "workflow", recordSpan);
+    const options = { attributes: { operation, outcome: failed ? "failure" as const : "success" as const } };
+    telemetry.metrics.count("server.operation.results", 1, options);
+    telemetry.metrics.distribution("server.operation.duration", Math.max(0, elapsedMs), { ...options, unit: "millisecond" });
     const value = this.observations.get(operation) || { count: 0, failures: 0, totalMs: 0, maxMs: 0 };
     value.count++;
     value.failures += Number(failed);

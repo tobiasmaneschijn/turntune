@@ -7,13 +7,17 @@ import type { LibraryMutation } from "./private-library.js";
 import type { Store } from "../../persistence/store.js";
 import { ResourcePolicyStore } from "../../resources/resource-policy.js";
 import { DEFAULT_PLAN_LIMITS } from "../../../shared/resource-policy.js";
+import { configureTelemetry, type MetricOptions } from "../../../shared/observability.js";
 
 interface Fixture {
   calls: Array<{ kind: "read" | "write"; userId: string; mutation?: LibraryMutation }>;
   failStore: boolean;
+  measurements: Array<{ name: string; options: MetricOptions }>;
 }
 async function withRoutes(run: (base: string, fixture: Fixture) => Promise<void>) {
-  const fixture: Fixture = { calls: [], failStore: false };
+  const fixture: Fixture = { calls: [], failStore: false, measurements: [] };
+  const restore = configureTelemetry({ captureError() {}, log() {}, async flush() {},
+    metric(_type, name, _value, options) { fixture.measurements.push({ name, options }); } });
   const library = { picks: [], sets: [] };
   const store = {
     resourcePolicies:new ResourcePolicyStore(null),
@@ -43,7 +47,7 @@ async function withRoutes(run: (base: string, fixture: Fixture) => Promise<void>
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("HTTP fixture did not start");
   try { await run(`http://127.0.0.1:${address.port}`, fixture); }
-  finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  finally { restore(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 }
 const post = (body: unknown, token = "alice"): RequestInit => ({
   method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -88,5 +92,15 @@ test("private-library validation, JSON parsing and Store failures all retain no-
     assertPrivate(await fetch(`${base}/api/library`, { headers: { Authorization: "Bearer alice" } }), 500);
     assertPrivate(await fetch(`${base}/api/library`, post({ type: "clear-library" })), 500);
     assert.deepEqual(fixture.calls.map(call => [call.kind, call.userId]), [["read", "alice"], ["write", "alice"]]);
+    fixture.failStore = false;
+    assertPrivate(await fetch(`${base}/api/library`, post({ type: "clear-library" })), 200);
+    const results = fixture.measurements.filter(item => item.name === "server.library.write.results");
+    assert.deepEqual(results.map(item => item.options.attributes), [
+      { operation: "library.write", status: 400, outcome: "rejected" },
+      { operation: "library.write", status: 500, outcome: "failure" },
+      { operation: "library.write", status: 200, outcome: "success" }
+    ]);
+    assert.equal(fixture.measurements.filter(item => item.name === "server.library.write.attempts").length, 3);
+    assert.doesNotMatch(JSON.stringify(fixture.measurements), /alice|clear-library|Write failed|Bearer/);
   });
 });

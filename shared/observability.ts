@@ -8,15 +8,46 @@ export interface ObservabilityContext {
   durationMs?: number;
   count?: number;
 }
+export type MetricType = "count" | "gauge" | "distribution";
+export type MetricUnit = "none" | "millisecond" | "second" | "byte" | "percent";
+export type MetricOutcome = "success" | "failure" | "timeout" | "canceled" | "rejected" | "offline";
+export type MetricReason = "network" | "server" | "client" | "rate_limit" | "capacity" | "invalid_response" | "unauthorized" | "autoplay_blocked" | "provider_error" | "unknown";
+export interface MetricOptions {
+  unit?: MetricUnit;
+  attributes?: { operation?: string; provider?: string; status?: number; outcome?: MetricOutcome; reason?: MetricReason };
+}
 export interface TelemetryAdapter {
   captureError(error: Error, context: ObservabilityContext): void;
   log(level: LogLevel, event: string, context: ObservabilityContext): void;
+  metric?(type: MetricType, name: string, value: number, options: MetricOptions): void;
   flush(timeoutMs: number): Promise<void>;
 }
 
 const identifier = /^[a-z][a-z0-9_.-]{0,79}$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const providers = new Set(["youtube", "spotify", "soundcloud", "mixcloud", "apple", "appleMusic", "apple-music", "apple_music", "giphy"]);
+const metricUnits = new Set<unknown>(["none", "millisecond", "second", "byte", "percent"]);
+const metricOutcomes = new Set<unknown>(["success", "failure", "timeout", "canceled", "rejected", "offline"]);
+const metricReasons = new Set<unknown>(["network", "server", "client", "rate_limit", "capacity", "invalid_response", "unauthorized", "autoplay_blocked", "provider_error", "unknown"]);
+
+/** Metrics use bounded dimensions, never request IDs or arbitrary scope data. */
+function sanitizeMetricOptions(options: MetricOptions): MetricOptions {
+  const attributes: NonNullable<MetricOptions["attributes"]> = {};
+  const source = options.attributes;
+  if (typeof source?.operation === "string" && identifier.test(source.operation)) attributes.operation = source.operation;
+  if (typeof source?.provider === "string" && providers.has(source.provider)) attributes.provider = source.provider;
+  if (typeof source?.status === "number" && Number.isInteger(source.status) && source.status >= 100 && source.status <= 599) attributes.status = source.status;
+  if (metricOutcomes.has(source?.outcome)) attributes.outcome = source!.outcome;
+  if (metricReasons.has(source?.reason)) attributes.reason = source!.reason;
+  return { ...(options.unit !== undefined ? { unit: options.unit } : {}), attributes };
+}
+function validMetric(name: unknown, value: unknown, type: string, unit: unknown): boolean {
+  return typeof name === "string" && identifier.test(name) &&
+    typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e9 &&
+    ["count", "counter", "gauge", "distribution"].includes(type) &&
+    (!(type === "count" || type === "counter") || value >= 0) &&
+    (unit === undefined || metricUnits.has(unit));
+}
 export function safeIdentifier(value: unknown, fallback = "unknown"): string {
   return typeof value === "string" && identifier.test(value) ? value : fallback;
 }
@@ -80,6 +111,14 @@ export function createTelemetry(initialAdapter?: TelemetryAdapter) {
     window.count++; total.count++;
     return true;
   }
+  function metric(type: MetricType, name: string, value: number, options: MetricOptions = {}) {
+    try {
+      if (!adapter?.metric || !validMetric(name, value, type, options.unit)) return;
+      // Sentry adapters aggregate and sample metrics separately. Applying the
+      // error/log throttle here would bias failure rates under normal traffic.
+      adapter.metric(type, name, value, sanitizeMetricOptions(options));
+    } catch { /* A metric sink must not interrupt application work. */ }
+  }
   const api = {
     captureError(error: unknown, context: ObservabilityContext) {
       try {
@@ -101,6 +140,11 @@ export function createTelemetry(initialAdapter?: TelemetryAdapter) {
   };
   return {
     ...api,
+    metrics: {
+      count(name: string, value = 1, options?: MetricOptions) { metric("count", name, value, options); },
+      gauge(name: string, value: number, options?: MetricOptions) { metric("gauge", name, value, options); },
+      distribution(name: string, value: number, options?: MetricOptions) { metric("distribution", name, value, options); }
+    },
     configure(next?: TelemetryAdapter) {
       const previous = adapter; adapter = next;
       return () => { if (adapter === next) adapter = previous; };
@@ -195,7 +239,17 @@ export function sanitizeSentryLog<T>(input: T): T | null {
   } catch { return null; }
 }
 
-/** SDK scopes can enrich logs after beforeSendLog. Filter the final wire envelope too. */
+export function sanitizeSentryMetric<T>(input: T): T | null {
+  try {
+    const metric = record(input);
+    if (!["counter", "gauge", "distribution"].includes(String(metric.type)) ||
+      !validMetric(metric.name, metric.value, String(metric.type), metric.unit)) return null;
+    return { name: metric.name, type: metric.type, value: metric.value,
+      ...sanitizeMetricOptions(metric as MetricOptions) } as T;
+  } catch { return null; }
+}
+
+/** SDK scopes enrich logs and metrics after their hooks. Filter the wire envelope too. */
 export function sanitizeSentryEnvelope<T>(input: T, metadata: { environment: string; release: string }): T | null {
   try {
     if (!Array.isArray(input) || !Array.isArray(input[1])) return null;
@@ -216,6 +270,23 @@ export function sanitizeSentryEnvelope<T>(input: T, metadata: { environment: str
           user: { ip_address: "0.0.0.0", geo: {} },
           sdk: { name: safeIdentifier(eventSdk.name), version: typeof eventSdk.version === "string" && /^[0-9.a-z-]{1,30}$/i.test(eventSdk.version) ? eventSdk.version : undefined,
             settings: { infer_ip: "never", infer_user_agent: "never" } } }]];
+      }
+      if (header.type === "trace_metric" && Array.isArray(payload.items)) {
+        // Match the SDK's metric buffer bound so a valid burst is not truncated.
+        const metrics = payload.items.slice(0, 1_000).flatMap((item: unknown) => {
+          const metric = record(item), attributes = record(metric.attributes);
+          const safe = sanitizeSentryMetric({ ...metric, attributes: Object.fromEntries(
+            ["operation", "provider", "status", "outcome", "reason"].map(key => [key, record(attributes[key]).value])) });
+          if (!safe || typeof metric.timestamp !== "number" || !Number.isFinite(metric.timestamp) || metric.timestamp <= 0) return [];
+          const serialized = Object.fromEntries(Object.entries({ ...safe.attributes, "sentry.environment": metadata.environment, "sentry.release": metadata.release })
+            .filter(([, value]) => value !== undefined).map(([key, value]) => [key, { type: typeof value === "number" ? "double" : "string", value }]));
+          return [{ ...safe, timestamp: metric.timestamp,
+            trace_id: typeof metric.trace_id === "string" && /^[a-f0-9]{32}$/i.test(metric.trace_id) ? metric.trace_id : "",
+            span_id: typeof metric.span_id === "string" && /^[a-f0-9]{16}$/i.test(metric.span_id) ? metric.span_id : undefined,
+            attributes: serialized }];
+        });
+        return metrics.length ? [[{ type: "trace_metric", item_count: metrics.length, content_type: "application/vnd.sentry.items.trace-metric+json" },
+          { version: 2, ingest_settings: { infer_ip: "never", infer_user_agent: "never" }, items: metrics }]] : [];
       }
       if (header.type !== "log" || !Array.isArray(payload.items)) return [];
       const logs = payload.items.slice(0, 100).flatMap((item: unknown) => {

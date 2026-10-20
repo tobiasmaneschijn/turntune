@@ -12,6 +12,7 @@ type ProviderHarness = {
   statusSamples: { version: number; currentTime: number; ready: boolean; buffering: boolean; playing?: boolean; trackId?: string }[];
   endCallbacks: number[];
   errors: string[];
+  metrics: { name: string; value: number; options: { attributes?: { provider?: string; outcome?: string } } }[];
   inspectMusic(): { volume: number; authorized: boolean };
   inspectHost(): { state?: { providerName: string; audioState: string }; requests: string[]; musicPlaying: boolean };
   holdSoundCloudCallbacks(): void;
@@ -156,6 +157,13 @@ test("listeners can switch providers while old callbacks finish, then stop liste
   expect(await page.evaluate(() => window.providerTest.inspectHost())).toMatchObject({
     state: { providerName: "SoundCloud", audioState: "playing" }, requests: [], musicPlaying: false
   });
+  const metrics = await page.evaluate(() => window.providerTest.metrics);
+  expect(metrics.filter(metric => metric.name === "playback.attempts").map(metric => metric.options.attributes?.provider))
+    .toEqual(["soundcloud", "apple", "soundcloud"]);
+  expect(metrics.filter(metric => metric.name === "playback.results").map(metric => metric.options.attributes?.outcome))
+    .toEqual(["canceled", "success", "success"]);
+  expect(metrics.filter(metric => metric.name === "playback.start.duration")).toHaveLength(2);
+  expect(JSON.stringify(metrics)).not.toMatch(/provider-switch-room|listener-one|room-track|Regression track|initial-token/);
   await page.evaluate(() => window.providerTest.unmount());
   await expect(page.getByTitle(/^SoundCloud player for /)).toHaveCount(0);
   expect(await page.evaluate(() => window.providerTest.inspectHost().musicPlaying)).toBe(false);

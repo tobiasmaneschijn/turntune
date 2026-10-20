@@ -4,6 +4,7 @@ import { libraryMutationSchema, PrivateLibraryDataError } from "./private-librar
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import type { Store } from "../../persistence/store.js";
 import { PublicRequestError, reportUnexpectedRequestError } from "../../lib/public-request-error.js";
+import { beginActionMetric } from "../../observability/actions.js";
 
 /** Identity always comes from verified request credentials, never from JSON/query. */
 export function mountPrivateLibraryRoutes(app: express.Express, store: Store, getUserId: (request: express.Request) => Promise<string | null>, now = Date.now) {
@@ -33,16 +34,28 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
     }
   });
   app.post("/api/library", noStore, express.json({ limit: "1mb" }), async (request, response) => {
+    const finish = beginActionMetric("server.library.write", "library.write");
     try {
       const userId = await getUserId(request);
-      if (!userId) return response.status(401).json({ error: serverT("sign_in_to_use_private_picks_and_sets") });
-      if (!allow(userId, "write", response)) return;
+      if (!userId) {
+        finish("rejected", { status: 401, reason: "unauthorized" });
+        return response.status(401).json({ error: serverT("sign_in_to_use_private_picks_and_sets") });
+      }
+      if (!allow(userId, "write", response)) { finish("rejected", { status: 429, reason: "rate_limit" }); return; }
       const parsed = libraryMutationSchema.safeParse(request.body);
-      if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message || serverT("invalid_library_action") });
-      response.json({ library: await store.updatePrivateLibrary(userId, parsed.data),limits:(await store.resourcePolicies.get(userId)).limits });
+      if (!parsed.success) {
+        finish("rejected", { status: 400 });
+        return response.status(400).json({ error: parsed.error.issues[0]?.message || serverT("invalid_library_action") });
+      }
+      const library = await store.updatePrivateLibrary(userId, parsed.data);
+      const limits = (await store.resourcePolicies.get(userId)).limits;
+      finish("success", { status: 200 });
+      response.json({ library, limits });
     } catch (error) {
       if (!(error instanceof PrivateLibraryDataError)) reportUnexpectedRequestError(error, { operation: "library.write" });
-      response.status(error instanceof PublicRequestError?error.status:error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PublicRequestError||error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_save_private_picks_and_sets") });
+      const status = error instanceof PublicRequestError ? error.status : error instanceof PrivateLibraryDataError ? 409 : 500;
+      finish(status >= 500 ? "failure" : "rejected", { status, ...(status === 429 ? { reason: "capacity" as const } : {}) });
+      response.status(status).json({ error: error instanceof PublicRequestError||error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_save_private_picks_and_sets") });
     }
   });
 }

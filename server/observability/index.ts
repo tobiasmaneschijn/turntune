@@ -16,6 +16,7 @@ export function consoleAdapter(): TelemetryAdapter {
 }
 if (metadata.provider !== "none") configureTelemetry(consoleAdapter());
 export const telemetry = {
+  metrics: core.metrics,
   captureError(error: unknown, context: ObservabilityContext) { core.captureError(error, { ...requestContext.getStore(), ...context }); },
   log(level: LogLevel, event: string, context: ObservabilityContext = { operation: event }) { core.log(level, event, { ...requestContext.getStore(), ...context }); }
 };

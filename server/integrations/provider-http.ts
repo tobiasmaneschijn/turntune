@@ -1,5 +1,7 @@
 import { serverT } from "../lib/i18n.js";
 import type { Provider } from "../../shared/provider-definitions.js";
+import type { MetricOptions } from "../../shared/observability.js";
+import { telemetry } from "../observability/index.js";
 /** Fixed provider names keep both admission state and metrics cardinality bounded. */
 export type ProviderService = Provider | "giphy";
 
@@ -74,25 +76,42 @@ export async function readBoundedJson<T = unknown>(response: Response, maxBytes 
   }
 }
 
-/** Admission remains held until fetch and body consumption finish, including aborts. */
+/** One metric result per logical call, including redirects and admission failures.
+ * Admission remains held until fetch and body consumption finish, including aborts. */
 export async function providerJson<T>(provider: ProviderService, fetcher: typeof fetch, url: string, init: RequestInit = {}, options: { maxBytes?: number; timeoutMs?: number; allowedRedirectOrigins?: readonly string[] } = {}) {
-  const signal = providerSignal(init.signal, options.timeoutMs);
-  signal.throwIfAborted();
-  const now = Date.now();
-  // Spotify includes the app's 1.5-second per-listener playback polling. Catalog
-  // providers do not need that throughput; each keeps a lower spend ceiling.
-  const maximumRequests = provider === "spotify" ? spotifyRequestsPerMinute : catalogRequestsPerMinute;
-  const window = windows.get(provider);
-  const budget = !window || window.resetAt <= now ? { count: 0, resetAt: now + 60_000 } : window;
-  if ((active.get(provider) || 0) >= providerConcurrent || totalActive >= globalConcurrent || budget.count >= maximumRequests) {
-    throw new Error(serverT("provider_request_capacity_reached_try_again_shortly"));
-  }
-  budget.count++;
-  windows.set(provider, budget);
-  active.set(provider, (active.get(provider) || 0) + 1);
-  totalActive++;
+  const started = performance.now();
+  const attributes: NonNullable<MetricOptions["attributes"]> = { operation: "provider.request", provider };
+  let signal: AbortSignal | undefined, admitted = false;
+  let stage: "setup" | "fetch" | "response" = "setup";
+  const result: NonNullable<MetricOptions["attributes"]> = { ...attributes, outcome: "failure" };
+  const responseStatus = (status: number) => {
+    result.status = status;
+    result.reason = status === 429 ? "rate_limit" : status === 401 || status === 403 ? "unauthorized" : status >= 400 ? "provider_error" : undefined;
+  };
+  telemetry.metrics.count("provider.request.attempts", 1, { attributes });
   try {
+    signal = providerSignal(init.signal, options.timeoutMs);
+    signal.throwIfAborted();
+    const now = Date.now();
+    // Spotify includes the app's 1.5-second per-listener playback polling. Catalog
+    // providers do not need that throughput; each keeps a lower spend ceiling.
+    const maximumRequests = provider === "spotify" ? spotifyRequestsPerMinute : catalogRequestsPerMinute;
+    const window = windows.get(provider);
+    const budget = !window || window.resetAt <= now ? { count: 0, resetAt: now + 60_000 } : window;
+    if ((active.get(provider) || 0) >= providerConcurrent || totalActive >= globalConcurrent || budget.count >= maximumRequests) {
+      result.outcome = "rejected";
+      result.reason = "capacity";
+      throw new Error(serverT("provider_request_capacity_reached_try_again_shortly"));
+    }
+    budget.count++;
+    windows.set(provider, budget);
+    active.set(provider, (active.get(provider) || 0) + 1);
+    totalActive++;
+    admitted = true;
+    stage = "fetch";
     let response = await fetcher(url, { ...init, redirect: options.allowedRedirectOrigins ? "manual" : "error", signal });
+    stage = "response";
+    responseStatus(response.status);
     // SoundCloud's resolver may redirect to its canonical track endpoint. Only
     // an explicitly trusted HTTPS origin can receive the authorization header.
     if (options.allowedRedirectOrigins && [301, 302, 303, 307, 308].includes(response.status)) {
@@ -103,15 +122,36 @@ export async function providerJson<T>(provider: ProviderService, fetcher: typeof
         throw new Error(serverT("provider_returned_an_unsafe_redirect"));
       }
       budget.count++;
+      stage = "fetch";
+      // A failed second fetch has no final response status.
+      result.status = undefined;
+      result.reason = undefined;
       response = await fetcher(target.href, { ...init, redirect: "error", signal });
+      stage = "response";
+      responseStatus(response.status);
     }
     if (signal.aborted) await response.body?.cancel();
     signal.throwIfAborted();
-    if (response.status === 204) return { response, payload: null as T };
+    if (response.status === 204) {
+      result.outcome = "success";
+      return { response, payload: null as T };
+    }
     const payload = await readBoundedJson<T>(response, options.maxBytes, signal);
+    result.outcome = response.ok ? "success" : "failure";
     return { response, payload };
+  } catch (error) {
+    if (signal?.aborted) {
+      const reason = signal.reason;
+      result.outcome = reason && typeof reason === "object" && reason.name === "TimeoutError" ? "timeout" : "canceled";
+      result.reason = result.outcome === "timeout" ? "network" : "client";
+    } else result.reason ??= stage === "fetch" ? "network" : stage === "response" ? "invalid_response" : "unknown";
+    throw error;
   } finally {
-    active.set(provider, (active.get(provider) || 1) - 1);
-    totalActive--;
+    if (admitted) {
+      active.set(provider, (active.get(provider) || 1) - 1);
+      totalActive--;
+    }
+    telemetry.metrics.count("provider.request.results", 1, { attributes: result });
+    telemetry.metrics.distribution("provider.request.duration", Math.max(0, performance.now() - started), { unit: "millisecond", attributes: result });
   }
 }

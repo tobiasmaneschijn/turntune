@@ -10,7 +10,9 @@ import { mountSpotifyAccessRoutes } from "./features/admin/spotify-access-routes
 import { mountApiErrors } from "./app/api-errors.js";
 import { serverT } from "./lib/i18n.js";
 import { runtimeMetrics } from "./lib/runtime-metrics.js";
+import { observeQueueCommand } from "./observability/actions.js";
 import { telemetry, flushTelemetry } from "./observability/index.js";
+import { startCapacityMetrics } from "./observability/capacity.js";
 import { mountAdminRoutes } from "./features/admin/admin-routes.js";
 import { mountMusicRoutes } from "./features/music/music-routes.js";
 import { mountRoomActions } from "./features/rooms/room-actions.js";
@@ -587,7 +589,9 @@ io.on("connection", (socket) => {
     },error=>{telemetry.captureError(error,{operation:"socket.command"});securityEvent("request_failed","failed");});
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
     socket.on(event, (payload: unknown, reply?: unknown) => {
-      if (shuttingDown) return;
+      const commandMetric = observeQueueCommand(event, reply);
+      const acknowledgement = commandMetric?.reply ?? reply;
+      if (shuttingDown) { commandMetric?.finish("canceled"); return; }
       const userId=socket.data.authUserId||getMembership(socket.id)?.user.id||socket.id;
       const peer=trustedSocketPeer(socket);
       const rules=[{key:`socket-actions-user:${userId}`,maximum:240,windowMs:60_000},{key:`socket-actions-peer:${peer}`,maximum:1500,windowMs:60_000}];
@@ -596,18 +600,20 @@ io.on("connection", (socket) => {
       const globalRelease=securityBudget.acquire("socket-action-global",256);
       if(!userRelease||!globalRelease||!securityBudget.consume(rules)){
         userRelease?.();globalRelease?.();
-        if(typeof reply==="function")reply({ok:false,error:serverT("too_many_requests_wait_a_minute_before_trying_again"),retryAfter:60});
+        commandMetric?.finish("rejected", { reason: "rate_limit" });
+        if(typeof acknowledgement==="function")acknowledgement({ok:false,error:serverT("too_many_requests_wait_a_minute_before_trying_again"),retryAfter:60});
         securityEvent("rate_limited","denied");return;
       }
       const operation = (async()=>{
         try {
           const policy=await resourcePolicies.get(userId);
-          await resourceAdmission.roomAction(event,userId,socketRooms.get(socket.id),policy,()=>run(payload,reply));
+          await resourceAdmission.roomAction(event,userId,socketRooms.get(socket.id),policy,()=>run(payload,acknowledgement));
         } catch(error) {
           if (!(error instanceof SecurityLimitError)) telemetry.captureError(error, { operation: "socket.admission" });
-          if(typeof reply==="function")reply({ok:false,error:error instanceof SecurityLimitError?error.message:serverT("resource_limits_are_unavailable_try_again_shortly"),retryAfter:60});
+          commandMetric?.finish(error instanceof SecurityLimitError ? "rejected" : "failure", { reason: error instanceof SecurityLimitError ? "capacity" : "server" });
+          if(typeof acknowledgement==="function")acknowledgement({ok:false,error:error instanceof SecurityLimitError?error.message:serverT("resource_limits_are_unavailable_try_again_shortly"),retryAfter:60});
         }
-      })().finally(()=>{userRelease();globalRelease();});
+      })().finally(()=>{ commandMetric?.finish("failure", { reason: "invalid_response" }); userRelease();globalRelease(); });
       activeSocketActions.add(operation);
       void operation.finally(() => activeSocketActions.delete(operation));
     });
@@ -820,7 +826,18 @@ for(const room of await store.listSessionRooms()){
   else {blockedRooms.add(room.id);watchIdleRoom(room.id);}
 }
 maintenance.start();
+let stopCapacityMetrics: (() => void) | undefined;
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
+  if (!shuttingDown) stopCapacityMetrics = startCapacityMetrics(() => {
+    let activeRooms = 0;
+    const listeners = new Set<string>();
+    for (const users of roomUsers.values()) {
+      if (users.size) activeRooms++;
+      for (const user of users.values()) listeners.add(user.id);
+    }
+    return { activeRooms, connectedListeners: listeners.size, connectedSockets: io.engine.clientsCount,
+      pendingRoomCommands: runtimeMetrics.pendingRoomCommands };
+  });
   telemetry.log("info", "server.listening");
   // Local process harnesses use this readiness line to discover an ephemeral port.
   const address = httpServer.address();
@@ -830,6 +847,7 @@ httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  stopCapacityMetrics?.();
   djEvictions.clear();
   announcementExpiries.clear();
   sessionScheduler.clear();
