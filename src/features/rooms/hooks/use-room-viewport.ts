@@ -2,8 +2,9 @@ import { useEffect, type RefObject } from "react";
 import { isEditableShortcutTarget } from "../../../hooks/use-keyboard-shortcuts";
 
 /** Dynamic viewport units alone do not shrink for every browser's virtual keyboard. */
-export function useRoomViewport(workspace: RefObject<HTMLElement | null>) {
+export function useRoomViewport(workspace: RefObject<HTMLElement | null>, enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     const viewport = window.visualViewport;
     const element = workspace.current;
     const shell = element?.closest<HTMLElement>(".app-shell");
@@ -43,5 +44,5 @@ export function useRoomViewport(workspace: RefObject<HTMLElement | null>) {
       if (previousHeight) root.style.setProperty("--room-viewport-height", previousHeight);
       else root.style.removeProperty("--room-viewport-height");
     };
-  }, [workspace]);
+  }, [workspace, enabled]);
 }

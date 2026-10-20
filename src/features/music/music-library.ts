@@ -16,6 +16,17 @@ export function libraryLimits(library: PrivateLibrary | null): LibraryResourceLi
 export type LibraryMutation = { type: "save-pick"; track: LibraryTrack } | { type: "delete-pick"; id: string }
   | { type: "save-set"; id: string; name: string; tracks: LibraryTrack[] } | { type: "rename-set"; id: string; name: string }
   | { type: "delete-set"; id: string } | { type: "clear-library" };
+const libraryListeners = new Map<string, Set<(library: PrivateLibrary) => void>>();
+
+/** Keep mounted library views current after an action elsewhere in the room. */
+export function subscribePrivateLibrary(accessToken: string, listener: (library: PrivateLibrary) => void) {
+  const listeners = libraryListeners.get(accessToken) || new Set();
+  listeners.add(listener); libraryListeners.set(accessToken, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size) libraryListeners.delete(accessToken);
+  };
+}
 export function libraryTrack(track: LibraryTrack | Track): LibraryTrack {
   return { provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist,
     artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs };
@@ -26,6 +37,8 @@ export async function requestPrivateLibrary(accessToken: string, mutation?: Libr
     validate: (value): value is { library: PrivateLibrary } => Boolean(value && typeof value === "object" && "library" in value && value.library &&
       typeof value.library === "object" && "picks" in value.library && Array.isArray(value.library.picks) && "sets" in value.library && Array.isArray(value.library.sets)) });
   const limits = body.limits;
-  return limits && [limits.libraryPicks, limits.librarySets, limits.librarySetTracks].every(value => Number.isSafeInteger(value) && value > 0)
+  const library = limits && [limits.libraryPicks, limits.librarySets, limits.librarySetTracks].every(value => Number.isSafeInteger(value) && value > 0)
     ? { ...body.library, limits } : body.library;
+  if (mutation) libraryListeners.get(accessToken)?.forEach(listener => listener(library));
+  return library;
 }

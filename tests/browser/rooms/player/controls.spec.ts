@@ -44,7 +44,7 @@ test("mute restores local volume without changing shared room playback", async (
   await expect(page.getByText("Use your device volume for Mixcloud.")).toBeVisible();
 });
 
-test("listeners see disconnected room controls and can recover a rejected playback command", async ({ page }) => {
+test("listeners can preview a seek without changing playback and recover a rejected command", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   const details = page.getByRole("button", { name: "Track details", exact: true });
   for (const control of [details,
@@ -64,11 +64,22 @@ test("listeners see disconnected room controls and can recover a rejected playba
   await page.keyboard.press("Escape");
   await expect(details).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const position = page.getByRole("slider", { name: "Playback position", exact: true });
+  await page.getByRole("group").filter({ has: position }).hover();
+  await expect(page.getByRole("tooltip").filter({ hasText: /^\d+:\d{2}$/ })).toBeVisible();
+  expect(await page.evaluate(() => window.playerQolTest.calls)).toHaveLength(0);
   await page.getByRole("button", { name: "Toggle room connection" }).click();
   await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeDisabled();
+  await expect(position).toBeDisabled();
   await page.getByRole("button", { name: "Toggle room connection" }).click();
-  await page.getByRole("button", { name: "Pause room", exact: true }).click();
-  await expect(page.getByText("Pausing room…")).toBeVisible();
+  await position.focus();
+  await position.press("Escape");
+  await expect(page.getByRole("tooltip").filter({ hasText: /^\d+:\d{2}$/ })).toHaveCount(0);
+  await position.press("End");
+  await expect(position).toBeDisabled();
+  expect(await page.evaluate(() => window.playerQolTest.requests.at(-1))).toMatchObject({
+    event: "playback:update", payload: { trackId: "t1", position: 180 }
+  });
   await expect(page.getByRole("button", { name: "Next track", exact: true })).toBeDisabled();
   await page.evaluate(() => (window as any).playerQolTest.pending({ ok: false, error: "DJ permission changed" }));
   await expect(page.getByRole("alert")).toContainText("DJ permission changed");

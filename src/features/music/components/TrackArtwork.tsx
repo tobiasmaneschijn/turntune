@@ -5,7 +5,7 @@ import { useEffectiveMotion } from '@/hooks/use-effective-motion'
 import '@/styles/track-artwork.css'
 
 type ArtworkTrack = Pick<Track, 'provider' | 'providerId' | 'artworkUrl'>
-interface ArtworkImage { source: string }
+interface ArtworkImage { source: string; crossOrigin?: 'anonymous' }
 
 const pendingArtwork = new Map<Element, () => void>()
 let artworkObserver: IntersectionObserver | undefined
@@ -37,13 +37,15 @@ export function trackArtworkUrl(track: ArtworkTrack) {
 }
 
 /** Only decorative image layers transition; no provider or audio lifetime belongs here. */
-export function TrackArtwork({ track, compact = false, active = true, src, className = '', alt = '' }: {
+export function TrackArtwork({ track, compact = false, active = true, src, className = '', alt = '', onImageReady }: {
   track: ArtworkTrack
   compact?: boolean
   active?: boolean
   src?: string | null
   className?: string
   alt?: string
+  /** Opt in to reading the displayed cover; failed CORS loads retain a normal image. */
+  onImageReady?: (image: HTMLImageElement | null) => void
 }) {
   const artwork = approvedImageUrl(src !== undefined ? src : trackArtworkUrl(track))
   const source = compact && track.provider === 'youtube' && src === undefined
@@ -52,6 +54,10 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
   const reducedMotionRef = useRef(reducedMotion)
   reducedMotionRef.current = reducedMotion
   const elementRef = useRef<HTMLSpanElement>(null)
+  const currentImageRef = useRef<HTMLImageElement>(null)
+  const imageReadyRef = useRef(onImageReady)
+  imageReadyRef.current = onImageReady
+  const readable = Boolean(onImageReady)
   const [visibleSource, setVisibleSource] = useState<string | undefined>()
   const loadAllowed = active && (!compact || visibleSource === source)
   const [images, setImages] = useState<{ current: ArtworkImage | null; previous: ArtworkImage | null }>({ current: null, previous: null })
@@ -71,6 +77,7 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
     if (!source) {
       setImages({ current: null, previous: null })
       setState('fallback')
+      imageReadyRef.current?.(null)
       return
     }
     if (!loadAllowed) return
@@ -79,27 +86,41 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
       return
     }
     setState('loading')
+    imageReadyRef.current?.(null)
     const replacement = new Image()
     replacement.decoding = 'async'
     replacement.referrerPolicy = 'no-referrer'
+    if (readable) replacement.crossOrigin = 'anonymous'
     replacement.onload = () => {
       void replacement.decode().catch(() => {}).then(() => {
         if (!active || settled) return
         settled = true
-        setImages((current) => ({ current: { source },
+        setImages((current) => ({ current: { source, crossOrigin: replacement.crossOrigin === 'anonymous' ? 'anonymous' : undefined },
           previous: reducedMotionRef.current || current.current?.source === source ? null : current.current }))
         setState('ready')
       })
     }
     replacement.onerror = () => {
       if (!active || settled) return
+      if (replacement.crossOrigin === 'anonymous') {
+        // Providers without CORS can still display their ordinary cover.
+        replacement.removeAttribute('crossorigin')
+        replacement.src = source
+        return
+      }
       settled = true
       setImages({ current: null, previous: null })
       setState('fallback')
+      imageReadyRef.current?.(null)
     }
     replacement.src = source
     return () => { active = false; replacement.onload = null; replacement.onerror = null; replacement.removeAttribute('src') }
-  }, [loadAllowed, source])
+  }, [loadAllowed, source, readable])
+
+  useEffect(() => {
+    const image = currentImageRef.current
+    if (images.current?.source === source && image?.complete && image.naturalWidth) onImageReady?.(image)
+  }, [images.current?.source, onImageReady, source])
 
   useEffect(() => {
     if (!images.previous) return
@@ -117,8 +138,9 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
     role={alt ? 'img' : undefined} aria-label={alt || undefined} aria-hidden={alt ? undefined : true}>
     <span className={`track-artwork-fallback provider-artwork ${track.provider}`} aria-hidden="true">{track.provider === 'soundcloud' ? 'SC' : '♪'}</span>
     {images.previous && !reducedMotion && <img referrerPolicy="no-referrer" className="track-artwork-previous" src={images.previous.source} alt="" aria-hidden="true" />}
-    {images.current && <img referrerPolicy="no-referrer" key={images.current.source} className="track-artwork-current" src={images.current.source} alt="" aria-hidden="true"
+    {images.current && <img ref={currentImageRef} crossOrigin={images.current.crossOrigin} referrerPolicy="no-referrer" key={images.current.source} className="track-artwork-current" src={images.current.source} alt="" aria-hidden="true"
       data-motion={reducedMotion ? 'off' : 'on'} onAnimationEnd={() => setImages((current) => current.current?.source === images.current?.source ? { ...current, previous: null } : current)}
-      onError={() => { if (images.current?.source === source) { setImages({ current: null, previous: null }); setState('fallback') } }} />}
+      onLoad={event => { if (images.current?.source === source) imageReadyRef.current?.(event.currentTarget) }}
+      onError={() => { if (images.current?.source === source) { setImages({ current: null, previous: null }); setState('fallback'); imageReadyRef.current?.(null) } }} />}
   </span>
 }

@@ -8,7 +8,7 @@ import type { ChatCommandOrigin, ChatCommandService } from './chat-command-servi
 import { PublicRequestError, publicRequestFailure } from '../../lib/public-request-error.js'
 
 type EventKind = 'message' | 'reaction' | 'typing'
-type Reply = { ok: boolean; error?: string }
+type Reply = { ok: boolean; error?: string; message?: unknown }
 export interface ChatRelayOptions {
   getMembership: (socketId: string) => { room: { id: string }; user: User; admissionToken?: string } | null
   canWriteRoom: (userId: string, roomId: string) => Promise<boolean>
@@ -62,9 +62,9 @@ export function createChatRelay(options: ChatRelayOptions) {
         } }
         origin.assertActive()
         if (options.commands && kind === 'message') {
-          await options.commands.message(roomId,user.id,envelope.message,origin)
+          const message = await options.commands.message(roomId,user.id,envelope.message,origin)
           origin.assertActive()
-          return {ok:true}
+          return {ok:true,message}
         }
         if (options.commands && kind === 'reaction') {
           await options.commands.reaction(roomId,user.id,envelope.reaction,origin)

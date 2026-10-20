@@ -436,7 +436,7 @@ export function ProfilePage({ profileId, accessToken, currentUser, onBack, onOwn
     <section className="profile-shell profile-shell-simple" aria-label={t("socialProfileName", { name: profile.display_name })}>
       {!embedded && <nav className="profile-page-navigation" aria-label={t("socialProfile")}><Button variant="ghost" size="sm" disabled={editBusy} onClick={() => leaveProfile(onBack)}><ArrowLeft /> {t("socialBack")}</Button></nav>}
       <div className="profile-hero">
-        <div className="profile-avatar-wrap"><Avatar user={profileUser} size={embedded ? 72 : 96} /></div>
+        <div className="profile-avatar-wrap"><Avatar user={profileUser} size={embedded ? 48 : 64} /></div>
         <div className="profile-identity">
           <Heading>{profile.display_name}{profile.is_app_admin && <DevFlair className="profile-dev-flair" />}</Heading>
           {profile.handle && <span className="profile-handle">@{profile.handle}</span>}

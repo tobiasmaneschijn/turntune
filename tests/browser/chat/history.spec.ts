@@ -93,6 +93,9 @@ test('Browse older messages, find a saved conversation and return to live chat',
   await expect(page.getByText('Earlier messages', { exact: true })).toHaveCount(0)
 })
 
+test.describe('Touch chat media', () => {
+test.use({ hasTouch: true, isMobile: true })
+
 test('Share a GIF and react to a message while keeping a text draft', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 480 })
   const composer = page.getByRole('textbox', { name: 'Message room chat' })
@@ -100,12 +103,19 @@ test('Share a GIF and react to a message while keeping a text draft', async ({ p
   await page.getByRole('button', { name: 'Add emoji', exact: true }).click()
   await page.getByRole('tab', { name: 'GIFs', exact: true }).click()
   await page.getByPlaceholder('Search GIFs').fill('dance')
+  await composer.tap()
+  await expect(page.getByRole('tabpanel', { name: 'GIFs', exact: true })).toHaveCount(0)
+  await expect(composer).toHaveValue('My next message')
+  await page.getByRole('button', { name: 'Add GIF', exact: true }).tap()
+  await expect(page.getByPlaceholder('Search GIFs')).toHaveValue('dance')
   await page.locator('.chat-gif-tile').first().click()
   await expect(page.locator('.chat-message-item').last().locator('.chat-media-link')).toBeVisible()
   await expect(composer).toHaveValue('My next message')
   const message = page.locator(`#chat-message-${id(420)}`)
   const actions = message.getByRole('button', { name: 'Message actions for Mira', exact: true })
-  await actions.click()
+  await message.getByText('Room message 420', { exact: true }).tap()
+  await expect.poll(() => actions.evaluate(element => element.checkVisibility({ checkOpacity: true }))).toBe(true)
+  await actions.tap()
   await page.getByRole('menuitem', { name: 'React', exact: true }).click()
   const picker = page.getByRole('dialog', { name: "React to Mira's message" })
   await picker.getByPlaceholder('Find an emoji').fill('heart')
@@ -114,6 +124,7 @@ test('Share a GIF and react to a message while keeping a text draft', async ({ p
   await expect(message.locator('.chat-message-reactions > button')).toHaveCount(1)
   await expect(actions).toBeFocused()
   await expect(composer).toHaveValue('My next message')
+})
 })
 
 test('Reopen an uploaded image after its link expires and retry a failed refresh', async ({ page }) => {

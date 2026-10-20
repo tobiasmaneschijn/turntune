@@ -1,6 +1,7 @@
 import { serverT } from "../lib/i18n.js";
 import type { RequestHandler } from "express";
 import { RoomCommandError } from "../realtime/socket-handler.js";
+import { localRateLimitsDisabled } from "./local-development.js";
 
 interface ConnectionLeaseTarget {
   conn:{readyState:string;once(event:"close",listener:()=>void):unknown};
@@ -34,6 +35,7 @@ export class SecurityBudget {
   constructor(private readonly now = Date.now, private readonly maximumKeys = 20_000) {}
 
   consume(rules: BudgetRule[]): boolean {
+    if (localRateLimitsDisabled()) return true;
     const now = this.now();
     if (now >= this.nextPrune || this.windows.size >= this.maximumKeys) {
       for (const [key, value] of this.windows) if (value.expiresAt <= now) this.windows.delete(key);
@@ -66,6 +68,7 @@ export class SecurityBudget {
 
   /** Short bursts refill gradually; denied multi-key requests spend no tokens. */
   consumeBurst(rules: Array<{key:string;capacity:number;perMinute:number}>): boolean {
+    if (localRateLimitsDisabled()) return true;
     const now=this.now();
     for(const [key,value] of this.buckets) if(value.expiresAt<=now)this.buckets.delete(key);
     const changes=rules.map(rule=>{
@@ -88,6 +91,7 @@ export class SecurityBudget {
 
 export function peerRequestBudget(budget: SecurityBudget, peer: (request: Parameters<RequestHandler>[0]) => string): RequestHandler {
   return (request,response,next) => {
+    if (localRateLimitsDisabled()) return next();
     const identity = peer(request);
     const ready = request.path === "/ready";
     const rules = [{key:`http-peer:${identity}`,maximum:600,windowMs:60_000}];

@@ -4,17 +4,19 @@
   --motion-control: 150ms;
   --motion-surface: 200ms;
   --motion-artwork: 280ms;
+  --motion-reorder: 200ms;
+  --motion-handoff: 800ms;
+  --motion-result: 280ms;
   --motion-ease-out: cubic-bezier(.2,.8,.2,1);
   --motion-ease-exit: ease-in;
 }
 [data-slot="button"], .app-shell button, .room-lobby button,
 [data-slot="dialog-content"] button, [data-slot="menu-content"] [role="menuitem"] {
-  transition-property: background-color, border-color, color, box-shadow, opacity, transform, translate;
+  transition-property: background-color, border-color, color, box-shadow, opacity;
   transition-duration: var(--motion-control);
   transition-timing-function: var(--motion-ease-out);
 }
-@keyframes pulse { 50% { box-shadow: 0 0 0 5px rgba(216,255,87,0); } 0%,
-100% { box-shadow: 0 0 0 0 rgba(216,255,87,.35); } }
+@keyframes pulse { 50% { opacity: .5; } }
 @keyframes settings-spin { to { transform: rotate(360deg); } }
 .reduced-motion *,
 .reduced-motion *::before,

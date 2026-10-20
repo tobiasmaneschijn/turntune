@@ -1,6 +1,35 @@
 {
   "releases": [
     {
+      "version": "0.1.12",
+      "date": "2026-10-20",
+      "title": "New design and shared chat",
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "Rich link previews, with queue and save actions for music links.",
+            "Song attachments and timestamped comments. Drag cover art from the player or History into a chat draft, then open comments from the current song's timeline.",
+            "Moderator-pinned chat messages.",
+            "Games in the chat + menu, including shared music trivia with results in the chat.",
+            "Drop supported music links at a chosen position in your queue.",
+            "Select queue tracks to remove them together or save them as a set.",
+            "Listener avatars briefly appear for confirmed player reactions."
+          ]
+        },
+        {
+          "title": "Improved",
+          "items": [
+            "Compact design across rooms, room discovery, profiles, sign-in, settings, and admin tools, with light, dark, and system appearance.",
+            "Persistent bottom player with centered controls, disabled idle controls, timestamp previews, and playback errors that do not shift the layout.",
+            "Add music uses provider icons, compact search, and a link action at the bottom.",
+            "Refined chat message actions, account menus, and emoji/GIF pickers. Pickers close on outside clicks, and the emoji picker stays open after a selection.",
+            "Muted artwork color in the player border, smooth queue reordering, and DJ handoff highlights, with reduced-motion support."
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.1.11",
       "date": "2026-10-20",
       "title": "Emoji fixes and playback diagnostics",

@@ -1,0 +1,301 @@
+/* Open room chat. Density stays local to the room; shared chat fixtures opt in. */
+.open-room {
+  --room-chat-text-size: 14px;
+  --room-chat-meta-size: 12px;
+  --room-chat-avatar-size: 28px;
+  --room-chat-line-height: 20px;
+  --room-chat-group-gap: 10px;
+  --room-chat-gutter: 16px;
+  --room-chat-control-size: 28px;
+  --room-chat-row-inset: 8px;
+  --room-chat-composer-control-size: 32px;
+  --room-chat-composer-input-height: 40px;
+}
+
+.open-room .chat,
+.open-room [data-chat-surface] {
+  --chat-text-size: var(--room-chat-text-size);
+  --chat-name-size: var(--room-chat-text-size);
+  --chat-meta-size: var(--room-chat-meta-size);
+  --chat-small-size: var(--room-chat-meta-size);
+  --chat-surface: var(--card);
+  color: var(--foreground);
+}
+
+.open-room .chat {
+  border-radius: 0;
+}
+
+.open-room .chat-message-scroll {
+  padding: 4px var(--room-chat-gutter) 12px !important;
+  scroll-padding-block: 12px;
+}
+
+.open-room .chat-message-list {
+  padding-bottom: 4px;
+}
+
+.open-room .chat-message-item {
+  width: calc(100% + 2 * var(--room-chat-row-inset));
+  min-height: var(--room-chat-control-size);
+  grid-template-columns: var(--room-chat-avatar-size) minmax(0, 1fr);
+  column-gap: 10px;
+  margin-inline: calc(-1 * var(--room-chat-row-inset));
+  margin-top: var(--room-chat-group-gap);
+  padding: 2px var(--room-chat-row-inset);
+  border-radius: 4px;
+}
+
+.open-room .chat-message-item:is(:hover, :focus-within):not(.chat-message-mentioned),
+.open-room .chat-message-item:has(.chat-message-more[aria-expanded="true"]):not(.chat-message-mentioned) {
+  background: color-mix(in oklch, var(--foreground), transparent 96%);
+}
+
+.open-room .chat-message-item.chat-message-grouped {
+  margin-top: 0;
+  padding-block: 1px;
+}
+
+.open-room .chat-message-item.chat-message-has-reply {
+  margin-top: var(--room-chat-group-gap);
+}
+
+.open-room .chat-message-item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.open-room .chat-message-avatar {
+  width: var(--room-chat-avatar-size);
+}
+
+.open-room .chat-message-avatar > button {
+  display: grid;
+  place-items: center;
+  width: var(--room-chat-avatar-size);
+  height: var(--room-chat-avatar-size);
+}
+
+.open-room .chat-message-avatar .avatar {
+  width: var(--room-chat-avatar-size) !important;
+  height: var(--room-chat-avatar-size) !important;
+}
+
+.open-room .chat-message-content {
+  padding-right: calc(var(--room-chat-control-size) + 4px);
+}
+
+.open-room .chat-message-meta {
+  min-height: var(--room-chat-line-height);
+  margin-bottom: 0;
+  gap: 2px 8px;
+}
+
+.open-room .chat-message-meta strong {
+  font-weight: 600;
+  line-height: var(--room-chat-line-height);
+}
+
+.open-room .chat-message-own .chat-message-meta strong {
+  color: var(--foreground);
+}
+
+.open-room .chat-message-meta time {
+  line-height: 18px;
+}
+
+.open-room .chat-message-body {
+  line-height: var(--room-chat-line-height);
+}
+
+.open-room .chat-message-more {
+  right: var(--room-chat-row-inset);
+  width: var(--room-chat-control-size);
+  height: var(--room-chat-control-size);
+}
+
+.open-room .chat-message-actions {
+  top: -12px;
+  right: calc(var(--room-chat-control-size) + var(--room-chat-row-inset) + 4px);
+  gap: 0;
+  border-radius: 6px;
+}
+
+.open-room .chat-message-has-reply .chat-message-actions {
+  top: 16px;
+}
+
+.open-room .chat-message-actions > button {
+  width: var(--room-chat-control-size);
+  height: var(--room-chat-control-size);
+  border-radius: 4px;
+}
+
+.open-room .chat-message-actions > button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.open-room .chat-message-reactions {
+  margin-top: 2px;
+  gap: 2px;
+}
+
+.open-room .chat-message-reactions > button {
+  min-height: 24px;
+  padding: 1px 5px;
+  gap: 4px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.open-room .chat-message-reactions > button.active {
+  border-color: color-mix(in oklch, var(--primary-text), transparent 65%);
+  background: color-mix(in oklch, var(--primary), transparent 94%);
+}
+
+.open-room .chat-message-reactions > button > span:not(.chat-reaction-tooltip) {
+  font-size: 15px;
+}
+
+.open-room .chat-message-save-state {
+  min-height: 18px;
+  margin-top: 2px;
+}
+
+.open-room .chat-message-reply {
+  min-height: 24px;
+  margin-bottom: 2px;
+}
+
+.open-room .chat-date-divider,
+.open-room .chat-unread-divider {
+  margin: 12px 0 6px;
+}
+
+/* A single compact row grows vertically with the existing textarea autosizing. */
+.open-room .chat-composer {
+  padding: 0 var(--room-chat-gutter) 12px;
+  border-top: 0;
+}
+
+.open-room .chat-typing-indicator {
+  height: 18px;
+  padding-bottom: 2px;
+}
+
+.open-room .chat-composer-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  min-height: 44px;
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.open-room .chat-composer-input {
+  min-height: var(--room-chat-composer-input-height);
+  height: var(--room-chat-composer-input-height);
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: var(--room-chat-line-height);
+}
+
+.open-room .chat-composer-tools {
+  width: auto;
+  min-height: var(--room-chat-composer-input-height);
+  padding: 4px;
+  gap: 2px;
+  align-self: end;
+}
+
+.open-room .chat-composer-tools > button,
+.open-room .chat-composer-tools .chat-composer-gif {
+  width: var(--room-chat-composer-control-size);
+  height: var(--room-chat-composer-control-size);
+  min-height: var(--room-chat-composer-control-size);
+  flex-basis: var(--room-chat-composer-control-size);
+  border-radius: 4px;
+}
+
+.open-room .chat-composer-tools > button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.open-room .chat-composer-tools .chat-send-button {
+  margin-left: 2px;
+}
+
+.open-room .chat-reply-composer {
+  min-height: 40px;
+  padding-block: 2px;
+  border-radius: 6px 6px 0 0;
+  background: var(--card);
+}
+
+.open-room .chat-composer-replying .chat-composer-bar {
+  border-radius: 0 0 6px 6px;
+}
+
+.open-room .chat-composer-hint {
+  padding-top: 4px;
+}
+
+.open-room .chat-history-toolbar {
+  padding: 2px 8px;
+}
+
+/* Touch controls keep their larger targets; the message text remains plain. */
+@media (max-width: 640px), (pointer: coarse) {
+  .open-room {
+    --room-chat-text-size: 16px;
+    --room-chat-line-height: 24px;
+    --room-chat-gutter: 12px;
+    --room-chat-control-size: 44px;
+    --room-chat-composer-control-size: 44px;
+    --room-chat-composer-input-height: 44px;
+  }
+
+  .open-room .chat-message-avatar > button {
+    width: 44px;
+    height: 44px;
+    margin: -4px 0 -4px -8px;
+  }
+
+  .open-room .chat-message-reactions > button,
+  .open-room .chat-message-reply {
+    min-height: 44px;
+  }
+
+  .open-room .chat-composer-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .open-room .chat-composer-input {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .open-room .chat-composer-tools {
+    width: 100%;
+  }
+
+  .open-room .chat-composer-tools .chat-send-button {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .open-room .chat-message-item,
+  .open-room .chat-message-more,
+  .open-room .chat-message-actions,
+  .open-room .chat-composer-tools > button {
+    transition: none;
+  }
+
+  .open-room .chat-typing-indicator i {
+    animation: none;
+  }
+}

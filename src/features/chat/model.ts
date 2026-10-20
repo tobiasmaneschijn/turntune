@@ -1,5 +1,7 @@
 import i18n from '../../i18n'
 import type { User } from '@/types'
+import type { ChatGame, ChatSongAttachment } from '../../../shared/chat-attachments'
+export type { ChatGame, ChatSongAttachment } from '../../../shared/chat-attachments'
 
 export type ChatMessageType = 'text' | 'image' | 'gif'
 
@@ -14,6 +16,8 @@ export interface ChatMessage {
   replyTo?: ChatReply
   reactions?: ChatReaction[]
   poll?: ChatPoll
+  song?: ChatSongAttachment
+  game?: ChatGame
   createdAt: string
   removedAt?: string
 }
@@ -98,7 +102,7 @@ export function recentChatMessages(messages: ChatMessage[], limit = CHAT_LIVE_WI
 export function createReplySnapshot(message: ChatMessage): ChatReply {
   return {
     id: message.id,
-    content: message.content,
+    content: message.content || message.song?.title || '',
     type: message.type,
     mediaUrl: message.mediaUrl,
     mentions: message.mentions,
@@ -311,8 +315,8 @@ export function reactionLabel(group: ReactionGroup, currentUserId: string): stri
   return new Intl.ListFormat(i18n.resolvedLanguage, { style: 'long', type: 'conjunction' }).format(visibleNames)
 }
 
-export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type' | 'removedAt'>): string {
-  return message.removedAt?i18n.t('chat:removed'):message.content || (message.type === 'gif' ? i18n.t('chat:gif') : i18n.t('chat:image'))
+export function getMessagePreview(message: Pick<ChatMessage, 'content' | 'type' | 'removedAt'> & Partial<Pick<ChatMessage, 'song'>>): string {
+  return message.removedAt?i18n.t('chat:removed'):message.content || message.song?.title || (message.type === 'gif' ? i18n.t('chat:gif') : i18n.t('chat:image'))
 }
 
 export function startsNewDay(message: ChatMessage, previous?: ChatMessage): boolean {

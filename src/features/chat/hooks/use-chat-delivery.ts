@@ -3,18 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createChatDeliveryQueue, type ChatSaveStates } from '@/features/chat/delivery'
 import { ChatOutboxError, createChatOutboxStore } from '@/features/chat/outbox'
 import type { ChatMedia, ChatMention, ChatMessage, ChatReply } from '@/features/chat/model'
+import type { ChatGame, ChatSongAttachment } from '../../../../shared/chat-attachments'
+import { formatChatGameCommand } from '@/features/chat/chat-games'
 
-export interface ChatComposerSnapshot { text: string; mentions: ChatMention[]; replyTo: ChatReply | null; revision: number }
+export interface ChatComposerSnapshot { text: string; mentions: ChatMention[]; replyTo: ChatReply | null; song?: ChatSongAttachment; revision: number }
 interface Options {
   scope: string
   ownerId: string
   isConnected: boolean
   slowModeSeconds?: number
-  prepareMessage: (content: string, media?: ChatMedia, reply?: ChatReply, mentions?: ChatMention[], pollOptions?: string[]) => ChatMessage
+  prepareMessage: (content: string, media?: ChatMedia, reply?: ChatReply, mentions?: ChatMention[], pollOptions?: string[], attachments?: Pick<ChatMessage, 'song' | 'game'>) => ChatMessage
   deliver: (message: ChatMessage) => Promise<unknown>
   persist?: (message: ChatMessage) => Promise<void> | void
   composer: () => ChatComposerSnapshot
-  accepted: (snapshot: ChatComposerSnapshot, text: boolean) => void
+  accepted: (snapshot: ChatComposerSnapshot, text: boolean, submitted: ChatMessage) => void
   confirmedSend?: () => void
   beforeTextSend?: () => void
   onError: (message: string) => void
@@ -60,20 +62,21 @@ export function useChatDelivery(options: Options) {
     return () => { lifetime.active = false; queue.dispose(); if (queueRef.current === queue) queueRef.current = null }
   }, [options.scope, options.ownerId])
 
-  const send = useCallback((media?: ChatMedia, caption?: string, pollOptions?: string[]) => {
+  const send = useCallback((media?: ChatMedia, caption?: string, pollOptions?: string[], game?: ChatGame, preserveDraft = false) => {
     const current = optionsRef.current
     const snapshot = current.composer()
-    const content = pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || t('sharedImage')) : snapshot.text.trim()
+    const content = game ? formatChatGameCommand(game) : pollOptions ? (caption || '').trim() : media ? (caption?.slice(0, 500) || t('sharedImage')) : snapshot.text.trim()
     const queue = queueRef.current
-    if (!queue || !current.isConnected || !content ||
+    if (!queue || !current.isConnected || (!content && !snapshot.song) ||
       (sendingRef.current && (media || pollOptions || (current.slowModeSeconds || 0) > 0)) ||
       (uploadingRef.current && !media?.storagePath)) return null
     current.onError('')
     try {
-      const message = current.prepareMessage(content, media, pollOptions ? undefined : snapshot.replyTo || undefined, media || pollOptions ? [] : snapshot.mentions, pollOptions)
+      const message = current.prepareMessage(content, media, pollOptions || preserveDraft ? undefined : snapshot.replyTo || undefined, media || pollOptions || game ? [] : snapshot.mentions, pollOptions,
+        { song: !media && !pollOptions && !game ? snapshot.song : undefined, game })
       const delivered = queue.accept(message)
       // This synchronous callback clears only the accepted draft, never later edits.
-      if (!pollOptions) current.accepted(snapshot, !media)
+      if (!pollOptions && !preserveDraft) current.accepted(snapshot, !media, message)
       if (!media && !pollOptions) current.beforeTextSend?.()
       return delivered
     } catch (error) {
@@ -94,6 +97,7 @@ export function useChatDelivery(options: Options) {
   }, [])
   const sendText = useCallback(async () => Boolean(send()), [send])
   const sendPoll = useCallback(async (question: string, pollOptions: string[]) => Boolean(send(undefined, question, pollOptions)), [send])
+  const sendGame = useCallback(async (game: ChatGame, options?: { preserveDraft: boolean }) => Boolean(send(undefined, undefined, undefined, game, options?.preserveDraft)), [send])
   const sendMedia = useCallback(async (type: 'image' | 'gif', mediaUrl: string, content: string, storagePath?: string) => {
     const delivered = send({ type, mediaUrl, storagePath }, content)
     return delivered ? await delivered : false
@@ -102,5 +106,5 @@ export function useChatDelivery(options: Options) {
     const delivered = send({ type, mediaUrl, storagePath }, content)
     return { accepted: Boolean(delivered), delivered: delivered ? await delivered : false }
   }, [send])
-  return { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef, sendText, sendPoll, sendMedia, sendMediaWithOwnership, retrySend, retrySave }
+  return { saveStates, outboxMessages, sending, uploading, sendingRef, uploadingRef, setUploading, lifetimeRef, sendText, sendPoll, sendGame, sendMedia, sendMediaWithOwnership, retrySend, retrySave }
 }

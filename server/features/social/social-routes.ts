@@ -4,6 +4,7 @@ import { z } from "zod";
 import { BoundedCache } from "../../lib/bounded-cache.js";
 import { SocialError, type SocialStore } from "./social-store.js";
 import { reportUnexpectedRequestError } from "../../lib/public-request-error.js";
+import { localRateLimitsDisabled } from "../../security/local-development.js";
 
 const friendAction = z.object({ action: z.enum(["request", "accept", "decline", "remove"]) }).strict();
 const activitySettings = z.object({ shareActivity: z.boolean().optional(), receiveRequests: z.boolean().optional() }).strict().refine(input => input.shareActivity !== undefined || input.receiveRequests !== undefined);
@@ -19,10 +20,12 @@ export function mountSocialRoutes(app: express.Express, store: SocialStore, getU
     try {
       const actor = await getUserId(request);
       if (!actor) return void response.status(401).json({ error: serverT("sign_in_to_use_friends") });
-      const limit = kind === "read" ? 120 : kind === "invite" ? 10 : 30;
-      const key = `${kind}:${actor}`, attempt = attempts.get(key) || { count: 0, resetAt: now() + 60_000 };
-      if (attempt.count >= limit) { response.setHeader("Retry-After", String(Math.max(1, Math.ceil((attempt.resetAt - now()) / 1000)))); return void response.status(429).json({ error: serverT("too_many_requests_try_again_in_a_minute") }); }
-      attempt.count++; attempts.set(key, attempt);
+      if (!localRateLimitsDisabled()) {
+        const limit = kind === "read" ? 120 : kind === "invite" ? 10 : 30;
+        const key = `${kind}:${actor}`, attempt = attempts.get(key) || { count: 0, resetAt: now() + 60_000 };
+        if (attempt.count >= limit) { response.setHeader("Retry-After", String(Math.max(1, Math.ceil((attempt.resetAt - now()) / 1000)))); return void response.status(429).json({ error: serverT("too_many_requests_try_again_in_a_minute") }); }
+        attempt.count++; attempts.set(key, attempt);
+      }
       response.json(await run(request, actor));
     } catch (error) {
       reportUnexpectedRequestError(error, { operation: "social.request" });

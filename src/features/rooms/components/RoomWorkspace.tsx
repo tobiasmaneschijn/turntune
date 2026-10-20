@@ -1,14 +1,30 @@
 import { useTranslation } from "react-i18next";
-import { useRef, type ComponentProps, type ReactNode } from "react";
+import { useRef, type ComponentProps, type ReactNode, type Ref } from "react";
 import { useMediaQuery } from "../../../hooks/use-media-query";
 import { useRoomViewport } from "../hooks/use-room-viewport";
 import { RoomPaneTabs, type RoomPane } from "./RoomPaneTabs";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
+import { OpenRoomWorkspace } from "./OpenRoomWorkspace";
 import "../../../styles/layout-completion.css";
 
 type PanelGroupProps = Pick<ComponentProps<typeof ResizablePanelGroup>, "defaultLayout" | "groupRef" | "onLayoutChanged">;
 
-export function RoomWorkspace({ radio, player, chat, compact = false, value, onValueChange, unreadCount = 0, miniPlayer, listeningChecklist, roomNotice, ...panelProps }: PanelGroupProps & {
+export type RoomWorkspaceProps = PanelGroupProps & {
+  radio: ReactNode; player: ReactNode; chat: ReactNode;
+  compact?: boolean; value: RoomPane; onValueChange: (pane: RoomPane) => void;
+  unreadCount?: number; miniPlayer?: ReactNode; listeningChecklist?: ReactNode; roomNotice?: ReactNode;
+  experience?: boolean; activityContainerRef?: Ref<HTMLDivElement>;
+  musicOpen?: boolean;
+  musicOpenRequest?: number;
+};
+
+export function RoomWorkspace({ experience, activityContainerRef, musicOpen, musicOpenRequest, ...props }: RoomWorkspaceProps) {
+  return experience
+    ? <OpenRoomWorkspace {...props} activityContainerRef={activityContainerRef} musicOpen={musicOpen} musicOpenRequest={musicOpenRequest} />
+    : <ClassicRoomWorkspace {...props} />;
+}
+
+function ClassicRoomWorkspace({ radio, player, chat, compact = false, value, onValueChange, unreadCount = 0, miniPlayer, listeningChecklist, roomNotice, ...panelProps }: PanelGroupProps & {
   radio: ReactNode;
   player: ReactNode;
   chat: ReactNode;

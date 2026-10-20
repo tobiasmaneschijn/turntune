@@ -17,11 +17,13 @@ import { Label } from '@/components/ui/label'
 export function ForgotPasswordForm({
   client,
   onNavigate,
+  showTitle = true,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
   client: SupabaseClient
   onNavigate: (path: string) => void
+  showTitle?: boolean
 }) {
   const { t } = useTranslation("public");
   const [email, setEmail] = useState('')
@@ -94,12 +96,10 @@ export function ForgotPasswordForm({
         </Card>
       ) : (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-xl">{t("resetPassword")}</CardTitle>
-          </CardHeader>
+          {showTitle && <CardHeader><CardTitle>{t("resetPassword")}</CardTitle></CardHeader>}
           <CardContent>
             <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="email">{t("email")}</Label>
                   <Input

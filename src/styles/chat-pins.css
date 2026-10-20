@@ -1,0 +1,16 @@
+.chat-pinned-messages { flex: 0 0 auto; min-height: 0; max-height: min(320px, 55%); display: flex; flex-direction: column; border-bottom: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground); }
+.chat-pins-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; font-size: 13px; }
+.chat-pinned-messages > p, .chat-pins-error { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--muted-foreground); }
+.chat-pins-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-pins-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--input) transparent; }
+.chat-pin-row { display: flex; align-items: center; gap: 4px; margin-inline: 8px; border-top: 1px solid var(--border); }
+.chat-pin-jump { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 8px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--foreground); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.chat-pin-jump:hover { background: var(--secondary); }
+.chat-pin-jump:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.chat-pin-jump > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-pin-jump > time { color: var(--muted-foreground); font-size: 11px; }
+.chat-pin-jump > span { grid-column: 1 / -1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+@media (max-width: 640px), (pointer: coarse) {
+  .chat-pins-heading > button, .chat-pin-row > button { min-width: 44px; min-height: 44px; }
+  .chat-pin-jump { min-height: 44px; }
+}

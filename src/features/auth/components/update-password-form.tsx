@@ -16,11 +16,13 @@ import { Label } from '@/components/ui/label'
 export function UpdatePasswordForm({
   client,
   onComplete,
+  showTitle = true,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
   client: SupabaseClient
   onComplete: () => void
+  showTitle?: boolean
 }) {
   const { t } = useTranslation("public");
   const [password, setPassword] = useState('')
@@ -50,12 +52,10 @@ export function UpdatePasswordForm({
   return (
     <div className={cn('flex flex-col gap-6', className)} {...props}>
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">{t("newPassword")}</CardTitle>
-        </CardHeader>
+        {showTitle && <CardHeader><CardTitle>{t("newPassword")}</CardTitle></CardHeader>}
         <CardContent>
           <form onSubmit={handleForgotPassword}>
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="password">{t("newPassword")}</Label>
                 <Input
@@ -71,7 +71,7 @@ export function UpdatePasswordForm({
                 />
                 <p id="password-requirements" className="text-xs text-muted-foreground">{t("passwordLengthHint")}</p>
               </div>
-              {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? t("saving") : t("savePassword")}
               </Button>

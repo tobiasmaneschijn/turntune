@@ -2,14 +2,15 @@ import { useTranslation } from "react-i18next";
 import { ListMusic, MessageSquare, Play } from "lucide-react";
 
 export type RoomPane = "radio" | "player" | "chat";
-const panes: RoomPane[] = ["radio", "player", "chat"];
+const defaultPanes: RoomPane[] = ["radio", "player", "chat"];
 
 /** Panels stay mounted so changing panes never restarts a playback provider. */
-export function RoomPaneTabs({ value, onValueChange, unreadCount = 0, mode = "tabs" }: {
+export function RoomPaneTabs({ value, onValueChange, unreadCount = 0, mode = "tabs", panes = defaultPanes }: {
   value: RoomPane;
   onValueChange: (pane: RoomPane) => void;
   unreadCount?: number;
   mode?: "tabs" | "views";
+  panes?: readonly RoomPane[];
 }) {
   const { t } = useTranslation("rooms");
   return (

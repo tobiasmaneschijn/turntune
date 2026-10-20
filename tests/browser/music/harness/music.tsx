@@ -6,7 +6,11 @@ import type { SocketReply } from "../../../../src/lib/socket-request";
 import type { Provider, RoomSnapshot, Track, User } from "../../../../src/types";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
+import "../../../../src/styles/open-room.css";
 import "./music.css";
+
+const inlinePanel = new URLSearchParams(location.search).has("inline");
+if (inlinePanel) document.documentElement.setAttribute("data-room-design", "open-room");
 
 const self: User = { id: "self", name: "Alex", avatarSeed: "alex", avatarKey: "pulse" };
 const other: User = { id: "other", name: "Casey", avatarSeed: "casey", avatarKey: "pulse" };
@@ -38,12 +42,14 @@ const waitingActions: Array<(response?: SocketReply) => void> = [];
 let deferAction = false;
 let counter = 0;
 const undoTracks = new Map<string, { track: Track; after?: string; before?: string; roomId: string }>();
+const failedRemovals = new Set<string>();
 
 declare global {
   interface Window {
     musicQol: {
       commands: typeof commands;
       deferNextAction(): void;
+      failNextQueueRemoval(trackId: string): void;
       resolveNext(response?: SocketReply): void;
       setRoom(roomId: string): void;
       setConnected(connected: boolean): void;
@@ -71,6 +77,10 @@ function Harness() {
     const execute = (forced?: SocketReply) => {
       if (forced?.ok === false) { reply(forced); return; }
       if (latest.current.room.id !== roomId) { reply({ ok: true, position: 9 }); return; }
+      if (event === "queue:remove" && failedRemovals.delete((payload as { trackId: string }).trackId)) {
+        for (const [key, receipt] of undoTracks) if (receipt.roomId === roomId) undoTracks.delete(key);
+        reply({ ok: false, error: "Queue storage is unavailable. Try again." }); return;
+      }
       const next: RoomSnapshot = { ...latest.current, room: { ...latest.current.room, queue: [...latest.current.room.queue], djQueueUserIds: [...latest.current.room.djQueueUserIds] } };
       let result: SocketReply = { ok: true };
       const data = payload as any;
@@ -98,7 +108,7 @@ function Harness() {
         if (index < 0) { reply({ ok: false, error: "Track not found." }); return; }
         const before = next.room.queue[index - 1]?.id; const after = next.room.queue[index + 1]?.id;
         const [track] = next.room.queue.splice(index, 1);
-        if (event === "queue:remove") { const token = crypto.randomUUID(); undoTracks.set(token, { track, before, after, roomId }); result.undo = { token, title: track.title, expiresAt: Date.now() + 15_000 }; }
+        if (event === "queue:remove") { const token = crypto.randomUUID(); for (const [key, receipt] of undoTracks) if (receipt.roomId === roomId) undoTracks.delete(key); undoTracks.set(token, { track, before, after, roomId }); result.undo = { token, title: track.title, expiresAt: Date.now() + 15_000 }; }
         if (event !== "queue:remove") next.room.queue.splice(event === "queue:play-next" ? 0 : data.toIndex, 0, track);
       }
       if (event === "queue:undo") {
@@ -121,6 +131,7 @@ function Harness() {
   window.musicQol = {
     commands,
     deferNextAction: () => { deferAction = true; },
+    failNextQueueRemoval: (trackId) => { failedRemovals.add(trackId); },
     resolveNext: (response) => { const execute = waitingActions.shift(); if (!execute) throw new Error("No pending action"); execute(response); },
     setRoom: (roomId) => update(initialSnapshot(roomId)),
     setConnected,
@@ -131,7 +142,7 @@ function Harness() {
     openQueue: () => controlsRef.current?.openQueue()
   };
 
-  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} controlsRef={controlsRef} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
+  return <><p className="music-harness-heading">Production MusicRail · deterministic actions</p><main className="music-qol-harness" style={{ display: new URLSearchParams(location.search).has("hideMusic") ? "none" : undefined, width: inlinePanel ? 320 : undefined }}><MusicRail snapshot={snapshot} currentUserId={self.id} accessToken={new URLSearchParams(location.search).get("scenario")?.startsWith("library") ? "fixture-access-token" : undefined} connected={connected} requestAction={requestAction} setNotice={setNotice} controlsRef={controlsRef} inlineAddMusic={inlinePanel} /></main><output className="music-harness-output" aria-label="Last music notice">{notice}</output></>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Harness /></ThemeProvider>);

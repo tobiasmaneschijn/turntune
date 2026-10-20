@@ -7,6 +7,7 @@ import test from 'node:test'
 import { createClient } from '@supabase/supabase-js'
 import { ChatCommandService, type ChatCommandServiceOptions } from './chat-command-service.js'
 import { CHAT_MAX_REACTIONS_PER_MESSAGE, CHAT_MAX_HISTORY_CHILDREN, CHAT_MAX_POLL_VOTERS } from './chat-validation.js'
+import { COIN_SIDES, EIGHTBALL_ANSWERS, RPS_CHOICES, rpsOutcome } from '../../../shared/chat-attachments.js'
 
 const alice = '11111111-1111-4111-8111-111111111111'
 const staff = '22222222-2222-4222-8222-222222222222'
@@ -17,6 +18,85 @@ const message = (now: number, id = randomUUID(), content = 'Hello') => ({
   type: 'text' as const,
   createdAt: new Date(now).toISOString(),
   mentions: []
+})
+
+test('chat games commit a server result once and preserve it across retries and restart', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-games-'))
+  const events: unknown[] = []
+  const options: ChatCommandServiceOptions = {
+    client: null, dataDir: dir, now: () => initialTime,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }), authorize: async () => {},
+    emit: async (_room, _event, payload) => { events.push(payload) },
+  }
+  try {
+    const service = new ChatCommandService(options)
+    const input = { ...message(initialTime), game: { kind: 'roll', dice: 2, sides: 6, result: [99,99] } }
+    const [first, duplicate] = await Promise.all([service.message('lounge', alice, input), service.message('lounge', alice, input)])
+    assert.equal(first.game?.kind, 'roll')
+    if (first.game?.kind !== 'roll') throw new Error('Missing roll')
+    assert.equal(first.content, '/roll 2d6')
+    assert.equal(first.game.result?.length, 2)
+    assert.ok(first.game.result?.every(value => value >= 1 && value <= 6))
+    assert.deepEqual(duplicate.game, first.game)
+    assert.equal(events.length, 1)
+    const restarted = new ChatCommandService(options)
+    assert.deepEqual((await restarted.message('lounge', alice, { ...input, game: { ...input.game, result: [1,1] } })).game, first.game)
+    await assert.rejects(restarted.message('lounge', alice, { ...input, game: { ...input.game, sides: 20 } }), /different content/)
+    const chosen = await restarted.message('lounge', alice, { ...message(initialTime), game: { kind: 'pick', options: ['house','ambient'], result: 'forged' } })
+    assert.equal(chosen.game?.kind, 'pick')
+    if (chosen.game?.kind === 'pick') assert.ok(chosen.game.options.includes(chosen.game.result!))
+
+    const newGames = [
+      { game: { kind: 'flip', result: 'forged' }, choices: COIN_SIDES, command: '/flip' },
+      { game: { kind: 'rps', choice: 'paper', result: 'forged' }, choices: RPS_CHOICES, command: '/rps paper' },
+      { game: { kind: 'eightball', question: 'One more song?', result: 'forged' }, choices: EIGHTBALL_ANSWERS, command: '/8ball One more song?' },
+    ]
+    for (const { game, choices, command } of newGames) {
+      const input = { ...message(initialTime), game }
+      const accepted = await restarted.message('lounge', alice, input)
+      assert.equal(accepted.content, command)
+      assert.equal(accepted.game?.kind, game.kind)
+      const resolvedGame = accepted.game
+      assert.ok(resolvedGame && 'result' in resolvedGame && choices.some(value => value === resolvedGame.result))
+      const afterRestart = new ChatCommandService(options)
+      assert.deepEqual((await afterRestart.message('lounge', alice, { ...input, game: { ...game, result: 'changed' } })).game, accepted.game)
+      if (game.kind === 'rps') await assert.rejects(afterRestart.message('lounge', alice, { ...input, game: { ...game, choice: 'rock' } }), /different content/)
+      if (game.kind === 'eightball') await assert.rejects(afterRestart.message('lounge', alice, { ...input, game: { ...game, question: 'Different question?' } }), /different content/)
+    }
+    assert.equal(events.length, 5, 'each new game is published once across retries')
+    await assert.rejects(restarted.message('lounge', alice, { ...message(initialTime), game: { kind: 'rps', choice: 'lizard' } }))
+    await assert.rejects(restarted.message('lounge', alice, { ...message(initialTime), game: { kind: 'eightball', question: ' ' } }))
+    assert.equal(rpsOutcome('rock', 'scissors'), 'win')
+    assert.equal(rpsOutcome('paper', 'scissors'), 'lose')
+    assert.equal(rpsOutcome('scissors', 'scissors'), 'draw')
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('song attachments use public room metadata and survive history changes without leaking removed content', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'soundspin-song-'))
+  let available = true
+  const publicSong = { id: 'played-track', provider: 'youtube' as const, providerId: 'video', title: 'Room recording', durationMs: 30_000 }
+  const options: ChatCommandServiceOptions = {
+    client: null, dataDir: dir, now: () => initialTime,
+    getUser: async id => ({ id, name: 'Alice', avatarSeed: id }), authorize: async () => {}, emit: async () => {},
+    resolveSong: async (roomId, id) => available && roomId === 'lounge' && id === publicSong.id ? publicSong : null,
+  }
+  try {
+    const service = new ChatCommandService(options)
+    const input = { ...message(initialTime, undefined, ''), song: { ...publicSong, title: 'Forged title', positionSeconds: 40 } }
+    const accepted = await service.message('lounge', alice, input)
+    assert.equal(accepted.content, '')
+    assert.equal(accepted.song?.title, publicSong.title)
+    assert.equal(accepted.song?.positionSeconds, 30)
+    await assert.rejects(service.message('lounge', alice, { ...message(initialTime), song: { id: 'private-queued-track' } }), /no longer available/)
+    await assert.rejects(service.message('elsewhere', alice, { ...message(initialTime), song: publicSong }), /no longer available/)
+    available = false
+    assert.deepEqual((await new ChatCommandService(options).message('lounge', alice, input)).song, JSON.parse(JSON.stringify(accepted.song)))
+    await service.removeMessage('lounge', staff, input.id, randomUUID())
+    const payload = await service.readMessages('lounge', [input.id])
+    assert.equal(payload.rows[0].song, null)
+    assert.equal((await service.message('lounge', alice, input)).song, undefined)
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
 test('local chat commits before delivery, preserves immutable receipts and cooldowns across restart', async () => {

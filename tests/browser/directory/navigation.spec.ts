@@ -165,7 +165,7 @@ test("enter password-protected rooms and retry creation without losing its detai
   await expect(page.getByRole("button", { name: "Create a room", exact: true })).toBeVisible();
   await page.evaluate(() => { (window as any).directoryReviewFixture.delayCreation = true; });
   await page.getByRole("button", { name: "Create a room", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Let's make some noise.", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Create a room", exact: true });
   await dialog.getByRole("textbox", { name: "Room name", exact: true }).fill("  New radio  ");
   await dialog.locator("#room-password").fill("submitted-password");
   await dialog.getByRole("button", { name: "Create room", exact: true }).click();

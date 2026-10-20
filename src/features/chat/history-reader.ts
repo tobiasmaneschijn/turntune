@@ -3,9 +3,13 @@ import type { ChatMessage, ChatPollVoteEvent } from './model'
 import { normalizeRealtimePollVote } from './protocol'
 import { chatHistoryCursorFilter, chatMessagesFromRows, type ChatHistoryCursor, type ChatHistoryPage, type ChatHistoryRow } from './persistence'
 import { requestJson } from '../../lib/authenticated-http'
+import { createChatPinSource, type ChatPinSource } from './pins'
+import { createChatLinkPreviewLoader, type ChatLinkPreviewLoader } from './link-previews'
+import { createChatTriviaSource, type ChatTriviaSource } from './trivia'
 
 export interface ChatMessageContext { messages: ChatMessage[]; olderCursor: ChatHistoryCursor; newerCursor: ChatHistoryCursor; hasOlder: boolean; hasNewer: boolean }
-export interface ChatHistorySource {
+export interface ChatHistorySource extends Partial<ChatPinSource>, Partial<ChatTriviaSource> {
+  loadLinkPreview?: ChatLinkPreviewLoader
   loadPage(cursor?: ChatHistoryCursor, options?: { direction?: 'older' | 'newer'; pageSize?: number }): Promise<ChatHistoryPage>
   search(query: string, cursor?: ChatHistoryCursor): Promise<ChatHistoryPage>
   loadContext(messageId: string): Promise<ChatMessageContext | null>
@@ -36,6 +40,9 @@ export function createChatHistorySource(accessToken: string, roomSlug: string, f
   }
   const messages = (payload: RowsPayload) => chatMessagesFromRows(payload.rows, payload.replies, payload.profiles)
   return {
+    ...createChatPinSource(accessToken, roomSlug, fetchImpl),
+    ...createChatTriviaSource(accessToken, roomSlug, fetchImpl),
+    loadLinkPreview: createChatLinkPreviewLoader(accessToken, roomSlug, fetchImpl),
     async loadPage(cursor, options = {}) {
       const params = cursorParams(cursor)
       if (options.direction) params.set('direction', options.direction)

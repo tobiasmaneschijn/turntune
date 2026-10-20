@@ -278,7 +278,7 @@ export function RoomLobby({
         </div>
         {loading ? (
           <div className="lobby-loading" aria-label={t("roomLobby.loadingRooms2")} aria-busy="true">
-            {[0, 1, 2].map(item => <Skeleton key={item} className="h-24 rounded-lg" />)}
+            {[0, 1, 2].map(item => <Skeleton key={item} className="h-20 rounded-lg" />)}
           </div>
         ) : (
           <div className="lobby-directory-results">

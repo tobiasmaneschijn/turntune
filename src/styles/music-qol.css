@@ -35,7 +35,6 @@
 .music-rail-qol .dj-lineup-toggle[aria-expanded="true"] .music-lineup-label svg { transform: none; }
 .music-rail-qol .music-dj-membership { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .music-rail-qol .music-dj-membership > p { flex: 1; min-width: 0; margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
-.music-rail-qol .music-own-readiness { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
 .music-rail-qol .music-dj-action { flex-shrink: 0; min-height: 44px; padding-inline: 10px; font-size: 12px; }
 .music-rail-qol .music-lineup-details { min-width: 0; padding: 8px 4px 0; }
 .music-rail-qol .music-lineup-details > p { margin: 8px 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }

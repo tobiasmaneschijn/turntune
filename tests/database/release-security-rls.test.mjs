@@ -190,12 +190,22 @@ test('release-ready marker is last-migration dependent and service-only',async()
     assert.equal((await db.query("select soundspin_release_ready('unknown-contract')as ready")).rows[0].ready,false);
     const metadata=(await db.query("select prosecdef,proconfig from pg_proc where oid='public.soundspin_release_ready()'::regprocedure")).rows[0];
     assert.equal(metadata.prosecdef,false);assert.ok(metadata.proconfig.includes('search_path=""'));
-    for(const [name,args] of [['soundspin_social_profiles','uuid[]'],['soundspin_has_account_identity','jsonb,text'],['soundspin_room_access','text,uuid,uuid[]'],['soundspin_chat_message_state','uuid']]){
+    for(const [name,args] of [['soundspin_social_profiles','uuid[]'],['soundspin_has_account_identity','jsonb,text'],['soundspin_room_access','text,uuid,uuid[]'],['soundspin_chat_message_state','uuid'],['soundspin_chat_trivia_answer','text,uuid,uuid,integer']]){
       await db.exec(`reset role; alter function public.${name}(${args}) rename to ${name}_fixture_missing; set role service_role`);
       assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,false,'Missing release identity helpers must prevent startup.');
       await db.exec(`reset role; alter function public.${name}_fixture_missing(${args}) rename to ${name}; set role service_role`);
       assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,true);
     }
+    // The same startup contract must reject absent chat storage and an unsafe
+    // direct answer channel, while retaining all previous readiness checks.
+    await db.exec('reset role; alter table public.soundspin_chat_trivia_answers rename to soundspin_chat_trivia_answers_fixture_missing; set role service_role');
+    assert.equal((await db.query("select soundspin_release_ready('database-access-v1')as ready")).rows[0].ready,false);
+    await db.exec('reset role; alter table public.soundspin_chat_trivia_answers_fixture_missing rename to soundspin_chat_trivia_answers; grant select on public.soundspin_chat_trivia_answers to authenticated; set role service_role');
+    assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,false);
+    await db.exec('reset role; revoke select on public.soundspin_chat_trivia_answers from authenticated; alter table public.soundspin_chat_trivia_answers disable row level security; set role service_role');
+    assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,false);
+    await db.exec('reset role; alter table public.soundspin_chat_trivia_answers enable row level security; set role service_role');
+    assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,true);
   }finally{await db.close();}
 });
 

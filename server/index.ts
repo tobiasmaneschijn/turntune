@@ -50,6 +50,9 @@ import { SocialStore } from "./features/social/social-store.js";
 import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./features/chat/chat-history.js";
 import { createChatRelay } from "./features/chat/chat-relay.js";
 import { resolveChatMediaUrl } from "./features/chat/chat-media.js";
+import { mountChatLinkPreviewRoutes } from "./features/chat/link-preview-routes.js";
+import { ChatPinService } from "./features/chat/chat-pin-service.js";
+import { mountChatPinRoutes } from "./features/chat/chat-pin-routes.js";
 import { createSavedSetResolver, SetImportRegistry } from "./features/music/saved-set.js";
 import { validateServerConfig } from "./lib/config.js";
 import { configureHttpSecurity, trustedClientIp, trustedSocketPeer } from "./security/security-http.js";
@@ -260,8 +263,15 @@ async function canWriteRoomChat(userId: string, roomSlug: string) {
   return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
 }
 const chatWritePolicy = createChatWritePolicy();
+async function canReadRoomChat(userId: string, roomSlug: string) {
+  const access = await freshRoomAdmission(userId, roomSlug);
+  if (!canReadAdmission(access)) return false;
+  const room = await store.loadRoom(roomSlug);
+  if (!room || isRoomBanned(room, userId)) return false;
+  return access.isPublic && !access.passwordHash || [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
+}
 /** HTTP poll mutations and the relay share the same fresh admitted recipient gate. */
-async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll' | 'chat:removed', payload: unknown,
+async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll' | 'chat:removed' | 'chat:pin', payload: unknown,
   origin: { socketId?: string; userId: string; assertActive?: () => void }) {
   origin.assertActive?.();
   const recipients = [...(roomUsers.get(roomId) || [])];
@@ -283,6 +293,13 @@ async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:re
   }
 }
 const chatCommands=new ChatCommandService({client:supabaseAdmin,
+  resolveSong: async (roomId, trackId) => {
+    const room = await store.loadRoom(roomId);
+    const track = [room?.playback.track, ...(room?.history || [])].find(track => track?.id === trackId);
+    if (!track) return null;
+    const { id, provider, providerId, title, artist, artworkUrl, permalinkUrl, durationMs } = track;
+    return { id, provider, providerId, title, artist, artworkUrl, permalinkUrl, durationMs };
+  },
   withRoomOperation:(roomId,run)=>store.withRoomOperation(roomId,run),
   getMentionAudience:async(roomId)=>{
     const users=uniqueUsers(roomUsers.get(roomId)?.values()??[]);
@@ -317,14 +334,24 @@ mountChatHistoryRoutes(app, {
   canWriteRoom: canWriteRoomChat,
   onPollVote: (roomId, event, userId) => emitAdmittedChat(roomId, 'chat:poll', { roomId, poll: event }, { userId }),
   getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
-  canReadRoom: async (userId, roomSlug) => {
-    const access = await freshRoomAdmission(userId, roomSlug);
-    if (!canReadAdmission(access)) return false;
-    const room=await store.loadRoom(roomSlug);if(!room||isRoomBanned(room,userId))return false;
-    if (access.isPublic && !access.passwordHash) return true;
-    // Protected/private history requires the same live admission as the room.
-    return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
-  }
+  canReadRoom: canReadRoomChat
+});
+mountChatLinkPreviewRoutes(app, { getUserId: getApiUserId, canReadRoom: canReadRoomChat });
+const chatPins = new ChatPinService({ client: supabaseAdmin,
+  withRoomOperation: (roomId, run) => store.withRoomOperation(roomId, run),
+  authorizeRead: async (roomId, userId) => { if (!await canReadRoomChat(userId, roomId)) throw new RoomCommandError('Join this room before reading pinned messages.'); },
+  authorizeManage: async (roomId, userId) => {
+    if (!await canWriteRoomChat(userId, roomId)) throw new RoomCommandError('Join this room before changing pinned messages.');
+    const room = await store.loadRoom(roomId);
+    if (!room) throw new RoomCommandError('Room not found.');
+    requireRoomCapability(room, userId, 'chatParticipants');
+  },
+  loadMessage: id => chatCommands.loadMessage(id),
+  onChanged: (roomId, pin, userId) => emitAdmittedChat(roomId, 'chat:pin', { roomId, pin }, { userId }),
+});
+mountChatPinRoutes(app, { pins: chatPins, getUserId: getApiUserId,
+  canReadRoom: (roomId, userId) => canReadRoomChat(userId, roomId),
+  readMessages: (roomId, ids) => chatCommands.readMessages(roomId, ids),
 });
 const moderation=new ModerationService(store,{
   authorizeActor:async(roomId,userId)=>{const access=await freshRoomAdmission(userId,roomId);if(!access.accountActive||!access.roomActive)throw new RoomCommandError(serverT("room_access_is_unavailable"));},

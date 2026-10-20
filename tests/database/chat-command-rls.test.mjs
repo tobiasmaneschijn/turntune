@@ -34,11 +34,17 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     await db.exec(await readFile(new URL('../../supabase/migrations/20261009073805_durable_room_chat.sql', import.meta.url), 'utf8'));
     await db.exec(await readFile(new URL('../../supabase/migrations/20261013121000_chat_moderation_bounds.sql', import.meta.url), 'utf8'));
     await db.exec(await readFile(new URL('../../supabase/migrations/20261020083659_return_committed_chat_record.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261020120000_chat_song_games.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261020184034_chat_more_minigames.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261020185454_chat_music_trivia.sql', import.meta.url), 'utf8'));
     for (const role of ['anon', 'authenticated']) {
       await db.exec(`set role ${role}`);
       await assert.rejects(command('message', `message:${randomUUID()}`, payload(randomUUID())), /permission denied/);
       await assert.rejects(db.query('select soundspin_committed_chat_row($1)', [randomUUID()]), /permission denied/);
       await assert.rejects(db.query('select soundspin_chat_message_state($1)', [randomUUID()]), /permission denied/);
+      await assert.rejects(db.query('select soundspin_chat_game_result($1)', [{ kind: 'roll', dice: 1, sides: 6 }]), /permission denied/);
+      await assert.rejects(db.query('select public.soundspin_chat_trivia_answer($1,$2,$3,0)', ['lounge',alice,randomUUID()]), /permission denied/);
+      await assert.rejects(db.query('select * from public.soundspin_chat_trivia_answers'), /permission denied/);
       await assert.rejects(db.query('select * from public.soundspin_chat_tombstones'), /permission denied/);
       await db.exec('reset role');
     }
@@ -100,6 +106,54 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     assert.equal((await command('message', `message:${replyId}`, replyInput)).row.reply.content, 'Message removed');
     assert.deepEqual((await db.query('select content,poll_options,media_url,storage_path,removed_at is not null as removed from soundspin_messages where id=$1', [id])).rows, [{ content: 'Message removed', poll_options: null, media_url: null, storage_path: null, removed: true }]);
     assert.equal((await db.query('select * from soundspin_poll_votes')).rows.length, 0);
+    // Outcomes are drawn inside the transaction and immutable across a retry.
+    const gameId = randomUUID(), gameInput = { ...payload(gameId), poll: undefined, content: '/roll 2d6', game: { kind: 'roll', dice: 2, sides: 6, result: [99,99] } };
+    const rolled = await command('message', `message:${gameId}`, gameInput);
+    assert.equal(rolled.row.game.result.length, 2);
+    assert.ok(rolled.row.game.result.every(value => value >= 1 && value <= 6));
+    const retriedGame = await command('message', `message:${gameId}`, { ...gameInput, game: { ...gameInput.game, result: [1,1] } });
+    assert.equal(retriedGame.fresh, false);assert.deepEqual(retriedGame.row.game, rolled.row.game);
+    const pickId = randomUUID(), pickInput = { ...payload(pickId), poll: undefined, content: '/pick house, ambient', game: { kind: 'pick', options: ['house','ambient'], result: 'forged' } };
+    const picked = await command('message', `message:${pickId}`, pickInput);
+    assert.ok(pickInput.game.options.includes(picked.row.game.result));
+    for (const [game, outcomes] of [
+      [{ kind: 'flip' }, ['heads','tails']],
+      [{ kind: 'rps', choice: 'rock' }, ['rock','paper','scissors']],
+      [{ kind: 'eightball', question: 'One more song?' }, ['yes','no','likely','unlikely','maybe','askAgain','certain','doubtful']],
+    ]) {
+      const id = randomUUID(), input = { ...payload(id), poll: undefined, content: 'Game', game: { ...game, result: 'forged' } };
+      const accepted = await command('message', `message:${id}`, input);
+      assert.equal(accepted.row.game.kind, game.kind);
+      assert.ok(outcomes.includes(accepted.row.game.result));
+      assert.deepEqual((await command('message', `message:${id}`, { ...input, game: { ...game, result: 'changed' } })).row.game, accepted.row.game);
+    }
+    await assert.rejects(db.query('select soundspin_chat_game_result($1)', [{ kind: 'rps', choice: 'lizard' }]), /rock, paper, or scissors/);
+    await assert.rejects(db.query('select soundspin_chat_game_result($1)', [{ kind: 'eightball', question: ' ' }]), /question/);
+    // Room trivia records one immutable answer per account; retries cannot change it.
+    const triviaId=randomUUID(), triviaRound={questionId:'piano-keys',question:'How many keys does a standard full-size piano have?',options:['88','76','61','96'],endsAt:new Date(Date.now()+30_000).toISOString()};
+    const triviaInput={...payload(triviaId),poll:undefined,content:'/trivia',game:{kind:'trivia',round:triviaRound,correctOption:0}};
+    const trivia=await command('message',`message:${triviaId}`,triviaInput);
+    assert.deepEqual(trivia.row.game,{kind:'trivia',round:triviaRound});
+    assert.deepEqual((await command('message',`message:${triviaId}`,{...triviaInput,game:{kind:'trivia',round:{...triviaRound,endsAt:new Date(0).toISOString()}}})).row.game,trivia.row.game);
+    const answer=async(user,index,room='lounge')=>(await db.query('select public.soundspin_chat_trivia_answer($1,$2,$3,$4) as answer',[room,user,triviaId,index])).rows[0].answer;
+    assert.equal(await answer(alice,0),0);
+    assert.equal(await answer(alice,2),0);
+    assert.equal(await answer(staff,1),1);
+    await assert.rejects(answer(alice,0,'elsewhere'),/unavailable/);
+    await assert.rejects(answer(staff,4),/Choose a trivia answer/);
+    assert.equal((await db.query('select count(*)::int as count from public.soundspin_chat_trivia_answers where message_id=$1',[triviaId])).rows[0].count,2);
+    await db.query("update public.soundspin_messages set game=jsonb_set(game,'{round,endsAt}',to_jsonb((clock_timestamp()-interval '1 second')::text)) where id=$1",[triviaId]);
+    assert.equal(await answer(alice,3),0);
+    await assert.rejects(answer('00000000-0000-4000-8000-000000000001',2),/ended/);
+    await command('remove',`remove:${randomUUID()}`,{messageId:triviaId},staff);
+    await assert.rejects(answer(alice,0),/unavailable/);
+    assert.equal((await db.query('select count(*)::int as count from public.soundspin_chat_trivia_answers where message_id=$1',[triviaId])).rows[0].count,0);
+    const songId = randomUUID(), songInput = { ...payload(songId), poll: undefined, content: '', song: { id: 'played-track', provider: 'youtube', providerId: 'song', title: 'A song', positionSeconds: 14 } };
+    assert.deepEqual((await command('message', `message:${songId}`, songInput)).row.song, songInput.song);
+    await command('remove', `remove:${randomUUID()}`, { messageId: songId }, staff);
+    assert.equal((await command('message', `message:${songId}`, songInput)).row.song, null);
+    await command('remove', `remove:${randomUUID()}`, { messageId: gameId }, staff);
+    assert.equal((await command('message', `message:${gameId}`, gameInput)).row.game, null);
     await assert.rejects(command('reaction', `reaction:${randomUUID()}`, { messageId: id, action: 'add', emoji: '❤️' }), /removed/);
     await assert.rejects(command('poll', `poll:${randomUUID()}`, { messageId: id, optionIndex: 0 }), /removed/);
     const future = randomUUID();await command('remove', `remove:${randomUUID()}`, { messageId: future, reason: 'Pre-save removal' }, staff);
@@ -107,13 +161,13 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     assert.equal(pendingRemoval.row,null);assert.equal(pendingRemoval.removal.roomId,'lounge');assert.ok(pendingRemoval.removal.removedAt);
     await command('message', `message:${future}`, payload(future), alice, 10);
     assert.equal((await db.query('select content,removed_at is not null as removed from soundspin_messages where id=$1', [future])).rows[0].removed, true);
-    assert.equal((await db.query('select * from soundspin_chat_removals')).rows.length, 2);
+    assert.equal((await db.query('select * from soundspin_chat_removals')).rows.length, 5);
     // Expiring replay receipts cannot resurrect content or change immutable message identity.
     await db.query("update soundspin_chat_receipts set created_at=now()-interval '25 hours'");
     assert.equal((await command('message', `message:${id}`, input)).fresh, false);
     await assert.rejects(command('message', `message:${id}`, { ...input, content: 'Changed' }, alice, 0, 'c'.repeat(64)), /different content/);
     assert.equal((await command('remove', `remove:${randomUUID()}`, { messageId: id }, staff)).fresh, false);
-    assert.equal((await db.query('select * from soundspin_chat_removals')).rows.length, 2);
+    assert.equal((await db.query('select * from soundspin_chat_removals')).rows.length, 5);
     // The aggregate limit also applies to many accounts and direct service inserts.
     const crowded = randomUUID(); await command('message', `message:${crowded}`, payload(crowded));
     await db.query("insert into soundspin_message_reactions(message_id,user_id,emoji) select $1,id,'👍' from auth.users where id::text like '00000000-%' order by id limit 300", [crowded]);

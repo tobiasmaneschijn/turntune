@@ -9,7 +9,8 @@ export async function startServer(load: () => Promise<unknown>) {
     // Configuration names aid operators without echoing environment values or
     // arbitrary provider/database errors through Node's uncaught-error renderer.
     if (error instanceof Error && typeof error.message === "string") {
-      const setting = ["SUPABASE_JWKS", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "APP_ORIGIN", "TRUSTED_PROXY_CIDRS", "PROVIDER_TOKEN_ENCRYPTION_KEY"].find(name => error.message.includes(name));
+      const setting = ["SUPABASE_JWKS", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "APP_ORIGIN", "TRUSTED_PROXY_CIDRS", "PROVIDER_TOKEN_ENCRYPTION_KEY",
+        "PROVIDER_REQUESTS_PER_MINUTE", "SPOTIFY_REQUESTS_PER_MINUTE", "PROVIDER_MAX_CONCURRENT", "PROVIDER_GLOBAL_MAX_CONCURRENT"].find(name => error.message.includes(name));
       if (setting) console.error(JSON.stringify({ type: "application", level: "error", event: "server.startup.configuration_rejected", setting }));
     }
     await flushTelemetry();

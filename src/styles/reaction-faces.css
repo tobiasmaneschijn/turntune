@@ -1,0 +1,8 @@
+/* Reaction arrivals sit above the count without changing dock geometry. */
+.bang-meter-body { position: relative; }
+.live-reaction-faces { position: absolute; z-index: 6; right: 0; bottom: calc(100% + 4px); display: inline-flex; align-items: center; pointer-events: none; }
+.live-reaction-faces > span { display: inline-flex; border: 2px solid var(--background); border-radius: 50%; animation: reaction-face-arrive var(--motion-fast, 110ms) var(--motion-ease-out, ease-out); }
+.live-reaction-faces > span + span { margin-left: -5px; }
+@keyframes reaction-face-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .live-reaction-faces { display: none; } }
+.reduced-motion .live-reaction-faces { display: none; }

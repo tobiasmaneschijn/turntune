@@ -6,7 +6,7 @@ import { SignUpForm } from "../../../../../src/features/auth/components/sign-up-
 import { ThemeProvider } from "../../../../../src/components/theme-provider";
 import { TooltipProvider } from "../../../../../src/components/ui/tooltip";
 import { Button } from "../../../../../src/components/ui/button";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../../src/styles/shadcn.css";
 import "../../../../../src/styles/index.css";
 

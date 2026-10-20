@@ -120,6 +120,15 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
       )
     )
   )
+  app.get(
+    '/api/rooms/:roomSlug/chat/trivia/:messageId',
+    route(false, (room, user, request) => commands.triviaState(room, user, String(request.params.messageId)))
+  )
+  app.post(
+    '/api/rooms/:roomSlug/chat/trivia/:messageId/answer',
+    express.json({ limit: '1kb' }),
+    route(true, (room, user, request) => commands.triviaAnswer(room, user, String(request.params.messageId), request.body?.optionIndex))
+  )
   app.post(
     '/api/rooms/:roomSlug/chat/media-url',
     express.json({ limit: '2kb' }),

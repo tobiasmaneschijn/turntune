@@ -24,13 +24,13 @@ test("A visitor follows the listening demo and chooses the cloud app or self-hos
   const queue = steps.getByRole("button", { name: "Your private queue", exact: true });
   const join = steps.getByRole("button", { name: "Join as DJ", exact: true });
   const turn = steps.getByRole("button", { name: "Your turn", exact: true });
-  const ownQueue = demo.getByLabel("DJ rotation and your private queue", { exact: true });
+  const ownQueue = demo.getByLabel("Your private queue", { exact: true });
   const player = demo.getByLabel("Player", { exact: true });
   await expect(queue).toHaveAttribute("aria-pressed", "true");
   await expect(ownQueue.getByText("Sunset Lover", { exact: true })).toBeVisible();
   await expect(ownQueue.getByText("A Walk", { exact: true })).toBeVisible();
   await expect(player.getByText("Midnight City", { exact: true })).toBeVisible();
-  await expect(ownQueue.getByText("You’re next", { exact: true })).toHaveCount(0);
+  await expect(demo.getByRole("button", { name: "Join rotation", exact: true, includeHidden: true })).toBeVisible();
 
   // Let the demonstration advance without depending on a particular animation
   // duration. Each checkpoint must be shown before the next one can appear.
@@ -38,7 +38,7 @@ test("A visitor follows the listening demo and chooses the cloud app or self-hos
     await page.clock.runFor(1_000);
     return join.getAttribute("aria-pressed");
   }).toBe("true");
-  await expect(ownQueue.getByText("You’re next", { exact: true })).toBeVisible();
+  await expect(demo.getByRole("button", { name: "Leave rotation", exact: true, includeHidden: true })).toBeVisible();
   await expect(player.getByText("Midnight City", { exact: true })).toBeVisible();
   await expect.poll(async () => {
     await page.clock.runFor(1_000);
@@ -93,7 +93,9 @@ test("A visitor who prefers reduced motion can step through the room on a narrow
     await expect(step).toHaveAttribute("aria-pressed", "true");
     await expect(step).toBeInViewport();
   }
-  await expect(demo.getByText("Certified banger", { exact: true })).toBeInViewport();
+  const reactions = demo.getByRole("button", { name: "Vote Banger", exact: true, includeHidden: true });
+  await expect(reactions).toBeInViewport();
+  await expect(reactions).toHaveText("2");
   await demo.getByRole("button", { name: "Replay demo", exact: true }).click();
   await page.clock.runFor(60_000);
   await expect(queue).toHaveAttribute("aria-pressed", "true");

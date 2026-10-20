@@ -22,7 +22,7 @@ function ThemeEffects() {
 
   useEffect(() => {
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    themeColor?.setAttribute("content", resolvedTheme === "light" ? "#f7f7f2" : "#09090b");
+    themeColor?.setAttribute("content", resolvedTheme === "light" ? "#ffffff" : "#18181b");
   }, [resolvedTheme]);
 
   return null;

@@ -375,7 +375,7 @@ export function UserSettingsDialog({
                   setRequestingPermission(true);
                   void requestNotificationPermission().then(setNotificationPermission).finally(() => setRequestingPermission(false));
                 }}>{requestingPermission ? t("userSettingsDialog.requestingPermission") : t("userSettingsDialog.enableNotifications")}</Button>}</div>
-                <SettingSwitch title={t("userSettingsDialog.backgroundNotificationsOnly")} description={t("userSettingsDialog.onlyWhenThisTabIsInactive")} checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
+                <SettingSwitch title={t("userSettingsDialog.backgroundNotificationsOnly")} checked={settings.notifications.backgroundOnly !== false} onChange={(checked) => updateNotification("backgroundOnly", checked)} />
                 <SettingSwitch title={t("userSettingsDialog.dJTurn")} checked={settings.notifications.djTurn} onChange={(checked) => void updateNotification("djTurn", checked)} />
                 <SettingSwitch title={t("userSettingsDialog.unavailableTracks")} description={t("userSettingsDialog.noMatchOnYourProvider")} checked={settings.notifications.unavailableTrack} onChange={(checked) => void updateNotification("unavailableTrack", checked)} />
                 <SettingSwitch title={t("userSettingsDialog.chatMentions")} checked={settings.notifications.chatMentions} onChange={(checked) => void updateNotification("chatMentions", checked)} />

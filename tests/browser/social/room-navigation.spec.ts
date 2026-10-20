@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 declare global { interface Window { socialRoomTest: { creates: number; destroys: number; joins: number; themes: Array<string | null>; connected: boolean; removeFromRoom: () => void } } }
 
-test("visit your profile and a friend's profile while staying in the listening room", async ({ page }) => {
+test("visit your profile and a friend's profile while staying in the listening room", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/tests/browser/social/harnesses/room/index.html");
   await expect.poll(() => page.evaluate(() => window.socialRoomTest.creates), { timeout: 15_000 }).toBe(1);
   const account = page.getByRole("button", { name: "Account menu", exact: true });
@@ -28,9 +29,8 @@ test("visit your profile and a friend's profile while staying in the listening r
   const roomActions = page.getByRole("button", { name: "More room actions", exact: true });
   for (const control of [account, roomActions,
     page.getByRole("link", { name: "turntune home", exact: true }),
-    page.getByRole("link", { name: "Rooms", exact: true }),
-    page.getByRole("button", { name: "Copy invite link", exact: true }),
-    page.getByRole("button", { name: "Room listeners, 2 listeners", exact: true })]) {
+    page.getByRole("button", { name: "Open my queue", exact: true }),
+    page.getByRole("button", { name: "Show all 2 room listeners", exact: true })]) {
     await expect(control).toBeVisible();
     const box = await control.boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -40,6 +40,17 @@ test("visit your profile and a friend's profile while staying in the listening r
   await roomActions.click();
   await expect(page.getByRole("menuitem", { name: "Your profile", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Settings", exact: true })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: /Room commands/ }).click();
+  const commands = page.getByRole("dialog", { name: "Room commands", exact: true });
+  await commands.getByRole("menuitem", { name: /^Copy invite link/ }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(new URL("/room/lounge", page.url()).href);
+  await roomActions.click();
+  await page.getByRole("menuitem", { name: "Room listeners", exact: true }).click();
+  const listeners = page.getByRole("dialog", { name: "Room listeners", exact: true });
+  await expect(listeners.getByRole("button", { name: "Open Bob's profile", exact: true })).toBeVisible();
+  await listeners.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(roomActions).toBeFocused();
+  await roomActions.click();
   await page.getByRole("menuitem", { name: "Friends", exact: true }).click();
   await page.getByRole("button", { name: "Open Bob's profile", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Bob", exact: true })).toBeVisible();
@@ -53,6 +64,9 @@ test("visit your profile and a friend's profile while staying in the listening r
   await page.getByRole("menuitem", { name: "Your profile", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Alice", exact: true })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("link", { name: "turntune home", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Rooms", exact: true })).toBeVisible();
 });
 
 test("create an account from a room link and return after email activation", async ({ page }) => {
