@@ -1,5 +1,6 @@
 import { activeMentions, normalizeChatMentions } from './mentions'
 import type { ChatMention } from './model'
+import { clearUserChatOutbox } from './outbox'
 
 const PREFIX = 'soundspin-chat-draft:'
 export const CHAT_DRAFT_TTL_MS = 12 * 60 * 60 * 1000
@@ -63,6 +64,7 @@ export function createChatDraftStore(userId: string, roomName: string, storage =
 /** Invalidates pending/unmount flushes before deleting every room draft for this account. */
 export function clearUserChatDrafts(userId: string, storage = sessionDraftStorage()) {
   ownerVersions.set(userId, (ownerVersions.get(userId) || 0) + 1)
+  clearUserChatOutbox(userId, storage)
   if (!storage) return
   try {
     const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))

@@ -506,10 +506,6 @@ function RoomChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
   const historySource = useMemo(() => createChatHistorySource(accessToken, snapshot.room.id), [accessToken, snapshot.room.id]);
-  // RoomChat is keyed by account and room. An original-UUID retry keeps that
-  // identity while reading refreshed credentials from this same lifetime.
-  const historySourceRef = useRef(historySource);
-  historySourceRef.current = historySource;
   const chatTransport = useMemo(() => createSocketChatSessionFactory(socket, snapshot.room.id), [snapshot.room.id]);
   useEffect(() => { chatTransport.setAdmitted(connected); }, [chatTransport, connected]);
   const [error, setError] = useState("");
@@ -556,7 +552,6 @@ function RoomChat({
     };
   }, [client, snapshot.room.id]);
 
-  const persistMessage = useCallback((message: ChatMessage) => historySourceRef.current.saveMessage(message), []);
   const capabilities = snapshot.room.capabilities ?? roomCapabilities(snapshot.room, currentUser.id, snapshot.serverTime);
   const effectivePolicy = effectiveRoomPolicy(snapshot.room, snapshot.serverTime);
   const requestIdFor = (key: string) => { if (!managementRequestIds.current.has(key)) managementRequestIds.current.set(key, crypto.randomUUID()); return managementRequestIds.current.get(key)!; };
@@ -592,7 +587,6 @@ function RoomChat({
           canRemoveMessage={message => capabilities.owner || (message.user.id !== snapshot.room.ownerUserId && !snapshot.room.moderatorUserIds.includes(message.user.id))}
           onReportMessage={reportMessage}
           messages={messages}
-          onSend={persistMessage}
           onConnected={refreshHistory}
           onOpenProfile={onOpenProfile}
           adminUserIds={adminUserIds}
