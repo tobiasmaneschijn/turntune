@@ -17,6 +17,7 @@ export async function initializeObservability() {
         const composite: TelemetryAdapter = {
           captureError(error, context) { consoleSink.captureError(error, context); sentry.adapter.captureError(error, context); },
           log(level, event, context) { consoleSink.log(level, event, context); sentry.adapter.log(level, event, context); },
+          metric(type, name, value, options) { sentry.adapter.metric?.(type, name, value, options); },
           async flush(timeoutMs) { await sentry.adapter.flush(timeoutMs); }
         };
         configureTelemetry(composite);

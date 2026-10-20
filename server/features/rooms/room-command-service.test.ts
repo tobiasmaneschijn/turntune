@@ -6,6 +6,7 @@ import { ResourcePolicyStore } from "../../resources/resource-policy.js";
 import { RoomCommandService } from "./room-command-service.js";
 import { advanceRadio, QueueUndoRegistry } from "./radio.js";
 import type { Room, Track } from "../../types.js";
+import { configureTelemetry, type MetricOptions } from "../../../shared/observability.js";
 
 const track = (id: string): Track => ({ id, provider: "youtube", providerId: id, title: id, addedBy: { id: "alice", name: "Alice", avatarSeed: "alice" }, addedAt: 1 });
 const room = (id = "room-one"): Room => ({ id, name: id, ownerUserId: "alice", moderatorUserIds: [], djRoleUserIds: [], isPublic: true,
@@ -25,7 +26,11 @@ async function setup(write: (state: Room) => Promise<void>) {
   return { store, first, second, broadcasts, service: new RoomCommandService(store, value => { broadcasts.push(structuredClone(value)); }) };
 }
 
-test("failed skip leaves authoritative state untouched and the same command can retry", async () => {
+test("failed skip leaves authoritative state untouched and the same command can retry", async t => {
+  const measurements: Array<{ name: string; options: MetricOptions }> = [];
+  const restore = configureTelemetry({ captureError() {}, log() {}, async flush() {},
+    metric(_type, name, _value, options) { measurements.push({ name, options }); } });
+  t.after(restore);
   let fail = true;
   const { store, first, service, broadcasts } = await setup(async () => { if (fail) throw new Error("storage offline"); });
   const before = structuredClone(first);
@@ -34,6 +39,12 @@ test("failed skip leaves authoritative state untouched and the same command can 
   fail = false;
   assert.equal(await service.execute(first, draft => { advanceRadio(draft); return { result: draft.playback.track!.id }; }), "second");
   assert.equal(broadcasts.length, 1); assert.equal(first.history[0].id, "first");
+  assert.deepEqual(measurements.filter(item => item.name === "server.operation.results").map(item => item.options.attributes), [
+    { operation: "room_save", outcome: "failure" }, { operation: "room_command", outcome: "failure" },
+    { operation: "room_save", outcome: "success" }, { operation: "room_command", outcome: "success" }
+  ]);
+  assert.equal(measurements.filter(item => item.name === "server.operation.duration" && item.options.unit === "millisecond").length, 4);
+  assert.doesNotMatch(JSON.stringify(measurements), /storage offline|room-one|Alice|youtube/);
 });
 
 test("slow writes expose only committed state and do not block unrelated rooms", async () => {

@@ -1,6 +1,26 @@
 {
   "releases": [
     {
+      "version": "0.1.11",
+      "date": "2026-10-20",
+      "title": "Emoji fixes and playback diagnostics",
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "Error and performance reporting for playback and room connections when configured by the host."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "Emoji picker images and categories stay visible, including search results.",
+            "Tracks keep their original source when music-service matches identify different recordings."
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.1.10",
       "date": "2026-10-19",
       "title": "Introducing turntune",

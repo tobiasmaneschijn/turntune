@@ -10,7 +10,7 @@ import { RuntimeMetrics } from "../lib/runtime-metrics.js";
 import { createSentryTraceExporter } from "./adapters/sentry-traces.js";
 import { getCurrentScope } from "@sentry/node";
 
-test("Sentry receives useful code locations and logs without private content or automatic SDK context", async () => {
+test("Sentry receives code locations, logs and application metrics without private content or automatic SDK context", async () => {
   const envelopes: unknown[] = [];
   const config = observabilityConfig({ NODE_ENV: "production", OBSERVABILITY_PROVIDER: "sentry", OBSERVABILITY_ENVIRONMENT: "staging", SENTRY_DSN: "https://publickey@monitoring.invalid/1" });
   const { adapter, traceExporter } = createSentryAdapter(config, () => ({
@@ -27,11 +27,32 @@ test("Sentry receives useful code locations and logs without private content or 
     getCurrentScope().setAttribute("private_scope_attribute", "private-scoped-secret");
     reporter.captureError(error, { operation: "room.save", status: 500, requestId: "c1c14747-7193-40f0-a3a3-9e111b8ec264" });
     reporter.log("warn", "provider.unavailable", { operation: "provider.request", provider: "spotify" });
+    const attributes = { operation: "room.save", provider: "spotify", status: 200,
+      requestId: "c1c14747-7193-40f0-a3a3-9e111b8ec264", message: "private metric content" };
+    reporter.metrics.count("room.saved", 1, { attributes });
+    reporter.metrics.gauge("room.queue.length", 3);
+    reporter.metrics.distribution("room.save.duration", 12, { unit: "millisecond", attributes });
     await reporter.flush(2_000);
     const items = (envelopes as Array<[unknown, Array<[{ type: string }, Record<string, unknown>]>]>).flatMap(envelope => envelope[1]);
     const event = items.find(([header]) => header.type === "event")?.[1];
     const logs = items.filter(([header]) => header.type === "log");
-    assert.ok(event); assert.ok(logs.length);
+    const metricPayload = items.find(([header]) => header.type === "trace_metric")?.[1];
+    assert.ok(event); assert.ok(logs.length); assert.ok(metricPayload);
+    const metricItems = metricPayload.items as Array<{ name: string; type: string; value: number; unit?: string; attributes: Record<string, { value: unknown }> }>;
+    assert.deepEqual(metricItems.map(({ name, type, value, unit }) => ({ name, type, value, unit })), [
+      { name: "room.saved", type: "counter", value: 1, unit: undefined },
+      { name: "room.queue.length", type: "gauge", value: 3, unit: undefined },
+      { name: "room.save.duration", type: "distribution", value: 12, unit: "millisecond" }
+    ]);
+    assert.deepEqual(metricPayload.ingest_settings, { infer_ip: "never", infer_user_agent: "never" });
+    assert.equal(metricItems[0].attributes.operation.value, "room.save");
+    assert.equal(metricItems[0].attributes.provider.value, "spotify");
+    assert.equal(metricItems[0].attributes.status.value, 200);
+    for (const metric of metricItems) {
+      assert.equal(metric.attributes["sentry.environment"].value, "staging");
+      assert.equal(metric.attributes["sentry.release"].value, "unknown");
+      assert.equal(metric.attributes.requestId, undefined);
+    }
     const encoded = JSON.stringify(items);
     assert.match(encoded, /Unexpected failure in room.save/);
     assert.match(encoded, /server\/persistence\/store.js/);
@@ -42,7 +63,7 @@ test("Sentry receives useful code locations and logs without private content or 
     assert.match(JSON.stringify(logs), /sentry.release.*unknown/);
     assert.equal(event.environment, "staging");
     assert.deepEqual(event.user, { ip_address: "0.0.0.0", geo: {} });
-  } finally { globals._sentryDebugIds = previous; }
+  } finally { globals._sentryDebugIds = previous; getCurrentScope().removeAttribute("private_scope_attribute"); }
 });
 
 test("operations export traces without leaking collector credentials to Sentry and bounded exporters preserve application results", async t => {

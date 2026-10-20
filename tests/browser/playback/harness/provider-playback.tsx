@@ -7,6 +7,7 @@ import { TooltipProvider } from "../../../../src/components/ui/tooltip";
 import { readUserSettings } from "../../../../src/features/settings/user-settings";
 import type { Playback, RoomSnapshot } from "../../../../src/types";
 import type { PlayerStatus } from "../../../../src/features/playback/providers/YouTubePlayer";
+import { configureTelemetry, type MetricOptions, type MetricType } from "../../../../shared/observability";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
 
@@ -18,6 +19,8 @@ const statusCallbacks: number[] = [];
 const statusSamples: (PlayerStatus & { version: number })[] = [];
 const endCallbacks: number[] = [];
 const errors: string[] = [];
+const metrics: Array<{ type: MetricType; name: string; value: number; options: MetricOptions }> = [];
+configureTelemetry({ captureError() {}, log() {}, metric(type, name, value, options) { metrics.push({ type, name, value, options }); }, async flush() {} });
 const positionCallbacks: ((position: number) => void)[] = [];
 const pausedCallbacks: { callback: (paused: boolean) => void; paused: boolean }[] = [];
 const listeners = new Map<string, (event?: unknown) => void>();
@@ -165,6 +168,7 @@ Object.assign(window, {
     statusSamples,
     endCallbacks,
     errors,
+    metrics,
     inspectHost: () => ({ state: hostState, requests: hostRequests, musicPlaying: music.playbackState === playbackStates.playing }),
     holdSoundCloudCallbacks() {
       deferPaused = true;
