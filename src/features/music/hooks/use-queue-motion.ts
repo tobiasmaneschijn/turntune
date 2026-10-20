@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
-import { useEffectiveMotion } from "../../../hooks/use-effective-motion";
+import { readEffectiveReducedMotion, useEffectiveMotion } from "../../../hooks/use-effective-motion";
 
 interface QueueLayout {
   scope: string;
@@ -25,6 +25,8 @@ export function useQueueMotion(list: RefObject<HTMLDivElement | null>, order: st
       return;
     }
     const rows = [...element.querySelectorAll<HTMLElement>(":scope > [data-track-id]")];
+    // A queue update can commit before the preference change notification.
+    const motionDisabled = reducedMotion || readEffectiveReducedMotion();
     // Preserve the visual position if a second authoritative update interrupts
     // the first. Read offsets before cancelling, then measure natural layout.
     const visual = new Map(rows.map(row => [row, row.getBoundingClientRect().top]));
@@ -43,7 +45,7 @@ export function useQueueMotion(list: RefObject<HTMLDivElement | null>, order: st
       const id = row.dataset.trackId!;
       positions.set(id, top);
       const oldTop = previous.current?.scope === scope ? previous.current.positions.get(id) : undefined;
-      if (oldTop === undefined || reducedMotion || !row.animate || !duration) continue;
+      if (oldTop === undefined || motionDisabled || !row.animate || !duration) continue;
       const interruptedOffset = moving.has(row) ? visual.get(row)! - rect.top : 0;
       const distance = oldTop + interruptedOffset - top;
       const visible = rect.bottom > origin && rect.top < origin + element.clientHeight;
