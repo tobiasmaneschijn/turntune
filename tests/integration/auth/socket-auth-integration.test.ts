@@ -63,6 +63,15 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   const socket = io(url, { autoConnect: false, reconnection: false, transports: ["websocket"] });
   sockets.push(socket);
   const waitEvent = (event: string) => once(socket, event, { signal: AbortSignal.timeout(7_000) });
+  const readProfile = (credential?: string) => fetch(`${url}/api/profiles/${verifiedUserId}`, {
+    headers: credential ? { Authorization: `Bearer ${credential}` } : {}, signal: AbortSignal.timeout(3_000)
+  });
+  assert.equal((await readProfile()).status, 401);
+  assert.equal((await readProfile(token(Math.floor(Date.now() / 1000) + 60, { role: "service_role" }))).status, 401,
+    "HTTP profile access requires a signed user session, independently of socket authentication.");
+  const activeProfile = await readProfile(token(Math.floor(Date.now() / 1000) + 60));
+  assert.equal(activeProfile.status, 200);
+  assert.equal((await activeProfile.json() as { profile: { user_id: string } }).profile.user_id, verifiedUserId);
   const firstExpiry = Math.floor(Date.now() / 1000) + 5;
   const shortToken = token(firstExpiry);
   const spotifySearch = (credential: string, roomSlug = "auth-room") => fetch(`${url}/api/spotify/search?q=fixture&roomSlug=${roomSlug}`, {

@@ -1,13 +1,22 @@
+import { createMaintenance } from "./app/maintenance.js";
+import { mountStatusRoutes } from "./app/status-routes.js";
+import { mountConfigRoutes, mountResourcePolicyRoute } from "./app/config-routes.js";
+import { createRequestIdentity } from "./security/request-identity.js";
+import { mountApiAccess } from "./security/api-access.js";
+import { createRoom } from "./features/rooms/create-room.js";
+import { mountRoomRoutes } from "./features/rooms/room-routes.js";
+import { mountProfileRoutes } from "./features/accounts/profile-routes.js";
+import { mountSpotifyAccessRoutes } from "./features/admin/spotify-access-routes.js";
+import { mountApiErrors } from "./app/api-errors.js";
 import { serverT } from "./lib/i18n.js";
 import { mountAdminRoutes } from "./features/admin/admin-routes.js";
 import { mountMusicRoutes } from "./features/music/music-routes.js";
 import { mountRoomActions } from "./features/rooms/room-actions.js";
 import { RoomCommandService } from "./features/rooms/room-command-service.js";
-import { hashRoomPassword, passwordMatches } from "./features/rooms/room-password.js";
+import { passwordMatches } from "./features/rooms/room-password.js";
 import { RoomEntryLimiter } from "./features/rooms/room-entry-limiter.js";
 import { IdleRoomRegistry } from "./features/rooms/idle-rooms.js";
 import { reconcileDjPresence } from "./features/rooms/dj-presence.js";
-import { runtimeMetrics } from "./lib/runtime-metrics.js";
 import { mountSpotifyOAuthRoutes } from "./integrations/spotify/spotify-oauth-routes.js";
 import { createSocketCredentialLease, type SocketCredentialLease } from "./realtime/socket-credentials.js";
 import { createChatWritePolicy } from "./features/chat/chat-write-policy.js";
@@ -23,8 +32,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 import { z } from "zod";
 import { Store } from "./persistence/store.js";
-import { profileUpdateSchema } from "./features/accounts/profile-fields.js";
-import { roomSettingsPatchSchema } from "./features/rooms/room-settings.js";
 import { accessMode, chatParticipationError, effectiveRoomPolicy, isRoomStaff } from "../shared/room-policy.js";
 import { canInviteRoom, isRoomBanned, roleInRoom, requireNotBanned, requireProtectedTarget, requireRoomCapability } from "./features/rooms/room-access.js";
 import { ChatCommandService } from "./features/chat/chat-command-service.js";
@@ -39,7 +46,6 @@ import { SocialStore } from "./features/social/social-store.js";
 import { loadChatReply, loadStoredChatMessage, mountChatHistoryRoutes } from "./features/chat/chat-history.js";
 import { createChatRelay } from "./features/chat/chat-relay.js";
 import { resolveChatMediaUrl } from "./features/chat/chat-media.js";
-import { withPublicRoomPreview } from "./features/rooms/directory-preview.js";
 import { createSavedSetResolver, SetImportRegistry } from "./features/music/saved-set.js";
 import { validateServerConfig } from "./lib/config.js";
 import { configureHttpSecurity, trustedClientIp, trustedSocketPeer } from "./security/security-http.js";
@@ -55,11 +61,9 @@ import { AccountDeletionService } from "./features/accounts/account-deletion.js"
 import { mountPlatformRoutes } from "./features/admin/platform-routes.js";
 import { mountManagedUploadRoutes } from "./features/uploads/upload-routes.js";
 import { mountFeedbackRoutes } from "./features/feedback/feedback-routes.js";
-import { cleanupManagedUploads } from "./features/uploads/managed-uploads.js";
 import { mountSignupRoutes } from "./features/auth/signup-routes.js";
-import { securityEvent, securityEventSnapshot, securityRequestContext } from "./security/security-events.js";
+import { securityEvent, securityRequestContext } from "./security/security-events.js";
 import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./realtime/socket-handler.js";
-import { PublicRequestError } from "./lib/public-request-error.js";
 import { roomPresence, uniqueUsers } from "./features/rooms/presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./features/rooms/announcements.js";
 import { SoundCloudApi } from "./integrations/soundcloud.js";
@@ -138,8 +142,7 @@ const authEnabled = Boolean(
 const supabaseAdmin: SupabaseClient | null = authEnabled ? createBoundedAdminClient() : null;
 const signupAdmin = supabaseAdmin && signupInvitePassword ? supabaseAdmin : null;
 const platform = new PlatformSecurity(supabaseAdmin,!authEnabled && ["test","development"].includes(process.env.NODE_ENV || ""));
-const requestIdentities = new WeakMap<express.Request,Promise<{userId:string;aal:unknown}|null>>();
-const activeRequests = new WeakMap<express.Request,Promise<string|null>>();
+const { getApiUserId, getSelfServiceUserId, getApiAdminUserId } = createRequestIdentity({ authEnabled, supabaseUrl, platform, store });
 const blockedRooms = new Set<string>();
 
 // Live coordination is process-local. `roomUsers` is socket presence, while
@@ -183,27 +186,6 @@ store.setRoomCacheHooks(watchIdleRoom,roomId=>!blockedRooms.has(roomId)&&(Boolea
   Boolean(store.getRoom(roomId)?.djQueueUserIds.some(id=>hasPendingDjEviction(roomId,id))) ||
   Boolean(store.getRoom(roomId)?.settings.themeSchedules?.some(item=>item.endsAt>Date.now())) ||
   Boolean(store.getRoom(roomId)?.radioState?.fallback.enabled)));
-const roomCreateSchema = z.object({
-  name: z.string().trim().min(1).max(48),
-  isPublic: z.boolean().default(true),
-  accessMode:z.enum(["public","unlisted","members"]).optional(),
-  password: z.string().max(128).optional()
-});
-
-const roomSettingsSchema = roomSettingsPatchSchema;
-
-const favoriteSchema = z.object({ favorite: z.boolean() });
-
-function roomSlug(name: string) {
-  const base = name
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 38) || "room";
-  return `${base}-${crypto.randomBytes(3).toString("hex")}`;
-}
-
 console.log("Signup configuration:", {
   signupInvitePassword: Boolean(signupInvitePassword),
   supabaseUrl: Boolean(supabaseUrl),
@@ -222,44 +204,6 @@ function spotifyRedirectUri(request: express.Request) {
   return `${request.protocol}://${spotifySafeHost}/api/spotify/callback`;
 }
 
-async function getRequestIdentity(request: express.Request) {
-  if (!authEnabled) return null;
-  const cached=requestIdentities.get(request); if(cached)return cached;
-  const pending=(async()=>{
-  const authorization = request.get("authorization");
-  const token = authorization?.match(/^Bearer (.+)$/i)?.[1];
-  if (!token || token.length>16_384) return null;
-  const { data, error } = await verifyCredentials(
-    { token, apikey: null },
-    { auth: "user" }
-  );
-  if(error || !data.userClaims || !validUserClaims(data.jwtClaims,supabaseUrl))return null;
-  return {userId:data.userClaims.id,aal:data.jwtClaims?.aal};
-  })();
-  requestIdentities.set(request,pending);return pending;
-}
-async function getApiUserId(request: express.Request) {
-  const cached=activeRequests.get(request);if(cached)return cached;
-  const pending=(async()=>{const identity=await getRequestIdentity(request);return identity&&await platform.activeAccount(identity.userId)?identity.userId:null;})();
-  activeRequests.set(request,pending);return pending;
-}
-async function getSelfServiceUserId(request: express.Request) {
-  const identity=await getRequestIdentity(request);
-  return identity && await platform.verifiedAccount(identity.userId) ? identity.userId : null;
-}
-
-async function getApiAdminUserId(request: express.Request): Promise<
-  { ok: true; userId: string } |
-  { ok: false; error: string; status: 401 | 403 }
-> {
-  const userId = await getApiUserId(request);
-  if (!userId) return { ok: false, error: serverT("authentication_required"), status: 401 };
-  const profile = await store.getProfile(userId);
-  if (!profile?.is_app_admin) return { ok: false, error: serverT("administrator_access_required"), status: 403 };
-  if ((await getRequestIdentity(request))?.aal !== "aal2") return {ok:false,error:serverT("verify_a_second_factor_before_using_administrator_tools"),status:403};
-  return { ok: true, userId };
-}
-
 async function canUseSpotify(request:express.Request,userId:string,explicitRoom?:string) {
   if(!await platform.activeAccount(userId))return false;
   const callback=/^(?:\/api\/spotify)?\/callback$/i.test(request.path);
@@ -276,30 +220,8 @@ async function canUseSpotify(request:express.Request,userId:string,explicitRoom?
   return [...(roomUsers.get(roomId)?.values()??[])].some(user=>user.id===userId);
 }
 
-// Verify private requests before accepting/parsing uploads or other request bodies.
-app.use("/api",async(request,response,next)=>{
-  try {
-    const publicPath=["/health","/ready","/config","/signup","/spotify/callback"].includes(request.path);
-    if(publicPath)return next();
-    const selfService=request.path==="/account/deletion-request" || request.path.startsWith("/account/export/");
-    const actor=await(selfService?getSelfServiceUserId(request):getApiUserId(request));
-    if(!actor)return void response.status(401).json({error:serverT("authentication_required")});
-    const roomSlug=request.path.match(/^\/rooms\/([a-z0-9-]{3,48})(?:\/|$)/)?.[1];
-    if(roomSlug&&!await platform.activeRoom(roomSlug))return void response.status(404).json({error:serverT("room_not_found")});
-    if(roomSlug)blockedRooms.delete(roomSlug);
-    if(!securityBudget.consume([{key:`http-user:${actor}`,maximum:300,windowMs:60_000}]))return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_requests_wait_a_minute_before_trying_again")});
-    const release=securityBudget.acquire(`http-user-flight:${actor}`,12);
-    if(!release)return void response.set("Retry-After","60").status(429).json({error:serverT("too_many_concurrent_requests")});
-    response.once("finish",release);response.once("close",release);
-    const roomWrite=roomSlug&&!["GET","HEAD"].includes(request.method)&&!request.path.includes("/chat/")&&!request.path.endsWith("/favorite");
-    if(roomWrite) {
-      const policy=await resourcePolicies.get(actor);
-      await resourceAdmission.roomAction("http:room-write",actor,roomSlug,policy,()=>new Promise<void>(resolve=>{
-        response.once("finish",resolve);response.once("close",resolve);next();
-      }));
-    } else next();
-  }catch(error){if(!response.headersSent)response.status(error instanceof SecurityLimitError?429:503).json({error:error instanceof SecurityLimitError?error.message:serverT("account_access_could_not_be_verified_try_again")});}
-});
+mountApiAccess(app, { getApiUserId, getSelfServiceUserId, platform, blockedRooms,
+  securityBudget, resourceAdmission, resourcePolicies });
 
 mountSignupRoutes(app,{admin:signupAdmin?.auth.admin??null,invitePassword:signupInvitePassword,
   appOrigin:process.env.APP_ORIGIN || "http://127.0.0.1:5173"});
@@ -479,26 +401,6 @@ async function restrictAccount(userId:string) {
   });
 }
 
-
-function createRoom(id: string, ownerUserId: string, name?: string): Room {
-  return {
-    id,
-    name: name || id.replaceAll("-", " "),
-    ownerUserId,
-    moderatorUserIds: [],
-    djRoleUserIds: [],
-    isPublic: true,
-    passwordProtected: false,
-    settings: { djAccess: "everyone" },
-    djUserId: null,
-    djQueueUserIds: [],
-    djQueues: {},
-    history: [],
-    playback: { track: null, playing: false, position: 0, updatedAt: Date.now() },
-    vibe: null,
-    createdAt: Date.now()
-  };
-}
 
 /** Build the personalized state sent to one listener. */
 function snapshot(room: Room, userId: string): RoomSnapshot {
@@ -843,209 +745,43 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(()=>securityEvent("request_failed","failed")); });
 });
 
-app.get("/api/health", (_request, response) => {
-  response.json({ ok: true });
+const maintenance = createMaintenance({ supabaseAdmin, authEnabled, accountDeletion, platform, resourcePolicies,
+  isShuttingDown: () => shuttingDown,
+  connectedAccountIds: () => [
+    ...[...io.sockets.sockets.values()].map(socket => socket.data.authUserId as string).filter(Boolean),
+    ...[...roomDjUsers.values()].flatMap(users => [...users.keys()])
+  ],
+  cachedRoomIds: () => store.getCachedRooms().map(room => room.id),
+  restrictAccount, restrictRoom,
+  updateResourcePolicy: limits => {
+    if (limits) { globalResourceLimits = limits; globalResourcePolicyAvailable = true; }
+    else globalResourcePolicyAvailable = false;
+  }
 });
-app.get("/api/ready", async (_request, response) => {
-  response.set("Cache-Control", "no-store");
-  try {
-    const ready = !shuttingDown && await store.isReady();
-    response.status(ready ? 200 : 503).json({ ok: ready });
-  } catch { response.status(503).json({ ok: false }); }
-});
-app.get("/api/admin/runtime", async (request, response) => {
-  response.set("Cache-Control", "no-store");
-  const access = await getApiAdminUserId(request);
-  if (!access.ok) return response.status(access.status).json({ error: access.error });
-  response.json({ coordination: "single-instance", cachedRooms: store.cachedRoomCount, cachedRoomBytes:store.cachedRoomBytes, activeRooms: roomUsers.size,
-    connectedSockets: io.engine.clientsCount, storageCleanup:storageCleanupStatus, security:securityEventSnapshot(), ...runtimeMetrics.snapshot() });
+mountStatusRoutes(app, {
+  isReady: async () => !shuttingDown && await store.isReady(), getApiAdminUserId,
+  runtimeSnapshot: () => ({ cachedRooms: store.cachedRoomCount, cachedRoomBytes: store.cachedRoomBytes,
+    activeRooms: roomUsers.size, connectedSockets: io.engine.clientsCount, storageCleanup: maintenance.storageCleanupSnapshot() })
 });
 
 mountAdminRoutes(app, { client: supabaseAdmin, getAdminUserId: getApiAdminUserId,
   listenerCount: slug => uniqueUsers(roomUsers.get(slug)?.values() || []).length });
-app.get("/api/profiles/:userId", async (request, response) => {
-  if (!(await getApiUserId(request))) {
-    return response.status(401).json({ error: serverT("authentication_required") });
-  }
-  const userId = z.string().uuid().safeParse(request.params.userId);
-  if (!userId.success) return response.status(400).json({ error: serverT("invalid_profile") });
-  try {
-    if(!await platform.activeAccount(userId.data))return response.status(404).json({error:serverT("profile_not_found")});
-    const [profile, options] = await Promise.all([
-      store.getProfile(userId.data),
-      store.getProfileOptions()
-    ]);
-    if (!profile) return response.status(404).json({ error: serverT("profile_not_found") });
-    response.json({ profile, options });
-  } catch (error) {
-    response.status(500).json({
-      error: serverT("could_not_load_profile")
-    });
-  }
-});
+mountProfileRoutes(app, { store, platform, getApiUserId });
 
-app.get("/api/rooms", async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
-  try {
-    const listenerCounts = Object.fromEntries(
-      [...roomUsers.entries()].map(([slug, users]) => [slug, uniqueUsers(users.values()).length])
-    );
-    const rooms = await store.listRooms(userId, listenerCounts);
-    const q=typeof request.query.q==="string"?request.query.q.trim().toLowerCase().slice(0,100):"",tag=typeof request.query.tag==="string"?request.query.tag.trim().toLowerCase():"",language=typeof request.query.language==="string"?request.query.language.trim().toLowerCase():"";
-    response.json({ rooms: rooms.filter(room=>(!q||`${room.name} ${room.description??""} ${(room.tags??[]).join(" ")}`.toLowerCase().includes(q))&&(!tag||room.tags?.some(t=>t.toLowerCase()===tag))&&(!language||room.language?.toLowerCase()===language)).map(room => withPublicRoomPreview(room, store.getRoom(room.slug))) });
-  } catch (error) {
-    response.status(500).json({ error: serverT("could_not_load_rooms") });
-  }
-});
-
-app.post("/api/rooms", express.json(), async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
-  const parsed = roomCreateSchema.safeParse(request.body);
-  if (!parsed.success) {
-    return response.status(400).json({ error: parsed.error.issues[0]?.message || serverT("invalid_room") });
-  }
-  try {
-    const {limits}=await resourcePolicies.get(userId);
-    if(!securityBudget.consume([{key:`room-create:${userId}`,maximum:limits.roomCreatesPerHour,windowMs:3600_000},{key:`room-create-peer:${trustedClientIp(request)}`,maximum:Math.max(20,limits.roomCreatesPerHour*2),windowMs:3600_000}]))return response.set("Retry-After","3600").status(429).json({error:serverT("too_many_room_creation_attempts_try_again_later")});
-    const room = createRoom(roomSlug(parsed.data.name), userId, parsed.data.name);
-    room.settings.accessMode=parsed.data.accessMode??(parsed.data.isPublic?"public":"members");
-    room.isPublic = room.settings.accessMode!=="members";
-    room.passwordProtected = Boolean(parsed.data.password?.trim());
-    await store.createRoom(room, await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)));
-    watchIdleRoom(room.id);
-    // A full favorites list must not turn a completed creation into a failed
-    // request that the user might retry and duplicate.
-    try { await store.setFavorite(room.id, userId, true); } catch { /* Room is created. */ }
-    response.status(201).json({ room: { slug: room.id, name: room.name } });
-  } catch (error) {
-    response.status(error instanceof PublicRequestError?error.status:error instanceof SecurityLimitError?429:error instanceof RoomCommandError?400:503).json({ error: error instanceof RoomCommandError ? error.message : serverT("could_not_create_room_your_room_limit_may_have_been_reached") });
-  }
-});
-
-app.put("/api/rooms/:slug/favorite", express.json(), async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
-  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
-  const parsed = favoriteSchema.safeParse(request.body);
-  if (!slug.success || !parsed.success) return response.status(400).json({ error: serverT("invalid_favorite") });
-  try {
-    const access = await store.getRoomAccess(slug.data, userId);
-    if (!access.exists || access.banned || (!access.isPublic && !access.role)) {
-      return response.status(404).json({ error: serverT("room_not_found") });
-    }
-    await store.setFavorite(slug.data, userId, parsed.data.favorite);
-    response.json({ favorite: parsed.data.favorite });
-  } catch (error) {
-    response.status(error instanceof PublicRequestError?error.status:400).json({ error: error instanceof RoomCommandError?error.message:serverT("could_not_update_favorite") });
-  }
-});
-
-app.patch("/api/rooms/:slug", express.json(), async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
-  const slug = z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
-  const parsed = roomSettingsSchema.safeParse(request.body);
-  if (!slug.success || !parsed.success) {
-    return response.status(400).json({ error: parsed.success ? serverT("invalid_room") : parsed.error.issues[0]?.message });
-  }
-  try {
-    const previousDjs = [...(store.getRoom(slug.data)?.djQueueUserIds || [])];
-    const access=await store.getRoomAccess(slug.data,userId);
-    if(access.banned||(access.role!=="owner"&&access.role!=="moderator"))throw new RoomCommandError(serverT("only_the_owner_or_a_moderator_can_change_room_settings"));
-    const {password,...settings}=parsed.data;
-    const room = await store.updateRoomSettings(slug.data, userId, {
-      ...settings,
-      passwordHash: parsed.data.password === undefined ? undefined : await securityBudget.run("room-crypto",4,()=>hashRoomPassword(parsed.data.password)),
-    },async()=>{if(!await platform.activeAccount(userId)||!await platform.activeRoom(slug.data))throw new RoomCommandError(serverT("room_access_is_unavailable"));});
-    if (room) {
-      for (const id of previousDjs.filter(id => !room.djQueueUserIds.includes(id))) {
-        cancelDjEviction(room.id, id); forgetDjUser(room.id, id);
-      }
-      broadcast(room);
-    }
-    response.json({ room: room ? { id: room.id, name: room.name } : null });
-  } catch (error) {
-    response.status(error instanceof SecurityLimitError?429:error instanceof RoomCommandError?403:503).json({ error: error instanceof RoomCommandError ? error.message : serverT("could_not_update_room") });
-  } finally {
-    watchIdleRoom(slug.data);
-  }
-});
-
-app.patch("/api/profile", express.json(), async (request, response) => {
-  const userId = await getApiUserId(request);
-  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
-  const parsed = profileUpdateSchema.safeParse(request.body);
-  if (!parsed.success) {
-    return response.status(400).json({ error: parsed.error.issues[0]?.message || serverT("invalid_profile") });
-  }
-  try {
-    const profile = await store.updateProfile(userId, parsed.data);
-    response.json({ profile });
-  } catch (error) {
-    response.status(400).json({
-      error: error instanceof RoomCommandError ? error.message : serverT("could_not_update_profile")
-    });
-  }
-});
+mountRoomRoutes(app, { store, platform, securityBudget, resourcePolicies, getApiUserId,
+  roomUsers, watchIdleRoom, cancelDjEviction, forgetDjUser, broadcast });
 
 mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,canUseSpotify,
   soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
 mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,canUseSpotify,
   isAccountActive:userId=>platform.activeAccount(userId),
   authorizationUrl: (redirectUri, state) => spotifyApi.authorizationUrl(redirectUri, state), redirectUri: spotifyRedirectUri });
-app.get("/api/resource-policy",async(request,response)=>{
-  try {
-    const actor=await getApiUserId(request);
-    if(!actor)return response.status(401).json({error:serverT("authentication_required")});
-    response.json(await resourcePolicies.get(actor));
-  }catch{response.status(503).json({error:serverT("resource_limits_are_unavailable_try_again_shortly")});}
-});
-app.put("/api/admin/rooms/:slug/spotify",express.json({limit:"1kb"}),async(request,response)=>{
-  try {
-    const admin=await getApiAdminUserId(request);
-    if(!admin.ok)return response.status(admin.status).json({error:admin.error});
-    const slug=z.string().regex(/^[a-z0-9-]{3,48}$/).safeParse(request.params.slug);
-    const body=z.object({enabled:z.boolean()}).strict().safeParse(request.body);
-    if(!slug.success||!body.success)return response.status(400).json({error:serverT("invalid_spotify_setting")});
-    const room=await store.setRoomSpotifyEnabled(slug.data,admin.userId,body.data.enabled,async()=>{
-      const current=await getApiAdminUserId(request);
-      if(!current.ok||!await platform.activeRoom(slug.data))throw new RoomCommandError(serverT("administrator_access_required"));
-    });
-    broadcast(room);
-    securityEvent("admin_change","success",{actorId:admin.userId,requestId:response.locals.requestId});
-    response.json({enabled:room.settings.spotifyEnabled===true});
-  }catch{response.status(503).json({error:serverT("could_not_change_spotify_access_try_again")});}
-});
-app.get("/api/config", async(request, response) => {
-  let spotifyConfigured=false;
-  try {const actor=await getApiUserId(request);spotifyConfigured=Boolean(actor&&spotifyAccounts.configured&&await canUseSpotify(request,actor));}catch{/* Public configuration does not expose disabled capabilities. */}
-  response.json({
-    giphyConfigured: giphyApi.configured,
-    music: {
-      spotifyConfigured,
-      appleMusicConfigured: appleMusicApi.configured
-    },
-    supabase: authEnabled
-      ? { url: supabaseUrl, anonKey: supabasePublishableKey }
-      : null
-  });
-});
+mountResourcePolicyRoute(app, { getApiUserId, resourcePolicies });
+mountSpotifyAccessRoutes(app, { store, platform, getApiAdminUserId, broadcast });
+mountConfigRoutes(app, { authEnabled, supabaseUrl, supabasePublishableKey, getApiUserId, canUseSpotify,
+  giphyApi, spotifyAccounts, appleMusicApi });
 
-app.use("/api", (_request, response) => {
-  response.status(404).json({ error: serverT("that_api_endpoint_does_not_exist") });
-});
-
-app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
-  if (response.headersSent) return next(error);
-  const status = typeof error === "object" && error && "status" in error ? Number(error.status) : 500;
-  if (status === 400 || status === 413) {
-    return response.status(status).json({ error: status === 413 ? serverT("the_request_is_too_large") : serverT("the_request_body_is_invalid") });
-  }
-  securityEvent("request_failed","failed");
-  response.status(500).json({ error: serverT("the_server_could_not_complete_this_request_please_try_again") });
-});
+mountApiErrors(app);
 
 if (process.env.NODE_ENV === "production") {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1064,53 +800,7 @@ for(const room of await store.listSessionRooms()){
   if(await platform.activeRoom(room.id))await sessionScheduler.recover(room);
   else {blockedRooms.add(room.id);watchIdleRoom(room.id);}
 }
-let mediaCleanup: Promise<void> | null = null;
-let storageCleanupStatus={removed:0,remaining:0,oldestAt:null as string|null,failed:0,lastRunAt:null as string|null};
-let deletionWork:Promise<void>|null=null,retentionWork:Promise<void>|null=null,connectionChecks:Promise<void>|null=null;
-function cleanManagedMedia() {
-  if (!supabaseAdmin || mediaCleanup || shuttingDown) return;
-  mediaCleanup = cleanupManagedUploads(supabaseAdmin,{maxBatches:20,batchSize:100,maxMs:20_000})
-    .then(status=>{storageCleanupStatus={...status,lastRunAt:new Date().toISOString()};if(status.failed)securityEvent("storage_cleanup","failed",{count:status.failed});else if(status.removed)securityEvent("storage_cleanup","success",{count:status.removed});})
-    .catch(()=>{storageCleanupStatus.failed++;securityEvent("storage_cleanup","failed");})
-    .finally(() => { mediaCleanup = null; });
-}
-function processDeletion(){
-  if(!accountDeletion||deletionWork||shuttingDown)return;
-  deletionWork=accountDeletion.runNext().then(()=>undefined).catch(()=>securityEvent("account_deletion","failed")).finally(()=>{deletionWork=null;});
-}
-function pruneRetention(){
-  if(!supabaseAdmin||retentionWork||shuttingDown)return;
-  retentionWork=(async()=>{
-    const deadline=Date.now()+20_000;
-    for(let batch=0;batch<20&&Date.now()<deadline;batch++){
-      const [records,archives,chat]=await Promise.all([supabaseAdmin.rpc("soundspin_prune_security_retention"),supabaseAdmin.rpc("soundspin_purge_security_archives",{p_limit:1000}),supabaseAdmin.rpc("soundspin_prune_chat_history",{p_limit:500})]);
-      if(records.error||archives.error||chat.error)throw new Error(serverT("retention_maintenance_failed"));
-      const counts=[...Object.values(records.data||{}),...Object.values(archives.data||{}),Number(chat.data?.removed??0),Number(chat.data?.updatedReplies??0),chat.data?.hasMoreRooms?1:0];
-      if(counts.every(value=>Number(value)===0))break;
-    }
-  })().catch(()=>securityEvent("storage_cleanup","failed")).finally(()=>{retentionWork=null;});
-}
-function recheckConnections(){
-  if(!authEnabled||connectionChecks||shuttingDown)return;
-  connectionChecks=(async()=>{
-    const accounts=[...new Set([
-      ...[...io.sockets.sockets.values()].map(socket=>socket.data.authUserId as string).filter(Boolean),
-      ...[...roomDjUsers.values()].flatMap(users=>[...users.keys()])
-    ])];
-    const rooms=store.getCachedRooms().map(room=>room.id);
-    const tasks=[...accounts.map(userId=>async()=>{if(!await platform.activeAccount(userId))await restrictAccount(userId);}),
-      ...rooms.map(roomId=>async()=>{if(!await platform.activeRoom(roomId))await restrictRoom(roomId);})];
-    let index=0;
-    await Promise.all(Array.from({length:Math.min(8,tasks.length)},async()=>{while(index<tasks.length&&!shuttingDown){const task=tasks[index++];try{await task();}catch{securityEvent("upstream_failure","failed");}}}));
-  })().finally(()=>{connectionChecks=null;});
-}
-cleanManagedMedia();processDeletion();pruneRetention();
-const mediaCleanupTimer = setInterval(cleanManagedMedia,60_000);
-const deletionTimer=setInterval(processDeletion,60_000),retentionTimer=setInterval(pruneRetention,3600_000),connectionTimer=setInterval(recheckConnections,20_000);
-const resourcePolicyTimer=setInterval(()=>{void resourcePolicies.getGlobal().then(limits=>{globalResourceLimits=limits;globalResourcePolicyAvailable=true;}).catch(()=>{globalResourcePolicyAvailable=false;securityEvent("configuration_failure","failed");});},15_000);
-resourcePolicyTimer.unref();
-mediaCleanupTimer.unref();
-deletionTimer.unref();retentionTimer.unref();connectionTimer.unref();
+maintenance.start();
 httpServer.listen(port, process.env.HOST || "0.0.0.0", () => {
   const address = httpServer.address();
   console.log(`turntune listening on http://${process.env.HOST || "0.0.0.0"}:${typeof address === "object" && address ? address.port : port}`);
@@ -1122,15 +812,14 @@ async function shutdown() {
   djEvictions.clear();
   announcementExpiries.clear();
   sessionScheduler.clear();
-  clearInterval(mediaCleanupTimer);
-  clearInterval(deletionTimer);clearInterval(retentionTimer);clearInterval(connectionTimer);clearInterval(resourcePolicyTimer);
+  maintenance.stop();
   idleRooms.clear();
   const deadline = setTimeout(() => process.exit(1), 25_000);
   deadline.unref();
   try {
     await new Promise<void>((resolve) => io.close(() => resolve()));
     await Promise.allSettled([...activeSocketActions]);
-    await Promise.allSettled([mediaCleanup,deletionWork,retentionWork,connectionChecks].filter((work):work is Promise<void>=>Boolean(work)));
+    await maintenance.drain();
     await store.flush();
     clearTimeout(deadline);
   } catch (error) {

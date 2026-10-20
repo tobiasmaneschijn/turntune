@@ -63,7 +63,11 @@ and durable grace scheduling before horizontally scaling the server.
 
 | File | Responsibility |
 | --- | --- |
-| `server/index.ts` | Composition root, admission, presence, timer lifecycle, room metadata/profile routes, readiness and diagnostics. |
+| `server/index.ts` | Composition root, socket admission/presence, room timer lifecycle, startup and shutdown. |
+| `server/app/` | Status/configuration routes, API errors, and recurring cleanup and security maintenance. |
+| `server/security/request-identity.ts`, `server/security/api-access.ts` | Request-scoped HTTP identity, account checks, and admission before body parsing. |
+| `server/features/rooms/room-routes.ts`, `server/features/rooms/create-room.ts` | Room directory, creation, favorites and settings HTTP workflows, plus initial room state. |
+| `server/features/accounts/profile-routes.ts` | Profile reads and updates over HTTP. |
 | `server/features/rooms/room-actions.ts` | Admitted DJ, queue, playback, role, note and vote commands. |
 | `server/features/rooms/room-command-service.ts` | Ordered durable mutation followed by personalized broadcast. |
 | `shared/room-policy.ts`, `server/features/rooms/room-settings.ts` | Default/effective policy, capability summaries, bounded settings validation and authorization. |
@@ -76,7 +80,8 @@ and durable grace scheduling before horizontally scaling the server.
 | `server/features/rooms/radio.ts` | Radio state normalization, DJ eligibility, round-robin advancement, private queue access, and snapshot privacy. |
 | `server/features/rooms/radio-policy.ts`, `server/features/music/track-metadata.ts` | Recording eligibility, trusted duration, repeat ledger, turn/stop/fallback/vote state, and theme overlays. |
 | `server/features/rooms/room-session-scheduler.ts` | Theme/session clock updates, finite fallback completion, presence pause/resume and restart recovery. |
-| `server/persistence/store.ts` | Live room cache, Supabase reads/writes, room directory, roles, favorites, profiles, and ordered persistence. |
+| `server/persistence/store.ts` | Live room cache, room directory, roles, favorites, ordered persistence and the account persistence facade. |
+| `server/persistence/profile-repository.ts`, `server/persistence/music-connection-repository.ts`, `server/persistence/private-library-repository.ts` | Profile validation/queries, provider connections, and account-ordered private-library updates sharing the local file queue. |
 | `server/types.ts` | Authoritative private room extension of shared room fields. |
 | `shared/types.ts`, `shared/room-protocol.ts` | Public snapshots, acknowledgements and runtime command schemas shared by client and server. |
 | `server/features/rooms/radio.test.ts` | Focused tests for rotation, privacy, legacy migration, and disconnect timers. |

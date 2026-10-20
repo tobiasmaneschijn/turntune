@@ -4,8 +4,8 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createBoundedAdminClient } from "../integrations/supabase-client.js";
 import { ResourcePolicyStore } from "../resources/resource-policy.js";
-import { PublicRequestError, trustedSqlRequestError } from "../lib/public-request-error.js";
-import { profileUpdateSchema, type ProfileUpdate } from "../features/accounts/profile-fields.js";
+import { trustedSqlRequestError } from "../lib/public-request-error.js";
+import type { ProfileUpdate } from "../features/accounts/profile-fields.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { advanceRadio, normalizeRadioState, pruneUnauthorizedDjs } from "../features/rooms/radio.js";
 import { roomAllowsProvider } from "../../shared/providers.js";
@@ -13,38 +13,24 @@ import { allowedProvidersSchema, roomSettingsPatchSchema, authorizeRoomSettingsP
 import { accessMode } from "../../shared/room-policy.js";
 import { appendModerationLog, emptyModeration, ensureModeration, isRoomBanned, roleInRoom } from "../features/rooms/room-access.js";
 import { runtimeMetrics } from "../lib/runtime-metrics.js";
-import { changePrivateLibrary, emptyLibrary, libraryMutationSchema, privateLibrarySchema, PrivateLibraryDataError, type LibraryMutation, type PrivateLibrary } from "../features/music/private-library.js";
+import type { LibraryMutation, PrivateLibrary } from "../features/music/private-library.js";
 import type {
   DjAccess,
   Provider,
   Room,
   RoomDirectoryEntry,
   RoomRole,
-  MusicProviderConnection,
-  SoundSpinProfile,
-  SoundSpinProfileOption
+  MusicProviderConnection
 } from "../types.js";
 import type { RoomModerationState, RoomMemberRecord, User } from "../types.js";
+import { ProfileRepository } from "./profile-repository.js";
+import { MusicConnectionRepository, type LocalMusicConnectionData } from "./music-connection-repository.js";
+import { PrivateLibraryRepository, type LocalPrivateLibraryData } from "./private-library-repository.js";
+import { resourceQuotaError } from "./quota-errors.js";
 
-const PROFILE_COLUMNS = "user_id, display_name, is_app_admin, bio, avatar_key, avatar_url, avatar_path, theme_key, created_at, updated_at, handle, status_text, favorite_tracks";
-function resourceQuotaError(error:{code?:string;message:string}) {
-  if(error.code!=="P0001")return undefined;
-  const messages:Record<string,string>={
-    "Room ownership limit reached":"Your room limit is reached. Remove an unused room before creating another.",
-    "Room waiting queue limit reached":"This room's waiting queue is full. Remove tracks before adding more.",
-    "Account waiting queue limit reached":"Your waiting queues are full. Remove tracks before adding more.",
-    "Saved picks limit reached":"Your saved picks are full. Delete a pick before saving another.",
-    "Saved sets limit reached":"Your saved sets are full. Delete a set before saving another.",
-    "Set tracks limit reached":"This set has reached its track limit. Remove tracks before adding more.",
-  };
-  return Object.hasOwn(messages,error.message)?new PublicRequestError(messages[error.message],429):undefined;
-}
-
-interface Database {
+interface Database extends LocalMusicConnectionData, LocalPrivateLibraryData {
   rooms: Record<string, Room>;
   roomPasswords?: Record<string, string | null>;
-  musicConnections?: Record<string, MusicProviderConnection>;
-  privateLibraries?: Record<string, PrivateLibrary>;
   favorites?: Record<string,string[]>;
 }
 
@@ -81,7 +67,9 @@ export class Store {
   private queuedRoomChanges = new Map<string, number>();
   private supabase: SupabaseClient | null = null;
   private roomLoads = new Map<string, Promise<Room | undefined>>();
-  private libraryWrites = new Map<string, Promise<PrivateLibrary>>();
+  private readonly profiles: ProfileRepository;
+  private readonly musicConnections: MusicConnectionRepository;
+  private readonly privateLibraries: PrivateLibraryRepository;
   private readonly dataDir: string;
   private readonly dataFile: string;
   private readonly tempFile: string;
@@ -109,6 +97,11 @@ export class Store {
       this.supabase = createBoundedAdminClient();
     }
     this.resourcePolicies = options.resourcePolicies ?? new ResourcePolicyStore(this.supabase);
+    this.profiles = new ProfileRepository(this.supabase);
+    // init() replaces local data after reading disk. Resolve it when an operation
+    // runs, while keeping every local repository on the same atomic file queue.
+    this.musicConnections = new MusicConnectionRepository(this.supabase, () => this.data, () => this.persistFile());
+    this.privateLibraries = new PrivateLibraryRepository(this.supabase, () => this.data, () => this.persistFile(), this.resourcePolicies);
   }
 
   get usesSupabase() {
@@ -167,69 +160,16 @@ export class Store {
     }
   }
 
-  private musicConnectionKey(userId: string, provider: "spotify") {
-    return `${userId}:${provider}`;
-  }
-
   async getMusicConnection(userId: string, provider: "spotify") {
-    if (!this.supabase) {
-      return this.data.musicConnections?.[this.musicConnectionKey(userId, provider)] || null;
-    }
-    const { data, error } = await this.supabase
-      .from("soundspin_music_connections")
-      .select("user_id, provider, refresh_token_ciphertext, scopes, metadata, created_at, updated_at")
-      .eq("user_id", userId)
-      .eq("provider", provider)
-      .maybeSingle();
-    if (error) throw new Error(serverT("could_not_load_provider_connection_value2", { provider: provider, value2: error.message }));
-    return data ? {
-      userId: data.user_id,
-      provider: data.provider,
-      refreshTokenCiphertext: data.refresh_token_ciphertext,
-      scopes: data.scopes || [],
-      metadata: data.metadata || {},
-      createdAt: data.created_at,
-      updatedAt: data.updated_at
-    } as MusicProviderConnection : null;
+    return this.musicConnections.getMusicConnection(userId, provider);
   }
 
   async saveMusicConnection(connection: Omit<MusicProviderConnection, "createdAt" | "updatedAt">) {
-    const now = new Date().toISOString();
-    if (!this.supabase) {
-      this.data.musicConnections ||= {};
-      const key = this.musicConnectionKey(connection.userId, connection.provider);
-      const current = this.data.musicConnections[key];
-      this.data.musicConnections[key] = {
-        ...connection,
-        createdAt: current?.createdAt || now,
-        updatedAt: now
-      };
-      await this.persistFile();
-      return;
-    }
-    const { error } = await this.supabase.from("soundspin_music_connections").upsert({
-      user_id: connection.userId,
-      provider: connection.provider,
-      refresh_token_ciphertext: connection.refreshTokenCiphertext,
-      scopes: connection.scopes,
-      metadata: connection.metadata,
-      updated_at: now
-    }, { onConflict: "user_id,provider" });
-    if (error) throw new Error(serverT("could_not_save_value1_connection_value2", { value1: connection.provider, value2: error.message }));
+    return this.musicConnections.saveMusicConnection(connection);
   }
 
   async deleteMusicConnection(userId: string, provider: "spotify") {
-    if (!this.supabase) {
-      delete this.data.musicConnections?.[this.musicConnectionKey(userId, provider)];
-      await this.persistFile();
-      return;
-    }
-    const { error } = await this.supabase
-      .from("soundspin_music_connections")
-      .delete()
-      .eq("user_id", userId)
-      .eq("provider", provider);
-    if (error) throw new Error(serverT("could_not_disconnect_provider_value2", { provider: provider, value2: error.message }));
+    return this.musicConnections.deleteMusicConnection(userId, provider);
   }
 
   getRoom(id: string) {
@@ -426,54 +366,11 @@ export class Store {
   }
 
   async getPrivateLibrary(userId: string): Promise<PrivateLibrary> {
-    if (!this.supabase) return structuredClone(this.data.privateLibraries && Object.hasOwn(this.data.privateLibraries, userId) ? this.data.privateLibraries[userId] : emptyLibrary());
-    const { data, error } = await this.supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
-    if (error) throw new Error(serverT("could_not_load_private_picks_and_sets_value1", { value1: error.message }));
-    if (!data) return emptyLibrary();
-    const parsed = privateLibrarySchema.safeParse(data.data);
-    if (!parsed.success || !Number.isSafeInteger(Number(data.revision)) || Number(data.revision) < 1) throw new PrivateLibraryDataError();
-    return parsed.data;
+    return this.privateLibraries.getPrivateLibrary(userId);
   }
 
-  /** Per-owner ordering plus database revision checks prevent lost concurrent-tab edits. */
   updatePrivateLibrary(userId: string, value: LibraryMutation): Promise<PrivateLibrary> {
-    const mutation = libraryMutationSchema.parse(value);
-    const previous = this.libraryWrites.get(userId);
-    const operation = (previous ? previous.catch(() => emptyLibrary()) : Promise.resolve(emptyLibrary())).then(async () => {
-      const {limits}=await this.resourcePolicies.get(userId);
-      if (!this.supabase) {
-        this.data.privateLibraries ||= {};
-        const before = this.data.privateLibraries[userId];
-        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(before || emptyLibrary(), mutation,Date.now(),limits);
-        Object.defineProperty(this.data.privateLibraries, userId, { value: next, writable: true, enumerable: true, configurable: true });
-        try { await this.persistFile(); }
-        catch (error) { if (before) this.data.privateLibraries[userId] = before; else delete this.data.privateLibraries[userId]; throw error; }
-        return structuredClone(next);
-      }
-      const supabase = this.supabase;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const { data, error } = await supabase.from("soundspin_private_libraries").select("data, revision").eq("user_id", userId).maybeSingle();
-        if (error) throw new Error(serverT("could_not_load_private_picks_and_sets_value1", { value1: error.message }));
-        const parsed = data ? privateLibrarySchema.safeParse(data.data) : null;
-        const validRevision = !data || (Number.isSafeInteger(Number(data.revision)) && Number(data.revision) >= 1 && Number(data.revision) < Number.MAX_SAFE_INTEGER);
-        if (mutation.type !== "clear-library" && ((!parsed?.success && data) || !validRevision)) throw new PrivateLibraryDataError();
-        const next = mutation.type === "clear-library" ? emptyLibrary() : changePrivateLibrary(parsed?.success ? parsed.data : emptyLibrary(), mutation,Date.now(),limits);
-        if (!data) {
-          const insert = await supabase.from("soundspin_private_libraries").insert({ user_id: userId, data: next, revision: 1 });
-          if (!insert.error) return next;
-          if (insert.error.code === "23505") continue;
-          throw resourceQuotaError(insert.error)??new Error(serverT("could_not_save_private_picks_and_sets_value1", { value1: insert.error.message }));
-        }
-        const revision = validRevision ? Number(data.revision) + 1 : 1;
-        const update = await supabase.from("soundspin_private_libraries").update({ data: next, revision, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("revision", data.revision).select("revision").maybeSingle();
-        if (update.error) throw resourceQuotaError(update.error)??new Error(serverT("could_not_save_private_picks_and_sets_value1", { value1: update.error.message }));
-        if (update.data) return next;
-      }
-      throw new Error(serverT("your_library_changed_in_another_tab_refresh_and_try_again"));
-    });
-    this.libraryWrites.set(userId, operation);
-    void operation.finally(() => { if (this.libraryWrites.get(userId) === operation) this.libraryWrites.delete(userId); }).catch(() => {});
-    return operation;
+    return this.privateLibraries.updatePrivateLibrary(userId, value);
   }
 
   /** Reserve a guest room before a join yields, so every socket shares its owner/state. */
@@ -1011,115 +908,19 @@ export class Store {
     });
   }
   async loadOrCreateProfile(userId: string, displayName: string) {
-    if (!this.supabase) return null;
-    const current = await this.getProfile(userId);
-    if (current) return current;
-    // A reconnect carries potentially stale browser profile data. Only seed a
-    // missing profile; never reset a saved display name while joining a room.
-    const { error } = await this.supabase
-      .from("soundspin_profiles")
-      .upsert(
-        { user_id: userId, display_name: displayName, updated_at: new Date().toISOString() },
-        { onConflict: "user_id", ignoreDuplicates: true }
-      );
-    if (error) throw new Error(serverT("could_not_load_profile_value1", { value1: error.message }));
-    const profile = await this.getProfile(userId);
-    if (!profile) throw new Error(serverT("could_not_load_profile_after_creating_it"));
-    return profile;
+    return this.profiles.loadOrCreateProfile(userId, displayName);
   }
 
   async getProfile(userId: string) {
-    if (!this.supabase) return null;
-    const { data, error } = await this.supabase
-      .from("soundspin_profiles")
-      .select(PROFILE_COLUMNS)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (error) throw new Error(serverT("could_not_load_profile_value1", { value1: error.message }));
-    return data as SoundSpinProfile | null;
+    return this.profiles.getProfile(userId);
   }
 
   async getProfileOptions() {
-    if (!this.supabase) return [];
-    const { data, error } = await this.supabase
-      .from("soundspin_profile_options")
-      .select("key, kind, name, metadata")
-      .order("kind", { ascending: true })
-      .order("name", { ascending: true });
-    if (error) throw new Error(serverT("could_not_load_profile_options_value1", { value1: error.message }));
-    return (data || []) as SoundSpinProfileOption[];
+    return this.profiles.getProfileOptions();
   }
 
-  async updateProfile(
-    userId: string,
-    input: ProfileUpdate
-  ) {
-    if (!this.supabase) return null;
-    const update = profileUpdateSchema.parse(input);
-    const supabase = this.supabase;
-    const current = await this.getProfile(userId);
-    if (!current) throw new Error(serverT("profile_not_found"));
-
-    const validateOption = async (
-      key: string,
-      kind: SoundSpinProfileOption["kind"],
-      missingMessage: string
-    ) => {
-      const { data: option, error } = await supabase
-        .from("soundspin_profile_options")
-        .select("key")
-        .eq("key", key)
-        .eq("kind", kind)
-        .maybeSingle();
-      if (error) throw new Error(serverT("could_not_validate_kind_value2", { kind: kind, value2: error.message }));
-      if (!option) throw new Error(missingMessage);
-    };
-
-    if (update.avatarKey && update.avatarKey !== current.avatar_key) {
-      await validateOption(update.avatarKey, "avatar", "That avatar does not exist.");
-    }
-    if (update.themeKey && update.themeKey !== current.theme_key) {
-      await validateOption(update.themeKey, "theme", "That theme does not exist.");
-    }
-
-    let customAvatarUrl: string | undefined;
-    if (update.customAvatarPath !== undefined) {
-      const [folder, fileName, extra] = update.customAvatarPath.split("/");
-      if (folder !== userId || !fileName || extra) throw new Error(serverT("that_avatar_upload_is_not_yours"));
-      const { data: objects, error } = await supabase.storage
-        .from("profile-avatars")
-        .list(userId, { search: fileName, limit: 10 });
-      if (error) throw new Error(serverT("could_not_validate_avatar_upload_value1", { value1: error.message }));
-      if (!objects?.some((object) => object.name === fileName)) throw new Error(serverT("that_avatar_upload_was_not_found"));
-      customAvatarUrl = supabase.storage.from("profile-avatars").getPublicUrl(update.customAvatarPath).data.publicUrl;
-    }
-
-    const values: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (update.displayName !== undefined) values.display_name = update.displayName;
-    if (update.bio !== undefined) values.bio = update.bio;
-    if (update.handle !== undefined) values.handle = update.handle;
-    if (update.statusText !== undefined) values.status_text = update.statusText;
-    if (update.favoriteTracks !== undefined) values.favorite_tracks = update.favoriteTracks;
-    if (update.avatarKey !== undefined) {
-      values.avatar_key = update.avatarKey;
-      values.avatar_url = null;
-      values.avatar_path = null;
-    }
-    if (update.customAvatarPath !== undefined) {
-      values.avatar_url = customAvatarUrl;
-      values.avatar_path = update.customAvatarPath;
-    }
-    if (update.themeKey !== undefined) values.theme_key = update.themeKey;
-
-    const { data, error } = await supabase
-      .from("soundspin_profiles")
-      .update(values)
-      .eq("user_id", userId)
-      .select(PROFILE_COLUMNS)
-      .single();
-    if (error?.code === "23505" && update.handle !== undefined) throw new Error(serverT("that_handle_is_taken"));
-    if (error) throw new Error(serverT("could_not_update_profile_value1", { value1: error.message }));
-    return data as SoundSpinProfile;
+  async updateProfile(userId: string, input: ProfileUpdate) {
+    return this.profiles.updateProfile(userId, input);
   }
 
   /**
