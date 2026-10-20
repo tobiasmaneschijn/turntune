@@ -52,6 +52,9 @@ test("follow a room's music-service restrictions when searching and adding a lin
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://mixcloud.com/fixture/show/");
   await expect(page.getByText("Mixcloud · disabled in this room", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Find track", exact: true })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await dropQueueLink(page, 'https://mixcloud.com/fixture/show/', 'Beta', 'before');
+  await expect(page.getByRole('alert')).toContainText('Mixcloud is disabled in this room');
   expect(await api(page, "return music.commands")).toEqual([]);
 });
 
@@ -167,6 +170,128 @@ test("reorder the private queue and undo a removal without changing room playbac
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Beta", "Gamma", "Alpha"]);
   expect(await rows.evaluateAll(items => items.every(item => item.getAnimations().every(animation => animation.playState !== "running")))).toBe(true);
   expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
+});
+
+test("select queue tracks, save only the selection, and recover a partial removal", async ({ page }) => {
+  await mockLibrary(page, true);
+  const saves: any[] = [];
+  page.on('request', request => { if (request.url().endsWith('/api/library') && request.method() === 'POST') saves.push(request.postDataJSON()); });
+  await open(page, 'library', true);
+  const playback = await api(page, 'return music.snapshot().room.playback');
+  const rows = page.locator('.music-queue-pane .queue-track');
+  await page.getByRole('button', { name: 'Actions for Alpha', exact: true }).press('Enter');
+  await page.getByRole('menuitem', { name: 'Select track', exact: true }).press('Enter');
+  await expect(page.getByRole('checkbox', { name: 'Select Alpha', exact: true })).toBeChecked();
+  await page.getByRole('button', { name: 'Actions for Beta', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Select track', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Select Beta', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Actions for Alpha', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Deselect track', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Select Alpha', exact: true })).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(1);
+  await rows.filter({ has: page.getByText('Gamma', { exact: true }) }).getByText('Gamma', { exact: true }).click({ modifiers: ['Shift'] });
+  await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(3);
+  await rows.filter({ has: page.getByText('Beta', { exact: true }) }).getByText('Beta', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
+  await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Save selected as set', exact: true }).click();
+  const name = page.getByRole('textbox', { name: 'Set name', exact: true });
+  await expect(name).toBeFocused();
+  await name.fill('Two picks');
+  await page.getByRole('button', { name: 'Save set', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Library storage is unavailable');
+  await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2);
+  await expect(name).toHaveValue('Two picks');
+  await page.getByRole('button', { name: 'Save set', exact: true }).click();
+  await expect(name).toBeHidden();
+  expect(saves.map(save => save.tracks.map((track: any) => track.title))).toEqual([['Alpha', 'Gamma'], ['Alpha', 'Gamma']]);
+  expect(saves[1].id).toBe(saves[0].id);
+  await expect(rows.locator('.rail-track-copy strong')).toHaveText(['Alpha', 'Beta', 'Gamma']);
+  await page.getByRole('button', { name: 'Clear selection', exact: true }).press('Enter');
+  await expect(page.getByRole('button', { name: 'Actions for Alpha', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Queue actions', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Select all tracks', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Select Beta', exact: true }).uncheck();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const gammaCheckbox = page.getByRole('checkbox', { name: 'Select Gamma', exact: true });
+  await expect(gammaCheckbox).toBeInViewport({ ratio: 1 });
+  expect(await gammaCheckbox.evaluate(input => {
+    const target = (input as HTMLInputElement).labels?.[0] || input;
+    const box = target.getBoundingClientRect();
+    return box.width >= 44 && box.height >= 44;
+  })).toBe(true);
+  for (const label of ['Remove selected tracks', 'Save selected as set', 'Clear selection']) {
+    const action = page.getByRole('button', { name: label, exact: true });
+    await expect(action).toBeInViewport({ ratio: 1 });
+    const box = await action.boundingBox();
+    expect(box!.width >= 44 && box!.height >= 44).toBe(true);
+  }
+
+  await api(page, "music.failNextQueueRemoval('queue-Gamma'); music.deferNextAction()");
+  await page.getByRole('button', { name: 'Remove selected tracks', exact: true }).click();
+  await expect(page.getByText('Only the last removal can be undone.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove 2 tracks', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Save selected as set', exact: true })).toBeDisabled();
+  await api(page, 'music.resolveNext({ ok: true })');
+  await expect(page.getByRole('alert')).toContainText('Removed 1 track. Queue storage is unavailable');
+  await expect(page.getByRole('button', { name: 'Undo removal', exact: true })).toHaveCount(0);
+  await expect(rows.locator('.rail-track-copy strong')).toHaveText(['Beta', 'Gamma']);
+  await expect(page.getByRole('checkbox', { name: 'Select Gamma', exact: true })).toBeChecked();
+  await page.getByRole('button', { name: 'Remove selected tracks', exact: true }).click();
+  await expect(rows.locator('.rail-track-copy strong')).toHaveText(['Beta']);
+  await expect(page.getByRole('group', { name: 'Queue selection', exact: true })).toBeHidden();
+  await expect(page.getByRole('tab', { name: /My queue/ })).toBeFocused();
+  expect(await api(page, 'return music.snapshot().room.playback')).toEqual(playback);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+async function dropQueueLink(page: Page, value: string, title?: string, edge: 'before' | 'after' = 'after') {
+  const target = title ? page.locator('.music-queue-pane .queue-track').filter({ has: page.getByText(title, { exact: true }) }) : page.locator('.music-queue-pane .rail-track-list');
+  const box = await target.boundingBox();
+  const data = await page.evaluateHandle(link => { const transfer = new DataTransfer(); transfer.setData('text/uri-list', link); return transfer; }, value);
+  const event = { dataTransfer: data, clientX: box!.x + 8, clientY: box!.y + (edge === 'before' ? 2 : box!.height - 2) };
+  await target.dispatchEvent('dragover', event);
+  await target.dispatchEvent('drop', event);
+  await data.dispose();
+}
+
+test('drop music links at a chosen queue position and discard a lookup after changing rooms', async ({ page }) => {
+  let release!: () => void;
+  let holdLookup = false;
+  let lookupStarted = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route('https://www.youtube.com/oembed?**', async route => {
+    lookupStarted = true;
+    if (holdLookup) await gate;
+    const url = new URL(new URL(route.request().url()).searchParams.get('url')!);
+    await route.fulfill({ json: { title: url.searchParams.get('v') === 'abcdefghijk' ? 'Dropped Song' : 'Later Song', author_name: 'Dropped Artist' } }).catch(() => {});
+  });
+  await open(page);
+  const playback = await api(page, 'return music.snapshot().room.playback');
+  const titles = page.locator('.music-queue-pane .queue-track .rail-track-copy strong');
+  await dropQueueLink(page, 'https://example.com/not-music', 'Beta', 'before');
+  await expect(page.getByRole('alert')).toContainText('Drop one supported music link');
+  expect(await api(page, 'return music.commands')).toEqual([]);
+  await dropQueueLink(page, 'https://youtu.be/abcdefghijk', 'Beta', 'before');
+  await expect(titles).toHaveText(['Alpha', 'Dropped Song', 'Beta', 'Gamma']);
+  await dropQueueLink(page, 'https://youtu.be/lmnopqrstuv');
+  await expect(titles).toHaveText(['Alpha', 'Dropped Song', 'Beta', 'Gamma', 'Later Song']);
+  expect(await api(page, 'return music.snapshot().room.playback')).toEqual(playback);
+
+  holdLookup = true; lookupStarted = false;
+  await dropQueueLink(page, 'https://youtu.be/zyxwvutsrqp', 'Alpha', 'before');
+  await expect.poll(() => lookupStarted).toBe(true);
+  await dropQueueLink(page, 'https://youtu.be/zyxwvutsrqp', 'Alpha', 'before');
+  expect(await api(page, "return music.commands.filter(command => command.event === 'queue:add').length")).toBe(2);
+  await api(page, "music.setRoom('second-room')");
+  release();
+  await expect(titles).toHaveText(['Alpha', 'Beta', 'Gamma']);
+  expect(await api(page, "return music.commands.filter(command => command.event === 'queue:add').length")).toBe(2);
+
+  await open(page, 'listener-quiet');
+  await dropQueueLink(page, 'https://youtu.be/abcdefghijk');
+  await expect(titles).toHaveText(['Dropped Song']);
+  expect(await api(page, 'return music.snapshot().room.playback.track')).toBeNull();
 });
 
 test("queue a song as a listener and go on air by joining the DJ rotation", async ({ page }) => {

@@ -1,0 +1,25 @@
+.queue-selection-tools { flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+.queue-selection-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; }
+.queue-selection-bar > span { flex: 1; font-size: 12px; color: var(--muted-foreground); }
+.queue-selection-bar > button { width: 30px; height: 30px; }
+.queue-selection-name { display: flex; gap: 6px; padding: 0 8px 8px; }
+.queue-selection-name input { min-width: 0; flex: 1; }
+.queue-selection-confirm { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; }
+.queue-selection-confirm p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted-foreground); }
+.queue-track[data-selected="true"] { background: var(--accent); }
+.queue-track-selector { display: grid; place-items: center; width: 100%; min-width: 0; min-height: 32px; cursor: pointer; }
+.queue-track-selector input { width: 14px; height: 14px; accent-color: var(--primary); cursor: pointer; }
+.queue-track-selector:focus-within { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 4px; }
+.music-queue-pane .rail-track-list[data-empty-drop="true"] { position: relative; }
+.music-queue-pane .rail-track-list[data-empty-drop="true"]::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--primary); pointer-events: none; }
+.history-song-drag { display: block; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 7px; cursor: grab; }
+:is(.open-room, [data-room-design="open-room"]) .history-song-drag { border-radius: 4px; }
+.history-song-drag:active { cursor: grabbing; }
+@media (max-width: 640px), (pointer: coarse) {
+  .queue-selection-bar > button { width: 44px; height: 44px; }
+  .queue-track-selector { width: 44px; min-height: 44px; }
+  .music-rail-qol .queue-track:has(.queue-track-selector),
+  :is(.open-room, [data-room-design="open-room"]) .private-music-panel .queue-track:has(.queue-track-selector) {
+    grid-template-columns: 44px 40px minmax(0, 1fr) 44px;
+  }
+}

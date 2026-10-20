@@ -39,6 +39,9 @@ section.now-playing.now-playing--dock.panel .track-stage :is(.youtube-shell, .so
 section.now-playing.now-playing--dock.panel .mixcloud-shell > iframe { display: none; }
 section.now-playing.now-playing--dock.panel .mixcloud-shell { display: contents; }
 section.now-playing.now-playing--dock .current-track { grid-column: 1; grid-row: 1; display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0; text-align: left; }
+.now-playing.now-playing--dock .dock-song-drag { display: inline-flex; flex: 0 0 var(--dock-artwork-size); width: var(--dock-artwork-size); height: var(--dock-artwork-size); border-radius: 4px; }
+.dock-song-drag[draggable="true"] { cursor: grab; }
+.dock-song-drag img { pointer-events: none; }
 .now-playing.now-playing--dock .dock-track-artwork { position: relative; flex: 0 0 var(--dock-artwork-size); width: var(--dock-artwork-size); height: var(--dock-artwork-size); overflow: hidden; border-radius: 4px; }
 .now-playing.now-playing--dock .dock-track-artwork img { width: 100%; height: 100%; object-fit: cover; }
 .now-playing.now-playing--dock .current-track-copy { min-width: 0; flex: 1; text-align: left; }

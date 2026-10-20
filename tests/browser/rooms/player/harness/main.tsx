@@ -7,7 +7,10 @@ import { NowPlaying } from "../../../../../src/features/playback/components/NowP
 import { RoomSettingsDialog } from "../../../../../src/features/rooms/components/RoomSettingsDialog";
 import { MusicRail, type MusicRailControls } from "../../../../../src/features/music/components/MusicRail";
 import { useMediaQuery } from "../../../../../src/hooks/use-media-query";
-import { RealtimeChat } from "../../../../../src/features/chat/components/realtime-chat";
+import { RealtimeChat, type RealtimeChatHandle } from "../../../../../src/features/chat/components/realtime-chat";
+import type { ChatSongMoment } from "../../../../../src/features/chat/song-moments";
+import type { ChatMessage } from "../../../../../src/features/chat/model";
+import { songFromTrack } from "../../../../../src/features/music/song-drag";
 import { RoomHeader } from "../../../../../src/features/rooms/components/RoomHeader";
 import { RoomAnnouncementBanner } from "../../../../../src/features/rooms/components/RoomAnnouncementBanner";
 import { RoomThemeBanner } from "../../../../../src/features/rooms/components/RoomThemeBanner";
@@ -29,6 +32,10 @@ const reactingListener = new URLSearchParams(location.search).has("listener");
 const user = { id: "player-user", name: "Mira", avatarSeed: "mira" };
 const track: Track = { id: "t1", provider: "youtube", providerId: "fixture0001", title: "A very long recording title that remains readable in its full track details", artist: "The Evening Ensemble", permalinkUrl: "https://www.youtube.com/watch?v=fixture0001", durationMs: 180000, addedBy: user, addedAt: 1 };
 const snapshot: RoomSnapshot = { room: { id: "player-room", name: "Evening radio", ownerUserId: user.id, moderatorUserIds: [], djRoleUserIds: [], isPublic: true, passwordProtected: false, settings: { spotifyEnabled: true }, djUserId: user.id, djQueueUserIds: [], queue: [], history: [], playback: { track, playing: true, position: 30, updatedAt: Date.now() }, vibe: null, createdAt: 1 }, users: [user, { ...user, id: "listener", name: "Jonas" }], djUsers: [user], serverTime: Date.now() };
+if (new URLSearchParams(location.search).has("reactions")) {
+  snapshot.users.push({ id: "mira", name: "mira", avatarSeed: "mira" });
+  snapshot.room.vibe = { trackId: track.id, votes: { mira: -1 } };
+}
 if (polished) {
   snapshot.room.name = "Evening Radio";
   snapshot.users.push({ id: "sam", name: "Sam", avatarSeed: "sam", avatarKey: "midnight" }, { id: "alex", name: "Alex", avatarSeed: "alex", avatarKey: "orbit" });
@@ -44,7 +51,7 @@ if (polished) {
   snapshot.room.queue[0].providerId = "4fQeaM62mOY";
 }
 const chatClient = { channel() { return { on() { return this; }, subscribe(callback: (status: string) => void) { queueMicrotask(() => callback("SUBSCRIBED")); return this; }, async send() { return "ok"; } }; }, async removeChannel() { return "ok"; } } as unknown as SupabaseClient;
-const chatMessages = [{ id: "hello-1", content: "This is the perfect soundtrack for the evening.", type: "text" as const, user: snapshot.users[1], createdAt: "2026-10-06T18:30:00Z" }, { id: "hello-2", content: "Queued a few favorites for my next turn.", type: "text" as const, user, createdAt: "2026-10-06T18:31:00Z" }];
+const chatMessages: ChatMessage[] = [{ id: "hello-1", content: "This is the perfect soundtrack for the evening.", type: "text", user: snapshot.users[1], createdAt: "2026-10-06T18:30:00Z", song: polished && snapshot.room.playback.track ? songFromTrack(snapshot.room.playback.track, 45) : undefined }, { id: "hello-2", content: "Queued a few favorites for my next turn.", type: "text", user, createdAt: "2026-10-06T18:31:00Z" }];
 if (polished && new URLSearchParams(location.search).has("empty")) { snapshot.room.playback.track = null; snapshot.room.queue = []; snapshot.room.djUserId = null; }
 if (polished) [
   "I've got Tycho lined up after this.", "Nice. Keeping the queue open tonight?", "Yep, join whenever you're ready.",
@@ -103,6 +110,8 @@ function Harness() {
   const [musicOpen, setMusicOpen] = useState(true);
   const [musicOpenRequest, setMusicOpenRequest] = useState(0);
   const musicControls = useRef<MusicRailControls>(null);
+  const chatControls = useRef<RealtimeChatHandle>(null);
+  const [songMoments, setSongMoments] = useState<ChatSongMoment[]>([]);
   const narrow = useMediaQuery("(max-width: 1024px)");
   const openQueue = () => { setMusicOpen(true); setMusicOpenRequest(request => request + 1); setPane("radio"); requestAnimationFrame(() => musicControls.current?.openQueue()); };
   const openSearch = () => { setMusicOpen(true); setMusicOpenRequest(request => request + 1); setPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.focusSearch())); };
@@ -134,8 +143,8 @@ function Harness() {
 
       roomNotice={polished && <><RoomThemeBanner prompt={new URLSearchParams(location.search).get("theme") || "After hours"} /><RoomAnnouncementBanner roomId={room.room.id} userId={user.id} announcement={{ id: "fixture-note", text: "One song per turn. Pick something you love.", authorId: user.id, updatedAt: 1, expiresAt: null }} serverTime={room.serverTime} canEdit={false} connected={connected} /></>}
       radio={polished ? <MusicRail controlsRef={musicControls} activityContainer={activityContainer} inlineAddMusic onOpenProfile={() => {}} onClose={() => setMusicOpen(false)} snapshot={room} currentUserId={user.id} accessToken="fixture" connected={connected} setNotice={() => {}} requestAction={requestAction} /> : <div className="panel"><input aria-label="Music search" /></div>}
-      chat={polished ? <aside className="chat panel"><div className="chat-header"><strong>Room chat</strong><div className="chat-presence"><small>2 listeners</small><div ref={setChatHeaderActions} className="chat-header-actions" /></div></div><div className="supabase-chat-body"><RealtimeChat headerActionsContainer={chatHeaderActions} historyRoomSlug={room.room.id} historySource={chatHistorySource} notifications={settings.notifications} client={chatClient} roomName="soundspin:player-room" user={user} roomUsers={room.users} messages={chatMessages} onSend={async () => {}} isVisible={!narrow || pane === "chat"} /></div></aside> : <div className="chat panel"><textarea aria-label="Chat draft" /></div>}
-      player={<div className="player-column" data-revision={revision}><NowPlaying onAddTrack={polished ? openSearch : undefined} presentation={polished ? "dock" : "panel"} snapshot={room} currentUserId={reactingListener ? "listener" : user.id} isDj canControlPlayback accessToken="fixture" compact={settings.playback.compactPlayer} onToggleCompact={() => setSettings(value => ({ ...value, playback: { ...value.playback, compactPlayer: !value.playback.compactPlayer } }))} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} userSettings={settings} onUserSettingsChange={setSettings} roomConnected={connected} onOpenSettings={() => setSettingsOpen(true)} requestAction={requestAction} providerPlayers={adapters} /></div>} />
+      chat={polished ? <aside className="chat panel"><div className="chat-header"><strong>Room chat</strong><div className="chat-presence"><small>2 listeners</small><div ref={setChatHeaderActions} className="chat-header-actions" /></div></div><div className="supabase-chat-body"><RealtimeChat ref={chatControls} onSongMomentsChange={setSongMoments} currentSong={room.room.playback.track ? songFromTrack(room.room.playback.track, 30) : undefined} headerActionsContainer={chatHeaderActions} historyRoomSlug={room.room.id} historySource={chatHistorySource} notifications={settings.notifications} client={chatClient} roomName="soundspin:player-room" user={user} roomUsers={room.users} messages={chatMessages} onSend={async () => {}} isVisible={!narrow || pane === "chat"} /></div></aside> : <div className="chat panel"><textarea aria-label="Chat draft" /></div>}
+      player={<div className="player-column" data-revision={revision}><NowPlaying songMoments={songMoments} onOpenSongMoment={messageId => { setPane("chat"); requestAnimationFrame(() => requestAnimationFrame(() => chatControls.current?.revealMessage(messageId))); }} onAddTrack={polished ? openSearch : undefined} presentation={polished ? "dock" : "panel"} snapshot={room} currentUserId={reactingListener ? "listener" : user.id} isDj canControlPlayback accessToken="fixture" compact={settings.playback.compactPlayer} onToggleCompact={() => setSettings(value => ({ ...value, playback: { ...value.playback, compactPlayer: !value.playback.compactPlayer } }))} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} userSettings={settings} onUserSettingsChange={setSettings} roomConnected={connected} onOpenSettings={() => setSettingsOpen(true)} requestAction={requestAction} providerPlayers={adapters} /></div>} />
     {delayedOpen && <DeferredDialog title="Deferred panel" load={loadDelayed} componentProps={{ onClose: () => setDelayedOpen(false) }} />}
     {flakyOpen && <DeferredDialog title="Deferred panel" load={loadFlaky} componentProps={{ onClose: () => setFlakyOpen(false) }} />}
     {roomSettingsOpen && <RoomSettingsDialog snapshot={room} currentUserId={user.id} accessToken="fixture" connected={connected} onNotice={() => { if (qa.savedRoomSettings) qa.setAllowedProviders(qa.savedRoomSettings.allowedProviders); }} onClose={() => setRoomSettingsOpen(false)} />}

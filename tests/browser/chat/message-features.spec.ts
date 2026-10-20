@@ -21,6 +21,9 @@ interface HarnessWindow {
     acceptedMessages: Record<string, ChatMessage>
     addedMusicLinks: string[]
     savedMusicLinks: string[]
+    currentSong: NonNullable<ChatMessage['song']>
+    seekChanges: unknown[]
+    remove: (messageId: string) => void
   }
 }
 const databases = new WeakMap<Page, Database>()
@@ -143,7 +146,8 @@ test('Keep room pins across visits, respect private message hiding, and recover 
   expect(database.pinWrites.map(write => write.pinned)).toEqual([true, false, false])
 })
 
-test('Save a shared track and keep a song-linked comment after reloading chat', async ({ page }) => {
+test('Save a shared track, draft a song comment by dropping, and open its visible timeline marker', async ({ page }) => {
+  await page.goto('/tests/browser/chat/harnesses/commands/index.html?song-moments')
   const preview = messageRow(page, musicId).getByRole('article', { name: 'Link preview', exact: true })
   await expect(preview.getByText('Midnight City', { exact: true })).toBeVisible()
   await composer(page).fill('Keep this draft')
@@ -158,11 +162,30 @@ test('Save a shared track and keep a song-linked comment after reloading chat', 
   await expect(fallback.getByRole('link', { name: fallbackUrl, exact: true })).toHaveAttribute('href', fallbackUrl)
   await expect(fallback.getByRole('article', { name: 'Link preview', exact: true })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Add to message', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Attach current song', exact: true }).click()
+  await messageRow(page, noteId).hover()
+  await messageRow(page, noteId).getByRole('button', { name: 'Message actions for Mira', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Reply', exact: true }).click()
+  const drop = async (roomId: string, privateQueue = false) => {
+    const data = await page.evaluateHandle(({ roomId, privateQueue, url }) => {
+      const transfer = new DataTransfer()
+      transfer.setData(privateQueue ? 'application/x-turntune-private-queue' : 'application/x-turntune-song',
+        privateQueue ? 'private-track-id' : JSON.stringify({ roomId, song: (window as unknown as HarnessWindow).chatCommandsTest.currentSong }))
+      transfer.setData('text/plain', privateQueue ? 'private-track-id' : url)
+      return transfer
+    }, { roomId, privateQueue, url: musicUrl })
+    await composer(page).dispatchEvent('drop', { dataTransfer: data })
+    await data.dispose()
+  }
+  await drop('other-room')
+  await drop('lounge', true)
+  await expect(page.locator('form').getByRole('group', { name: 'Attached song', exact: true })).toHaveCount(0)
+  await expect(composer(page)).toHaveValue('Keep this draft')
+  await drop('lounge')
   await expect(page.getByRole('group', { name: 'Attached song', exact: true })).toContainText('Midnight City')
   await expect(page.getByRole('group', { name: 'Attached song', exact: true })).toContainText('1:14')
   await expect(composer(page)).toHaveValue('Keep this draft')
+  await expect(page.locator('form')).toContainText(note)
+  expect(databases.get(page)!.rows).toHaveLength(3)
   await composer(page).fill('That transition is so good')
   await composer(page).press('Enter')
   const sent = page.locator('.chat-message-item').filter({ hasText: 'That transition is so good' })
@@ -179,6 +202,22 @@ test('Save a shared track and keep a song-linked comment after reloading chat', 
   await expect(sent.getByRole('group', { name: 'Attached song', exact: true })).toContainText('Midnight City')
   await expect(sent.getByRole('group', { name: 'Attached song', exact: true })).toContainText('1:14')
   await expect(messageRow(page, attachmentId).getByRole('group', { name: 'Attached song', exact: true })).toContainText('Midnight City')
+  const marker = page.getByRole('button', { name: 'Alice, 1:14: That transition is so good', exact: true })
+  await marker.focus()
+  await expect(page.getByRole('tooltip')).toContainText('That transition is so good')
+  await marker.click()
+  await expect(sent).toBeFocused()
+  expect(await page.evaluate(() => (window as unknown as HarnessWindow).chatCommandsTest.seekChanges)).toEqual([])
+  await sent.hover()
+  await sent.getByRole('button', { name: 'Actions for your message', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Hide message', exact: true }).click()
+  await expect(marker).toHaveCount(0)
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Switch account', exact: true }).click()
+  await expect(marker).toBeVisible()
+  const commentId = databases.get(page)!.rows.find(row => row.content === 'That transition is so good')!.id
+  await page.evaluate(id => (window as unknown as HarnessWindow).chatCommandsTest.remove(id), commentId)
+  await expect(marker).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(composer(page)).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

@@ -33,6 +33,9 @@ import { EmptyPlayerDock } from "./EmptyPlayerDock";
 import { PlaybackTimeline } from "./PlaybackTimeline";
 import { formatPlaybackTime } from "../format-playback-time";
 import { useArtworkColor } from "../use-artwork-color";
+import { LiveReactionFaces } from "./LiveReactionFaces";
+import { writeSongDrag, songFromTrack } from "../../music/song-drag";
+import type { ChatSongMoment } from "../../chat/song-moments";
 
 const loadUserSettings = () => import("../../settings/UserSettingsDialog").then(module => ({ default: module.UserSettingsDialog }));
 const defaultRequestAction = (event: string, payload: unknown, reply: (result: SocketReply) => void) => requestSocketAction(socket, event, payload, reply);
@@ -154,6 +157,9 @@ function BangOMeter({
         role="group"
         aria-label={addedByCurrentUser ? t("nowPlaying.listenerReactions") : t("nowPlaying.reactLabel")}
       >
+      <LiveReactionFaces scope={`${snapshot.room.id}:${currentUserId}:${track?.id || ""}`}
+        votes={Object.fromEntries(Object.entries(vibe?.votes || {}).filter(([userId]) => userId !== track?.addedBy.id))}
+        users={snapshot.users} currentUserId={currentUserId} connected={roomConnected} enabled={decorationsEnabled} />
       <div className="bang-meter-face">
         <div
           key={track?.id}
@@ -244,7 +250,9 @@ export function NowPlaying({
   requestAction = defaultRequestAction,
   providerPlayers,
   isolatedPreview = false,
-  presentation = "panel"
+  presentation = "panel",
+  songMoments,
+  onOpenSongMoment
 }: {
   snapshot: RoomSnapshot;
   isDj: boolean;
@@ -269,6 +277,8 @@ export function NowPlaying({
   isolatedPreview?: boolean;
   /** Presentation changes never change the provider's owner or mount position. */
   presentation?: "panel" | "dock";
+  songMoments?: ChatSongMoment[];
+  onOpenSongMoment?: (messageId: string) => void;
 }) {
   const { t } = useTranslation("music");
   const playback = snapshot.room.playback;
@@ -522,7 +532,11 @@ export function NowPlaying({
           </div>
           <div className="player-details">
           <div className="current-track">
-            {docked && <TrackArtwork track={track} compact className="dock-track-artwork" onImageReady={artworkColor.onArtworkReady} />}
+            {docked && <span className="dock-song-drag" draggable={roomConnected}
+              title={t("nowPlaying.dragSongToChat")}
+              onDragStart={event => {
+                if (!roomConnected || !writeSongDrag(event.dataTransfer, snapshot.room.id, songFromTrack(track, playerStatus.currentTime))) event.preventDefault();
+              }}><TrackArtwork track={track} compact className="dock-track-artwork" onImageReady={artworkColor.onArtworkReady} /></span>}
             <div className="current-track-copy">
               <div className="current-track-title">
                 <h3 title={track.title}>{track.title}</h3>
@@ -562,6 +576,7 @@ export function NowPlaying({
                   disabled={controlsUnavailable || !playerStatus.duration}
                   readOnly={docked && !canControlPlayback}
                   label={t("nowPlaying.position")}
+                  songMoments={songMoments} onOpenSongMoment={onOpenSongMoment}
                   valueText={value => i18n.t("music:nowPlaying.positionValue", { position: formatPlaybackTime(value), duration: formatPlaybackTime(playerStatus.duration) })}
                   onPreview={value => setSeekPreview(typeof value === "number" ? value : value[0])}
                   onCommit={commitSeek} />

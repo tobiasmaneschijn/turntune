@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Slider } from "../../../components/ui/slider";
 import { formatPlaybackTime } from "../format-playback-time";
+import type { ChatSongMoment } from "@/features/chat/song-moments";
+import { TimelineSongMoments } from "./TimelineSongMoments";
+import "@/styles/song-moments.css";
 
 type TimelineValue = number | readonly number[];
 
 export function PlaybackTimeline({ value, duration, disabled, readOnly, label, valueText,
-  onPreview, onCommit }: {
+  onPreview, onCommit, songMoments, onOpenSongMoment }: {
   value: number;
   duration: number;
   disabled: boolean;
@@ -14,11 +17,14 @@ export function PlaybackTimeline({ value, duration, disabled, readOnly, label, v
   valueText: (value: number) => string;
   onPreview: (value: TimelineValue) => void;
   onCommit: (value: TimelineValue) => void;
+  songMoments?: readonly ChatSongMoment[];
+  onOpenSongMoment?: (messageId: string) => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [seeking, setSeeking] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const pointerType = useRef("");
+  const controlRef = useRef<HTMLDivElement>(null);
   const end = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const position = Math.max(0, Math.min(Number.isFinite(value) ? value : 0, end));
   const candidate = seeking || keyboardFocus ? position : hovered;
@@ -42,7 +48,8 @@ export function PlaybackTimeline({ value, duration, disabled, readOnly, label, v
     const bounds = track?.getBoundingClientRect();
     if (bounds?.width && end) setHovered(Math.max(0, Math.min(end, (event.clientX - bounds.left) / bounds.width * end)));
   };
-  return <div className="playback-timeline"
+  return <div className="playback-timeline">
+    <div ref={controlRef} className="playback-timeline-control"
     onPointerMove={event => { if (event.pointerType !== "touch" || seeking) pointAt(event); }}
     onPointerDown={event => {
       pointerType.current = event.pointerType;
@@ -68,5 +75,8 @@ export function PlaybackTimeline({ value, duration, disabled, readOnly, label, v
       style={{ left: `${fraction * 100}%`, transform: `translateX(-${fraction * 100}%)` }}>
       {formatPlaybackTime(preview)}
     </span>}
+    </div>
+    {songMoments?.length && onOpenSongMoment ? <TimelineSongMoments moments={songMoments}
+      duration={end} trackRef={controlRef} onOpen={onOpenSongMoment} /> : null}
   </div>;
 }

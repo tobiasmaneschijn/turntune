@@ -1,0 +1,5 @@
+.open-room .chat-composer[data-song-drop] .chat-composer-bar {
+  border-color: var(--primary);
+  outline: 1px solid var(--primary);
+  outline-offset: 2px;
+}

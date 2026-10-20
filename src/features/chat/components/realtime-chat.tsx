@@ -15,10 +15,13 @@ import { ChatHistorySearch } from '@/features/chat/components/chat-history-searc
 import { ChatPinnedMessages } from '@/features/chat/components/chat-pinned-messages'
 import { ChatSongAttachment } from '@/features/chat/components/chat-song-attachment'
 import { useChatPins } from '@/features/chat/hooks/use-chat-pins'
+import { useSongDrop } from '@/features/chat/hooks/use-song-drop'
+import { songMoments, type ChatSongMoment } from '@/features/chat/song-moments'
 import { parseChatGameCommand } from '@/features/chat/chat-games'
 import type { ChatSongAttachment as SongAttachment } from '../../../../shared/chat-attachments'
 import type { ChatMessageFeatures } from '../message-features'
 import '@/styles/chat-polls.css'
+import '@/styles/chat-song-drop.css'
 import { getScopedSupabaseClient } from '@/lib/supabase'
 import { boundedOperation, CLEANUP_TIMEOUT_MS, SUBMISSION_TIMEOUT_MS } from '@/lib/bounded-operation'
 import {
@@ -99,6 +102,7 @@ interface RealtimeChatProps {
   onOpenProfile?: (userId: string) => void
   onOpenQueue?: () => void
   currentSong?: SongAttachment
+  onSongMomentsChange?: (moments: ChatSongMoment[]) => void
   canPinMessages?: boolean
   onAddMusicLink?: (url: string) => Promise<void>
   onSaveMusicLink?: (url: string) => Promise<void>
@@ -129,6 +133,7 @@ interface RealtimeChatProps {
 
 export interface RealtimeChatHandle {
   focusComposer: () => void
+  revealMessage: (messageId: string) => void
 }
 
 const TYPING_ROOM_LIMIT = 20
@@ -151,7 +156,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
   onSend,
   onOpenProfile,
   onOpenQueue,
-  currentSong, canPinMessages = false, onAddMusicLink, onSaveMusicLink,
+  currentSong, onSongMomentsChange, canPinMessages = false, onAddMusicLink, onSaveMusicLink,
   adminUserIds = EMPTY_ADMIN_IDS,
   roomUsers = EMPTY_USERS,
   isVisible = true,
@@ -479,6 +484,20 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     ? applyRemovalEvents(applyPollVoteEvents(applyReactionEvents(applyChatUserProfiles(history.context.messages, roomUsers), reactionEvents, reactionNamesByUserId), pollVoteEvents),removalEvents)
     : allMessages, [history.context, roomUsers, reactionEvents, reactionNamesByUserId, pollVoteEvents, allMessages,removalEvents])
 
+  const scope = `${user.id}:${roomName}`
+  const [momentScope, setMomentScope] = useState(scope)
+  useEffect(() => { setMomentScope(scope) }, [scope])
+  const momentProvider = currentSong?.provider
+  const momentProviderId = currentSong?.providerId
+  const momentDurationMs = currentSong?.durationMs
+  const currentMoments = useMemo(() => momentScope === scope ? songMoments(
+    mergeChatMessages(allMessages, visibleMessages), momentProvider && momentProviderId
+      ? { provider: momentProvider, providerId: momentProviderId, durationMs: momentDurationMs } : undefined, hiddenIds,
+  ) : [], [allMessages, visibleMessages, hiddenIds, momentScope, scope,
+    momentProvider, momentProviderId, momentDurationMs])
+  useEffect(() => { onSongMomentsChange?.(currentMoments) }, [currentMoments, onSongMomentsChange])
+  useEffect(() => () => { onSongMomentsChange?.([]) }, [scope, onSongMomentsChange])
+
   useLayoutEffect(() => {
     if (!history.loadingOlder && !history.contextLoading) restoreAnchor()
   }, [visibleMessages, history.loadingOlder, history.contextLoading, anchorRevision, restoreAnchor])
@@ -573,10 +592,6 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     : typingNames.length === 2
       ? t('typingTwo', { first: typingNames[0], second: typingNames[1] })
       : typingNames.length > 2 ? t('typingSeveral') : ''
-
-  useImperativeHandle(ref, () => ({
-    focusComposer: () => messageInputRef.current?.focus(),
-  }), [])
 
   useEffect(() => {
     if (onMessage) {
@@ -865,6 +880,12 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     pendingJumpRef.current = messageId
     void history.revealContext(messageId).then((found) => { if (!found) pendingJumpRef.current = null })
   }, [cancelAnchor, containerRef, history.revealContext, historyRoomSlug, markJumpTarget, t])
+  useImperativeHandle(ref, () => ({
+    focusComposer: () => messageInputRef.current?.focus(),
+    revealMessage: (messageId) => {
+      if (currentMoments.some(moment => moment.messageId === messageId)) jumpToMessage(messageId)
+    },
+  }), [currentMoments, jumpToMessage])
   useEffect(() => {
     const messageId = pendingJumpRef.current
     if (!messageId || !history.context) return
@@ -1037,6 +1058,12 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     draftStore.save(draftSnapshotRef.current.draft)
     messageInputRef.current?.focus({ preventScroll: true })
   }
+  const songDrop = useSongDrop({
+    roomId: historyRoomSlug || roomName.replace(/^soundspin:/, ''), scope,
+    disabled: !isConnected || !canChat || capabilities?.links === false || Boolean(cooldownRemaining) || sending || uploading,
+    onAttach: song => { if (!sendingRef.current && !uploadingRef.current) changeAttachedSong(song) },
+    onReject: () => toast.error(t('songDropUnavailable')),
+  })
   const closePins = () => { setShowPins(false); pinsButtonRef.current?.focus({ preventScroll: true }) }
   const setMessagePinned = useCallback((id: string, pinned: boolean) => {
     const scope = `${user.id}:${roomName}`
@@ -1156,6 +1183,10 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
       <form
         ref={composerRef}
         onSubmit={handleSendMessage}
+        onDragOver={songDrop.onDragOver}
+        onDragLeave={songDrop.onDragLeave}
+        onDrop={songDrop.onDrop}
+        data-song-drop={songDrop.active || undefined}
         className={cn('chat-composer', { 'chat-composer-replying': Boolean(replyingTo) })}
         autoComplete="off"
       >

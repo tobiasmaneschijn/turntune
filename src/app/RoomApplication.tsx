@@ -34,6 +34,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useGroupRef } from "../components/ui/resizable";
 import type { ChatMessage } from "../features/chat/model";
+import type { ChatSongMoment } from "../features/chat/song-moments";
 import { createChatHistorySource } from "../features/chat/history-reader";
 import { createSocketChatSessionFactory } from "../features/chat/socket-transport";
 import { useChatMusicActions } from '../features/chat/hooks/use-chat-music-actions';
@@ -93,6 +94,20 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
     setRoomPassword, setRoomPasswordRequired, setRoomJoinError, retryRoom, openRoom, openProfile, openAdmin,
     goHome: leaveRoom, backFromProfile } = useRoomSession({ auth, profile, profileReady, onNotice: setNotice });
   const [roomNotificationsMuted] = useRoomNotificationMuted(profile.id, roomId || "");
+  const songMomentScope = `${roomId || ""}:${profile.id}:${snapshot?.room.playback.track?.id || ""}`;
+  const songMomentScopeRef = useRef(songMomentScope);
+  songMomentScopeRef.current = songMomentScope;
+  const [songMomentState, setSongMomentState] = useState<{ scope: string; moments: ChatSongMoment[] }>({ scope: "", moments: [] });
+  const receiveSongMoments = useCallback((moments: ChatSongMoment[]) => {
+    setSongMomentState({ scope: songMomentScope, moments });
+  }, [songMomentScope]);
+  const openSongMoment = (messageId: string) => {
+    if (songMomentState.scope !== songMomentScope || !songMomentState.moments.some(moment => moment.messageId === messageId)) return;
+    setMobileRoomPane("chat");
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (songMomentScopeRef.current === songMomentScope) chatControls.current?.revealMessage(messageId);
+    }));
+  };
   useRouteFocus(navigationContext, navigationContext, Boolean(roomId && profilePageId), focusOnEntry);
   const recordedVisitRef = useRef<string | null>(null);
   const invitationRequests = useRef(new Map<string, AbortController>());
@@ -400,6 +415,8 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
                 onOpenSettings={() => setUserSettingsOpen(true)}
                 onAddTrack={focusMusicSearch}
                 controlsRef={playerControls} onLocalStateChange={setLocalPlayback}
+                songMoments={songMomentState.scope === songMomentScope ? songMomentState.moments : undefined}
+                onOpenSongMoment={openSongMoment}
               /></PanelErrorBoundary>
             </div>}
           chat={<PanelErrorBoundary key={`${snapshot.room.id}:${profile.id}`} panelName={i18n.t("common:RoomApplication_chat")}><RoomChat
@@ -416,6 +433,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
               onUnreadCountChange={setChatUnreadCount}
               onOpenQueue={openMusicQueue}
               controlsRef={chatControls}
+              onSongMomentsChange={receiveSongMoments}
             /></PanelErrorBoundary>}
       />
       {roomSettingsOpen && auth.session && (
@@ -501,7 +519,8 @@ function RoomChat({
   onActivate,
   onUnreadCountChange,
   onOpenQueue,
-  controlsRef
+  controlsRef,
+  onSongMomentsChange
 }: {
   snapshot: RoomSnapshot;
   currentUser: User;
@@ -515,6 +534,7 @@ function RoomChat({
   onUnreadCountChange: (count: number) => void;
   onOpenQueue: () => void;
   controlsRef?: RefObject<RealtimeChatHandle | null>;
+  onSongMomentsChange?: (moments: ChatSongMoment[]) => void;
 }) {
   useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -601,6 +621,7 @@ function RoomChat({
             positionSeconds: Math.max(0, snapshot.room.playback.position + (snapshot.room.playback.playing ? (snapshot.serverTime - snapshot.room.playback.updatedAt) / 1000 : 0)) } : undefined}
           onAddMusicLink={chatMusic.addToQueue}
           onSaveMusicLink={chatMusic.save}
+          onSongMomentsChange={onSongMomentsChange}
           slowModeSeconds={capabilities.staff ? 0 : effectivePolicy.slowModeSeconds ?? 0}
           restrictionMessage={restrictionMessage}
           onRemoveMessage={capabilities.chatParticipants ? removeMessage : undefined}

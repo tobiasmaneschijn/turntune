@@ -215,6 +215,8 @@
     "noSearchResults": "No results for “{{query}}” on {{provider}}."
   },
   "nowPlaying": {
+    "recentReactors": "{{names}} reacted",
+    "dragSongToChat": "Drag song into chat",
     "dismissError": "Dismiss error",
     "djBy": "DJ {{name}}",
     "rateYourTrack": "Listeners rate your track",
@@ -438,6 +440,37 @@
   "apiLoader": {
     "downloadFailed": "Could not load {{provider}}.",
     "timeout": "{{provider}} took too long to load."
+  },
+  "timeline": {
+    "comments": "Song comments",
+    "commentsCount_one": "{{count}} song comment",
+    "commentsCount_other": "{{count}} song comments"
+  },
+  "queueTools": {
+    "selection": "Queue selection",
+    "select": "Select track",
+    "deselect": "Deselect track",
+    "selectAll": "Select all tracks",
+    "selectTrack": "Select {{title}}",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clearSelection": "Clear selection",
+    "removeSelected": "Remove selected tracks",
+    "saveSelected": "Save selected as set",
+    "lastRemovalUndo": "Only the last removal can be undone.",
+    "confirmRemove_one": "Remove {{count}} track",
+    "confirmRemove_other": "Remove {{count}} tracks",
+    "removed_one": "Removed {{count}} track.",
+    "removed_other": "Removed {{count}} tracks.",
+    "removePartial_one": "Removed {{count}} track. {{error}}",
+    "removePartial_other": "Removed {{count}} tracks. {{error}}",
+    "removeInterrupted_one": "Removed {{count}} track. Reconnect to remove the remaining selection.",
+    "removeInterrupted_other": "Removed {{count}} tracks. Reconnect to remove the remaining selection.",
+    "setTrackLimit_one": "A set can contain up to {{count}} track. Select fewer tracks.",
+    "setTrackLimit_other": "A set can contain up to {{count}} tracks. Select fewer tracks.",
+    "dropOneLink": "Drop one supported music link.",
+    "addedNotPositioned": "Track added. Its position could not be confirmed. Check your queue before trying again.",
+    "positionFailed": "Track added, but could not be moved. {{error}}"
   },
   "providers": {
     "youtube": "YouTube",

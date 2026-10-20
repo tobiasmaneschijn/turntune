@@ -1,12 +1,16 @@
 import { createRoot } from 'react-dom/client'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import '../../../../../src/styles/shadcn.css'
 import '../../../../../src/styles/index.css'
 import '../../../../../src/styles/open-room.css'
 import '../../../../../src/styles/room-chat.css'
+import '../../../../../src/styles/room-player.css'
 import { useRoomAppearance } from '../../../../../src/features/rooms/hooks/use-room-appearance'
-import { RealtimeChat } from '../../../../../src/features/chat/components/realtime-chat'
+import { RealtimeChat, type RealtimeChatHandle } from '../../../../../src/features/chat/components/realtime-chat'
+import type { ChatSongMoment } from '../../../../../src/features/chat/song-moments'
+import { PlaybackTimeline } from '../../../../../src/features/playback/components/PlaybackTimeline'
+import { formatPlaybackTime } from '../../../../../src/features/playback/format-playback-time'
 import { ThemeProvider } from '../../../../../src/components/theme-provider'
 import { Toaster } from '../../../../../src/components/ui/sonner'
 import { createChatHistorySource } from '../../../../../src/features/chat/history-reader'
@@ -22,14 +26,17 @@ const mira = { id: 'mira', name: 'Mira', avatarSeed: 'mira' }
 const currentSong: ChatSongAttachment = { id: 'fixture-current-song', provider: 'youtube', providerId: 'dX3k_QDnzHE', title: 'Midnight City', artist: 'M83', permalinkUrl: 'https://www.youtube.com/watch?v=dX3k_QDnzHE', durationMs: 240_000, positionSeconds: 74 }
 const acceptedStorageKey = 'fixture-chat-accepted-messages'
 const textOnly = new URLSearchParams(location.search).has('text-only')
+const withSongMoments = new URLSearchParams(location.search).has('song-moments')
 const listeners = new Map<string, Set<(payload: unknown) => void>>()
 const emitFromPeer = (event: string, payload: unknown) => listeners.get(event)?.forEach((callback) => callback(payload))
 const harness = {
   broadcasts: [] as ChatMessage[], saves: [] as ChatMessage[], failSend: false, holdDelivery: false,
   acceptedMessages: JSON.parse(sessionStorage.getItem(acceptedStorageKey) || '{}') as Record<string, ChatMessage>,
   addedMusicLinks: [] as string[], savedMusicLinks: [] as string[], currentSong,
+  seekChanges: [] as unknown[],
   releaseDelivery: () => {},
   receive: (message: ChatMessage, roomId = 'lounge') => emitFromPeer('chat:message', { roomId, message }),
+  remove: (messageId: string, roomId = 'lounge') => emitFromPeer('chat:removed', { roomId, messageId, removedAt: new Date().toISOString() }),
   peerVote: (poll: ChatPollVoteEvent, roomId = 'lounge') => emitFromPeer('chat:poll', { roomId, poll }),
 }
 Object.assign(window, { chatCommandsTest: harness })
@@ -81,6 +88,8 @@ function Harness() {
   const [destination, setDestination] = useState<'chat' | 'queue'>('chat')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
+  const [songMoments, setSongMoments] = useState<ChatSongMoment[]>([])
+  const chatRef = useRef<RealtimeChatHandle>(null)
   const source = useMemo(() => createChatHistorySource(`${user.id}-token`, room), [room, user.id])
   const transport = useMemo(() => createSocketChatSessionFactory(socket, room, true), [room])
   const refresh = useCallback(() => { setLoading(true); void source.loadPage().then((page) => setMessages(page.messages)).finally(() => setLoading(false)) }, [source])
@@ -90,14 +99,20 @@ function Harness() {
       <button onClick={() => setUser((value) => value.id === alice.id ? bob : alice)}>Switch account</button>
     </div>
     {destination === 'queue' ? <section aria-label="Queue destination"><h1>Queue</h1><button onClick={() => setDestination('chat')}>Back to chat</button></section>
-      : <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><RealtimeChat key={`${user.id}:${room}`} client={client} transport={transport}
+      : <div className="supabase-chat-body" style={{ flex: 1, minHeight: 0 }}><RealtimeChat key={`${user.id}:${room}`} ref={chatRef} client={client} transport={transport}
         roomName={`soundspin:${room}`} user={user} roomUsers={[alice, bob, mira]} messages={messages}
         historyRoomSlug={room} historySource={source} historyLoading={loading} notifications={readUserSettings().notifications}
         onConnected={refresh} onResolveMediaUrl={source.loadMediaUrl} onOpenQueue={() => setDestination('queue')}
         currentSong={textOnly ? undefined : currentSong} canPinMessages={user.id === alice.id}
+        onSongMomentsChange={withSongMoments ? setSongMoments : undefined}
         capabilities={textOnly ? { chat: true, media: false, links: false, polls: false, chatParticipants: false } : undefined}
         onAddMusicLink={async url => { harness.addedMusicLinks.push(url) }} onSaveMusicLink={async url => { harness.savedMusicLinks.push(url) }}
         onSend={async (message) => { harness.saves.push(message); await source.saveMessage(message) }} /></div>}
+    {withSongMoments && <div style={{ display: 'flex', minHeight: 44, padding: '0 24px', position: 'relative' }}>
+      <PlaybackTimeline value={74} duration={240} disabled={false} readOnly={false} label="Playback timeline"
+        valueText={formatPlaybackTime} onPreview={value => harness.seekChanges.push(value)} onCommit={value => harness.seekChanges.push(value)}
+        songMoments={songMoments} onOpenSongMoment={id => chatRef.current?.revealMessage(id)} />
+    </div>}
     <Toaster />
   </main></ThemeProvider>
 }

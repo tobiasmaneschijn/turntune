@@ -16,12 +16,16 @@ import { Skeleton } from "../../../components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../../components/ui/sheet";
 import { useMediaQuery } from "../../../hooks/use-media-query";
 import { useQueueMotion } from "../hooks/use-queue-motion";
+import { useQueueSelection } from "../hooks/use-queue-selection";
+import { QueueSelectionBar } from "./QueueSelectionBar";
+import { captureQueueInsertion, hasQueueLink, insertQueueLink, PRIVATE_QUEUE_DRAG_TYPE, QueueLinkPositionError, readQueueLink } from "../queue-link-drop";
+import { songFromTrack, writeSongDrag } from "../song-drag";
 import { MusicLibraryPanel } from "./MusicLibraryPanel";
 import { TrackDetailsDialog } from "./TrackDetailsDialog";
 import { PrivateMusicHeader } from "./PrivateMusicHeader";
 import { ProviderIcon } from "./ProviderIcon";
 import { RoomActivity } from "./RoomActivity";
-import { libraryTrack, requestPrivateLibrary, subscribePrivateLibrary, type LibraryMutation, type LibraryTrack, type PrivateLibrary, type SavedSet } from "../music-library";
+import { libraryLimits, libraryTrack, requestPrivateLibrary, subscribePrivateLibrary, type LibraryMutation, type LibraryTrack, type PrivateLibrary, type SavedSet } from "../music-library";
 import { storeValue } from "../../../lib/browser-storage";
 import { resolveMusicLink } from '../resolve-music-link';
 import { detectMusicProvider, formatTrackDuration, parseMusicLink, providerLabel, readSearchProvider, SEARCH_PROVIDER_STORAGE_KEY, trackSourceUrl, type ProviderSearchResult } from "../music-presentation";
@@ -32,6 +36,7 @@ import { allowedRoomProviders, roomAllowsProvider } from "../../../../shared/pro
 import "../../../styles/music-qol.css";
 import "../../../styles/room-music.css";
 import "../../../styles/queue-motion.css";
+import "../../../styles/queue-tools.css";
 
 export type MusicRailActionName = "queue:add" | "queue:remove" | "queue:undo" | "queue:set-add" | "queue:move" | "queue:play-next" | "queue:exception" | "queue:exception-request" | "dj:join" | "dj:leave";
 export type MusicRailAction = (event: MusicRailActionName, payload: unknown, reply: (result: SocketReply) => void) => void;
@@ -65,7 +70,7 @@ interface TrackInput {
 }
 
 interface PendingOperation {
-  kind: "add" | "resolve" | "dj" | "queue";
+  kind: "add" | "resolve" | "drop" | "dj" | "queue";
   key?: string;
   trackId?: string;
 }
@@ -126,6 +131,9 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const [queueDrop, setQueueDrop] = useState<{ id: string; edge: "before" | "after" } | null>(null);
   const draggedTrackRef = useRef<{ id: string; scope: string } | null>(null);
   const queueListRef = useRef<HTMLDivElement>(null);
+  const [emptyQueueDrop, setEmptyQueueDrop] = useState(false);
+  const dropRequestRef = useRef<AbortController | null>(null);
+  const selection = useQueueSelection(snapshot.room.queue.map(track => track.id));
   const [undoReceipt, setUndoReceipt] = useState<SocketReply["undo"]>();
   const [undoExpired, setUndoExpired] = useState(false);
   const [detailsTrack, setDetailsTrack] = useState<Track | LibraryTrack | null>(null);
@@ -143,6 +151,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const setImportIntentRef = useRef(new Map<string, string>());
   const detailsReturnFocusRef = useRef<HTMLElement | null>(null);
   const activeRef = useRef(true);
+  const connectedRef = useRef(connected);
   const snapshotRef = useRef(snapshot);
   const tabRef = useRef(tab);
   const pendingRef = useRef<PendingOperation | null>(null);
@@ -162,19 +171,28 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   const queueButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const historyButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   snapshotRef.current = snapshot;
+  connectedRef.current = connected;
   tabRef.current = tab;
   const queueScope = `${snapshot.room.id}:${currentUserId}`;
   const queueVisible = tab === "queue" && !(inlineAddMusic && addMusicOpen);
   useQueueMotion(queueListRef, snapshot.room.queue.map(track => track.id).join(","), queueScope, queueVisible && connected);
+  const restoreSelectionFocus = (trackId?: string) => requestAnimationFrame(() => {
+    if (!activeRef.current || tabRef.current !== "queue" || document.activeElement !== document.body) return;
+    (queueButtonRefs.current.get(trackId || "") || queueTabRef.current)?.focus({ preventScroll: true });
+  });
+  const clearSelection = () => { const first = snapshot.room.queue.find(track => selection.selected.has(track.id)); selection.clear(); restoreSelectionFocus(first?.id); };
+  const toggleSelection = (id: string) => { const last = selection.selected.size === 1 && selection.selected.has(id); selection.toggle(id); if (last) restoreSelectionFocus(id); };
 
   const clearQueueDrag = () => {
     draggedTrackRef.current = null;
     setDraggedTrackId("");
     setQueueDrop(null);
+    setEmptyQueueDrop(false);
   };
   useEffect(() => {
     if (pending || !connected || !queueVisible || draggedTrackRef.current?.scope !== queueScope) clearQueueDrag();
   }, [pending, connected, queueVisible, queueScope]);
+  useEffect(() => { if (!connected) dropRequestRef.current?.abort(); }, [connected]);
 
   const openAddMusic = () => {
     if (!addMusicOpen) addMusicReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -206,6 +224,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
       activeRef.current = false;
       searchRequestRef.current?.abort();
       resolveRequestRef.current?.abort();
+      dropRequestRef.current?.abort();
       libraryRequestRef.current?.abort();
     };
   }, []);
@@ -213,6 +232,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   useEffect(() => {
     searchRequestRef.current?.abort();
     resolveRequestRef.current?.abort();
+    dropRequestRef.current?.abort();
     setSearching(false);
     setResults([]);
     setCompletedQuery(null);
@@ -281,7 +301,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     });
   }, [accessToken]);
   const mutateLibrary = async (mutation: LibraryMutation) => {
-    if (!accessToken || libraryBusyRef.current) return false;
+    if (!accessToken || libraryBusyRef.current || pendingRef.current) return false;
     libraryBusyRef.current = true; setLibraryBusy(true); setLibraryError(""); setActionError(""); setStatus(t('rail.savingLibrary'));
     libraryRequestRef.current?.abort(); setLibraryLoading(false);
     const request = new AbortController(); libraryRequestRef.current = request;
@@ -331,7 +351,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
   }, [historyFilter, snapshot.room.history]);
 
   const beginOperation = (operation: PendingOperation) => {
-    if (!activeRef.current || pendingRef.current || !connected) return false;
+    if (!activeRef.current || pendingRef.current || libraryBusyRef.current || !connected) return false;
     pendingRef.current = operation;
     setPending(operation);
     setActionError("");
@@ -501,9 +521,78 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     } finally { finishOperation(operation); }
   };
 
+  const removeSelected = async () => {
+    const tracks = snapshotRef.current.room.queue.filter(track => selection.selected.has(track.id));
+    if (!tracks.length) return;
+    const operation: PendingOperation = { kind: "queue" };
+    if (!beginOperation(operation)) return;
+    let removed = 0;
+    try {
+      for (const track of tracks) {
+        if (!activeRef.current) return;
+        if (!connectedRef.current) { showActionError(t('queueTools.removeInterrupted', { count: removed })); return; }
+        if (!snapshotRef.current.room.queue.some(current => current.id === track.id)) { selection.remove(track.id); continue; }
+        // Starting another removal invalidates the server's previous receipt,
+        // including when that next removal cannot be saved.
+        setUndoReceipt(undefined); setUndoExpired(false);
+        const response = await sendAction("queue:remove", { trackId: track.id });
+        if (!activeRef.current) return;
+        if (!response.ok) {
+          showActionError(removed ? t('queueTools.removePartial', { count: removed, error: response.error || t('rail.updateQueueError') }) : response.error || t('rail.updateQueueError'));
+          return;
+        }
+        removed++;
+        selection.remove(track.id);
+        setUndoReceipt(response.undo); setUndoExpired(false);
+      }
+      const message = t('queueTools.removed', { count: removed });
+      setStatus(message); setNotice(message);
+    } finally {
+      finishOperation(operation);
+      requestAnimationFrame(() => {
+        if (activeRef.current && tabRef.current === "queue" && document.activeElement === document.body) {
+          const remaining = queueListRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]:checked');
+          (remaining || queueTabRef.current)?.focus({ preventScroll: true });
+        }
+      });
+    }
+  };
+  const saveSelected = async (name: string, id: string) => {
+    const tracks = snapshotRef.current.room.queue.filter(track => selection.selected.has(track.id));
+    if (!tracks.length || pendingRef.current || libraryBusyRef.current) return false;
+    const limits = libraryLimits(privateLibrary);
+    if (tracks.length > limits.librarySetTracks) { showActionError(t('queueTools.setTrackLimit', { count: limits.librarySetTracks })); return false; }
+    if (privateLibrary && privateLibrary.sets.length >= limits.librarySets && !privateLibrary.sets.some(set => set.id === id)) { showActionError(t('library.setLimit', { count: limits.librarySets })); return false; }
+    return mutateLibrary({ type: "save-set", id, name, tracks: tracks.map(libraryTrack) });
+  };
+
+  const dropQueueLink = async (event: DragEvent, index: number) => {
+    event.preventDefault(); event.stopPropagation(); clearQueueDrag();
+    if (pendingRef.current || libraryBusyRef.current || !connectedRef.current) return;
+    const parsed = readQueueLink(event.dataTransfer);
+    if (!parsed) return showActionError(t('queueTools.dropOneLink'));
+    if (!roomAllowsProvider(snapshotRef.current.room.settings, parsed.provider)) return showActionError(t('rail.serviceDisabled', { provider: providerLabel(parsed.provider) }));
+    const insertion = captureQueueInsertion(snapshotRef.current.room.queue, index);
+    const operation: PendingOperation = { kind: "drop" };
+    if (!beginOperation(operation)) return;
+    const request = new AbortController(); dropRequestRef.current = request;
+    try {
+      const added = await insertQueueLink(parsed, insertion, { accessToken, signal: request.signal, current: () => snapshotRef.current,
+        active: () => activeRef.current, connected: () => connectedRef.current, send: sendAction });
+      if (!activeRef.current || !added) return;
+      const message = t(added.response.started ? 'rail.trackNowPlaying' : 'rail.trackAdded', { title: added.track.title });
+      setStatus(message); setNotice(message);
+    } catch (error) {
+      if (activeRef.current && (!request.signal.aborted || error instanceof QueueLinkPositionError)) showActionError(error instanceof Error ? error.message : t('rail.lookupError'));
+    } finally {
+      if (dropRequestRef.current === request) dropRequestRef.current = null;
+      finishOperation(operation);
+    }
+  };
+
   const queueDropIndex = (id: string, edge: "before" | "after") => {
     const drag = draggedTrackRef.current;
-    if (!drag || drag.scope !== queueScope || pendingRef.current || !connected) return null;
+    if (!drag || drag.scope !== queueScope || pendingRef.current || libraryBusyRef.current || !connected) return null;
     const queue = snapshotRef.current.room.queue;
     const from = queue.findIndex(track => track.id === drag.id);
     const target = queue.findIndex(track => track.id === id);
@@ -512,6 +601,11 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     return { from, to: boundary - (from < boundary ? 1 : 0) };
   };
   const previewQueueDrop = (event: DragEvent, id: string, edge: "before" | "after") => {
+    if (!draggedTrackRef.current && hasQueueLink(event.dataTransfer) && !pendingRef.current && !libraryBusyRef.current && connectedRef.current) {
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy";
+      setQueueDrop(previous => previous?.id === id && previous.edge === edge ? previous : { id, edge });
+      return;
+    }
     const move = queueDropIndex(id, edge);
     if (!move) return;
     event.preventDefault();
@@ -520,6 +614,11 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     setQueueDrop(previous => move.from === move.to ? null : previous?.id === id && previous.edge === edge ? previous : { id, edge });
   };
   const commitQueueDrop = (event: DragEvent, id: string, edge: "before" | "after") => {
+    if (!draggedTrackRef.current && hasQueueLink(event.dataTransfer)) {
+      const target = snapshotRef.current.room.queue.findIndex(track => track.id === id);
+      if (target >= 0) void dropQueueLink(event, target + (edge === "after" ? 1 : 0));
+      return;
+    }
     const move = queueDropIndex(id, edge);
     if (!move) return;
     event.preventDefault();
@@ -604,15 +703,18 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
     </form>}
   </div>;
 
-  const queueActions = accessToken && tab === "queue" && snapshot.room.queue.length > 0 ? (
-    <DropdownMenu onOpenChange={(open) => { if (open) queueSaveFocusRef.current = false; }}><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('rail.queueActions')} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu" finalFocus={() => queueSaveFocusRef.current ? saveSetInputRef.current || libraryTabRef.current || true : true}><DropdownMenuItem disabled={libraryBusy || Boolean(pending)} onClick={() => { queueSaveFocusRef.current = true; setSaveSetOpen(true); setTab("library"); }}><Bookmark />{t('rail.saveQueueAsSet')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+  const queueActions = tab === "queue" && snapshot.room.queue.length > 0 ? (
+    <DropdownMenu onOpenChange={(open) => { if (open) queueSaveFocusRef.current = false; }}><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('rail.queueActions')} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu" finalFocus={() => queueSaveFocusRef.current ? saveSetInputRef.current || libraryTabRef.current || true : true}>
+      <DropdownMenuItem disabled={libraryBusy || Boolean(pending)} onClick={selection.selectAll}><Check />{t('queueTools.selectAll')}</DropdownMenuItem>
+      {accessToken && <DropdownMenuItem disabled={libraryBusy || Boolean(pending)} onClick={() => { queueSaveFocusRef.current = true; setSaveSetOpen(true); setTab("library"); }}><Bookmark />{t('rail.saveQueueAsSet')}</DropdownMenuItem>}
+    </DropdownMenuContent></DropdownMenu>
   ) : null;
 
   const feedback = (
       <div className="music-feedback">
         {!connected && <p className="music-offline">{t('rail.disconnected')}</p>}
         {actionError && <p className="music-action-error" role="alert">{actionError}</p>}
-        <div className="music-action-status" role="status" aria-live="polite">{status}{pending && <span>{pending.kind === "add" ? t('rail.addingTrack') : pending.kind === "queue" ? t('rail.updatingQueue') : pending.kind === "resolve" ? t('rail.findingDetails') : t('rail.updatingRotation')}</span>}</div>
+        <div className="music-action-status" role="status" aria-live="polite">{status}{pending && <span>{pending.kind === "add" ? t('rail.addingTrack') : pending.kind === "queue" ? t('rail.updatingQueue') : pending.kind === "resolve" || pending.kind === "drop" ? t('rail.findingDetails') : t('rail.updatingRotation')}</span>}</div>
         {showQueueLink && addMusicOpen && !inlineAddMusic && <Button size="sm" variant="ghost" onClick={openQueue}>{t('rail.viewQueue')}</Button>}
         {undoReceipt && <div className="music-undo"><span>{undoExpired ? t('rail.undoExpired') : t('rail.undoAvailable')}</span>{!undoExpired && <Button variant="outline" size="sm" disabled={!connected || Boolean(pending)} onClick={() => void undoRemove()}>{t('rail.undoRemoval')}</Button>}</div>}
         {importSkipped.length > 0 && <details><summary>{t('rail.importSkipped', { count: importSkipped.length })}</summary><ul className="music-import-summary">{importSkipped.map((item, index) => <li key={index}>{t('rail.skippedTrackReason', { title: item.title, reason: item.reason })}</li>)}</ul></details>}
@@ -715,7 +817,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
             const existing = rowStatus({ provider: track.provider, id: track.providerId, title: track.title, artist: track.artist || "" });
             const providerDisabled = !roomAllowsProvider(snapshot.room.settings, track.provider);
             return <div className="rail-track-row music-history-row" key={`${track.id}-${index}`}>
-              <TrackArtwork track={track} compact active={tab === "history"} />
+              <span className="history-song-drag" draggable title={t('nowPlaying.dragSongToChat')} onDragStart={event => { if (!writeSongDrag(event.dataTransfer, snapshot.room.id, songFromTrack(track))) event.preventDefault(); }}><TrackArtwork track={track} compact active={tab === "history"} /></span>
               <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small title={[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small>{providerDisabled && <small>{t('rail.providerDisabled')}</small>}{existing && <small className="music-result-confirmation">{existing}</small>}</span>
               <DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) historyButtonRefs.current.set(track.id, button); else historyButtonRefs.current.delete(track.id); }} render={<Button variant="ghost" size="icon" aria-label={t('rail.historyTrackActions', { title: track.title })} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
                 <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing) || providerDisabled} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />{t('rail.addToQueue')}</DropdownMenuItem>
@@ -730,30 +832,34 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
         </div>
       </TabsContent>
 
-      <TabsContent value="queue" keepMounted className="rail-pane music-queue-pane">
+      <TabsContent value="queue" keepMounted className="rail-pane music-queue-pane" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !pending && !libraryBusy && selection.selected.size) { event.preventDefault(); clearSelection(); } }}>
+        {selection.selected.size > 0 && <QueueSelectionBar count={selection.selected.size} selectionKey={[...selection.selected].sort().join(',')} busy={Boolean(pending) || libraryBusy} canRemove={connected} signedIn={Boolean(accessToken)} clear={clearSelection} remove={() => void removeSelected()} save={saveSelected} />}
 
-        <div className="rail-track-list" ref={queueListRef}
-          onDragOver={event => { const target = listDropTarget(event); if (target) previewQueueDrop(event, target.id, target.edge); }}
-          onDrop={event => { const target = listDropTarget(event); if (target) commitQueueDrop(event, target.id, target.edge); }}
+        <div className="rail-track-list" ref={queueListRef} data-empty-drop={emptyQueueDrop || undefined}
+          onDragOver={event => { const target = listDropTarget(event); if (target) previewQueueDrop(event, target.id, target.edge); else if (hasQueueLink(event.dataTransfer) && !pendingRef.current && !libraryBusyRef.current && connectedRef.current) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setEmptyQueueDrop(true); } }}
+          onDrop={event => { const target = listDropTarget(event); if (target) commitQueueDrop(event, target.id, target.edge); else if (hasQueueLink(event.dataTransfer)) void dropQueueLink(event, 0); }}
           onDragLeave={event => {
             const rect = event.currentTarget.getBoundingClientRect();
-            if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) setQueueDrop(null);
+            if (event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) { setQueueDrop(null); setEmptyQueueDrop(false); }
           }}>
           {snapshot.room.queue.map((track, index) => <div className={`rail-track-row queue-track ${draggedTrackId === track.id ? "dragging" : ""}`} key={track.id} data-track-id={track.id}
-            data-drop-edge={queueDrop?.id === track.id ? queueDrop.edge : undefined} draggable={!pending && connected}
+            data-selected={selection.selected.has(track.id) || undefined} data-drop-edge={queueDrop?.id === track.id ? queueDrop.edge : undefined} draggable={!pending && !libraryBusy && !selection.selected.size && connected}
+            onClick={event => { if (!pending && !libraryBusy) { selection.click(event, track.id); if (selection.selected.size === 1 && selection.selected.has(track.id) && !event.shiftKey) restoreSelectionFocus(track.id); } }}
             onDragStart={event => {
-              if (pendingRef.current || !connected || (event.target instanceof Element && event.target.closest("button, a, input"))) return event.preventDefault();
+              if (pendingRef.current || libraryBusyRef.current || selection.selected.size || !connected || (event.target instanceof Element && event.target.closest("button, a, input"))) return event.preventDefault();
               draggedTrackRef.current = { id: track.id, scope: queueScope };
               setDraggedTrackId(track.id);
               event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(PRIVATE_QUEUE_DRAG_TYPE, queueScope);
               event.dataTransfer.setData("text/plain", track.id);
             }} onDragEnd={clearQueueDrag}
             onDragOver={event => previewQueueDrop(event, track.id, rowDropEdge(event))}
             onDrop={event => commitQueueDrop(event, track.id, rowDropEdge(event))}>
-            <span className="queue-drag-handle" title={t('rail.reorderHint')} aria-hidden="true"><span className="queue-position">{index + 1}</span><GripVertical size={14} /></span>
+            {selection.selected.size ? <label className="queue-track-selector" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={t('queueTools.selectTrack', { title: track.title })} checked={selection.selected.has(track.id)} disabled={Boolean(pending) || libraryBusy} onChange={() => toggleSelection(track.id)} /></label> : <span className="queue-drag-handle" title={t('rail.reorderHint')} aria-hidden="true"><span className="queue-position">{index + 1}</span><GripVertical size={14} /></span>}
             <TrackArtwork track={track} compact active={tab === "queue"} />
             <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small><span className="sr-only">{t('rail.queuePosition', { position: index + 1 })}</span>{track.artist || providerLabel(track.provider)}</small>{snapshot.room.radio?.ineligibleTracks[track.id] ? <small>{snapshot.room.radio.ineligibleTracks[track.id]}</small> : !roomAllowsProvider(snapshot.room.settings, track.provider) && <small>{t('rail.disabledTrackSkipped')}</small>}</span>
-            <span className="queue-track-actions"><DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) queueButtonRefs.current.set(track.id, button); else queueButtonRefs.current.delete(track.id); }} data-queue-action-id={track.id} render={<Button variant="ghost" size="icon" aria-label={t('rail.trackActions', { title: track.title })} disabled={!connected || Boolean(pending)} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
+            <span className="queue-track-actions"><DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) queueButtonRefs.current.set(track.id, button); else queueButtonRefs.current.delete(track.id); }} data-queue-action-id={track.id} render={<Button variant="ghost" size="icon" aria-label={t('rail.trackActions', { title: track.title })} disabled={!connected || Boolean(pending) || libraryBusy} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
+              <DropdownMenuItem disabled={Boolean(pending) || libraryBusy} onClick={() => toggleSelection(track.id)}><Check />{t(selection.selected.has(track.id) ? 'queueTools.deselect' : 'queueTools.select')}</DropdownMenuItem>
               <DropdownMenuItem disabled={index === 0 || Boolean(pending) || !roomAllowsProvider(snapshot.room.settings, track.provider)} onClick={() => void queueAction("queue:play-next", track)}><ListMusic />{t('rail.firstInQueue')}</DropdownMenuItem>
               <DropdownMenuItem disabled={index === 0 || Boolean(pending)} onClick={() => void queueAction("queue:move", track, index - 1)}><ArrowUp />{t('rail.moveUp')}</DropdownMenuItem>
               <DropdownMenuItem disabled={index === snapshot.room.queue.length - 1 || Boolean(pending)} onClick={() => void queueAction("queue:move", track, index + 1)}><ArrowDown />{t('rail.moveDown')}</DropdownMenuItem>

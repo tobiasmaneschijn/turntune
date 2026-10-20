@@ -36,6 +36,7 @@
   "reactedBy": "{{emoji}} reacted by {{names}}",
   "hidden": "Hidden",
   "attachedSong": "Attached song",
+  "songDropUnavailable": "Drag a song from this room’s player or history.",
   "attachCurrentSong": "Attach current song",
   "removeSongAttachment": "Remove song attachment",
   "songPosition": "At {{time}}",
