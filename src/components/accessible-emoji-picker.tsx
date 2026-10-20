@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { useId, useMemo, useState } from 'react'
-import EmojiPicker, { Categories, Emoji, type EmojiClickData, type Props, type SkinTones } from 'emoji-picker-react'
+import EmojiPicker, { Categories, Emoji, EmojiStyle, type EmojiClickData, type Props, type SkinTones } from 'emoji-picker-react'
 import type { EmojiData } from 'emoji-picker-react/dist/types/exposedTypes'
 import emojiData from 'emoji-picker-react/dist/data/emojis.json'
+import { getChatEmojiUrl } from './platform-emoji-text'
 
 const tones = [
   ['neutral', 'toneDefault'], ['1f3fb', 'toneLight'], ['1f3fc', 'toneMediumLight'],
@@ -21,6 +22,7 @@ export default function AccessibleEmojiPicker(props: Props) {
   const results = useMemo(() => term ? emojis.filter((emoji) => emoji.n.some((name) => name.toLocaleLowerCase(i18n.resolvedLanguage).includes(term))) : [], [term, i18n.resolvedLanguage])
   const categories = Object.values(Categories).map((category) => ({ category, name: t(`category.${category}`) }))
   const tone = props.defaultSkinTone || 'neutral'
+  const getEmojiUrl = props.getEmojiUrl ?? getChatEmojiUrl
   const height = typeof props.height === 'number' ? Math.max(100, props.height - 48) : props.height
   return <div className="chat-accessible-emoji-picker">
     <div className="chat-emoji-search-row">
@@ -41,13 +43,14 @@ export default function AccessibleEmojiPicker(props: Props) {
                 emoji: String.fromCodePoint(...unified.split('-').map((part) => parseInt(part, 16))),
                 unified, unifiedWithoutSkinTone: item.u, names: item.n,
                 activeSkinTone: tone as SkinTones, isCustom: false,
-                imageUrl: '', getImageUrl: () => '',
+                imageUrl: getEmojiUrl(unified, props.emojiStyle ?? EmojiStyle.APPLE),
+                getImageUrl: (style = props.emojiStyle ?? EmojiStyle.APPLE) => getEmojiUrl(unified, style),
               }
               props.onEmojiClick?.(data, event.nativeEvent)
-            }}><Emoji unified={unified} emojiStyle={props.emojiStyle} size={28} /></button>
+            }}><Emoji unified={unified} emojiStyle={props.emojiStyle} getEmojiUrl={getEmojiUrl} size={28} /></button>
           })}
         </div> : <p className="chat-emoji-empty">{t('noEmoji')}</p>}
-      </> : <EmojiPicker {...props} categories={categories} height={height} autoFocusSearch={false} searchDisabled skinTonesDisabled previewConfig={{ showPreview: false }} />}
+      </> : <EmojiPicker {...props} getEmojiUrl={getEmojiUrl} categories={categories} height={height} autoFocusSearch={false} searchDisabled skinTonesDisabled previewConfig={{ showPreview: false }} />}
     </div>
   </div>
 }
