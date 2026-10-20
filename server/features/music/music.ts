@@ -1,15 +1,8 @@
 import type { Provider } from "../../types.js";
-
-export interface ProviderTrackMapping {
-  providerId: string;
-  permalinkUrl?: string;
-  artworkUrl?: string;
-  storefront?: string;
-  matchMethod?: "source" | "isrc" | "exact-metadata" | "fuzzy";
-}
+export type { ProviderTrackMapping } from "../../types.js";
 
 export interface CatalogTrack {
-  provider: Extract<Provider, "spotify" | "apple">;
+  provider: Provider;
   id: string;
   title: string;
   artist: string;

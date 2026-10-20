@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import i18n from "../../../i18n";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Music2 } from "lucide-react";
 import type { ProviderTrackMapping } from "../../../types";
 import { Button } from "../../../components/ui/button";
@@ -135,6 +135,7 @@ export function SpotifyPlayer({
   mode,
   isDj,
   volume,
+  controlsRef,
   accessToken,
   userId,
   roomSlug,
@@ -279,8 +280,8 @@ export function SpotifyPlayer({
     onError?.(error);
   }, [error, onError]);
 
-  useEffect(() => {
-    const syncPlayback = () => {
+  useImperativeHandle(controlsRef, () => ({
+    sync() {
       const currentPlayback = playbackRef.current;
       const currentMapping = mappingRef.current;
       if (!currentPlayback.track || !currentMapping) return;
@@ -306,7 +307,7 @@ export function SpotifyPlayer({
         return;
       }
       // This call is intentionally made directly inside the click-dispatched
-      // event so browsers count Sync as a playback activation gesture.
+      // action so browsers count Sync as a playback activation gesture.
       const revision = providerSessionRevision("spotify");
       void player.activateElement().then(async () => {
         if (revision !== providerSessionRevision("spotify") || playerRef.current !== player) return;
@@ -327,10 +328,8 @@ export function SpotifyPlayer({
           setActivationDismissed(false);
         }
       });
-    };
-    window.addEventListener("soundspin:playback-sync", syncPlayback);
-    return () => window.removeEventListener("soundspin:playback-sync", syncPlayback);
-  }, [mode]);
+    }
+  }), [mode]);
 
   useEffect(() => {
     setProviderAccount(userId);

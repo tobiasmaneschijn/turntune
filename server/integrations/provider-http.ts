@@ -1,6 +1,7 @@
 import { serverT } from "../lib/i18n.js";
+import type { Provider } from "../../shared/provider-definitions.js";
 /** Fixed provider names keep both admission state and metrics cardinality bounded. */
-export type ProviderService = "spotify" | "apple" | "soundcloud" | "mixcloud" | "youtube" | "giphy";
+export type ProviderService = Provider | "giphy";
 
 const active = new Map<ProviderService, number>();
 const windows = new Map<ProviderService, { count: number; resetAt: number }>();

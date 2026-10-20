@@ -2,10 +2,16 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { AppleMusicPlayer } from "../../../../src/features/playback/providers/AppleMusicPlayer";
 import { SoundCloudPlayer } from "../../../../src/features/playback/providers/SoundCloudPlayer";
-import type { Playback } from "../../../../src/types";
+import { NowPlaying, type NowPlayingLocalState } from "../../../../src/features/playback/components/NowPlaying";
+import { TooltipProvider } from "../../../../src/components/ui/tooltip";
+import { readUserSettings } from "../../../../src/features/settings/user-settings";
+import type { Playback, RoomSnapshot } from "../../../../src/types";
 import type { PlayerStatus } from "../../../../src/features/playback/providers/YouTubePlayer";
+import "../../../../src/styles/shadcn.css";
+import "../../../../src/styles/index.css";
 
 const provider = new URLSearchParams(location.search).get("provider") === "apple" ? "apple" : "soundcloud";
+const hostMode = new URLSearchParams(location.search).has("host");
 const root = createRoot(document.getElementById("root")!);
 const calls: { method: string; value?: unknown }[] = [];
 const statusCallbacks: number[] = [];
@@ -17,6 +23,11 @@ const pausedCallbacks: { callback: (paused: boolean) => void; paused: boolean }[
 const listeners = new Map<string, (event?: unknown) => void>();
 const readyCallbacks: ((event?: unknown) => void)[] = [];
 const loadCallbacks: (() => void)[] = [];
+const hostRequests: string[] = [];
+let hostState: NowPlayingLocalState | undefined;
+let deferredFinish: (() => void) | undefined;
+let hostSettings = readUserSettings();
+hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "source", defaultVolume: 50 } };
 let deferWidgetReady = new URLSearchParams(location.search).has("defer-ready");
 let deferWidgetLoad = false;
 let widgetCreations = 0;
@@ -39,6 +50,7 @@ let playback: Playback = {
     permalinkUrl: "https://soundcloud.com/test/track",
     title: "Regression track",
     durationMs: 180_000,
+    mappings: { apple: { providerId: "123456789" } },
     addedBy: { id: "dj", name: "DJ", avatarSeed: "dj" },
     addedAt: now
   },
@@ -62,8 +74,9 @@ function createMusic() { return {
   play: async () => {
     calls.push({ method: "play" });
     if (failNextPlay) { failNextPlay = false; throw new Error("Temporary Apple playback interruption"); }
+    music.playbackState = playbackStates.playing;
   },
-  pause: async () => { calls.push({ method: "pause" }); }
+  pause: async () => { calls.push({ method: "pause" }); music.playbackState = playbackStates.paused; }
 }; }
 let music = createMusic();
 window.MusicKit = {
@@ -107,6 +120,26 @@ window.SC = { Widget: Object.assign(() => { widgetCreations++; return widget; },
 }) };
 
 function render() {
+  if (hostMode) {
+    const user = { id: userId, name: "Listener", avatarSeed: userId };
+    const snapshot: RoomSnapshot = {
+      room: {
+        id: "provider-switch-room", name: "Provider switch", ownerUserId: userId,
+        moderatorUserIds: [], djRoleUserIds: [], isPublic: true, passwordProtected: false,
+        settings: {}, djUserId: userId, djQueueUserIds: [], queue: [], history: [],
+        playback, vibe: null, createdAt: now
+      },
+      users: [user], djUsers: [user], serverTime: now
+    };
+    root.render(createElement(TooltipProvider, null, createElement(NowPlaying, {
+      snapshot, currentUserId: userId, accessToken, isDj: true, canControlPlayback: true,
+      compact: false, onToggleCompact() {}, settingsOpen: false, onCloseSettings() {},
+      userSettings: hostSettings, onUserSettingsChange(settings) { hostSettings = settings; render(); },
+      onLocalStateChange(state) { hostState = state; },
+      requestAction(event, _payload, reply) { hostRequests.push(event); reply({ ok: true }); }
+    })));
+    return;
+  }
   const version = callbackVersion;
   const common = {
     playback,
@@ -132,6 +165,25 @@ Object.assign(window, {
     statusSamples,
     endCallbacks,
     errors,
+    inspectHost: () => ({ state: hostState, requests: hostRequests, musicPlaying: music.playbackState === playbackStates.playing }),
+    holdSoundCloudCallbacks() {
+      deferPaused = true;
+      listeners.get("progress")?.({ currentPosition: 179_000 });
+      deferredFinish = listeners.get("finish");
+    },
+    useApple() { hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "apple" } }; render(); },
+    useRoomSource() { hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "source" } }; render(); },
+    reportSoundCloudProgress(position: number) {
+      const held = deferPaused;
+      deferPaused = false;
+      listeners.get("progress")?.({ currentPosition: position });
+      deferPaused = held;
+    },
+    releaseSoundCloudCallbacks() {
+      deferPaused = false;
+      for (const pending of pausedCallbacks.splice(0)) pending.callback(pending.paused);
+      deferredFinish?.(); deferredFinish = undefined;
+    },
     inspectMusic: () => ({ volume: music.volume, authorized: music.isAuthorized }),
     failNextMusicPlay: () => { failNextPlay = true; },
     get widgetCreations() { return widgetCreations; },

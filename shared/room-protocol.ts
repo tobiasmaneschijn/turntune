@@ -1,7 +1,7 @@
 import { protocolT } from "./i18n.js";
 import { z } from 'zod';
 import { approvedRemoteImageUrl } from './remote-images.js';
-import { isMixcloudShowKey, mixcloudShowKey } from './mixcloud.js';
+import { MUSIC_PROVIDERS, validateProviderTrackLocator } from './provider-definitions.js';
 
 export const userSchema = z.object({
   id: z.string().min(1).max(100),
@@ -17,7 +17,7 @@ export const joinSchema = z.object({
 });
 
 export const trackSchema = z.object({
-  provider: z.enum(["youtube", "spotify", "apple", "soundcloud", "mixcloud"]),
+  provider: z.enum(MUSIC_PROVIDERS),
   providerId: z.string().min(1).max(200),
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
@@ -28,31 +28,8 @@ export const trackSchema = z.object({
   if (track.artworkUrl && !track.artworkUrl.startsWith("https://")) {
     context.addIssue({ code: "custom", path: ["artworkUrl"], message: protocolT("artwork_must_use_https") });
   }
-  if (track.provider === "spotify" && !/^[A-Za-z0-9]{22}$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: protocolT("invalid_spotify_track_id") });
-  }
-  if (track.provider === "apple" && !/^\d+$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: protocolT("invalid_apple_music_song_id") });
-  }
-  if (track.provider === "mixcloud") {
-    if (!isMixcloudShowKey(track.providerId)) {
-      context.addIssue({ code: "custom", path: ["providerId"], message: protocolT("invalid_mixcloud_show_key") });
-    }
-    if (!track.permalinkUrl || mixcloudShowKey(track.permalinkUrl) !== track.providerId) {
-      context.addIssue({ code: "custom", path: ["permalinkUrl"], message: protocolT("a_matching_mixcloud_show_url_is_required") });
-    }
-  }
-  if (track.provider !== "soundcloud") return;
-  if (!/^soundcloud:tracks:\d+$/.test(track.providerId)) {
-    context.addIssue({ code: "custom", path: ["providerId"], message: protocolT("invalid_soundcloud_track_urn") });
-  }
-  if (!track.permalinkUrl) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: protocolT("a_soundcloud_permalink_is_required") });
-    return;
-  }
-  const hostname = new URL(track.permalinkUrl).hostname.toLowerCase();
-  if (hostname !== "soundcloud.com" && !hostname.endsWith(".soundcloud.com")) {
-    context.addIssue({ code: "custom", path: ["permalinkUrl"], message: protocolT("invalid_soundcloud_permalink") });
+  for (const issue of validateProviderTrackLocator(track.provider, track, "queue")) {
+    context.addIssue({ code: "custom", path: [issue.path], message: protocolT(issue.messageKey) });
   }
 });
 

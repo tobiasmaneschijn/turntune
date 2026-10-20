@@ -13,6 +13,12 @@ type ProviderHarness = {
   endCallbacks: number[];
   errors: string[];
   inspectMusic(): { volume: number; authorized: boolean };
+  inspectHost(): { state?: { providerName: string; audioState: string }; requests: string[]; musicPlaying: boolean };
+  holdSoundCloudCallbacks(): void;
+  releaseSoundCloudCallbacks(): void;
+  useApple(): void;
+  useRoomSource(): void;
+  reportSoundCloudProgress(position: number): void;
   failNextMusicPlay(): void;
   widgetCreations: number;
   pendingLoads: number;
@@ -114,4 +120,43 @@ test("listeners can change language and recover a SoundCloud player using Sync",
   await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
   await page.evaluate(() => window.providerTest.resolvePosition(10_000));
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
+});
+
+test("listeners can switch providers while old callbacks finish, then stop listening on departure", async ({ page }) => {
+  await freezeProviderClock(page);
+  await page.route("**/api/music/connections", route => route.fulfill({ json: {
+    spotify: { configured: false, connected: false }, apple: { configured: true }
+  } }));
+  await page.goto("/tests/browser/playback/harness/provider-playback.html?host=1");
+  await expect(page.getByTitle(/^SoundCloud player for /)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
+  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
+  await page.evaluate(() => window.providerTest.holdSoundCloudCallbacks());
+  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPaused)).toBe(1);
+  await page.evaluate(() => window.providerTest.useApple());
+  await expect.poll(() => page.evaluate(() => window.providerTest.calls.some(call => call.method === "setQueue"))).toBe(true);
+  await page.clock.runFor(750);
+  await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().state))
+    .toMatchObject({ providerName: "Apple Music", audioState: "playing" });
+  await expect(page.getByTitle(/^SoundCloud player for /)).toHaveCount(0);
+  await page.evaluate(() => window.providerTest.useRoomSource());
+  await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
+  await page.evaluate(() => {
+    window.providerTest.resolvePosition(10_000);
+    window.providerTest.setWidgetPaused(false);
+    window.providerTest.reportSoundCloudProgress(10_000);
+  });
+  await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().state))
+    .toMatchObject({ providerName: "SoundCloud", audioState: "playing" });
+  await expect(page.getByTitle(/^SoundCloud player for /)).toBeVisible();
+  await page.evaluate(() => window.providerTest.releaseSoundCloudCallbacks());
+  await page.clock.runFor(1);
+  expect(await page.evaluate(() => window.providerTest.inspectHost())).toMatchObject({
+    state: { providerName: "SoundCloud", audioState: "playing" }, requests: [], musicPlaying: false
+  });
+  await page.evaluate(() => window.providerTest.unmount());
+  await expect(page.getByTitle(/^SoundCloud player for /)).toHaveCount(0);
+  expect(await page.evaluate(() => window.providerTest.inspectHost().musicPlaying)).toBe(false);
 });

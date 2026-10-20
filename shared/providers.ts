@@ -1,15 +1,11 @@
 import type { Provider, RoomSettings } from "./types.js";
-
-export const MUSIC_PROVIDERS = ["youtube", "soundcloud", "spotify", "apple", "mixcloud"] as const;
-
-export const PROVIDER_LABELS: Record<Provider, string> = {
-  youtube: "YouTube", soundcloud: "SoundCloud", spotify: "Spotify", apple: "Apple Music", mixcloud: "Mixcloud"
-};
+import { MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "./provider-definitions.js";
+export * from "./provider-definitions.js";
 
 /** Spotify requires an explicit app-admin room grant, including legacy rooms. */
 export function allowedRoomProviders(settings: RoomSettings): Provider[] {
   return MUSIC_PROVIDERS.filter(provider =>
-    (provider !== "spotify" || settings.spotifyEnabled === true) &&
+    (!PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant || settings.spotifyEnabled === true) &&
     (!Array.isArray(settings.allowedProviders) || settings.allowedProviders.includes(provider)));
 }
 

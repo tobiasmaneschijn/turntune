@@ -89,6 +89,8 @@ and durable grace scheduling before horizontally scaling the server.
 | `src/features/rooms/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
 | `src/features/profile/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
 | `src/features/playback/provider-playback.ts`, `src/features/playback/providers/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
+| `shared/provider-definitions.ts`, `src/features/playback/provider-registry.tsx`, `server/features/music/provider-registry.ts` | Shared provider capabilities and separate browser/server registrations; see [extending playback providers](playback-providers.md). |
+| `src/features/playback/playback-selection.ts`, `src/features/playback/use-playback-host.tsx` | Listener target/fallback resolution, adapter lifetime and stale-event rejection. |
 | `src/app/RoomApplication.tsx` | Screen composition, room view, player controls and DJ queue UI. |
 | `src/features/rooms/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
 | `src/features/rooms/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
