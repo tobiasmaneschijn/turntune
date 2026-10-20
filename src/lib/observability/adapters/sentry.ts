@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/react";
-import { attachSentryDebugIds, sanitizeSentryEnvelope, sanitizeSentryEvent, sanitizeSentryLog, type TelemetryAdapter } from "../../../../shared/observability";
+import { attachSentryDebugIds, sanitizeSentryEnvelope, sanitizeSentryEvent, sanitizeSentryLog, sanitizeSentryMetric, type TelemetryAdapter } from "../../../../shared/observability";
 import type { BrowserObservabilityConfig } from "../config";
 
 /** Sanitizing the stack removes its origin before Sentry can match injected
@@ -29,6 +29,7 @@ export function createSentryAdapter(config: BrowserObservabilityConfig): Telemet
     beforeSend: event => sanitizeSentryEvent(attachDebugIds(event)),
     beforeSendTransaction: () => null,
     beforeSendLog: log => sanitizeSentryLog(log),
+    beforeSendMetric: metric => sanitizeSentryMetric(metric),
     transportOptions: {
       bufferSize: 20,
       fetchOptions: { credentials: "omit", referrerPolicy: "no-referrer" }
@@ -47,6 +48,9 @@ export function createSentryAdapter(config: BrowserObservabilityConfig): Telemet
     },
     log(level, event, context) {
       Sentry.logger[level](event, { ...context });
+    },
+    metric(type, name, value, options) {
+      Sentry.metrics[type](name, value, options);
     },
     async flush(timeoutMs) { await client?.flush(timeoutMs); }
   };

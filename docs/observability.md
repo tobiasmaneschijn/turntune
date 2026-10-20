@@ -1,9 +1,9 @@
 # Observability
 
-turntune reports errors and structured logs through an application-owned adapter.
-Server traces and metrics use OpenTelemetry. Provider SDK imports stay inside the
-observability implementation so changing the backend does not require changing
-feature code.
+turntune reports errors, structured logs and application metrics through an
+application-owned adapter. Server traces and runtime metrics also use
+OpenTelemetry. Provider SDK imports stay inside the observability implementation
+so changing the backend does not require changing feature code.
 
 ## Runtime configuration
 
@@ -12,7 +12,7 @@ environment for direct Node hosting. The Compose files pass them to the server.
 
 | Setting | Behavior |
 | --- | --- |
-| `OBSERVABILITY_PROVIDER` | `console` by default; `sentry` enables remote errors, logs and sampled server traces; `none` disables application reporting and performance export. |
+| `OBSERVABILITY_PROVIDER` | `console` by default; `sentry` enables remote errors, logs, application metrics and sampled server traces; `none` disables application reporting and performance export. |
 | `OBSERVABILITY_ENVIRONMENT` | Environment label. Use `staging` on staging and `production` on production. |
 | `SENTRY_DSN` | Server project's HTTPS DSN when using Sentry. |
 | `SENTRY_BROWSER_DSN` | Browser project's HTTPS DSN. This value is public and is supplied through `/api/config`. |
@@ -108,19 +108,60 @@ security events retain their separate bounded stream.
 OpenTelemetry instruments the server's explicit application operations and
 runtime measurements. Sentry receives sampled server traces when its adapter is
 enabled. Configure the optional OTLP endpoint and headers to send traces and
-metrics to an existing collector or compatible backend; metrics require that
-endpoint. Export credentials never reach the
+runtime metrics to an existing collector or compatible backend; these
+OpenTelemetry metrics require that endpoint. Export credentials never reach the
 browser. Sampling controls trace volume; metrics use bounded labels rather than
-account, room or request identifiers. Browser performance monitoring and session
-replay are not enabled.
+account, room or request identifiers. Automatic browser tracing and session
+replay remain disabled.
+
+### Sentry application metrics
+
+The existing Sentry SDK supports application metrics without additional runtime
+settings. With `OBSERVABILITY_PROVIDER=sentry`, browser metrics use
+`SENTRY_BROWSER_DSN` and server metrics use `SENTRY_DSN`. No OTLP collector is
+required for these metrics.
+
+Each browser startup records `browser.app.started` once. When navigation timing
+is available, `browser.page.load` records the completed page-load duration as a
+distribution in milliseconds. React StrictMode does not duplicate these
+measurements.
+
+Feature code can use the shared facade. Supply actual values from the operation:
+
+```typescript
+import { telemetry } from "../shared/observability";
+
+telemetry.metrics.count("room.command", 1, {
+  attributes: { operation: "room.command" }
+});
+telemetry.metrics.gauge("room.queue.length", queue.length);
+telemetry.metrics.distribution("provider.response_time", elapsedMs, {
+  unit: "millisecond",
+  attributes: { operation: "provider.request", provider: "spotify", status: 200 }
+});
+```
+
+Counts measure events, gauges record current values, and distributions support
+duration and size percentiles. Attribute keys are limited to `operation`,
+`provider` and `status`. Keep names and operations fixed in code; do not include
+account, room or request IDs, messages, URLs, tokens or track metadata. Environment
+and release come from the existing runtime configuration. Metrics pass through
+the shared privacy filter and a final envelope allowlist that removes SDK scope
+enrichment.
+
+After deploying to staging, load the app and look for `browser.app.started` and
+`browser.page.load` in the browser project's Metrics view, filtered to the staging
+environment and deployed release. The SDK batches metrics; allow time for its
+flush and ingestion. Existing offline and ad-blocker limitations apply.
 
 Monitoring is best effort. Capture and export failures do not change request
 results, saving, playback or readiness. Shutdown attempts a bounded flush.
 
 ## Privacy and feature code
 
-Use the shared `telemetry.captureError` and `telemetry.log` entrypoints. Provide a
-stable operation such as `room.save`, plus only the allowed context fields.
+Use the shared `telemetry.captureError`, `telemetry.log` and `telemetry.metrics`
+entrypoints. Provide a stable operation such as `room.save`, plus only the allowed
+context fields.
 Do not pass request bodies, messages, track metadata, account data, URLs, cookies,
 tokens or provider responses. Expected input and authorization failures are not
 incidents. Report an exception at the boundary responsible for handling it;
@@ -128,19 +169,20 @@ duplicate captures of the same exception are suppressed.
 
 The shared privacy filter replaces arbitrary error messages with the operation,
 retains code locations and allowlisted context, and limits event volume. Final
-Sentry event and log filters also constrain SDK enrichment. Automatic request
-capture, breadcrumbs, user identity, session replay and arbitrary SDK context are
-disabled. Keep these rules when adding instrumentation or replacing an adapter.
+Sentry event, log and metric filters also constrain SDK enrichment. Automatic
+request capture, breadcrumbs, user identity, session replay and arbitrary SDK
+context are disabled. Keep these rules when adding instrumentation or replacing
+an adapter.
 A fixed unspecified IP prevents Sentry's ingestion layer from inferring a
 location. Affected-user counts are not meaningful because user identity is withheld.
 
 ## Switch providers
 
-To stop Sentry error and log delivery, select `console` or `none` and restart the
-existing service. To move traces and metrics, change the OTLP endpoint and
-headers. For another error-reporting service, implement the shared adapter
-contract and select it in the server and browser bootstrap modules. Feature code
-continues to use the same entrypoints.
+To stop Sentry error, log and application metric delivery, select `console` or
+`none` and restart the existing service. To move OpenTelemetry traces and runtime
+metrics, change the OTLP endpoint and headers. For another reporting service,
+implement the shared adapter contract and select it in the server and browser
+bootstrap modules. Feature code continues to use the same entrypoints.
 
 Source-map tooling is isolated in the build script. Replace that upload step for
 another provider while preserving the embedded release, private maps and cleanup

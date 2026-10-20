@@ -51,5 +51,13 @@ test("A listener retries a failed page while its crash is reported once without 
   expect(logs[0].payload).toMatchObject({ items: [{ attributes: {
     "sentry.environment": { value: "test" }, "sentry.release": { value: "fixture-revision" }
   } }] });
+  const metrics = items.filter(item => item.header.type === "trace_metric");
+  expect(metrics).toHaveLength(1);
+  expect(metrics[0].payload).toMatchObject({
+    ingest_settings: { infer_ip: "never", infer_user_agent: "never" },
+    items: [{ name: "browser.app.started", type: "counter", value: 1, attributes: {
+      "sentry.environment": { value: "test" }, "sentry.release": { value: "fixture-revision" }
+    } }]
+  });
   expect(envelopes.join("\n")).not.toMatch(/fixture-secret-token|Private message|access_token|127\.0\.0\.1/);
 });

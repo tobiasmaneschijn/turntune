@@ -33,6 +33,25 @@ test("a failed operation reports once with code locations and safe context, and 
   await reporter.flush(10);
 });
 
+test("application metrics reject invalid measurements and discard private attributes without changing application work", async () => {
+  const reports: unknown[] = [];
+  const reporter = createTelemetry({ captureError() {}, log() {}, metric(...metric) { reports.push(metric); }, async flush() {} });
+  const attributes = { operation: "provider.request", provider: "spotify", status: 200,
+    requestId: "c1c14747-7193-40f0-a3a3-9e111b8ec264", userId: "private-user", url: "https://private.invalid/?token=private" };
+  reporter.metrics.distribution("provider.duration", 12, { unit: "millisecond", attributes });
+  assert.deepEqual(reports, [["distribution", "provider.duration", 12, {
+    unit: "millisecond", attributes: { operation: "provider.request", provider: "spotify", status: 200 }
+  }]]);
+  reporter.metrics.count("room.save", -1);
+  reporter.metrics.gauge("room.queue", Number.NaN);
+  reporter.metrics.distribution("room.save", Number.POSITIVE_INFINITY);
+  reporter.metrics.count("https://private.invalid");
+  assert.equal(reports.length, 1);
+  reporter.configure({ captureError() {}, log() {}, metric() { throw new Error("offline"); }, async flush() {} });
+  assert.doesNotThrow(() => reporter.metrics.count("room.saved"));
+  await reporter.flush();
+});
+
 test("concurrent requests keep their own server-created correlation IDs and public configuration exposes only the browser DSN", async t => {
   const captured: string[] = [];
   const restore = configureTelemetry({ captureError() {}, log(_level, _event, context) { captured.push(context.requestId!); }, async flush() {} });
@@ -80,4 +99,16 @@ test("SDK enrichment cannot export private request, user, breadcrumb or source-c
   assert.ok(noSafeFrames);
   assert.equal(Object.hasOwn(noSafeFrames.exception.values[0], "stacktrace"), false);
   assert.equal(sanitizeSentryEvent({ type: "transaction", request: "private" }), null);
+  const metricEnvelope = sanitizeSentryEnvelope<[unknown, Array<[unknown, Record<string, unknown>]>]>([{}, [[{ type: "trace_metric" }, {
+    items: [...Array.from({ length: 101 }, () => ({ name: "browser.app.started", type: "counter", value: 1, timestamp: 1,
+      trace_id: "a".repeat(32), span_id: "b".repeat(16), private: "private",
+      attributes: { operation: { value: "browser.start" }, "user.email": { value: "private" }, requestId: { value: "private" },
+        "sentry.environment": { value: "private" }, "sentry.release": { value: "private" } } })),
+      { name: "private invalid metric", type: "gauge", value: 1, timestamp: 1 }]
+  }]]], { environment: "staging", release: "revision" });
+  assert.ok(metricEnvelope);
+  assert.doesNotMatch(JSON.stringify(metricEnvelope), /private|user.email|requestId/);
+  const payload = metricEnvelope[1][0][1];
+  assert.deepEqual(payload.ingest_settings, { infer_ip: "never", infer_user_agent: "never" });
+  assert.equal((payload.items as unknown[]).length, 101);
 });

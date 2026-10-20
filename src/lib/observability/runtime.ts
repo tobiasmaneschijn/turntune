@@ -9,6 +9,7 @@ interface BrowserObservabilityOptions {
   target: EventTarget;
   loadConfiguration(): Promise<unknown>;
   loadSentryAdapter?(config: BrowserObservabilityConfig): Promise<TelemetryAdapter>;
+  pageLoad?: { completed: boolean; durationMs(): number | undefined };
   testMode?: boolean;
 }
 
@@ -16,6 +17,8 @@ interface BrowserObservabilityOptions {
 export function initializeBrowserObservability(options: BrowserObservabilityOptions): { ready: Promise<void>; dispose(): void } {
   if (options.testMode) return { ready: Promise.resolve(), dispose() {} };
   let disposed = false;
+  let pageLoadTimer: ReturnType<typeof setTimeout> | undefined;
+  let pageLoadRecorded = false;
   let adapter: TelemetryAdapter = disabledAdapter;
   const pending: Array<(destination: TelemetryAdapter) => void> = [];
   const buffer = (send: (destination: TelemetryAdapter) => void) => {
@@ -24,6 +27,7 @@ export function initializeBrowserObservability(options: BrowserObservabilityOpti
   let restore = configureTelemetry({
     captureError(error, context) { buffer(destination => destination.captureError(error, context)); },
     log(level, event, context) { buffer(destination => destination.log(level, event, context)); },
+    metric(type, name, value, options) { buffer(destination => destination.metric?.(type, name, value, options)); },
     async flush() {}
   });
 
@@ -34,9 +38,28 @@ export function initializeBrowserObservability(options: BrowserObservabilityOpti
   };
   const onRejection = (event: Event) => telemetry.captureError((event as PromiseRejectionEvent).reason, { operation: "browser.unhandled.rejection" });
   const onPageHide = () => { void telemetry.flush(1_500); };
+  const onLoad = () => {
+    if (pageLoadRecorded || pageLoadTimer !== undefined) return;
+    // loadEventEnd is populated only after the browser finishes load handlers.
+    pageLoadTimer = setTimeout(() => {
+      pageLoadTimer = undefined;
+      if (disposed || pageLoadRecorded) return;
+      try {
+        const durationMs = options.pageLoad?.durationMs();
+        if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) return;
+        pageLoadRecorded = true;
+        telemetry.metrics.distribution("browser.page.load", durationMs, { unit: "millisecond" });
+      } catch { /* Navigation timing can be unavailable in embedded browsers. */ }
+    }, 0);
+  };
   options.target.addEventListener("error", onError);
   options.target.addEventListener("unhandledrejection", onRejection);
   options.target.addEventListener("pagehide", onPageHide);
+  if (options.pageLoad) {
+    options.target.addEventListener("load", onLoad);
+    if (options.pageLoad.completed) onLoad();
+  }
+  telemetry.metrics.count("browser.app.started");
 
   const ready = Promise.resolve().then(options.loadConfiguration).then(async value => {
     const config = parseBrowserObservabilityConfig(value);
@@ -66,6 +89,8 @@ export function initializeBrowserObservability(options: BrowserObservabilityOpti
       options.target.removeEventListener("error", onError);
       options.target.removeEventListener("unhandledrejection", onRejection);
       options.target.removeEventListener("pagehide", onPageHide);
+      options.target.removeEventListener("load", onLoad);
+      clearTimeout(pageLoadTimer);
       pending.length = 0;
       restore();
       void Promise.resolve().then(() => adapter.flush(1_500)).catch(() => undefined);
