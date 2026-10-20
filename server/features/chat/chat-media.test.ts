@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import sharp from 'sharp'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { resolveChatMediaUrl, signChatHistoryMedia, uploadChatMedia } from './chat-media.js'
+import { resolveChatMediaUrl, signChatHistoryMedia, signDurableChatHistoryMedia, uploadChatMedia } from './chat-media.js'
 
 const file = '00000000-0000-4000-8000-000000000001.png'
 function fixture() {
@@ -51,6 +51,55 @@ test('authorized history signs uploaded paths and clears stale public URLs if si
   assert.equal(f.signed[0].seconds, 300)
   const broken = { storage: { from: () => ({ createSignedUrls: async () => ({ error: new Error('Storage unavailable'), data: null }) }) } } as unknown as SupabaseClient
   assert.equal((await signChatHistoryMedia(broken, rows))[0].media_url, null)
+})
+
+test('image history batches repeated previews while withholding removed, pending and unreferenced attachments', async () => {
+  const { createClient } = await import('@supabase/supabase-js')
+  const row = (index: number) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    storage_path: `alice/lounge/00000000-0000-4000-8000-${String(index).padStart(12, '0')}.png`, media_url: 'https://public.test/old.png', removed_at: null as string | null })
+  const rows = Array.from({ length: 107 }, (_, index) => row(index + 1))
+  const registrations = rows.slice(0, 106).map(item => ({ storage_path: item.storage_path, room_slug: 'lounge', message_id: item.id as string | null, removed_at: null as string | null }))
+  registrations[101].removed_at = new Date().toISOString()
+  registrations[102].message_id = null
+  registrations[103].room_slug = 'elsewhere'
+  const references = rows.filter((_, index) => index !== 104).map(item => ({ ...item, room_slug: 'lounge' }))
+  references.find(item => item.id === rows[105].id)!.removed_at = new Date().toISOString()
+  const calls: string[] = [], signed: string[] = []
+  let broken = false
+  const client = createClient('https://history.test', 'test-secret', { auth: { persistSession: false }, global: { fetch: async (input, init) => {
+    const url = new URL(String(input)), table = url.pathname.split('/').at(-1)!
+    calls.push(table)
+    if (url.pathname.includes('/storage/')) {
+      const body = JSON.parse(String(init?.body))
+      assert.ok(body.paths.length <= 100); assert.equal(body.expiresIn, 300)
+      signed.push(...body.paths)
+      return Response.json(body.paths.map((path: string) => ({ path, signedURL: `/object/sign/chat-media/${path}?token=valid` })))
+    }
+    if (broken) return Response.json({ message: 'Unavailable' }, { status: 403 })
+    const key = table === 'soundspin_chat_uploads' ? 'storage_path' : 'id'
+    const batch = url.searchParams.get(key)!.slice(4, -1).split(',').map(value => value.replace(/^"|"$/g, ''))
+    assert.ok(batch.length <= 100)
+    if (table === 'soundspin_chat_uploads') return Response.json(registrations.filter(item => batch.includes(item.storage_path)))
+    assert.equal(url.searchParams.get('room_slug'), 'eq.lounge')
+    assert.equal(url.searchParams.get('removed_at'), 'is.null')
+    return Response.json(references.filter(item => batch.includes(item.id) && !item.removed_at))
+  } } })
+  const invalid = { ...row(200), storage_path: 'alice/lounge/../../private.png' }, removed = { ...row(201), removed_at: new Date().toISOString() }
+  const external = { ...row(202), storage_path: null, media_url: 'https://external.test/image.gif' }
+  const result = await signDurableChatHistoryMedia(client, 'lounge', [...rows, rows[0], invalid, removed, external])
+  assert.equal(calls.filter(table => table === 'soundspin_chat_uploads').length, 2)
+  assert.equal(calls.filter(table => table === 'soundspin_messages').length, 2)
+  assert.equal(signed.length, 102)
+  assert.equal(new Set(signed).size, signed.length)
+  assert.ok(result.slice(0, 101).every(item => item.media_url?.includes('token=valid')))
+  assert.ok(result.slice(101, 106).every(item => item.media_url === null))
+  assert.ok(result[106].media_url?.includes('token=valid')) // Existing same-room legacy reference.
+  assert.equal(result[107].media_url, result[0].media_url)
+  assert.equal(result[108].media_url, null); assert.equal(result[109].media_url, null)
+  assert.equal(result[110].media_url, external.media_url)
+  broken = true; signed.length = 0
+  assert.equal((await signDurableChatHistoryMedia(client, 'lounge', [rows[0]]))[0].media_url, null)
+  assert.equal(signed.length, 0)
 })
 
 test('registered signing refuses removed, unsent, expired and cross-room media, and upload rechecks policy before registration', async () => {

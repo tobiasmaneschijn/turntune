@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
+import { runtimeMetrics } from "../lib/runtime-metrics.js";
 import { createBoundedAdminClient, createBoundedSupabaseFetch } from "./supabase-client.js";
 
 const origin = "https://bounded-supabase-fixture.invalid";
@@ -110,6 +111,11 @@ test("supported Supabase SDK hook preserves RPC results and project-specific fix
       return Response.json({ ok: true }, { headers: { "content-range": "0-0/1" } });
     }
   });
-  const { data, error } = await client.rpc("soundspin_fixture", {});
+  const before = runtimeMetrics.snapshot().database.rpc?.count ?? 0;
+  const { data, error } = await runtimeMetrics.measure("chat_message", async () => client.rpc("soundspin_fixture", {}));
   assert.equal(error, null); assert.deepEqual(data, { ok: true }); assert.equal(calls, 1);
+  const metrics = runtimeMetrics.snapshot();
+  assert.equal(metrics.database.rpc.count, before + 1);
+  assert.equal(metrics.workflows.chat_message.averageRequests, 1);
+  assert.doesNotMatch(JSON.stringify(metrics), /sb_secret_fixture|soundspin_fixture|soundspin-supabase|https?:\/\//);
 });

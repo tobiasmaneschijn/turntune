@@ -5,9 +5,9 @@ import express from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mountAdminRoutes } from "./admin-routes.js";
 
-async function fixture(run: (base: string, state: { calls: Array<{ path: string; method: string; body?: unknown }>; fail: boolean }) => Promise<void>) {
+async function fixture(run: (base: string, state: { calls: Array<{ path: string; method: string; body?: unknown }>; fail: boolean; screenshots: boolean }) => Promise<void>) {
   const { createClient } = await import("@supabase/supabase-js");
-  const state = { calls: [] as Array<{ path: string; method: string; body?: unknown }>, fail: false };
+  const state = { calls: [] as Array<{ path: string; method: string; body?: unknown }>, fail: false, screenshots: false };
   const today = new Date().toISOString().slice(0, 10);
   const client = createClient("https://admin.invalid", "fixture", { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init);
@@ -15,8 +15,18 @@ async function fixture(run: (base: string, state: { calls: Array<{ path: string;
     const text = request.method === "GET" || request.method === "HEAD" ? undefined : await request.clone().text();
     state.calls.push({ path: url.pathname, method: request.method, body: text ? JSON.parse(text) : undefined });
     if (state.fail) return Response.json({ message: "private database failure" }, { status: 500 });
-    if (url.pathname.endsWith("soundspin_admin_activity")) return Response.json([{ day: today, users: 5, feedback: 4, messages: 1275 }]);
+    if (url.pathname.endsWith("soundspin_admin_summary")) return Response.json({
+      metrics: { users: 5, rooms: 3, feedback: 4, openFeedback: 2, messages: 1275 },
+      activity: [{ day: today, users: 5, feedback: 4, messages: 1275 }]
+    });
     if (url.pathname.endsWith("soundspin_update_feedback_admin")) return Response.json({ id: "11111111-1111-4111-8111-111111111111", status: "reviewing", admin_note: "Verified", updated_at: `${today}T10:00:00Z` });
+    if (state.screenshots && url.pathname === "/rest/v1/soundspin_feedback") return Response.json([{
+      id: "11111111-1111-4111-8111-111111111111", user_id: "listener", screenshot_paths: ["listener/found.png", "listener/missing.png", "other/private.png"], created_at: `${today}T10:00:00Z`
+    }]);
+    if (url.pathname === "/storage/v1/object/sign/feedback-screenshots") return Response.json([
+      { path: "listener/found.png", signedURL: "/object/sign/feedback-screenshots/listener/found.png?token=fixture", error: null },
+      { path: "listener/missing.png", signedURL: null, error: "Object not found" }
+    ]);
     if (request.method === "HEAD") return new Response(null, { headers: { "content-range": "0-0/1275" } });
     if (request.method === "PATCH") return Response.json({ id: "11111111-1111-4111-8111-111111111111", status: "reviewing", admin_note: "Verified", updated_at: `${today}T10:00:00Z` });
     return Response.json([]);
@@ -42,6 +52,20 @@ test("administrative routes reject unauthorized requests before privileged data 
     assert.deepEqual(state.calls, []);
   });
 });
+test("the support inbox signs screenshots together and remains usable when an individual image is missing", async () => {
+  await fixture(async (base, state) => {
+    state.screenshots = true;
+    const response = await fetch(`${base}/api/admin/dashboard`, authenticated);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.match(payload.feedback[0].screenshots[0].url, /found\.png/);
+    assert.equal(payload.feedback[0].screenshots[1].url, null);
+    assert.equal(payload.feedback[0].screenshots[2].url, null, "forged paths cannot gain signed previews");
+    const signing = state.calls.filter(call => call.path.startsWith("/storage/"));
+    assert.equal(signing.length, 1);
+    assert.deepEqual(signing[0].body, { paths: ["listener/found.png", "listener/missing.png"], expiresIn: 900 });
+  });
+});
 test("dashboard consumes SQL daily totals rather than capped raw activity rows and hides internal failures", async () => {
   await fixture(async (base, state) => {
     const response = await fetch(`${base}/api/admin/dashboard`, authenticated);
@@ -49,9 +73,12 @@ test("dashboard consumes SQL daily totals rather than capped raw activity rows a
     const payload = await response.json();
     assert.equal(payload.activity.length, 14);
     assert.equal(payload.activity.at(-1).messages, 1275);
-    assert.equal(state.calls.filter(call => call.path.endsWith("soundspin_admin_activity")).length, 1);
-    const rpc = state.calls.find(call => call.path.endsWith("soundspin_admin_activity"))!;
-    assert.match((rpc.body as { start_at: string }).start_at, /T00:00:00\.000Z$/);
+    assert.deepEqual(payload.metrics, { users: 5, rooms: 3, feedback: 4, openFeedback: 2, messages: 1275 });
+    assert.equal(state.calls.filter(call => call.path.endsWith("soundspin_admin_summary")).length, 1);
+    assert.equal(state.calls.filter(call => call.method === "HEAD").length, 0);
+    const rpc = state.calls.find(call => call.path.endsWith("soundspin_admin_summary"))!;
+    assert.match((rpc.body as { p_start: string }).p_start, /T00:00:00\.000Z$/);
+    assert.equal((rpc.body as { p_actor: string }).p_actor, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     state.fail = true;
     const failure = await fetch(`${base}/api/admin/dashboard`, authenticated);
     assert.equal(failure.status, 500);

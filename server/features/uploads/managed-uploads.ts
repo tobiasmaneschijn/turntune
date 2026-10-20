@@ -191,17 +191,14 @@ export async function cleanupManagedUploads(client: SupabaseClient | null, optio
         removed += Number(acknowledged || 0)
       } catch (error) {
         failed += paths.length
-        for (const row of rows) {
-          const attempts = Number(row.attempts || 0) + 1
-          const { error: retryError } = await client.from('soundspin_storage_deletion_outbox').update({ attempts, available_at: new Date(Date.now() + Math.min(3600, 30 * 2 ** Math.min(attempts, 7)) * 1000).toISOString(), last_error: 'Storage cleanup failed; retry scheduled.' }).eq('bucket_id', bucket).eq('storage_path', row.storage_path).eq('generation', row.generation)
-          if (retryError) throw retryError
-        }
+        const { error: retryError } = await client.rpc('soundspin_retry_upload_deletions', {
+          p_bucket: bucket, p_items: rows.map(row => ({ path: row.storage_path, generation: row.generation }))
+        })
+        if (retryError) throw retryError
       }
     }
   }
-  const { count, error: countError } = await client.from('soundspin_storage_deletion_outbox').select('storage_path', { count: 'exact', head: true })
-  if (countError) throw countError
-  const { data: oldest, error: ageError } = await client.from('soundspin_storage_deletion_outbox').select('queued_at').order('queued_at').limit(1)
+  const { data: oldest, count, error: ageError } = await client.from('soundspin_storage_deletion_outbox').select('queued_at', { count: 'exact' }).order('queued_at').limit(1)
   if (ageError) throw ageError
   // A one-hour audit window remains after deletion for quota accounting; prune
   // completed ledger rows after 7 days so abandoned attempts cannot grow forever.

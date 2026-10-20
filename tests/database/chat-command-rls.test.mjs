@@ -33,9 +33,12 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     }
     await db.exec(await readFile(new URL('../../supabase/migrations/20261009073805_durable_room_chat.sql', import.meta.url), 'utf8'));
     await db.exec(await readFile(new URL('../../supabase/migrations/20261013121000_chat_moderation_bounds.sql', import.meta.url), 'utf8'));
+    await db.exec(await readFile(new URL('../../supabase/migrations/20261020083659_return_committed_chat_record.sql', import.meta.url), 'utf8'));
     for (const role of ['anon', 'authenticated']) {
       await db.exec(`set role ${role}`);
       await assert.rejects(command('message', `message:${randomUUID()}`, payload(randomUUID())), /permission denied/);
+      await assert.rejects(db.query('select soundspin_committed_chat_row($1)', [randomUUID()]), /permission denied/);
+      await assert.rejects(db.query('select soundspin_chat_message_state($1)', [randomUUID()]), /permission denied/);
       await assert.rejects(db.query('select * from public.soundspin_chat_tombstones'), /permission denied/);
       await db.exec('reset role');
     }
@@ -46,7 +49,15 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     assert.equal(secondMembers.members.length,50);assert.equal(new Set([...memberPage.members,...secondMembers.members].map(member=>member.user.id)).size,100);
     assert.equal((await db.query("select soundspin_room_member_page('lounge','Alice') as result")).rows[0].result.members[0].user.id,alice);
     const id = randomUUID(), input = payload(id);
-    assert.equal((await command('message', `message:${id}`, input, alice, 10)).fresh, true);
+    const accepted = await command('message', `message:${id}`, input, alice, 10);
+    assert.equal(accepted.fresh, true);
+    assert.equal(accepted.row.id, id); assert.equal(accepted.row.content, input.content);
+    assert.equal(accepted.row.immutable_fingerprint, fingerprint);
+    assert.deepEqual(accepted.row.soundspin_message_reactions, []);
+    assert.equal((await db.query('select soundspin_chat_message_state($1) as result',[id])).rows[0].result.row.id,id);
+    await db.query('update soundspin_messages set immutable_fingerprint=null where id=$1',[id]);
+    assert.equal((await db.query('select soundspin_chat_message_state($1) as result',[id])).rows[0].result.row.immutable_fingerprint,fingerprint);
+    await db.query('update soundspin_messages set immutable_fingerprint=$2 where id=$1',[id,fingerprint]);
     assert.equal((await command('message', `message:${id}`, input, alice, 10)).fresh, false);
     await assert.rejects(command('message', `message:${id}`, input, alice, 10, 'b'.repeat(64)), /different content/);
     await assert.rejects(command('message', `message:${randomUUID()}`, payload(randomUUID()), alice, 10), /Slow mode/);
@@ -71,18 +82,29 @@ test('durable chat RPC is service-only, atomic and removal wins against replay a
     assert.equal((await command('poll', `poll:${randomUUID()}`, { messageId: id, optionIndex: 1 })).result.revision, 2);
     assert.equal((await command('poll', noopPoll, { messageId: id, optionIndex: 0 })).result.revision,1);
     assert.equal((await db.query('select option_index from soundspin_poll_votes where message_id=$1 and user_id=$2',[id,alice])).rows[0].option_index,1);
+    const retried = await command('message', `message:${id}`, input);
+    assert.equal(retried.fresh, false);
+    assert.equal(retried.row.soundspin_message_reactions.length, 3);
+    assert.equal(retried.row.soundspin_poll_votes[0].option_index, 1);
+    const replyId=randomUUID(), replyInput={ ...payload(replyId), replyTo:{ id } };
+    assert.equal((await command('message', `message:${replyId}`, replyInput)).row.reply.content, input.content);
     const removal = randomUUID();
     await assert.rejects(command('remove', `remove:${removal}`, { messageId: id, reason: 'x'.repeat(501) }, staff), /check constraint/);
     assert.equal((await db.query('select content from soundspin_messages where id=$1', [id])).rows[0].content, 'Secret');
     assert.equal((await db.query('select * from soundspin_chat_tombstones')).rows.length, 0);
     const removed = await command('remove', `remove:${removal}`, { messageId: id, reason: 'Spam' }, staff);
     assert.equal(removed.fresh, true);assert.equal((await command('remove', `remove:${removal}`, { messageId: id, reason: 'Spam' }, staff)).fresh, false);
-    await command('message', `message:${id}`, input);
+    const removedRetry = await command('message', `message:${id}`, input);
+    assert.equal(removedRetry.row.content, 'Message removed'); assert.ok(removedRetry.row.removed_at);
+    assert.deepEqual(removedRetry.row.soundspin_message_reactions, []);
+    assert.equal((await command('message', `message:${replyId}`, replyInput)).row.reply.content, 'Message removed');
     assert.deepEqual((await db.query('select content,poll_options,media_url,storage_path,removed_at is not null as removed from soundspin_messages where id=$1', [id])).rows, [{ content: 'Message removed', poll_options: null, media_url: null, storage_path: null, removed: true }]);
     assert.equal((await db.query('select * from soundspin_poll_votes')).rows.length, 0);
     await assert.rejects(command('reaction', `reaction:${randomUUID()}`, { messageId: id, action: 'add', emoji: '❤️' }), /removed/);
     await assert.rejects(command('poll', `poll:${randomUUID()}`, { messageId: id, optionIndex: 0 }), /removed/);
     const future = randomUUID();await command('remove', `remove:${randomUUID()}`, { messageId: future, reason: 'Pre-save removal' }, staff);
+    const pendingRemoval=(await db.query('select soundspin_chat_message_state($1) as result',[future])).rows[0].result;
+    assert.equal(pendingRemoval.row,null);assert.equal(pendingRemoval.removal.roomId,'lounge');assert.ok(pendingRemoval.removal.removedAt);
     await command('message', `message:${future}`, payload(future), alice, 10);
     assert.equal((await db.query('select content,removed_at is not null as removed from soundspin_messages where id=$1', [future])).rows[0].removed, true);
     assert.equal((await db.query('select * from soundspin_chat_removals')).rows.length, 2);

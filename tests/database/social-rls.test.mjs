@@ -40,6 +40,7 @@ async function database() {
     grant execute on function public.soundspin_room_has_ban(text,uuid),public.soundspin_may_invite(text,uuid) to service_role;`);
   await db.exec(await readFile(new URL("../../supabase/migrations/20261006205022_private_music_library.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../../supabase/migrations/20261013122000_social_blocks_library.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../../supabase/migrations/20261020083649_batch_social_admin_upload_queries.sql", import.meta.url), "utf8"));
   return db;
 }
 const act = async (db, actor, target, action) => (await db.query("select public.soundspin_friend_action($1,$2,$3) as state", [actor, target, action])).rows[0].state;
@@ -262,6 +263,44 @@ test("service social identity batches expose active confirmed subjects and hide 
     for (const role of ["anon", "authenticated"]) {
       await db.exec(`set role ${role}`);
       await assert.rejects(db.query("select * from public.soundspin_social_profiles($1::uuid[])", [[alice, bob]]), /permission denied/);
+      await db.exec("reset role");
+    }
+  } finally { await db.close(); }
+});
+
+test("batched social consent respects both block directions, request expiry, current sharing and disabled subjects", async () => {
+  const db = await database();
+  const states = async () => (await db.query("select * from public.soundspin_social_states($1,$2::uuid[]) order by user_id", [alice, [alice, bob, carol, bob]])).rows;
+  try {
+    await db.exec("set role service_role");
+    await befriend(db, alice, bob);
+    await act(db, carol, alice, "request");
+    await db.query("insert into public.soundspin_social_settings(user_id,share_activity) values($1,true)", [bob]);
+    assert.deepEqual(await states(), [
+      { user_id: bob, state: "friends", share_activity: true }, { user_id: carol, state: "incoming", share_activity: false }
+    ]);
+    await db.query("update public.soundspin_social_settings set share_activity=false where user_id=$1", [bob]);
+    await db.query("update public.soundspin_friendships set updated_at=now()-interval '15 days' where status='pending'");
+    assert.deepEqual(await states(), [
+      { user_id: bob, state: "friends", share_activity: false }, { user_id: carol, state: "none", share_activity: false }
+    ]);
+    // Also reject stale friendship rows even if a block exists without the
+    // normal mutation having already removed that relationship.
+    await db.query("insert into public.soundspin_user_blocks(blocker_id,blocked_id) values($1,$2)", [bob, alice]);
+    assert.equal((await states())[0].state, "none");
+    await db.query("delete from public.soundspin_user_blocks");
+    await db.query("insert into public.soundspin_user_blocks(blocker_id,blocked_id) values($1,$2)", [alice, bob]);
+    assert.equal((await states())[0].state, "none");
+    await db.query("delete from public.soundspin_user_blocks");
+    await db.exec("reset role");
+    await db.query("insert into public.test_disabled_accounts values($1)", [bob]);
+    await db.exec("set role service_role");
+    assert.equal((await states())[0].state, "none");
+    await assert.rejects(db.query("select * from public.soundspin_social_states($1,$2::uuid[])", [alice, Array(501).fill(bob)]), /exceeds its limit/);
+    await db.exec("reset role");
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`set role ${role}`);
+      await assert.rejects(states(), /permission denied/);
       await db.exec("reset role");
     }
   } finally { await db.close(); }

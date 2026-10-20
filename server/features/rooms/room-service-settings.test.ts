@@ -53,7 +53,14 @@ async function setupStore(state = room()) {
       };
       return query;
     },
-    async rpc(name: string, values: Commit) {
+    async rpc(name: string, values: Commit & { p_room_slug?: string; p_actor?: string }) {
+      if (name === "soundspin_room_access") {
+        assert.equal(values.p_room_slug, state.id);
+        const role = values.p_actor === state.ownerUserId ? "owner" : state.moderatorUserIds.includes(values.p_actor || "") ? "moderator" : "member";
+        return { data: { exists: true, isPublic: state.isPublic, passwordHash: null, role, banned: false,
+          accessMode: state.settings.accessMode ?? (state.isPublic ? "public" : "members"), settings: structuredClone(state.settings),
+          roomActive: true, accountActive: true, readers: [] }, error: null };
+      }
       assert.ok(name === "soundspin_commit_room" || name === "soundspin_commit_room_v2");
       commits.push(structuredClone(values));
       await controls.beforeCommit();

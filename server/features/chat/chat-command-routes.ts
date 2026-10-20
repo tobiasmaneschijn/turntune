@@ -88,21 +88,7 @@ export function mountDurableChatRoutes(app: Express, options: ChatHistoryRouteOp
     route(false, async (room, _user, request) => {
       const id = request.params.messageId
       if (typeof id !== 'string' || !UUID.test(id)) throw new PublicRequestError(serverT("invalid_message"))
-      const record = await commands.loadMessage(id)
-      if (!record || record.roomId !== room) return null
-      const at = { id, createdAt: record.message.createdAt }
-      const [older, newer] = await Promise.all([
-        commands.readPage(room, at, 'older', 20),
-        commands.readPage(room, at, 'newer', 20)
-      ])
-      const target = await commands.readMessage(room, id)
-      return {
-        ...(await commands.readPayload(room, [...older.rows, ...target!.rows, ...newer.rows])),
-        olderCursor: older.cursor || at,
-        newerCursor: newer.cursor || at,
-        hasOlder: older.hasMore,
-        hasNewer: newer.hasMore
-      }
+      return commands.readContext(room, id)
     })
   )
   app.post(

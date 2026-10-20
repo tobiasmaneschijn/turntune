@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -112,6 +112,17 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   assert.equal(rejoined.users[0].id, verifiedUserId);
   assert.deepEqual(rejoined.room.djQueueUserIds, [verifiedUserId]);
   assert.deepEqual(await socket.timeout(3_000).emitWithAck("dj:leave", undefined), { ok: true });
+  const message = { id: randomUUID(), content: 'A saved message', type: 'text', createdAt: new Date().toISOString(), mentions: [] };
+  const delivered = waitEvent('chat:message');
+  assert.deepEqual(await socket.timeout(3_000).emitWithAck('chat:message', { roomId: 'auth-room', message }), { ok: true });
+  assert.equal(((await delivered)[0] as { message: { id: string } }).message.id, message.id);
+  assert.deepEqual(await socket.timeout(3_000).emitWithAck('chat:typing', { roomId: 'auth-room', typing: { active: true } }), { ok: true });
+  const diagnostics = once(server, 'message', { signal: AbortSignal.timeout(3_000) });
+  server.send({ fixture: 'metrics' });
+  const { metrics } = (await diagnostics)[0];
+  assert.equal(metrics.workflows.chat_message.maxRequests, 5, 'a normal saved message has a bounded database request budget');
+  assert.equal(metrics.workflows.chat_typing.maxRequests, 2, 'typing validates access and delivery without repeated reads');
+  assert.doesNotMatch(JSON.stringify(metrics), /sb_secret|auth-room|verified@example/);
   const updateFixture = async (fixture: "account" | "room", disabled: boolean) => {
     const updated = once(server, "message", { signal: AbortSignal.timeout(3_000) });
     server.send({ fixture, disabled });
@@ -123,6 +134,10 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   await updateFixture("room", false);
   assert.deepEqual(await join(), { ok: true });
   await updateFixture("account", true);
+  const rejectedChat = await socket.timeout(3_000).emitWithAck('chat:message', {
+    roomId: 'auth-room', message: { ...message, id: randomUUID(), content: 'Must not be saved' }
+  });
+  assert.equal(rejectedChat.ok, false, 'the optimized chat path still rejects the next command after suspension');
   const profileResponse = await fetch(`${url}/api/profiles/${verifiedUserId}`, { headers: { Authorization: `Bearer ${token(Math.floor(Date.now() / 1000) + 60)}` }, signal: AbortSignal.timeout(3_000) });
   assert.ok([401, 403].includes(profileResponse.status));
   const suspendedSocket = io(url, { autoConnect: false, reconnection: false, transports: ["websocket"], auth: { accessToken: token(Math.floor(Date.now() / 1000) + 60) } });

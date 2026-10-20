@@ -9,6 +9,7 @@ import { mountProfileRoutes } from "./features/accounts/profile-routes.js";
 import { mountSpotifyAccessRoutes } from "./features/admin/spotify-access-routes.js";
 import { mountApiErrors } from "./app/api-errors.js";
 import { serverT } from "./lib/i18n.js";
+import { runtimeMetrics } from "./lib/runtime-metrics.js";
 import { mountAdminRoutes } from "./features/admin/admin-routes.js";
 import { mountMusicRoutes } from "./features/music/music-routes.js";
 import { mountRoomActions } from "./features/rooms/room-actions.js";
@@ -205,15 +206,13 @@ function spotifyRedirectUri(request: express.Request) {
 }
 
 async function canUseSpotify(request:express.Request,userId:string,explicitRoom?:string) {
-  if(!await platform.activeAccount(userId))return false;
   const callback=/^(?:\/api\/spotify)?\/callback$/i.test(request.path);
   const roomId=callback?explicitRoom:(explicitRoom??spotifyRoomContext(request));
-  if(!roomId)return Boolean((await store.getProfile(userId))?.is_app_admin);
-  if(!await platform.activeRoom(roomId))return false;
+  if(!roomId)return await platform.activeAccount(userId)&&Boolean((await store.getProfile(userId))?.is_app_admin);
+  const access=await freshRoomAdmission(userId,roomId);
+  if(!canReadAdmission(access))return false;
   const room=await store.loadRoom(roomId);
   if(!room||!roomAllowsProvider(room.settings,"spotify")||isRoomBanned(room,userId))return false;
-  const access=await store.getRoomAccess(roomId,userId);
-  if(!access.exists||access.banned||(!access.isPublic&&!access.role))return false;
   // OAuth navigation closes the initiating socket. The saved flow carries the
   // already-checked room; all later provider requests require live admission.
   if(callback)return true;
@@ -247,23 +246,34 @@ const socialStore = new SocialStore({
   }
 });
 mountSocialRoutes(app, socialStore, getApiUserId);
+/** One fresh database snapshot per authorization boundary, never cached across commands. */
+async function freshRoomAdmission(userId: string, roomSlug: string, readers: string[] = []) {
+  const [access, verified] = await Promise.all([
+    store.getRoomAdmission(roomSlug, userId, readers), platform.verifiedAccount(userId)
+  ]);
+  return { ...access, accountActive: access.accountActive && verified };
+}
+function canReadAdmission(access: Awaited<ReturnType<typeof freshRoomAdmission>>) {
+  return access.exists && access.roomActive && access.accountActive && !access.banned && (access.isPublic || Boolean(access.role));
+}
 async function canWriteRoomChat(userId: string, roomSlug: string) {
-  if (!await platform.activeAccount(userId) || !await platform.activeRoom(roomSlug)) return false;
+  const access = await freshRoomAdmission(userId, roomSlug);
+  if (!canReadAdmission(access)) return false;
   const room=await store.loadRoom(roomSlug);
   if(!room||isRoomBanned(room,userId))return false;
-  const access = await store.getRoomAccess(roomSlug, userId);
-  return access.exists && !access.banned && (access.isPublic || Boolean(access.role)) &&
-    [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
+  return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
 }
 const chatWritePolicy = createChatWritePolicy();
 /** HTTP poll mutations and the relay share the same fresh admitted recipient gate. */
 async function emitAdmittedChat(roomId: string, event: 'chat:message' | 'chat:reaction' | 'chat:typing' | 'chat:poll' | 'chat:removed', payload: unknown,
-  origin: { socketId?: string; userId: string }) {
+  origin: { socketId?: string; userId: string; assertActive?: () => void }) {
+  origin.assertActive?.();
   const recipients = [...(roomUsers.get(roomId) || [])];
-  const [allowed, canWrite] = await Promise.all([
-    store.allowedRoomReaders(roomId, recipients.map(([, user]) => user.id)),
-    canWriteRoomChat(origin.userId, roomId)
-  ]);
+  const access = await freshRoomAdmission(origin.userId, roomId, recipients.map(([, user]) => user.id));
+  origin.assertActive?.();
+  const allowed = access.readers;
+  const room = store.getRoom(roomId);
+  const canWrite = canReadAdmission(access) && room && !isRoomBanned(room, origin.userId);
   const sender = origin.socketId ? getMembership(origin.socketId) : undefined;
   const senderAdmitted = origin.socketId
     ? sender?.room.id === roomId && sender.user.id === origin.userId
@@ -290,7 +300,7 @@ const chatCommands=new ChatCommandService({client:supabaseAdmin,
     if(kind==="remove"){requireRoomCapability(room,userId,"chatParticipants");if(targetUserId&&room.ownerUserId!==userId)requireProtectedTarget(room,userId,targetUserId);return;}
     const error=chatParticipationError(room,userId,kind);if(error)throw new RoomCommandError(error);
     return{slowModeSeconds:effectiveRoomPolicy(room).slowModeSeconds??0,bypassSlowMode:isRoomStaff(room,userId)};
-  },emit:(roomId,event,payload,userId)=>emitAdmittedChat(roomId,event,payload,{userId})});
+  },emit:(roomId,event,payload,userId,origin)=>emitAdmittedChat(roomId,event,payload,{userId,...origin})});
 const chatRelay = createChatRelay({
   commands:chatCommands,
   writePolicy: chatWritePolicy,
@@ -312,17 +322,16 @@ mountChatHistoryRoutes(app, {
   onPollVote: (roomId, event, userId) => emitAdmittedChat(roomId, 'chat:poll', { roomId, poll: event }, { userId }),
   getUser: async (userId, roomId) => [...(roomUsers.get(roomId)?.values() || [])].find(user => user.id === userId) || null,
   canReadRoom: async (userId, roomSlug) => {
-    if (!await platform.activeAccount(userId) || !await platform.activeRoom(roomSlug)) return false;
+    const access = await freshRoomAdmission(userId, roomSlug);
+    if (!canReadAdmission(access)) return false;
     const room=await store.loadRoom(roomSlug);if(!room||isRoomBanned(room,userId))return false;
-    const access = await store.getRoomAccess(roomSlug, userId);
-    if (!access.exists || access.banned || (!access.isPublic && !access.role)) return false;
     if (access.isPublic && !access.passwordHash) return true;
     // Protected/private history requires the same live admission as the room.
     return [...(roomUsers.get(roomSlug)?.values() || [])].some(user => user.id === userId);
   }
 });
 const moderation=new ModerationService(store,{
-  authorizeActor:async(roomId,userId)=>{if(!await platform.activeAccount(userId)||!await platform.activeRoom(roomId))throw new RoomCommandError(serverT("room_access_is_unavailable"));},
+  authorizeActor:async(roomId,userId)=>{const access=await freshRoomAdmission(userId,roomId);if(!access.accountActive||!access.roomActive)throw new RoomCommandError(serverT("room_access_is_unavailable"));},
   broadcast,isAdmitted:(roomId,userId)=>[...(roomUsers.get(roomId)?.values()??[])].some(u=>u.id===userId),
   onlineUsers:roomId=>uniqueUsers(roomUsers.get(roomId)?.values()??[]),cancelDjEviction,forgetDj:forgetDjUser,
   revokeAdmission:async(roomId,userId,reason)=>{
@@ -501,7 +510,7 @@ function scheduleDjEviction(room: Room, user: User) {
 
 function getMembership(socketId: string) {
   const socket=io.sockets.sockets.get(socketId);
-  if(socket?.data.platformAllowed===false)return null;
+  if(!socket?.connected||socket.data.platformAllowed===false)return null;
   const lease = socket?.data.credentialLease as SocketCredentialLease | undefined;
   if (lease && Date.now() >= lease.expiresAt) return null;
   const roomId = socketRooms.get(socketId);
@@ -509,7 +518,7 @@ function getMembership(socketId: string) {
   const room = store.getRoom(roomId);
   const user = roomUsers.get(roomId)?.get(socketId);
   return room && user && !blockedRooms.has(roomId) && !isRoomBanned(room,user.id) &&
-    (accessMode(room)!=="members" || Boolean(roleInRoom(room,user.id))) ? { room, user } : null;
+    (accessMode(room)!=="members" || Boolean(roleInRoom(room,user.id))) ? { room, user, admissionToken:socket.data.admissionToken as string | undefined } : null;
 }
 
 async function leaveCurrentRoom(socketId: string) {
@@ -569,9 +578,14 @@ io.on("connection", (socket) => {
   const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => {
     const safe = safeSocketHandler(async (payload, reply) => {
       assertAuthorized();
-      if(authEnabled&&!await platform.activeAccount(socket.data.authUserId)){await restrictAccount(socket.data.authUserId);throw new RoomCommandError(serverT("account_access_is_unavailable"));}
-      const member=getMembership(socket.id);
-      if(member&&!await platform.activeRoom(member.room.id)){await restrictRoom(member.room.id);throw new RoomCommandError(serverT("this_room_is_unavailable"));}
+      // Chat owns a fresh check before its write and another before delivery.
+      // Other actions retain an early gate before provider calls or other work.
+      if (!event.startsWith("chat:")) {
+        const member = getMembership(socket.id);
+        const access = await platform.checkAccess(authEnabled ? [socket.data.authUserId] : [], member ? [member.room.id] : []);
+        if (authEnabled && !access.accounts.get(socket.data.authUserId)) { await restrictAccount(socket.data.authUserId); throw new RoomCommandError(serverT("account_access_is_unavailable")); }
+        if (member && !access.rooms.get(member.room.id)) { await restrictRoom(member.room.id); throw new RoomCommandError(serverT("this_room_is_unavailable")); }
+      }
       await handler(payload, reply);
     },()=>securityEvent("request_failed","failed"));
     const run = event === "room:join" ? serialSocketHandler(safe) : safe;
@@ -696,8 +710,8 @@ io.on("connection", (socket) => {
       });
       if (!socket.connected) return;
       await sessionScheduler.reconcilePresence(room);
-      const allowed=await store.allowedRoomReaders(roomId,[user.id]);
-      if(!allowed.has(user.id)||!getMembership(socket.id)||socket.data.admissionToken!==registration||!await platform.activeRoom(roomId))throw new RoomCommandError(serverT("room_access_changed_join_again"));
+      const admitted=await freshRoomAdmission(user.id,roomId,[user.id]);
+      if(!canReadAdmission(admitted)||!admitted.readers.has(user.id)||!getMembership(socket.id)||socket.data.admissionToken!==registration)throw new RoomCommandError(serverT("room_access_changed_join_again"));
       if (changed) {
         // Legacy normalization or stale-lineup cleanup changed shared radio state.
         broadcast(room);
@@ -726,7 +740,8 @@ io.on("connection", (socket) => {
     socket, onAction, store, commands: roomCommands, getMembership, assertAuthorized,
     authorizeCurrent:async(roomId,userId)=>{
       assertAuthorized();
-      if(!await platform.activeAccount(userId)||!await platform.activeRoom(roomId)||(authEnabled&&!(await store.allowedRoomReaders(roomId,[userId])).has(userId)))throw new RoomCommandError(serverT("room_access_changed_join_again"));
+      const access = await freshRoomAdmission(userId, roomId, [userId]);
+      if(!canReadAdmission(access)||!access.readers.has(userId))throw new RoomCommandError(serverT("room_access_changed_join_again"));
       assertAuthorized();
       const current=getMembership(socket.id);
       if(current?.room.id!==roomId||current.user.id!==userId)throw new RoomCommandError(serverT("this_room_session_has_ended"));
@@ -740,7 +755,10 @@ io.on("connection", (socket) => {
     onlineUserIds:id=>uniqueUsers(roomUsers.get(id)?.values()??[]).map(u=>u.id)
   });
   for (const kind of ["message", "reaction", "typing"] as const) {
-    onAction(`chat:${kind}`, async (payload, reply) => { reply?.(await chatRelay.handle(socket.id, kind, payload)); });
+    onAction(`chat:${kind}`, async (payload, reply) => {
+      const result = await runtimeMetrics.measure(`chat_${kind}`, () => chatRelay.handle(socket.id, kind, payload), result => !result.ok);
+      reply?.(result);
+    });
   }
   socket.on("disconnect", () => { void leaveCurrentRoom(socket.id).catch(()=>securityEvent("request_failed","failed")); });
 });
@@ -793,7 +811,7 @@ if (process.env.NODE_ENV === "production") {
 await store.init();
 globalResourceLimits=await resourcePolicies.getGlobal();
 if(supabaseAdmin){
-  const {data,error}=await supabaseAdmin.rpc("soundspin_release_ready");
+  const {data,error}=await supabaseAdmin.rpc("soundspin_release_ready", { p_contract: "database-access-v1" });
   if(error||data!==true)throw new Error(serverT("release_security_migrations_and_grants_must_be_applied_before_starting_the_server"));
 }
 for(const room of await store.listSessionRooms()){

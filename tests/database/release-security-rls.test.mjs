@@ -186,9 +186,11 @@ test('release-ready marker is last-migration dependent and service-only',async()
     assert.match(await readFile(new URL(files.at(-1),migrationsUrl),'utf8'),/create\s+(?:or replace\s+)?function public\.soundspin_release_ready\(/i,'The last release migration must define the readiness marker.');
     for(const role of ['anon','authenticated']){await db.exec(`set role ${role}`);await assert.rejects(db.query('select soundspin_release_ready()'),/permission denied/);await db.exec('reset role');}
     await db.exec('set role service_role');assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,true);
+    assert.equal((await db.query("select soundspin_release_ready('database-access-v1')as ready")).rows[0].ready,true);
+    assert.equal((await db.query("select soundspin_release_ready('unknown-contract')as ready")).rows[0].ready,false);
     const metadata=(await db.query("select prosecdef,proconfig from pg_proc where oid='public.soundspin_release_ready()'::regprocedure")).rows[0];
     assert.equal(metadata.prosecdef,false);assert.ok(metadata.proconfig.includes('search_path=""'));
-    for(const [name,args] of [['soundspin_social_profiles','uuid[]'],['soundspin_has_account_identity','jsonb,text']]){
+    for(const [name,args] of [['soundspin_social_profiles','uuid[]'],['soundspin_has_account_identity','jsonb,text'],['soundspin_room_access','text,uuid,uuid[]'],['soundspin_chat_message_state','uuid']]){
       await db.exec(`reset role; alter function public.${name}(${args}) rename to ${name}_fixture_missing; set role service_role`);
       assert.equal((await db.query('select soundspin_release_ready()as ready')).rows[0].ready,false,'Missing release identity helpers must prevent startup.');
       await db.exec(`reset role; alter function public.${name}_fixture_missing(${args}) rename to ${name}; set role service_role`);

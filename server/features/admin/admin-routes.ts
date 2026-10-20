@@ -36,38 +36,23 @@ app.get("/api/admin/dashboard", async (request, response) => {
     const activityStartIso = activityStart.toISOString();
 
     const [
-      userCount,
-      roomCount,
-      feedbackCount,
-      openFeedbackCount,
-      messageCount,
+      summary,
       feedbackResult,
-      roomResult,
-      dailyActivity
+      roomResult
     ] = await Promise.all([
-      supabaseAdmin.from("soundspin_profiles").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_rooms").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }),
-      supabaseAdmin.from("soundspin_feedback").select("*", { count: "exact", head: true }).in("status", ["new", "reviewing", "planned"]),
-      supabaseAdmin.from("soundspin_messages").select("*", { count: "exact", head: true }),
+      supabaseAdmin.rpc("soundspin_admin_summary", { p_actor: admin.userId, p_start: activityStartIso }),
       feedbackQuery.range(inbox.data.page * pageSize, inbox.data.page * pageSize + pageSize - 1),
       supabaseAdmin
         .from("soundspin_rooms")
         .select("slug, name, owner_id, is_public, created_at, updated_at")
         .order("updated_at", { ascending: false })
-        .limit(50),
-      supabaseAdmin.rpc("soundspin_admin_activity", { start_at: activityStartIso })
+        .limit(50)
     ]);
 
     const queryError = [
-      userCount.error,
-      roomCount.error,
-      feedbackCount.error,
-      openFeedbackCount.error,
-      messageCount.error,
+      summary.error,
       feedbackResult.error,
-      roomResult.error,
-      dailyActivity.error
+      roomResult.error
     ].find(Boolean);
     if (queryError) throw queryError;
 
@@ -83,11 +68,12 @@ app.get("/api/admin/dashboard", async (request, response) => {
     const screenshotPaths = [...new Set(feedback.flatMap((item) => (item.screenshot_paths || []).slice(0, 5)
       .filter((path: unknown): path is string => typeof path === "string" && path.length <= 200 && path.startsWith(`${item.user_id}/`) && !path.includes(".."))))];
     const signedUrls = new Map<string, string>();
-    await Promise.all(screenshotPaths.map(async (path) => {
-      try { const { data, error } = await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrl(path, 15 * 60);
-        if (!error && data?.signedUrl) signedUrls.set(path, data.signedUrl);
-      } catch { /* Isolate individual missing previews. */ }
-    }));
+    if (screenshotPaths.length) {
+      try {
+        const { data, error } = await supabaseAdmin.storage.from("feedback-screenshots").createSignedUrls(screenshotPaths, 15 * 60);
+        if (!error) for (const item of data || []) if (!item.error && item.path && item.signedUrl) signedUrls.set(item.path, item.signedUrl);
+      } catch { /* Previews remain optional when Storage is unavailable. */ }
+    }
 
     const activity = Array.from({ length: 14 }, (_, index) => {
       const date = new Date(activityStart);
@@ -95,7 +81,8 @@ app.get("/api/admin/dashboard", async (request, response) => {
       return { date: date.toISOString().slice(0, 10), users: 0, feedback: 0, messages: 0 };
     });
     const activityByDate = new Map(activity.map((item) => [item.date, item]));
-    for (const item of dailyActivity.data || []) {
+    const totals = summary.data as { metrics: { users: number; rooms: number; feedback: number; openFeedback: number; messages: number }; activity: Array<{ day: string; users: number; feedback: number; messages: number }> };
+    for (const item of totals.activity) {
       const bucket = activityByDate.get(item.day);
       if (bucket) {
         bucket.users = Number(item.users);
@@ -106,13 +93,7 @@ app.get("/api/admin/dashboard", async (request, response) => {
 
     response.json({
       pagination: { page: inbox.data.page, pageSize, hasMore: feedback.length === pageSize, status: inbox.data.status },
-      metrics: {
-        users: userCount.count || 0,
-        rooms: roomCount.count || 0,
-        feedback: feedbackCount.count || 0,
-        openFeedback: openFeedbackCount.count || 0,
-        messages: messageCount.count || 0
-      },
+      metrics: totals.metrics,
       activity,
       feedback: feedback.map((item) => ({
         id: item.id,

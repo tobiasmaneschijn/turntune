@@ -51,7 +51,7 @@ rolling deployments with overlapping processes are unsupported.
 
 The migrations create the app schema and Storage configuration. Do not manually
 make private buckets public or add broad client grants to work around an error.
-The server checks the service-only `soundspin_release_ready()` marker before
+The server checks the service-only `soundspin_release_ready('database-access-v1')` marker before
 listening and refuses startup when the required security migrations are missing.
 The JSON store used by isolated development and tests is not a production option.
 

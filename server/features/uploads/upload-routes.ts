@@ -37,13 +37,9 @@ export function mountManagedUploadRoutes(app: Express, options: ManagedUploadRou
       if (!options.client) { response.status(503).json({ error: serverT("image_uploads_are_unavailable") }); return }
       const paths = request.body?.storagePaths
       if (!Array.isArray(paths) || paths.length > 5 || !paths.length || paths.some(path => typeof path !== 'string' || path.length > 200 || !path.startsWith(`${user}/`))) throw new PublicRequestError(serverT("invalid_upload_cleanup_request"))
-      const { data, error } = await options.client.from('soundspin_managed_uploads').select('*').eq('actor_id', user).in('purpose', ['avatar', 'feedback']).in('storage_path', paths).in('state', ['reserved', 'pending'])
-      if (error) throw error
       // Claiming references and cleanup must use the same row lock in SQL.
-      for (const row of data || []) {
-        const { error: cleanupError } = await options.client.rpc('soundspin_cancel_pending_upload', { p_actor: user, p_path: row.storage_path })
-        if (cleanupError) throw cleanupError
-      }
+      const { error } = await options.client.rpc('soundspin_cancel_pending_uploads', { p_actor: user, p_paths: [...new Set(paths)] })
+      if (error) throw error
       response.json({ ok: true })
     } catch (error) {
       const failure = publicRequestFailure(error, 'Could not remove this upload. Try again later.')

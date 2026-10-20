@@ -220,7 +220,9 @@ test("service social identities use one bounded active-subject RPC rather than a
   const db = {
     rpc: async (name: string, args: { p_ids?: string[] }) => {
       calls.push({ name, args });
-      if (name === "soundspin_users_blocked") return { data: false, error: null };
+      if (name === "soundspin_social_states") return { data: [
+        { user_id: bob, state: "friends", share_activity: false }, { user_id: carol, state: "friends", share_activity: false }
+      ], error: null };
       assert.equal(name, "soundspin_social_profiles");
       assert.ok(args.p_ids && args.p_ids.length <= 500);
       return { data: args.p_ids.flatMap(id => profiles.has(id) ? [profiles.get(id)] : []), error: null };
@@ -249,5 +251,54 @@ test("service social identities use one bounded active-subject RPC rather than a
   assert.deepEqual(snapshot.people.map(person => person.user.id), [bob]);
   assert.deepEqual(snapshot.blockedPeople, [{ id: carol, name: "Unavailable listener", avatarSeed: carol }]);
   const profileCalls = calls.filter(call => call.name === "soundspin_social_profiles");
-  assert.equal(profileCalls.length, 2, "friends and owned block identities use bounded batch projections");
+  assert.equal(profileCalls.length, 1, "friends and owned block identities share a bounded batch projection");
+  assert.equal(calls.filter(call => call.name === "soundspin_social_states").length, 1, "consent checks must not fan out per friend");
+});
+
+test("a busy friends list bounds access reads, shares room lookups, and rechecks revoked activity consent before responding", async () => {
+  const { createClient } = await import("@supabase/supabase-js");
+  const peers = Array.from({ length: 12 }, (_, index) => `55555555-5555-4555-8555-${String(index + 1).padStart(12, "0")}`);
+  const rooms = peers.map((_, index) => index < 2 ? "shared-room" : `room-${index}`);
+  let active = 0, maximum = 0, accessReads = 0, stateReads = 0, roomReads = 0, revoked = false;
+  const client = createClient("https://social.invalid", "fixture", {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init), url = new URL(request.url);
+      if (url.pathname.endsWith("soundspin_social_states")) {
+        stateReads++;
+        const args = await request.json() as { p_targets: string[] };
+        return Response.json(args.p_targets.map(id => ({ user_id: id, state: revoked && id === peers[1] ? "none" : "friends", share_activity: !(revoked && id === peers[0]) })));
+      }
+      if (url.pathname.endsWith("soundspin_social_profiles")) return Response.json(peers.map((id, index) => ({ user_id: id, display_name: `Peer ${index}`, is_app_admin: false })));
+      if (url.pathname.endsWith("soundspin_friendships")) return Response.json(url.searchParams.get("status") === "eq.accepted"
+        ? peers.map(id => ({ user_low: alice, user_high: id, requested_by: alice, status: "accepted", updated_at: new Date().toISOString() })) : []);
+      if (url.pathname.endsWith("soundspin_social_settings")) return Response.json(null);
+      if (url.pathname.endsWith("soundspin_rooms")) {
+        roomReads++; revoked = true;
+        return Response.json([...new Set(rooms)].map(slug => ({ slug, name: slug })));
+      }
+      return Response.json([]);
+    } }
+  });
+  const store = new SocialStore({ supabase: client,
+    getActivity: id => ({ roomSlug: rooms[peers.indexOf(id)] }),
+    getRoomAccess: async () => {
+      active++; accessReads++; maximum = Math.max(maximum, active);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      active--;
+      return { exists: true, isPublic: true, passwordProtected: false, role: null };
+    }
+  });
+  const snapshot = await store.snapshot(alice);
+  assert.equal(snapshot.people.length, peers.length);
+  assert.equal(snapshot.people.find(person => person.user.id === peers[0])?.room, undefined);
+  assert.equal(snapshot.people.find(person => person.user.id === peers[1])?.room, undefined);
+  assert.equal(snapshot.people.filter(person => person.room).length, peers.length - 2);
+  assert.equal(accessReads, new Set(rooms).size, "same-room activity shares one fresh viewer access read");
+  assert.ok(maximum <= 4, "a populated list must not exhaust global database admission");
+  assert.equal(stateReads, 2, "initial and final consent checks are batches rather than per-friend requests");
+  assert.equal(roomReads, 1);
+  revoked = false;
+  await store.snapshot(alice);
+  assert.equal(accessReads, new Set(rooms).size * 2, "authority is read again for the next snapshot");
 });

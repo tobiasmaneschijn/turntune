@@ -25,7 +25,8 @@ export function mountPrivateLibraryRoutes(app: express.Express, store: Store, ge
       const userId = await getUserId(request);
       if (!userId) return response.status(401).json({ error: serverT("sign_in_to_use_private_picks_and_sets") });
       if (!allow(userId, "read", response)) return;
-      response.json({ library: await store.getPrivateLibrary(userId), limits:(await store.resourcePolicies.get(userId)).limits });
+      const [library, policy] = await Promise.all([store.getPrivateLibrary(userId), store.resourcePolicies.get(userId)]);
+      response.json({ library, limits: policy.limits });
     } catch (error) { response.status(error instanceof PrivateLibraryDataError ? 409 : 500).json({ error: error instanceof PrivateLibraryDataError ? error.message : serverT("could_not_load_private_picks_and_sets") }); }
   });
   app.post("/api/library", noStore, express.json({ limit: "1mb" }), async (request, response) => {
