@@ -1,0 +1,30 @@
+import { expect, test } from '@playwright/test'
+
+declare global { interface Window { authReview: { emails: string[]; fail: boolean } } }
+
+test('request a password reset, recover a failed resend and correct the address', async ({ page }) => {
+  await page.clock.install()
+  await page.goto('/tests/browser/auth/harness/index.html')
+  await page.getByRole('button', { name: 'Forgot password?' }).click()
+  await page.getByLabel('Email', { exact: true }).fill('listener@example.com')
+  await page.getByRole('button', { name: 'Send reset link', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeFocused()
+  await expect(page.getByText('If this email has an account, it will receive a reset link.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Resend in/ })).toBeDisabled()
+  await page.clock.fastForward(60_000)
+  await page.evaluate(() => { window.authReview.fail = true })
+  await page.getByRole('button', { name: 'Resend reset link' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Could not send reset link. Try again.')
+  await expect(page.getByRole('button', { name: 'Resend reset link' })).toBeEnabled()
+  await page.evaluate(() => { window.authReview.fail = false })
+  await page.getByRole('button', { name: 'Resend reset link' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Use another email' }).click()
+  await expect(page.getByLabel('Email', { exact: true })).toBeFocused()
+  await expect(page.getByLabel('Email', { exact: true })).toHaveValue('listener@example.com')
+  await page.getByLabel('Email', { exact: true }).fill('changed@example.com')
+  await page.getByRole('button', { name: 'Send reset link', exact: true }).click()
+  expect(await page.evaluate(() => window.authReview.emails)).toEqual(['listener@example.com', 'listener@example.com', 'listener@example.com', 'changed@example.com'])
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeFocused()
+})

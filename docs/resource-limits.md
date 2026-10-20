@@ -123,8 +123,8 @@ independent of any future paid-plan assignment.
 
 ## Verification
 
-`server/resource-policy.test.ts` checks cache isolation, concurrent refresh,
-configuration failure, and local defaults. `tests/resource-policy-rls.test.mjs`
+`server/resources/resource-policy.test.ts` checks cache isolation, concurrent refresh,
+configuration failure, and local defaults. `tests/database/resource-policy-rls.test.mjs`
 applies the complete migration chain and checks configuration permissions, plan
 enforcement, saved-work recovery after lowering quotas, upload reservations,
 membership/favorite admission, bounded chat cleanup, and Spotify authorization.

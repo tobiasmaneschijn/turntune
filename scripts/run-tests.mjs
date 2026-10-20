@@ -7,18 +7,18 @@ export { testEnvironment } from "./test-environment.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const groups = Object.freeze({
-  all: ["server/*.test.ts", "tests/*.test.ts"],
-  sql: ["tests/*-rls.test.mjs", "tests/sql/check-chat-rls.mjs"],
-  signup: ["server/invite-signup.test.ts", "server/signup-routes.test.ts"],
-  chat: ["tests/chat-*.test.ts", "server/chat-*.test.ts"],
-  feedback: ["tests/feedback-*.test.ts", "server/admin-routes.test.ts"],
-  giphy: ["server/giphy.test.ts", "server/provider-http.test.ts"],
-  radio: ["server/radio*.test.ts", "server/store.test.ts"],
-  soundcloud: ["server/soundcloud.test.ts", "server/provider-http.test.ts"],
-  music: ["server/music*.test.ts", "server/spotify-*.test.ts", "server/provider-*.test.ts", "server/saved-set.test.ts", "server/room-music-policy.test.ts"],
-  playback: ["tests/playback-*.test.ts", "tests/player-api-loader.test.ts"],
-  integration: ["tests/server-integration.test.ts", "tests/socket-auth-integration.test.ts"],
-  production: ["tests/production-entrypoint-smoke.mjs"]
+  all: ["server/**/*.test.ts", "tests/frontend/**/*.test.ts", "tests/tooling/*.test.ts", "tests/integration/**/*.test.ts"],
+  sql: ["tests/database/*-rls.test.mjs", "tests/database/chat/check-chat-rls.mjs"],
+  signup: ["server/features/auth/invite-signup.test.ts", "server/features/auth/signup-routes.test.ts"],
+  chat: ["tests/frontend/chat/*.test.ts", "server/features/chat/chat-*.test.ts"],
+  feedback: ["tests/frontend/feedback/*.test.ts", "server/features/admin/admin-routes.test.ts"],
+  giphy: ["server/integrations/giphy.test.ts", "server/integrations/provider-http.test.ts"],
+  radio: ["server/features/rooms/radio*.test.ts", "server/persistence/store.test.ts"],
+  soundcloud: ["server/integrations/soundcloud.test.ts", "server/integrations/provider-http.test.ts"],
+  music: ["server/features/music/music*.test.ts", "server/integrations/spotify/spotify-*.test.ts", "server/features/music/provider-*.test.ts", "server/integrations/provider-*.test.ts", "server/features/music/saved-set.test.ts", "server/features/rooms/room-music-policy.test.ts"],
+  playback: ["tests/frontend/playback/*.test.ts", "tests/frontend/settings/user-settings.test.ts"],
+  integration: ["tests/integration/rooms/server-integration.test.ts", "tests/integration/auth/socket-auth-integration.test.ts"],
+  production: ["tests/integration/production/production-entrypoint-smoke.mjs"]
 });
 
 export function testArguments(group = "all") {

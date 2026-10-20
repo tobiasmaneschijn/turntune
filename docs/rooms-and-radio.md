@@ -2,7 +2,7 @@
 
 This document explains the room lifecycle, DJ rotation, private queues,
 playback authority, disconnect behavior, and Supabase persistence. Read it
-before changing `server/index.ts`, `server/radio.ts`, or the room types.
+before changing `server/index.ts`, `server/features/rooms/radio.ts`, or the room types.
 
 Chat has a separate transport and persistence model. See [Chat
 architecture](chat.md).
@@ -64,38 +64,38 @@ and durable grace scheduling before horizontally scaling the server.
 | File | Responsibility |
 | --- | --- |
 | `server/index.ts` | Composition root, admission, presence, timer lifecycle, room metadata/profile routes, readiness and diagnostics. |
-| `server/room-actions.ts` | Admitted DJ, queue, playback, role, note and vote commands. |
-| `server/room-command-service.ts` | Ordered durable mutation followed by personalized broadcast. |
-| `shared/room-policy.ts`, `server/room-settings.ts` | Default/effective policy, capability summaries, bounded settings validation and authorization. |
-| `server/room-access.ts`, `server/moderation-service.ts`, `server/moderation-routes.ts` | Access checks, private restrictions/logs/reports/warnings, offline members, invitations and rules acknowledgment. |
-| `server/music-routes.ts`, `server/admin-routes.ts` | Provider/catalog and administrative HTTP boundaries. |
-| `server/spotify-oauth-routes.ts` | One-use browser-bound linking flow and validated internal return destinations. |
-| `server/socket-credentials.ts` | Verified JWT expiry checks and idle socket disconnect. |
-| `server/room-entry-limiter.ts`, `server/room-password.ts` | Account/peer admission budgets and asynchronous legacy-compatible scrypt verification. |
-| `server/idle-rooms.ts`, `server/runtime-metrics.ts` | Idle cache lifetime and bounded operation diagnostics. |
-| `server/radio.ts` | Radio state normalization, DJ eligibility, round-robin advancement, private queue access, and snapshot privacy. |
-| `server/radio-policy.ts`, `server/track-metadata.ts` | Recording eligibility, trusted duration, repeat ledger, turn/stop/fallback/vote state, and theme overlays. |
-| `server/room-session-scheduler.ts` | Theme/session clock updates, finite fallback completion, presence pause/resume and restart recovery. |
-| `server/store.ts` | Live room cache, Supabase reads/writes, room directory, roles, favorites, profiles, and ordered persistence. |
+| `server/features/rooms/room-actions.ts` | Admitted DJ, queue, playback, role, note and vote commands. |
+| `server/features/rooms/room-command-service.ts` | Ordered durable mutation followed by personalized broadcast. |
+| `shared/room-policy.ts`, `server/features/rooms/room-settings.ts` | Default/effective policy, capability summaries, bounded settings validation and authorization. |
+| `server/features/rooms/room-access.ts`, `server/features/moderation/moderation-service.ts`, `server/features/moderation/moderation-routes.ts` | Access checks, private restrictions/logs/reports/warnings, offline members, invitations and rules acknowledgment. |
+| `server/features/music/music-routes.ts`, `server/features/admin/admin-routes.ts` | Provider/catalog and administrative HTTP boundaries. |
+| `server/integrations/spotify/spotify-oauth-routes.ts` | One-use browser-bound linking flow and validated internal return destinations. |
+| `server/realtime/socket-credentials.ts` | Verified JWT expiry checks and idle socket disconnect. |
+| `server/features/rooms/room-entry-limiter.ts`, `server/features/rooms/room-password.ts` | Account/peer admission budgets and asynchronous legacy-compatible scrypt verification. |
+| `server/features/rooms/idle-rooms.ts`, `server/lib/runtime-metrics.ts` | Idle cache lifetime and bounded operation diagnostics. |
+| `server/features/rooms/radio.ts` | Radio state normalization, DJ eligibility, round-robin advancement, private queue access, and snapshot privacy. |
+| `server/features/rooms/radio-policy.ts`, `server/features/music/track-metadata.ts` | Recording eligibility, trusted duration, repeat ledger, turn/stop/fallback/vote state, and theme overlays. |
+| `server/features/rooms/room-session-scheduler.ts` | Theme/session clock updates, finite fallback completion, presence pause/resume and restart recovery. |
+| `server/persistence/store.ts` | Live room cache, Supabase reads/writes, room directory, roles, favorites, profiles, and ordered persistence. |
 | `server/types.ts` | Authoritative private room extension of shared room fields. |
 | `shared/types.ts`, `shared/room-protocol.ts` | Public snapshots, acknowledgements and runtime command schemas shared by client and server. |
-| `server/radio.test.ts` | Focused tests for rotation, privacy, legacy migration, and disconnect timers. |
+| `server/features/rooms/radio.test.ts` | Focused tests for rotation, privacy, legacy migration, and disconnect timers. |
 | `src/types.ts` | Re-exports shared public types, which have no `djQueues` map. |
-| `src/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
-| `src/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
-| `src/provider-playback.ts`, `src/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
-| `src/App.tsx` | Screen composition, room view, player controls and DJ queue UI. |
-| `src/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
-| `src/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
-| `src/components/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
-| `src/components/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
-| `src/components/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
-| `src/components/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
-| `src/components/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
-| `server/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
-| `server/spotify.ts` | Spotify catalog, OAuth token exchange, and Web API requests. |
-| `server/apple-music.ts` | Apple developer-token signing and catalog access. |
-| `server/provider-mappings.ts` | ISRC-first and confidence-scored cross-provider recording resolution. |
+| `src/features/rooms/hooks/use-room-session.ts` | Route/admission/snapshot controller and credential-aware room connection lifetime. |
+| `src/features/profile/hooks/use-app-profile.ts` | Account-scoped profile restoration independent of token rotation. |
+| `src/features/playback/provider-playback.ts`, `src/features/playback/providers/apple-music-session.ts` | Provider status/command leases and expiry-aware Apple token renewal. |
+| `src/app/RoomApplication.tsx` | Screen composition, room view, player controls and DJ queue UI. |
+| `src/features/rooms/components/RoomSettingsDialog.tsx`, `RoomMembersPanel.tsx` | General/Music/Chat/Members settings, policy drafts, presets, offline member and invitation controls. |
+| `src/features/rooms/components/ParticipantActions.tsx`, `RoomModerationDialog.tsx`, `RoomRulesDialog.tsx` | Participant actions, private moderation inbox, temporary controls, warnings and rules acceptance. |
+| `src/features/playback/providers/YouTubePlayer.tsx` | YouTube playback synchronization and natural track-ended reporting. |
+| `src/features/playback/providers/SoundCloudPlayer.tsx` | SoundCloud Widget playback synchronization and natural track-ended reporting. |
+| `src/features/playback/providers/MixcloudPlayer.tsx` | Visible Mixcloud Widget playback with seek refusal and autoplay recovery. |
+| `src/features/playback/providers/SpotifyPlayer.tsx` | Spotify Web Playback SDK or remote Spotify Connect synchronization. |
+| `src/features/playback/providers/AppleMusicPlayer.tsx` | MusicKit authorization and per-listener Apple Music playback. |
+| `server/integrations/soundcloud.ts` | Server-only OAuth token management and SoundCloud catalog search adapter. |
+| `server/integrations/spotify/spotify.ts` | Spotify catalog, OAuth token exchange, and Web API requests. |
+| `server/integrations/apple-music.ts` | Apple developer-token signing and catalog access. |
+| `server/features/music/provider-mappings.ts` | ISRC-first and confidence-scored cross-provider recording resolution. |
 | `supabase/migrations/20260716213000_initial_soundspin.sql` | Base room table and initial security. |
 | `supabase/migrations/20260716220542_room_directory.sql` | Directory metadata, memberships, favorites, and settings. |
 | `supabase/migrations/20260719151147_add_dj_role.sql` | Adds the room-level DJ role. |
@@ -616,8 +616,8 @@ Treat these as design requirements when reviewing a room/radio change:
 
 ### Change queue or rotation behavior
 
-Keep pure state transitions in `server/radio.ts`, not inside a socket handler.
-Extend `server/radio.test.ts` with a concrete lineup and expected order. Include
+Keep pure state transitions in `server/features/rooms/radio.ts`, not inside a socket handler.
+Extend `server/features/rooms/radio.test.ts` with a concrete lineup and expected order. Include
 empty queues, removal of the current DJ, and private snapshot coverage when
 relevant.
 
@@ -673,8 +673,8 @@ Run these after room or radio changes:
 ```bash
 npm run test:radio
 npm run test:music
-npx tsx --test server/moderation-service.test.ts server/radio-policy.test.ts server/room-music-policy.test.ts
-node --test tests/moderation-rls.test.mjs
+npx tsx --test server/features/moderation/moderation-service.test.ts server/features/rooms/radio-policy.test.ts server/features/rooms/room-music-policy.test.ts
+node --test tests/database/moderation-rls.test.mjs
 npm run typecheck
 npm run build
 ```

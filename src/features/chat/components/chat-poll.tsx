@@ -1,0 +1,62 @@
+import { useTranslation } from 'react-i18next'
+import { useId } from 'react'
+import { Check } from 'lucide-react'
+
+import { getPollResults, type ChatMessage } from '@/features/chat/model'
+import { PlatformEmojiText } from '@/components/platform-emoji-text'
+
+interface ChatPollViewProps {
+  poll: NonNullable<ChatMessage['poll']>
+  currentUserId: string
+  onVote: (optionIndex: number) => void
+  voting?: boolean
+  disabled?: boolean
+  error?: string
+}
+
+export function ChatPollView({
+  poll,
+  currentUserId,
+  onVote,
+  voting = false,
+  disabled = false,
+  error,
+}: ChatPollViewProps) {
+  const { t, i18n } = useTranslation('chat')
+  const id = useId()
+  const { counts, totalVotes, selectedOption } = getPollResults(poll, currentUserId)
+
+  return (
+    <div className="chat-poll" aria-busy={voting || undefined}>
+      <div className="chat-poll-options" role="group" aria-label={t('pollOptions')} aria-describedby={`${id}-hint`}>
+        {poll.options.map((option, index) => {
+          const count = counts[index] || 0
+          const selected = index === selectedOption
+          return (
+            <button
+              type="button"
+              className="chat-poll-option"
+              key={index}
+              aria-pressed={selected}
+              aria-label={t(selected ? 'selectedPollOption' : 'pollOption', { option, count })}
+              disabled={disabled || voting}
+              onClick={() => { if (!selected) onVote(index) }}
+            >
+              <span className="chat-poll-result-fill" aria-hidden="true" style={{ width: totalVotes ? `${count / totalVotes * 100}%` : '0%' }} />
+              <span className="chat-poll-option-label">
+                {selected && <Check size={16} aria-hidden="true" />}
+                <PlatformEmojiText text={option} />
+              </span>
+              <span className="chat-poll-option-count" aria-hidden="true">{count.toLocaleString(i18n.resolvedLanguage)}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="chat-poll-footer">
+        <span className="chat-poll-total" aria-live="polite" aria-atomic="true">{t('votes', { count: totalVotes })}</span>
+        <p id={`${id}-hint`}>{t('voteHint')}</p>
+      </div>
+      {error && <p className="chat-poll-error" role="alert">{error}</p>}
+    </div>
+  )
+}

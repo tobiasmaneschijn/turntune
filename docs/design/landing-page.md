@@ -27,7 +27,7 @@ design system. Generated review captures belong in ignored `.impeccable/review/`
 
 ## Relevant checks
 
-[tests/ui/landing.spec.ts](../../tests/ui/landing.spec.ts) covers private queues,
+[tests/browser/public/landing.spec.ts](../../tests/browser/public/landing.spec.ts) covers private queues,
 DJ handoff, pause/replay, keyboard steps, reduced motion, mobile reaction
 feedback, reflow, and isolation from provider and room traffic. Run it through
 `npm run test:ui` with the public-entry workflows.

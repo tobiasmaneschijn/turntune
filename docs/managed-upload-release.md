@@ -43,4 +43,4 @@ Legacy references count only when the reference's actor owns the object's first 
 - Confirm invalid legacy screenshot entries cannot fail the admin inbox, and older feedback remains reachable through the administrative paging/filter controls.
 - Seed an ordinary account's legacy feedback/profile/chat reference with another account's object path in a disposable database. Deleting the forged reference must not queue or remove the other account's object; legitimate actor-owned legacy objects must still enter cleanup.
 
-Local regressions: `server/managed-uploads.test.ts`, `server/chat-media.test.ts`, `tests/feedback-submission.test.ts`, and `tests/managed-upload-rls.test.mjs`. No test writes to hosted Supabase or production data.
+Local regressions: `server/features/uploads/managed-uploads.test.ts`, `server/features/chat/chat-media.test.ts`, `tests/frontend/feedback/feedback-submission.test.ts`, and `tests/database/managed-upload-rls.test.mjs`. No test writes to hosted Supabase or production data.

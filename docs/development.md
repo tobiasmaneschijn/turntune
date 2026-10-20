@@ -9,11 +9,21 @@ for development; never use production accounts or data in tests.
 | Path | Purpose |
 | --- | --- |
 | `src/` | React application, player adapters, and styles |
+| `src/app/` | Application composition, header, error boundaries, and route focus |
+| `src/features/` | Feature components, hooks, provider adapters, and supporting logic |
+| `src/components/`, `src/hooks/`, `src/lib/` | Shared UI, interaction hooks, and browser services |
+| `src/styles/` | Global stylesheet entry points, tokens, and product styles |
 | `src/locales/` | Shared language catalogs for app, server, protocol, and release copy |
 | `server/` | Express API, Socket.IO, room coordination, and provider integrations |
+| `server/features/` | Server routes, services, and tests grouped by feature |
+| `server/persistence/`, `server/integrations/` | Shared persistence and external service clients |
+| `server/security/`, `server/realtime/`, `server/resources/`, `server/lib/` | Shared server infrastructure |
 | `shared/` | Client/server types, command schemas, and policies |
 | `supabase/migrations/` | Append-only database migration chain |
 | `tests/` | Integration, SQL, browser, and frontend helper tests |
+| `tests/browser/`, `tests/frontend/` | Browser workflows and frontend helper tests grouped by feature |
+| `tests/integration/`, `tests/database/` | Server integration and disposable database checks |
+| `tests/config/playwright/` | Browser suite configs and shared isolated-server defaults |
 | `scripts/` | Test runners, dependency checks, and notice generation |
 | `security/` | Release preflight, static analysis, and dependency exceptions |
 | `deploy/`, `scripts/release/` | Hosting target bindings and verified-image deployment tooling |
@@ -22,6 +32,10 @@ The frontend uses Vite, React, TypeScript, Tailwind CSS, and Base UI components.
 The server owns room decisions and uses Supabase for accounts and durable data.
 See [rooms and radio](rooms-and-radio.md) and [chat](chat.md) for the relevant
 contracts and code maps.
+
+See the [frontend folder guide](../src/README.md) and
+[server folder guide](../server/README.md) for placement rules.
+The [test folder guide](../tests/README.md) describes workflows, fixtures, and suite configuration.
 
 ## Local configuration
 
@@ -135,7 +149,7 @@ The app version comes from `package.json`. Update it in both `package.json` and
 `package-lock.json`, then add a dated entry at the top of `releases` in
 [src/locales/en/changelog.json](../src/locales/en/changelog.json) using that
 literal version. Keep previous versions fixed and describe changes users can see.
-[src/changelog.ts](../src/changelog.ts) exposes the catalog to the app and release
+[src/features/public/changelog.ts](../src/features/public/changelog.ts) exposes the catalog to the app and release
 tooling.
 
 For deployment, follow [GitHub deployments](github-deployments.md). The manual
