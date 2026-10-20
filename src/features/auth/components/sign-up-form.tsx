@@ -17,11 +17,13 @@ import { Label } from '@/components/ui/label'
 export function SignUpForm({
   client: _client,
   onNavigate,
+  showTitle = true,
   className,
   ...props
 }: React.ComponentPropsWithoutRef<'div'> & {
   client?: SupabaseClient
   onNavigate: (path: string) => void
+  showTitle?: boolean
 }) {
   const { t } = useTranslation("public");
   const [displayName, setDisplayName] = useState('')
@@ -64,7 +66,7 @@ export function SignUpForm({
           </CardHeader>
           <CardContent>
             <p className="mb-4 text-sm">{t("invitationSent")}</p>
-            {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
+            {error && <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>}
             <Button type="button" className="w-full" disabled={isLoading} onClick={() => onNavigate('/login')}>
               {t("signIn")}
             </Button>
@@ -72,12 +74,10 @@ export function SignUpForm({
         </Card>
       ) : (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-xl">{t("createAccount")}</CardTitle>
-          </CardHeader>
+          {showTitle && <CardHeader><CardTitle>{t("createAccount")}</CardTitle></CardHeader>}
           <CardContent>
             <form onSubmit={handleSignUp}>
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="display-name">{t("displayName")}</Label>
                   <Input id="display-name" autoComplete="nickname" required maxLength={32} value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
@@ -108,7 +108,7 @@ export function SignUpForm({
                     {t("invitePasswordHint")}
                   </p>
                 </div>
-                {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
+                {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? t("sendingInvitation") : t("createAccount")}
                 </Button>

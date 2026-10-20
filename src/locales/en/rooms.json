@@ -202,7 +202,7 @@
   "roomLobby.joinName": "Join {{name}}",
   "roomLobby.join": "Join",
   "roomLobby.creationWasnTConfirmedRefreshRoomsBeforeCreating": "Creation wasn't confirmed. Refresh rooms before creating another.",
-  "roomLobby.createARoom": "Let's make some noise.",
+  "roomLobby.createARoom": "Create a room",
   "roomLobby.nameAndAccessSettings": "Name and access settings.",
   "roomLobby.roomName": "Room name",
   "roomLobby.fridayFocus": "Friday Night Frequencies",

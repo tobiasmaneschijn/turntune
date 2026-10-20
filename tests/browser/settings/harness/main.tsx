@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
 import { ThemeProvider } from "../../../../src/components/theme-provider";

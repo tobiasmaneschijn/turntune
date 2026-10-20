@@ -1,78 +1,21 @@
-@import "@fontsource-variable/inter";
-
 /* The room's visual knobs live here; pane proportions live in room-layout-presets. */
-:root[data-room-design="open-room"] {
-  color-scheme: light;
-  --room-font: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --room-text-size: 14px;
-  --room-detail-size: 12px;
+:root[data-room-design="open-room"], .open-room {
+  --room-font: var(--font-sans);
+  --room-text-size: var(--text-size);
+  --room-detail-size: var(--detail-size);
   --room-header-height: 56px;
   --room-player-height: 80px;
   --room-player-artwork-size: 44px;
   --room-row-height: 54px;
   --room-avatar-size: 28px;
   --room-space: 16px;
-  --background: #ffffff;
-  --foreground: #20212a;
-  --card: #ffffff;
-  --card-foreground: #20212a;
-  --popover: #ffffff;
-  --popover-foreground: #20212a;
-  --primary: #6938d3;
-  --primary-foreground: #ffffff;
-  --primary-text: #6131cc;
-  --secondary: #f4f3f7;
-  --secondary-foreground: #36343f;
-  --muted: #f5f5f7;
-  --muted-foreground: #6a6977;
-  --accent: #f0ebfc;
-  --accent-foreground: #4e259f;
-  --destructive: #b62842;
-  --border: #e8e7ed;
-  --input: #d8d6e0;
-  --ring: #7649da;
-  --success: #287a55;
-  --warning: #966710;
-  --info: #4266a2;
-  --room-scrollbar: #d4d2dc;
-  --radius: 0.45rem;
   --line: var(--border);
   --panel: var(--card);
-  --lime: var(--primary);
-  --purple: var(--primary);
   --app-header-height: var(--room-header-height);
   --room-toolbar-height: 0px;
   font-family: var(--room-font);
 }
-/* Follow the shared appearance preference; portals inherit these tokens too. */
-:root.dark[data-room-design="open-room"] {
-  color-scheme: dark;
-  --background: #18181b;
-  --foreground: #eeeef1;
-  --card: #202024;
-  --card-foreground: #eeeef1;
-  --popover: #252429;
-  --popover-foreground: #eeeef1;
-  --primary: #8251d4;
-  --primary-foreground: #ffffff;
-  --primary-text: #b99aef;
-  --secondary: #2b292f;
-  --secondary-foreground: #dfdee5;
-  --muted: #2b292f;
-  --muted-foreground: #aaa7b3;
-  --accent: #30263e;
-  --accent-foreground: #d2bbff;
-  --destructive: #f18b9b;
-  --border: #36333d;
-  --input: #6a6575;
-  --ring: #b99aef;
-  --success: #79c5a0;
-  --warning: #dbb66a;
-  --info: #92b2ec;
-  --room-scrollbar: #56515f;
-}
-:root[data-room-design="open-room"] * { scrollbar-color: var(--room-scrollbar) transparent; scrollbar-width: thin; }
-:root[data-room-design="open-room"] ::selection { background: var(--primary); color: var(--primary-foreground); }
+/* Appearance is shared with every page; only room geometry is scoped here. */
 :root[data-room-design="open-room"] .track-artwork-fallback { background: var(--muted); color: var(--muted-foreground); }
 
 .open-room {

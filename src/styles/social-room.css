@@ -1,8 +1,8 @@
-.room-profile-dialog { margin-left: auto; max-width: 660px; max-height: calc(100dvh - 2rem); overflow-y: auto; padding: 52px 20px 20px; }
+.room-profile-dialog { max-width: 620px; max-height: calc(100dvh - 2rem); overflow-y: auto; padding: 52px 16px 16px; }
 .room-friends-dialog { max-width: 620px; max-height: calc(100dvh - 2rem); overflow-y: auto; }
 .theme-night-options { display: grid; gap: 8px; }
 .theme-night-prompt { font-weight: 500; }
-.room-theme-banner { display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); min-width: 0; }
+.room-theme-banner { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); min-width: 0; }
 .room-theme-banner > span { color: var(--muted-foreground); font-size: 12px; flex-shrink: 0; }
 .room-theme-banner > strong { font-weight: 500; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .header-friends-button { display: none; } }

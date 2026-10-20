@@ -1,12 +1,13 @@
-:root { --app-header-height: 64px; --room-toolbar-height: 64px; }
+:root { --app-header-height: 56px; --room-toolbar-height: 56px; }
 .shared-app-header { position: relative; z-index: 20; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 24px; width: 100%; height: var(--app-header-height); padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--background); color: var(--foreground); }
 .shared-header-navigation { display: flex; align-items: center; gap: 24px; min-width: 0; }
 .shared-header-brand { display: inline-flex; align-items: center; min-height: 44px; flex-shrink: 0; text-decoration: none; color: inherit; }
-.shared-header-brand .logo { gap: 9px; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
-.shared-header-brand .logo-mark { width: 28px; height: 28px; border-radius: 7px; }
+.shared-header-brand .logo { gap: 0; font-size: 24px; font-weight: 550; letter-spacing: -0.04em; }
+.shared-header-brand .logo-mark { display: none; }
 .shared-header-brand .logo-mark i { width: 2px; }
-.shared-header-rooms, .shared-header-links a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 4px 0; color: var(--muted-foreground); text-decoration: none; font-size: 14px; font-weight: 500; }
-.shared-header-rooms:hover, .shared-header-links a:hover, .shared-header-rooms[aria-current=page] { color: var(--foreground); }
+.shared-header-rooms, .shared-header-links a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 4px 0; color: var(--muted-foreground); text-decoration: none; font-size: 13px; font-weight: 500; }
+.shared-header-rooms:hover, .shared-header-links a:hover { color: var(--foreground); }
+.shared-header-rooms[aria-current=page] { color: var(--primary-text); }
 .shared-header-links { display: flex; align-items: center; gap: 24px; }
 .shared-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .shared-app-header .shared-account-trigger { height: 44px; min-width: 44px; gap: 6px; padding: 4px; }

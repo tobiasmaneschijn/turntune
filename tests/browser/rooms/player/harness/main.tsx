@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../../src/styles/shadcn.css";
 import "../../../../../src/styles/index.css";
 import { NowPlaying } from "../../../../../src/features/playback/components/NowPlaying";

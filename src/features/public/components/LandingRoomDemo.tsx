@@ -11,7 +11,7 @@ import { Avatar } from "@/components/Avatar";
 import { ChatMessageItem } from "@/features/chat/components/chat-message";
 import { MusicRail } from "@/features/music/components/MusicRail";
 import { NowPlaying } from "@/features/playback/components/NowPlaying";
-import { RoomWorkspace } from "@/features/rooms/components/RoomWorkspace";
+import { OpenRoomWorkspace } from "@/features/rooms/components/OpenRoomWorkspace";
 import type { SoundCloudPlayer } from "@/features/playback/providers/SoundCloudPlayer";
 import type { RoomPane } from "@/features/rooms/components/RoomPaneTabs";
 import { Button } from "@/components/ui/button";
@@ -60,16 +60,7 @@ function SilentDemoPlayer({ playback, onStatus, syncRevision }: ComponentProps<t
     onStatus({ ready: true, buffering: false, playing: playback.playing, currentTime: playback.position, duration: (playback.track?.durationMs || 0) / 1000, trackId: playback.track?.id });
   }, [playback, onStatus, syncRevision]);
 
-  return <div className="provider-player-shell landing-demo-provider" aria-hidden="true">
-    <svg viewBox="0 0 320 180" className="landing-demo-record">
-      <circle cx="160" cy="90" r="76" fill="currentColor" opacity=".08" />
-      <circle cx="160" cy="90" r="62" fill="none" stroke="currentColor" opacity=".22" />
-      <circle cx="160" cy="90" r="52" fill="none" stroke="currentColor" opacity=".16" />
-      <circle cx="160" cy="90" r="42" fill="none" stroke="currentColor" opacity=".16" />
-      <circle cx="160" cy="90" r="23" fill="currentColor" />
-      <circle cx="160" cy="90" r="5" className="landing-demo-record-hole" />
-    </svg>
-  </div>;
+  return null;
 }
 const DEMO_PLAYERS = { soundcloud: SilentDemoPlayer };
 
@@ -108,6 +99,7 @@ export function LandingRoomDemo() {
   const [replay, setReplay] = useState(0);
   const [inView, setInView] = useState(false);
   const [foreground, setForeground] = useState(() => document.visibilityState === "visible");
+  const [activityContainer, setActivityContainer] = useState<HTMLDivElement | null>(null);
   const demoRef = useRef<HTMLElement>(null);
   const running = playing && inView && foreground;
   const snapshot = useMemo(() => demoSnapshot(step, you, t("sampleRoomName")), [step, replay, t, you]);
@@ -165,13 +157,15 @@ export function LandingRoomDemo() {
       </div>
     </div>
 
-    <div className="landing-demo-viewport" inert>
-      <RoomWorkspace value={steps[step].pane as RoomPane} onValueChange={noop} defaultLayout={{ radio: 28, player: 42, chat: 30 }}
-        radio={<MusicRail snapshot={snapshot} currentUserId={YOU.id} connected setNotice={noop} requestAction={silentAction} />}
+    <div className="landing-demo-viewport open-room" inert>
+      <OpenRoomWorkspace embedded value={steps[step].pane as RoomPane} onValueChange={noop}
+        activityContainerRef={setActivityContainer} defaultLayout={{ activity: 22, chat: 51, radio: 27 }}
+        radio={<MusicRail snapshot={snapshot} currentUserId={YOU.id} connected setNotice={noop} requestAction={silentAction}
+          activityContainer={activityContainer} inlineAddMusic />}
         player={<div className="player-column"><NowPlaying snapshot={snapshot} currentUserId={YOU.id} isDj={step >= 2}
           canControlPlayback={step >= 2} roomConnected compact={false} onToggleCompact={noop}
           settingsOpen={false} onCloseSettings={noop} userSettings={settings} onUserSettingsChange={noop}
-          isolatedPreview requestAction={silentAction} providerPlayers={DEMO_PLAYERS} /></div>}
+          isolatedPreview presentation="dock" requestAction={silentAction} providerPlayers={DEMO_PLAYERS} /></div>}
         chat={<DemoChat step={step} you={you} />} />
     </div>
 

@@ -20,7 +20,7 @@ import { Input } from "../../../../../src/components/ui/input";
 import { Slider } from "../../../../../src/components/ui/slider";
 import { Switch } from "../../../../../src/components/ui/switch";
 import type { RoomDirectoryEntry, RoomSnapshot, Track, User } from "../../../../../src/types";
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter";
 import "../../../../../src/styles/shadcn.css";
 import "../../../../../src/styles/index.css";
 import "./style.css";

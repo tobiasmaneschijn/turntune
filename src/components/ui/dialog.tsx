@@ -20,12 +20,12 @@ function DialogContent({
   useTranslation();
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[2px] transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+      <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/50 transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
       <DialogPrimitive.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
         <DialogPrimitive.Popup
           data-slot="dialog-content"
           className={cn(
-            "relative grid w-full max-w-lg gap-5 rounded-xl border bg-card p-6 text-card-foreground shadow-2xl outline-none transition-[opacity,transform] data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
+            "relative grid w-full max-w-lg gap-4 rounded-lg border bg-card p-5 text-card-foreground shadow-md outline-none transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
             className
           )}
           {...props}
@@ -52,7 +52,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   useTranslation();
-  return <DialogPrimitive.Title className={cn("text-lg font-semibold leading-none", className)} {...props} />
+  return <DialogPrimitive.Title className={cn("text-base font-semibold leading-snug", className)} {...props} />
 }
 
 function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {

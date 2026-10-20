@@ -8,7 +8,7 @@ app still requires an account and invitation.
 
 The demonstration shows a private queue feeding the shared DJ rotation, a track
 handoff, and chat reactions. It uses the production `MusicRail`, `NowPlaying`,
-`RoomWorkspace`, and chat components with isolated scripted state.
+`OpenRoomWorkspace`, and chat components with isolated scripted state.
 
 Pause, replay, keyboard steps, and reduced-motion behavior keep the demonstration
 usable without automatic playback. It must not open provider players, join a
@@ -16,14 +16,16 @@ room, or send provider or room requests.
 
 ## Design constraints
 
-Preserve Geist typography, semantic light/dark themes, shared controls, and the
-existing lime accent. Keep private waiting tracks out of shared room views.
+Use the shared Inter typography, neutral light/dark surfaces, violet actions,
+and Base UI controls. The room demonstration uses the same Open room regions and
+bottom player as the app. Keep private waiting tracks out of shared room views.
 Landing and demonstration copy uses the shared localization catalogs.
 The primary hosted-app action opens sign-in. Self-hosting actions lead to the
 hosting options and setup guide.
 
-Use [DESIGN.md](../../DESIGN.md) and `.impeccable/design.json` for the inherited
-design system. Generated review captures belong in ignored `.impeccable/review/`.
+Use [DESIGN.md](../../DESIGN.md) and `.impeccable/design.json` for the shared
+system; `src/styles/shadcn.css` owns its tokens. Generated review captures belong
+in ignored `.impeccable/review/`.
 
 ## Relevant checks
 

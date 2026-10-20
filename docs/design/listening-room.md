@@ -1,10 +1,9 @@
 # Listening room
 
 The active room uses the Open room design: Inter typography, neutral surfaces,
-and a violet action color. The shared Appearance menu offers Light, Dark, and
-System; the selected preference persists. The public
-pages, directory, and standalone account surfaces retain the inherited design in
-[DESIGN.md](../../DESIGN.md).
+and a violet action color shared across the app. The Appearance menu offers
+Light, Dark, and System; the selected preference persists. Shared tokens live in
+`src/styles/shadcn.css` and are documented in [DESIGN.md](../../DESIGN.md).
 
 ## Composition
 
@@ -45,7 +44,8 @@ require explicit approval.
 
 | Change | Source |
 | --- | --- |
-| Font, palette, room sizing variables, header, responsive shell | `src/styles/open-room.css` |
+| Shared font, palette, radius, and density | `src/styles/shadcn.css` |
+| Room sizing variables, header, responsive shell | `src/styles/open-room.css` |
 | Default pane proportions and saved layout presets | `src/features/rooms/hooks/use-room-layout-presets.ts`, `openRoomLayoutPresets` |
 | Region composition and pane visibility | `src/features/rooms/components/OpenRoomWorkspace.tsx` |
 | Room wiring, personal panel state, and shared activity target | `src/app/RoomApplication.tsx` |
@@ -57,16 +57,16 @@ require explicit approval.
 | Bottom player and playback options | `src/features/playback/components/NowPlaying.tsx` |
 | Disabled player while the room is empty | `src/features/playback/components/EmptyPlayerDock.tsx` |
 
-Use the semantic variables in `open-room.css` for colors. Its
-`--room-font`, `--room-text-size`, `--room-detail-size`, `--room-header-height`,
-`--room-player-height`, and spacing variables are the room's starting controls;
-local surface rules handle their own content. Keep pane percentages in the layout
-presets rather than duplicating them in CSS.
+Use shared semantic variables for color and typography. `open-room.css` aliases
+`--room-font` to `--font-sans` and sets room geometry: 14px text, 12px details, a
+56px header, an 80px desktop player, and 54px cover-art queue rows. Shared controls
+remain 34px on desktop and at least 44px for touch. Keep pane percentages in the
+layout presets rather than duplicating them in CSS.
 
 `useRoomAppearance` sets `data-room-design="open-room"` on the document root while
-the room is mounted, so portalled menus and dialogs receive the same semantic
-tokens. It restores the previous attribute on departure. Keep room overrides
-scoped to `.open-room` or that attribute.
+the room is mounted and restores the previous attribute on departure. Scope room
+geometry to `.open-room` or that attribute; global theme tokens also reach
+portalled menus and dialogs outside the room.
 
 `MusicRail` accepts `activityContainer` to portal shared activity into the left
 region and `inlineAddMusic` to keep search inside the private panel. Its

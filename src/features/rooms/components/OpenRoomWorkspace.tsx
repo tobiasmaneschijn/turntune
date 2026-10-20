@@ -14,14 +14,15 @@ import "../../../styles/room-chat.css";
 /** Stable regions keep the same player mounted beneath either content tab. */
 export function OpenRoomWorkspace({ radio, player, chat, value, onValueChange, unreadCount = 0,
   listeningChecklist, roomNotice, activityContainerRef, musicOpen = true,
-  defaultLayout, groupRef, onLayoutChanged, musicOpenRequest = 0 }: RoomWorkspaceProps) {
+  defaultLayout, groupRef, onLayoutChanged, musicOpenRequest = 0,
+  embedded = false }: RoomWorkspaceProps & { embedded?: boolean }) {
   const { t } = useTranslation("rooms");
   const narrow = useMediaQuery("(max-width: 1024px)");
   const contentPane = value === "radio" ? "radio" : "chat";
   const workspaceRef = useRef<HTMLElement>(null);
   const musicPanelRef = useRef<PanelImperativeHandle>(null);
-  useRoomAppearance();
-  useRoomViewport(workspaceRef);
+  useRoomAppearance(!embedded);
+  useRoomViewport(workspaceRef, !embedded);
   useEffect(() => {
     // Apply after the saved desktop layout, including when returning from a tab.
     const frame = requestAnimationFrame(() => {

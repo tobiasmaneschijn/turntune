@@ -1,101 +1,25 @@
-/* Authentication surface styles. */
-.welcome { min-height: 100vh; position: relative; overflow: hidden; display: flex; flex-direction: column; }
-.welcome::before { content: ""; position: absolute; inset: 0; opacity: .28; background-image: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px); background-size: 52px 52px; mask-image: linear-gradient(to bottom, black, transparent 80%); }
-.welcome-content,
-.welcome footer { z-index: 1; }
-.welcome-content { margin: auto; display: grid; align-items: center; }
-.auth-content { margin: auto; display: grid; align-items: center; z-index: 1; }
-.auth-card { width: 100%; }
-.auth-status { margin: 14px 0 0; color: #b7b9c0; font-size: 12px; line-height: 1.5; text-align: center; }
-.welcome-card button:disabled { opacity: .6; cursor: wait; }
-.welcome h1 { font: 700 clamp(50px, 6vw, 82px)/.98 "Geist Variable", sans-serif; }
-.welcome h1 em { color: var(--lime); font-style: normal; }
-.welcome-card label { display: block; color: #aaaab2; font-size: 13px; font-weight: 600; margin-bottom: 18px; }
-.welcome-card input { width: 100%; border: 1px solid #292a31; color: white; border-radius: 9px; outline: 0; margin-top: 8px; }
-.welcome-card input:focus { border-color: #68664c; box-shadow: 0 0 0 3px rgba(216,255,87,.07); }
-.welcome-card button { border: 0; background: var(--lime); color: #11120b; width: 100%; padding: 14px; border-radius: 9px; font-weight: 800; cursor: pointer; display: flex; justify-content: center; gap: 12px; }
-.welcome footer { color: #555760; font-size: 12px; text-align: center; letter-spacing: .5px; }
-.welcome-glow { position: absolute; border-radius: 50%; filter: blur(100px); opacity: .13; }
-@media (max-width: 900px) {
-  .welcome-content,
-.auth-content { grid-template-columns: 1fr; padding: 70px 0; gap: 35px; }
-  .welcome h1 { font-size: clamp(48px, 13vw, 72px); }
-}
-.welcome {
-  background: var(--background);
-}
-
-.welcome {
-  padding: 0;
-}
-
-.welcome::before,
-.welcome-glow { display: none; }
-
-.welcome-content,
-.auth-content {
-  width: min(900px, calc(100% - 48px));
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
-  gap: clamp(48px, 8vw, 96px);
-}
-
-.welcome-copy,
-.auth-intro { min-width: 0; }
-
-.welcome h1,
-.auth-intro h1 {
-  max-width: 600px;
-  margin: 18px 0 14px;
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: clamp(38px, 5vw, 58px);
-  font-weight: 650;
-  line-height: 1.02;
-  letter-spacing: -0.045em;
-}
-
-.welcome-content > div > p,
-.auth-intro > p,
-.auth-content > div > p {
-  max-width: 500px;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 15px;
-  line-height: 1.65;
-}
-
-.welcome-card,
-.auth-content [data-slot="card"] {
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-xl);
-  background: var(--card);
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.welcome-card label { margin: 0; }
-.welcome-card input { margin: 0; padding: 0 10px; background: transparent; }
-.welcome-card [data-slot="button"] { width: 100%; padding: 0 12px; border-radius: var(--radius-lg); }
-
-@media (max-width: 900px) {
-  .welcome-content,
-.auth-content { grid-template-columns: 1fr; gap: 32px; padding: 56px 0; }
-  .welcome h1,
-.auth-intro h1 { font-size: clamp(36px, 9vw, 52px); }
-}
-
-.welcome .app-release-footer { padding: 16px 24px 24px; }
-
-.light .welcome {
-  background-image: radial-gradient(circle at 50% -20%, color-mix(in oklch, var(--primary), transparent 88%), transparent 38%);
-}
-
+/* Authentication shares the app's controls, color tokens, and type scale. */
+.welcome { min-height: 100dvh; display: flex; flex-direction: column; background: var(--background); }
+.auth-content,
+.welcome-content { width: min(400px, calc(100% - 40px)); margin: auto; padding-block: 48px; display: grid; gap: 24px; }
+.auth-intro h1,
+.welcome-copy h1 { margin: 0; color: var(--foreground); font: 650 28px/1.2 var(--font-sans); letter-spacing: -.025em; }
+.welcome-card { width: 100%; }
+.auth-content [data-slot="card"] { padding: 0; gap: 20px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.auth-content [data-slot="card-header"],
+.auth-content [data-slot="card-content"] { padding: 0; }
+.auth-content [data-slot="card-header"] { gap: 8px; }
+.auth-content [data-slot="card-title"] { font-size: 18px; font-weight: 600; }
+.auth-content [data-slot="card-description"] { font-size: 13px; line-height: 1.5; }
+.auth-content input { width: 100%; }
+.auth-content input:disabled { cursor: wait; }
+.auth-status { margin: 12px 0 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.5; }
+.welcome .app-release-footer { padding: 16px 20px 24px; }
 @media (max-width: 640px) {
-  .welcome-content,
-.auth-content { width: calc(100% - 36px); padding-block: 44px; gap: 28px; }
-  .welcome h1,
-.auth-intro h1 { font-size: clamp(36px, 11vw, 48px); }
-  .welcome-card,
-.auth-content [data-slot="card"] { border: 1px solid var(--border); }
+  .auth-content,
+  .welcome-content { padding-block: 32px; }
+  .auth-intro h1,
+  .welcome-copy h1 { font-size: 24px; }
+  .auth-content input,
+  .auth-content [data-slot="button"] { min-height: 44px; }
 }

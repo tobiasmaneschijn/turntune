@@ -19,12 +19,10 @@ import {
   Inbox,
   LayoutDashboard,
   LockKeyhole,
-  MessageSquareText,
   Radio,
   RefreshCw,
   Search,
-  Sparkles,
-  Users
+  Sparkles
 } from "lucide-react";
 import { Avatar } from "../../components/Avatar";
 import { AppHeader } from "../../app/components/AppHeader";
@@ -322,7 +320,6 @@ export function AdminDashboard({
         settings={userSettings && onSettingsChange ? { accessToken, userSettings, onSettingsChange } : undefined} />
       <div className="admin-page">
       <aside className="admin-sidebar">
-        <div className="admin-console-label">{t("socialAdmin")}</div>
         <nav className="admin-nav" aria-label={t("socialAdminDashboard")}>
           <button type="button" aria-current={tab === "overview" ? "page" : undefined} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}><LayoutDashboard /><span className="admin-nav-label">{t("socialOverview")}</span></button>
           <button type="button" aria-current={tab === "feedback" ? "page" : undefined} className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}><Inbox /><span className="admin-nav-label">{t("socialFeedback")}</span>{Boolean(data?.metrics.openFeedback) && <span className="admin-nav-count">{data?.metrics.openFeedback}</span>}</button>
@@ -360,9 +357,11 @@ export function AdminDashboard({
                   </SelectGroup></SelectContent>
                 </Select>
                 <Badge variant="secondary">{t("socialFeedbackShown", { count: filteredFeedback.length })}</Badge>
-                <Button variant="outline" size="sm" disabled={loading || feedbackPage === 0} onClick={() => void loadDashboard(feedbackPage - 1)}>{t("socialPrevious")}</Button>
-                <span>{t("socialPageNumber", { number: feedbackPage + 1 })}</span>
-                <Button variant="outline" size="sm" disabled={loading || !data.pagination?.hasMore} onClick={() => void loadDashboard(feedbackPage + 1)}>{t("socialNext")}</Button>
+                <div className="admin-feedback-pagination">
+                  <Button variant="outline" size="sm" disabled={loading || feedbackPage === 0} onClick={() => void loadDashboard(feedbackPage - 1)}>{t("socialPrevious")}</Button>
+                  <span>{t("socialPageNumber", { number: feedbackPage + 1 })}</span>
+                  <Button variant="outline" size="sm" disabled={loading || !data.pagination?.hasMore} onClick={() => void loadDashboard(feedbackPage + 1)}>{t("socialNext")}</Button>
+                </div>
               </div>
 
               {filteredFeedback.length ? (
@@ -602,26 +601,24 @@ function PlatformPanel({ accessToken }: { accessToken: string }) {
 
 function OverviewPanel({ data, onOpenFeedback }: { data: AdminDashboardData; onOpenFeedback: (id: string) => void }) {
   const { t, i18n } = useTranslation("rooms");
-  const metricCards = [
-    { label: t("socialTotalListeners"), value: data.metrics.users, icon: Users },
-    { label: t("socialRooms"), value: data.metrics.rooms, icon: Radio },
-    { label: t("socialMessagesSent"), value: data.metrics.messages, icon: MessageSquareText },
-    { label: t("socialOpenFeedback"), value: data.metrics.openFeedback, icon: Inbox, attention: data.metrics.openFeedback > 0 }
+  const metrics = [
+    { label: t("socialTotalListeners"), value: data.metrics.users },
+    { label: t("socialRooms"), value: data.metrics.rooms },
+    { label: t("socialMessagesSent"), value: data.metrics.messages },
+    { label: t("socialOpenFeedback"), value: data.metrics.openFeedback, attention: data.metrics.openFeedback > 0 }
   ];
   const maxActivity = Math.max(1, ...data.activity.flatMap((item) => [item.users, item.feedback, item.messages]));
 
   return (
     <div className="admin-overview">
-      <div className="admin-metrics">
-        {metricCards.map(({ label, value, icon: Icon, attention }) => (
-          <Card key={label} className={attention ? "attention" : ""}>
-            <CardContent>
-              <span className="admin-metric-icon"><Icon /></span>
-              <span><small>{label}</small><strong>{value.toLocaleString(i18n.resolvedLanguage)}</strong></span>
-            </CardContent>
-          </Card>
+      <dl className="admin-metrics">
+        {metrics.map(({ label, value, attention }) => (
+          <div key={label} className={attention ? "attention" : ""}>
+            <dt>{label}</dt>
+            <dd>{value.toLocaleString(i18n.resolvedLanguage)}</dd>
+          </div>
         ))}
-      </div>
+      </dl>
 
       <div className="admin-overview-grid">
         <Card className="admin-activity-card">
