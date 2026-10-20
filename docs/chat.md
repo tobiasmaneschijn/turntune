@@ -401,6 +401,8 @@ The chat schema is introduced incrementally by these migrations:
   with coin flip, rock-paper-scissors and Magic 8 Ball. It adds no tables or columns.
 - `20261020185454_chat_music_trivia.sql` adds service-only trivia answers and the
   atomic first-answer transaction, and accepts server-picked public trivia rounds.
+- `20261020191245_chat_features_release_readiness.sql` keeps startup blocked until
+  the chat feature schema, server-only access and removal cleanup are installed.
 
 Browser code uses only the publishable key and signed-in access token. Secrets
 remain server-side. Direct Data API reads expose only the account's own rows for

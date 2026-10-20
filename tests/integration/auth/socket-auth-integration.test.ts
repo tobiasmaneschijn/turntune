@@ -114,8 +114,11 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   assert.deepEqual(await socket.timeout(3_000).emitWithAck("dj:leave", undefined), { ok: true });
   const message = { id: randomUUID(), content: 'A saved message', type: 'text', createdAt: new Date().toISOString(), mentions: [] };
   const delivered = waitEvent('chat:message');
-  assert.deepEqual(await socket.timeout(3_000).emitWithAck('chat:message', { roomId: 'auth-room', message }), { ok: true });
-  assert.equal(((await delivered)[0] as { message: { id: string } }).message.id, message.id);
+  const accepted = await socket.timeout(3_000).emitWithAck('chat:message', { roomId: 'auth-room', message });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.message.id, message.id);
+  assert.equal(accepted.message.user.id, verifiedUserId);
+  assert.deepEqual(((await delivered)[0] as { message: unknown }).message, accepted.message);
   assert.deepEqual(await socket.timeout(3_000).emitWithAck('chat:typing', { roomId: 'auth-room', typing: { active: true } }), { ok: true });
   const diagnostics = once(server, 'message', { signal: AbortSignal.timeout(3_000) });
   server.send({ fixture: 'metrics' });
