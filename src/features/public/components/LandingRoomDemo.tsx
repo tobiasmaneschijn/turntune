@@ -165,7 +165,7 @@ export function LandingRoomDemo() {
         player={<div className="player-column"><NowPlaying snapshot={snapshot} currentUserId={YOU.id} isDj={step >= 2}
           canControlPlayback={step >= 2} roomConnected compact={false} onToggleCompact={noop}
           settingsOpen={false} onCloseSettings={noop} userSettings={settings} onUserSettingsChange={noop}
-          isolatedPreview presentation="dock" requestAction={silentAction} providerPlayers={DEMO_PLAYERS} /></div>}
+          isolatedPreview previewReactions={step === 3} onOpenQueue={noop} presentation="dock" requestAction={silentAction} providerPlayers={DEMO_PLAYERS} /></div>}
         chat={<DemoChat step={step} you={you} />} />
     </div>
 

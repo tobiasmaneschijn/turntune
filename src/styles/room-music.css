@@ -44,7 +44,8 @@
 :is(.open-room, [data-room-design="open-room"]) .private-music-panel .queue-drag-handle .queue-position { display: block; width: 13px; font-variant-numeric: tabular-nums; }
 :is(.open-room, [data-room-design="open-room"]) .private-music-panel .queue-drag-handle svg { display: block; width: 11px; height: 14px; }
 :is(.open-room, [data-room-design="open-room"]) .private-music-panel .queue-track-actions button { width: 28px; min-width: 28px; height: 36px; }
-:is(.open-room, [data-room-design="open-room"]) .private-music-panel .music-history-row { grid-template-columns: 40px minmax(0, 1fr) 28px; }
+/* Size the action column to its touch target and leave room for its focus ring. */
+:is(.open-room, [data-room-design="open-room"]) .private-music-panel .music-history-row { grid-template-columns: 40px minmax(0, 1fr) auto; padding-inline-end: 4px; }
 :is(.open-room, [data-room-design="open-room"]) .private-music-panel .music-inline-add { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
 /* Results scroll between the search row and the persistent link footer. */
 :is(.open-room, [data-room-design="open-room"]) .music-inline-add .search-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; height: auto; grid-template-rows: none; overflow: hidden; padding-bottom: 0; }
@@ -126,4 +127,16 @@
   /* Link entry gets the available space in a short window, then returns to search. */
   :is(.open-room, [data-room-design="open-room"]) .music-inline-add:has(> .music-link-add.open) > .search-pane { display: none; }
   :is(.open-room, [data-room-design="open-room"]) .music-inline-add > .music-link-add.open { flex: 1; min-height: 0; max-height: none; }
+}
+
+/* Queue actions share the heading row; the room tabs already switch panes. */
+@media (max-width: 640px) {
+  :is(.open-room, [data-room-design="open-room"]) .private-music-header:not(:has(> h2)) { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-header:not(:has(> h2)) .private-music-title-row { flex: 1; min-width: 0; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-header:not(:has(> h2)) h2 { font-size: 15px; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-toolbar { display: contents; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-toolbar .music-header-actions { flex: 0 0 auto; margin: 0; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-close { display: none; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-panel .rail-track-list { padding-inline: 12px; }
+  :is(.open-room, [data-room-design="open-room"]) .private-music-panel .music-tool-tabs > .music-tabs { margin-inline: 12px; }
 }

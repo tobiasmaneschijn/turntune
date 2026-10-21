@@ -1,0 +1,66 @@
+.room-drawer-inline,
+.room-drawer-mounted-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.room-drawer-inline[hidden] { display: none; }
+.room-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(0 0 0 / .5);
+  opacity: calc(1 - var(--drawer-swipe-progress, 0));
+  transition: opacity 150ms ease;
+}
+.room-drawer-backdrop:is([data-starting-style], [data-ending-style]) { opacity: 0; }
+.room-drawer-viewport {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  /* Safari can leave fixed edges below its software keyboard. Base UI sets
+     this inset to the visible bottom, and keeps it zero when the layout shrinks. */
+  padding-bottom: var(--drawer-keyboard-inset, 0px);
+  pointer-events: none;
+}
+.room-drawer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min(88dvh, calc(var(--room-viewport-height, 100dvh) - 12px));
+  min-height: 0;
+  max-height: calc(var(--room-viewport-height, 100dvh) - 12px);
+  padding-bottom: env(safe-area-inset-bottom);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  pointer-events: auto;
+  outline: none;
+  transform: translateY(var(--drawer-swipe-movement-y, 0px));
+  transition: transform 180ms ease;
+}
+.room-drawer:is([data-starting-style], [data-ending-style]) { transform: translateY(100%); }
+.room-drawer[data-swiping] { transition: none; user-select: none; }
+.room-drawer-top { position: relative; display: flex; flex: 0 0 44px; min-height: 44px; align-items: center; justify-content: center; }
+.room-drawer-handle { width: 36px; height: 4px; border-radius: var(--radius-sm); background: var(--muted-foreground); }
+.room-drawer-title { margin: 0; padding-inline: 52px; font-size: 16px; font-weight: 600; }
+.room-drawer-top:has(.room-drawer-title) { flex-basis: 64px; padding-top: 16px; }
+.room-drawer-top:has(.room-drawer-title) .room-drawer-handle { position: absolute; top: 10px; }
+.room-drawer-top:has(.room-drawer-title) .room-drawer-close { top: 16px; }
+.room-drawer .room-drawer-close { position: absolute; top: 0; right: 8px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
+.room-drawer-body { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; }
+.room-drawer[hidden], .room-drawer-viewport[hidden], .room-drawer-backdrop[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .room-drawer, .room-drawer-backdrop { transition: none; }
+}

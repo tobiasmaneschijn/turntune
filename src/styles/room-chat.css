@@ -269,21 +269,13 @@
     min-height: 44px;
   }
 
-  .open-room .chat-composer-bar {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .open-room .chat-composer-input {
     font-size: 16px;
     line-height: 24px;
   }
 
   .open-room .chat-composer-tools {
-    width: 100%;
-  }
-
-  .open-room .chat-composer-tools .chat-send-button {
-    margin-left: auto;
+    padding: 2px;
   }
 }
 

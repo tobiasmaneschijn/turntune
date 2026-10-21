@@ -13,7 +13,7 @@ import { AppVersion } from "./components/AppVersion";
 import { RoomHeader } from "../features/rooms/components/RoomHeader";
 import { ParticipantActions } from "../features/rooms/components/ParticipantActions";
 import { RoomModerationDialog } from "../features/rooms/components/RoomModerationDialog";
-import { RoomRulesDialog } from "../features/rooms/components/RoomRulesDialog";
+import { RoomRulesDialog, RoomSessionNotices } from "../features/rooms/components/RoomRulesDialog";
 import { effectiveRoomPolicy, roomCapabilities } from "../../shared/room-policy";
 import { roomManagementRequest, roomModerationAction } from "../features/rooms/room-management";
 import { RoomWorkspace } from "../features/rooms/components/RoomWorkspace";
@@ -73,6 +73,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
   const [roomActivityContainer, setRoomActivityContainer] = useState<HTMLDivElement | null>(null);
   const [musicOpen, setMusicOpen] = useState(true);
   const [musicOpenRequest, setMusicOpenRequest] = useState(0);
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const musicControls = useRef<MusicRailControls>(null);
   const playerControls = useRef<NowPlayingControls>(null);
   const chatControls = useRef<RealtimeChatHandle>(null);
@@ -116,7 +117,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
     invitationRequests.current.clear();
   }, [auth.session?.user.id, roomId]);
   useEffect(() => {
-    setFriendsOpen(false); setThemeNightOpen(false); setRoomSettingsOpen(false); setUserSettingsOpen(false); setModerationOpen(false); setRulesOpen(false);
+    setFriendsOpen(false); setThemeNightOpen(false); setRoomSettingsOpen(false); setUserSettingsOpen(false); setModerationOpen(false); setRulesOpen(false); setMobileDetailsOpen(false);
   }, [auth.session?.user.id, roomId]);
   useEffect(() => {
     if (!roomId) { recordedVisitRef.current = null; return; }
@@ -127,13 +128,13 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
       recordedVisitRef.current = key;
     }
   }, [roomId, connected, snapshot?.room.id, auth.session?.user.id, profile.id]);
-  const focusMusicSearch = () => { setMusicOpen(true); setMusicOpenRequest(request => request + 1); setMobileRoomPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.focusSearch())); };
-  const openMusicQueue = () => { setMusicOpen(true); setMusicOpenRequest(request => request + 1); setMobileRoomPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.openQueue())); };
+  const focusMusicSearch = () => { setMobileDetailsOpen(false); setMusicOpen(true); setMusicOpenRequest(request => request + 1); setMobileRoomPane("radio"); requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.focusSearch())); };
+  const openMusicQueue = () => { setMobileDetailsOpen(false); setMusicOpen(true); setMusicOpenRequest(request => request + 1); setMobileRoomPane("radio"); if (!isNarrowRoomLayout) requestAnimationFrame(() => requestAnimationFrame(() => musicControls.current?.openQueue())); };
   const openPlayer = () => requestAnimationFrame(() => document.getElementById("player")?.focus({ preventScroll: true }));
   const focusChat = () => { setMobileRoomPane("chat"); requestAnimationFrame(() => requestAnimationFrame(() => chatControls.current?.focusComposer())); };
   const closeMusicQueue = () => {
     setMusicOpen(false);
-    if (isNarrowRoomLayout) focusChat();
+    if (isNarrowRoomLayout) setMobileRoomPane("chat");
     else requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".room-queue-toggle")?.focus());
   };
 
@@ -353,6 +354,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
         onResetLayout={resetRoomLayout} onNotice={setNotice}
         layoutPreset={roomLayouts.layoutPreset} onLayoutPresetChange={preset => { roomLayouts.onLayoutPresetChange(preset); setMusicOpen(true); }}
         onFocusSearch={focusMusicSearch} onOpenQueue={openMusicQueue} onOpenPlayer={openPlayer}
+        onOpenRoomDetails={() => { setMobileRoomPane("chat"); setMobileDetailsOpen(true); }}
         onToggleMute={localPlayback.localVolumeSupported === false ? undefined : () => playerControls.current?.toggleMute()} muted={localPlayback.muted} onFocusChat={focusChat}
         connected={connected} onReconnect={retryRoom}
         participants={snapshot.users} ownerUserId={snapshot.room.ownerUserId} moderatorUserIds={snapshot.room.moderatorUserIds} djUserId={snapshot.room.djUserId} onOpenProfile={openProfile}
@@ -374,12 +376,14 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
         }} />
 
       <RoomWorkspace experience activityContainerRef={setRoomActivityContainer} musicOpen={musicOpen} musicOpenRequest={musicOpenRequest}
+          mobileDetailsOpen={mobileDetailsOpen} onMobileDetailsOpenChange={setMobileDetailsOpen}
           compact={compactPlayer} value={mobileRoomPane} onValueChange={setMobileRoomPane} unreadCount={chatUnreadCount}
           defaultLayout={roomLayouts.defaultLayout}
           groupRef={roomPanelGroupRef}
           onLayoutChanged={roomLayouts.onLayoutChanged}
           listeningChecklist={<ListeningChecklist userId={profile.id} providerName={localPlayback.providerName} providerState={localPlayback.providerState} audioState={localPlayback.audioState} statusText={localPlayback.statusText} statusTone={localPlayback.statusTone} onOpenSettings={() => setUserSettingsOpen(true)} onEnableAudio={() => { openPlayer(); playerControls.current?.retryPlayback(); }} onChooseMusic={focusMusicSearch} />}
-          roomNotice={<RoomNotices snapshot={snapshot} userId={profile.id} canEdit={capabilities.roomDetailsMusic} connected={connected} accessToken={auth.session?.access_token} onRules={() => setRulesOpen(true)} />}
+          roomNotice={<RoomNotices snapshot={snapshot} userId={profile.id} canEdit={capabilities.roomDetailsMusic} connected={connected} onRules={() => setRulesOpen(true)} />}
+          roomStatus={auth.session && <RoomSessionNotices key={`${snapshot.room.id}:${profile.id}`} snapshot={snapshot} accessToken={auth.session.access_token} connected={connected} onRules={() => setRulesOpen(true)} />}
           radio={<MusicRail
               key={`${snapshot.room.id}:${profile.id}`}
               snapshot={snapshot}
@@ -414,6 +418,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
                 roomConnected={connected}
                 onOpenSettings={() => setUserSettingsOpen(true)}
                 onAddTrack={focusMusicSearch}
+                onOpenQueue={openMusicQueue}
                 controlsRef={playerControls} onLocalStateChange={setLocalPlayback}
                 songMoments={songMomentState.scope === songMomentScope ? songMomentState.moments : undefined}
                 onOpenSongMoment={openSongMoment}
@@ -428,7 +433,7 @@ export function RoomApplication({ auth, userSettings, changeUserSettings, focusO
               connected={connected}
               onOpenProfile={openProfile}
               notifications={userSettings.notifications}
-              isVisible={!isNarrowRoomLayout || mobileRoomPane !== "radio"}
+              isVisible={!isNarrowRoomLayout || mobileRoomPane !== "radio" && !mobileDetailsOpen}
               onActivate={() => setMobileRoomPane("chat")}
               onUnreadCountChange={setChatUnreadCount}
               onOpenQueue={openMusicQueue}
