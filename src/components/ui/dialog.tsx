@@ -20,8 +20,8 @@ function DialogContent({
   useTranslation();
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/50 transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
-      <DialogPrimitive.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
+      <DialogPrimitive.Backdrop data-slot="dialog-overlay" className="fixed inset-0 z-50 bg-black/50 transition-opacity data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+      <DialogPrimitive.Viewport data-slot="dialog-viewport" className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
         <DialogPrimitive.Popup
           data-slot="dialog-content"
           className={cn(

@@ -1,7 +1,8 @@
 import i18n from "../../i18n";
 import { readStoredValue } from "../../lib/browser-storage";
-import type { Provider, Track } from "../../types";
+import type { ArtworkSources, Provider, Track } from "../../types";
 import { isMixcloudShowKey, mixcloudShowKey, mixcloudShowUrl } from "../../../shared/mixcloud";
+import { audiusTrackUrl } from "../../../shared/audius";
 
 export const SEARCH_PROVIDER_STORAGE_KEY = "soundspin-search-provider";
 
@@ -11,6 +12,7 @@ export interface ProviderSearchResult {
   title: string;
   artist: string;
   thumbnail?: string;
+  artworkSources?: ArtworkSources;
   duration?: string;
   durationMs?: number;
   permalinkUrl?: string;
@@ -22,8 +24,8 @@ export function providerLabel(provider: Provider) {
 
 export function readSearchProvider(): Provider {
   const provider = readStoredValue(SEARCH_PROVIDER_STORAGE_KEY);
-  // Apple catalog search is still hidden behind the existing Coming Soon option.
-  return provider === "soundcloud" || provider === "spotify" || provider === "mixcloud" ? provider : "youtube";
+  // Room policy decides whether the remembered provider is currently available.
+  return provider === "soundcloud" || provider === "audius" || provider === "spotify" || provider === "mixcloud" ? provider : "youtube";
 }
 
 function isHost(hostname: string, domain: string) {
@@ -39,6 +41,7 @@ export function detectMusicProvider(value: string): Provider | null {
     if (url.hostname === "youtu.be" || isHost(url.hostname, "youtube.com")) return "youtube";
     if (isHost(url.hostname, "spotify.com")) return "spotify";
     if (isHost(url.hostname, "soundcloud.com")) return "soundcloud";
+    if (url.hostname === "audius.co" || url.hostname === "www.audius.co") return "audius";
     if (isHost(url.hostname, "music.apple.com")) return "apple";
     if (url.hostname === "mixcloud.com" || url.hostname === "www.mixcloud.com") return "mixcloud";
   } catch {
@@ -92,6 +95,10 @@ export function parseMusicLink(value: string, selectedProvider: Provider): Music
   if (provider === "soundcloud" && /\/sets(?:\/|$)/.test(url.pathname)) {
     return { error: i18n.t("music:links.soundcloudTrack") };
   }
+  if (provider === "audius") {
+    const canonical = audiusTrackUrl(input);
+    return canonical ? { provider, url: canonical } : { error: i18n.t("music:links.audiusTrack") };
+  }
   if (provider === "apple" && !/^\d+$/.test(url.searchParams.get("i") || "") && !/\/song\/[^/]+\/\d+\/?$/.test(url.pathname)) {
     return { error: i18n.t("music:links.appleTrack") };
   }
@@ -103,8 +110,9 @@ export function parseMusicLink(value: string, selectedProvider: Provider): Music
   return { provider, url: input };
 }
 
-export function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl">) {
-  return track.provider === "youtube" ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg` : track.artworkUrl;
+export function trackArtworkUrl(track: Pick<Track, "provider" | "providerId" | "artworkUrl" | "artworkSources">) {
+  return track.provider === "youtube" ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`
+    : track.artworkUrl || track.artworkSources?.["480x480"] || track.artworkSources?.["150x150"] || track.artworkSources?.["1000x1000"];
 }
 
 export function formatTrackDuration(durationMs?: number) {
@@ -132,6 +140,7 @@ export function trackSourceUrl(track: Pick<Track, "provider" | "providerId" | "p
   if (track.provider === "mixcloud" && isMixcloudShowKey(track.providerId)) {
     return mixcloudShowUrl(track.providerId);
   }
+  if (track.provider === "audius") return audiusTrackUrl(track.permalinkUrl);
   if (!track.permalinkUrl) return undefined;
   try {
     const url = new URL(track.permalinkUrl);

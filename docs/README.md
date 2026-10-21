@@ -10,6 +10,8 @@
 
 ## Architecture and product
 
+- [TurnTune 1.0 roadmap](v1-roadmap.md): free launch, first-month validation,
+  and requirements before charging.
 - [Rooms and radio](rooms-and-radio.md): room access, private queues, DJ rotation,
   synchronization, persistence, and permissions.
 - [Chat](chat.md): delivery, history, commands, reactions, and media access.

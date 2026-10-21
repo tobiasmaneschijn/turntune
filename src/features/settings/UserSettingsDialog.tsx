@@ -20,6 +20,7 @@ import { getSupabaseClient } from "../../lib/supabase";
 import { requestJson } from "../../lib/authenticated-http";
 import { resetProviderSession } from "../playback/provider-session";
 import { PLAYBACK_PREFERENCES, playbackPreferenceAllowed } from "../playback/playback-selection";
+import { isProviderAvailable } from "../../../shared/provider-definitions";
 
 interface SpotifyDevice {
   id: string | null;
@@ -358,12 +359,12 @@ export function UserSettingsDialog({
                     {connections.spotifyConnected && <Button variant="ghost" size="sm" onClick={onDisconnectSpotify}><Unplug />{t("userSettingsDialog.disconnect")}</Button>}
                   </span>
                 </div>}
-                <div className="connection-row">
+                {isProviderAvailable("apple") && <div className="connection-row">
                   <span className="connection-logo apple">{t("userSettingsDialog.a")}</span>
                   <span><strong>{t("userSettingsDialog.appleMusic")}</strong></span>
                   <Badge variant="outline">{appleUnavailable ? t("userSettingsDialog.unavailable") : appleAuthorized ? t("userSettingsDialog.authorized") : t("userSettingsDialog.available")}</Badge>
                   {appleAuthorized && <Button variant="ghost" size="sm" aria-label={t("userSettingsDialog.disconnectAppleMusic")} onClick={() => void resetProviderSession("apple")}><Unplug />{t("userSettingsDialog.disconnect")}</Button>}
-                </div>
+                </div>}
                 {spotifyEnabled && deviceError && <div className="dialog-error">{deviceError}</div>}
                 {spotifyEnabled && connections.spotifyConnected && devicesLoaded && !loadingDevices && !deviceError && !devices.length && <p className="settings-empty-devices" role="status">{t("userSettingsDialog.noSpotifyDevicesAvailableOpenSpotifyOnA")}</p>}
               </div>

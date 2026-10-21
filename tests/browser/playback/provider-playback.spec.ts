@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 async function freezeProviderClock(page: Page) {
   const clockTime = new Date("2026-10-06T12:00:00Z");
@@ -14,11 +14,9 @@ type ProviderHarness = {
   errors: string[];
   metrics: { name: string; value: number; options: { attributes?: { provider?: string; outcome?: string } } }[];
   inspectMusic(): { volume: number; authorized: boolean };
-  inspectHost(): { state?: { providerName: string; audioState: string }; requests: string[]; musicPlaying: boolean };
+  inspectHost(): { state?: { providerName: string; audioState: string }; requests: string[]; musicPlaying: boolean; track?: { id: string; provider: string; mappings?: { apple?: { providerId: string } } } };
   holdSoundCloudCallbacks(): void;
   releaseSoundCloudCallbacks(): void;
-  useApple(): void;
-  useRoomSource(): void;
   reportSoundCloudProgress(position: number): void;
   failNextMusicPlay(): void;
   widgetCreations: number;
@@ -34,7 +32,7 @@ type ProviderHarness = {
   deferPaused(): void;
   resolvePaused(): void;
   setMusicState(progress: number, state: string): void;
-  render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string }): void;
+  render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string; providerId?: string }): void;
   unmount(): void;
 };
 declare global { interface Window { providerTest: ProviderHarness } }
@@ -46,6 +44,91 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: { developerToken } });
   });
   await page.route("https://w.soundcloud.com/player/**", (route) => route.fulfill({ contentType: "text/html", body: "<html></html>" }));
+});
+
+function nativeAudioRecording(seconds: number) {
+  const sampleRate = 8_000;
+  const samples = sampleRate * seconds;
+  const recording = Buffer.alloc(44 + samples * 2);
+  recording.write("RIFF", 0); recording.writeUInt32LE(36 + samples * 2, 4); recording.write("WAVEfmt ", 8);
+  recording.writeUInt32LE(16, 16); recording.writeUInt16LE(1, 20); recording.writeUInt16LE(1, 22);
+  recording.writeUInt32LE(sampleRate, 24); recording.writeUInt32LE(sampleRate * 2, 28);
+  recording.writeUInt16LE(2, 32); recording.writeUInt16LE(16, 34); recording.write("data", 36);
+  recording.writeUInt32LE(samples * 2, 40);
+  for (let index = 0; index < samples; index++) recording.writeInt16LE(Math.round(Math.sin(index * 2 * Math.PI * 220 / sampleRate) * 1_000), 44 + index * 2);
+  return recording;
+}
+
+test("listeners can recover blocked Audius audio, follow room controls and leave without advancing twice", async ({ page }) => {
+  const recording = nativeAudioRecording(40);
+  const playbackHeaders: Record<string, string>[] = [];
+  let pendingSource: Route | undefined;
+  await page.route("**/api/music/connections", route => route.fulfill({ json: { audius: { configured: true } } }));
+  await page.route("https://api.audius.co/v1/tracks/*/stream?*", route => {
+    const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? "");
+    const start = range ? Number(range[1]) : 0;
+    const end = range?.[2] ? Math.min(Number(range[2]), recording.length - 1) : recording.length - 1;
+    return route.fulfill({
+      status: range ? 206 : 200, contentType: "audio/wav", body: recording.subarray(start, end + 1),
+      headers: { "access-control-allow-origin": "*", "accept-ranges": "bytes",
+        ...(range ? { "content-range": `bytes ${start}-${end}/${recording.length}` } : {}) }
+    });
+  });
+  const playbackUrl = (id: string) => `https://api.audius.co/v1/tracks/${id}/stream?api_key=fixture-public-key&app_name=TurnTune`;
+  await page.route("**/api/audius/playback?*", async route => {
+    playbackHeaders.push(await route.request().allHeaders());
+    const id = new URL(route.request().url()).searchParams.get("id")!;
+    if (id === "W39xP") { pendingSource = route; return; }
+    await route.fulfill({ json: { url: playbackUrl(id) } });
+  });
+  await page.goto("/tests/browser/playback/harness/provider-playback.html?provider=audius&host=1&block-audio=1");
+  const audio = page.locator("audio");
+  const audioState = () => audio.evaluate(element => {
+    const player = element as HTMLAudioElement;
+    return { paused: player.paused, position: player.currentTime, volume: player.volume };
+  });
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect(playbackHeaders).toHaveLength(1);
+  expect(playbackHeaders[0]).toMatchObject({ authorization: "Bearer initial-token", "x-soundspin-room": "provider-switch-room" });
+  const sync = page.getByRole("button", { name: "Sync playback with room", exact: true });
+  await sync.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await audioState()).paused).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().state))
+    .toMatchObject({ providerName: "Audius", audioState: "playing" });
+  expect((await audioState()).volume).toBe(.5);
+  expect(await page.evaluate(() => window.providerTest.calls.filter(call => call.method === "audio:play").at(-1)?.value))
+    .toEqual({ activated: true });
+  await page.getByRole("button", { name: "Pause room", exact: true }).click();
+  await expect.poll(async () => (await audioState()).paused).toBe(true);
+  const position = page.getByRole("slider", { name: "Playback position", exact: true });
+  await position.focus();
+  await page.keyboard.press("Home");
+  await expect.poll(async () => (await audioState()).position).toBe(0);
+  await page.getByRole("button", { name: "Play room", exact: true }).click();
+  await expect.poll(async () => (await audioState()).paused).toBe(false);
+  // Recover actual native media drift without restarting or replacing its element.
+  const originalAudio = await audio.elementHandle();
+  await audio.evaluate(element => { (element as HTMLAudioElement).currentTime = 8; });
+  await expect.poll(async () => (await audioState()).position).toBeLessThan(2);
+  await page.evaluate(() => window.providerTest.render({ position: 39.85, playing: true }));
+  await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().requests.filter(event => event === "playback:ended")))
+    .toHaveLength(1);
+  await audio.dispatchEvent("ended");
+  expect(await page.evaluate(() => window.providerTest.inspectHost().requests.filter(event => event === "playback:ended"))).toHaveLength(1);
+  await page.evaluate(() => window.providerTest.render({ position: 40, playing: true }));
+  await expect.poll(async () => (await audioState()).position).toBe(40);
+  expect((await audioState()).paused).toBe(true);
+  expect(await originalAudio!.evaluate(element => element === document.querySelector("audio"))).toBe(true);
+  await page.evaluate(() => window.providerTest.render({ trackId: "next-room-track", providerId: "W39xP", position: 5, playing: true }));
+  await expect.poll(() => Boolean(pendingSource)).toBe(true);
+  const departingAudio = await audio.elementHandle();
+  await page.evaluate(() => window.providerTest.unmount());
+  await pendingSource!.fulfill({ json: { url: playbackUrl("W39xP") } }).catch(() => {});
+  await expect(audio).toHaveCount(0);
+  expect(await departingAudio!.evaluate(element => ({ paused: (element as HTMLAudioElement).paused, source: element.getAttribute("src") })))
+    .toEqual({ paused: true, source: null });
+  expect(await page.evaluate(() => window.providerTest.inspectHost().requests.filter(event => event === "playback:ended"))).toHaveLength(1);
 });
 
 
@@ -123,26 +206,20 @@ test("listeners can change language and recover a SoundCloud player using Sync",
   await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
 });
 
-test("listeners can switch providers while old callbacks finish, then stop listening on departure", async ({ page }) => {
+test("listeners with a saved Apple preference hear the room source, can sync, and stop listening on departure", async ({ page }) => {
   await freezeProviderClock(page);
+  await page.addInitScript(() => {
+    localStorage.setItem("soundspin-user-settings", JSON.stringify({ playback: { preference: "apple" } }));
+  });
+  const appleRequests: string[] = [];
+  page.on("request", request => {
+    if (/\/api\/apple(?:\/|\?)|music\.apple\.com|js-cdn\.music\.apple\.com/.test(request.url())) appleRequests.push(request.url());
+  });
   await page.route("**/api/music/connections", route => route.fulfill({ json: {
     spotify: { configured: false, connected: false }, apple: { configured: true }
   } }));
   await page.goto("/tests/browser/playback/harness/provider-playback.html?host=1");
   await expect(page.getByTitle(/^SoundCloud player for /)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
-  await page.evaluate(() => window.providerTest.resolvePosition(10_000));
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.at(-1)?.method)).toBe("play");
-  await page.evaluate(() => window.providerTest.holdSoundCloudCallbacks());
-  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPaused)).toBe(1);
-  await page.evaluate(() => window.providerTest.useApple());
-  await expect.poll(() => page.evaluate(() => window.providerTest.calls.some(call => call.method === "setQueue"))).toBe(true);
-  await page.clock.runFor(750);
-  await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().state))
-    .toMatchObject({ providerName: "Apple Music", audioState: "playing" });
-  await expect(page.getByTitle(/^SoundCloud player for /)).toHaveCount(0);
-  await page.evaluate(() => window.providerTest.useRoomSource());
-  await expect.poll(() => page.evaluate(() => window.providerTest.widgetCreations)).toBe(2);
   await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
   await page.evaluate(() => {
     window.providerTest.resolvePosition(10_000);
@@ -151,20 +228,34 @@ test("listeners can switch providers while old callbacks finish, then stop liste
   });
   await expect.poll(() => page.evaluate(() => window.providerTest.inspectHost().state))
     .toMatchObject({ providerName: "SoundCloud", audioState: "playing" });
-  await expect(page.getByTitle(/^SoundCloud player for /)).toBeVisible();
-  await page.evaluate(() => window.providerTest.releaseSoundCloudCallbacks());
-  await page.clock.runFor(1);
-  expect(await page.evaluate(() => window.providerTest.inspectHost())).toMatchObject({
-    state: { providerName: "SoundCloud", audioState: "playing" }, requests: [], musicPlaying: false
+  const sync = page.getByRole("button", { name: "Sync playback with room", exact: true });
+  await sync.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPositions)).toBe(1);
+  await page.evaluate(() => {
+    window.providerTest.resolvePosition(10_000);
+    window.providerTest.reportSoundCloudProgress(10_000);
   });
+  expect(await page.evaluate(() => window.providerTest.inspectHost())).toMatchObject({
+    state: { providerName: "SoundCloud", audioState: "playing" }, requests: [], musicPlaying: false,
+    track: { id: "room-track", provider: "soundcloud", mappings: { apple: { providerId: "123456789" } } }
+  });
+  expect(await page.evaluate(() => window.providerTest.widgetCreations)).toBe(1);
+  expect(await page.evaluate(() => window.providerTest.calls.some(call => ["configure", "setQueue", "authorize"].includes(call.method)))).toBe(false);
+  expect(appleRequests).toEqual([]);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("soundspin-user-settings")!).playback.preference)).toBe("apple");
+  await expect(page.getByRole("button", { name: "Connect Apple Music", exact: true })).toHaveCount(0);
   const metrics = await page.evaluate(() => window.providerTest.metrics);
-  expect(metrics.filter(metric => metric.name === "playback.attempts").map(metric => metric.options.attributes?.provider))
-    .toEqual(["soundcloud", "apple", "soundcloud"]);
-  expect(metrics.filter(metric => metric.name === "playback.results").map(metric => metric.options.attributes?.outcome))
-    .toEqual(["canceled", "success", "success"]);
-  expect(metrics.filter(metric => metric.name === "playback.start.duration")).toHaveLength(2);
+  expect(metrics.filter(metric => metric.name === "playback.attempts").every(metric => metric.options.attributes?.provider === "soundcloud")).toBe(true);
+  expect(metrics.some(metric => metric.name === "playback.results" && metric.options.attributes?.outcome === "success")).toBe(true);
   expect(JSON.stringify(metrics)).not.toMatch(/provider-switch-room|listener-one|room-track|Regression track|initial-token/);
+  await page.evaluate(() => window.providerTest.holdSoundCloudCallbacks());
+  await expect.poll(() => page.evaluate(() => window.providerTest.pendingPaused)).toBe(1);
   await page.evaluate(() => window.providerTest.unmount());
   await expect(page.getByTitle(/^SoundCloud player for /)).toHaveCount(0);
-  expect(await page.evaluate(() => window.providerTest.inspectHost().musicPlaying)).toBe(false);
+  const callsAfterDeparture = await page.evaluate(() => window.providerTest.calls.length);
+  await page.evaluate(() => window.providerTest.releaseSoundCloudCallbacks());
+  await page.clock.runFor(1);
+  expect(await page.evaluate(() => window.providerTest.calls.length)).toBe(callsAfterDeparture);
+  expect(await page.evaluate(() => window.providerTest.inspectHost().requests)).toEqual([]);
 });

@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
-import { resolveTrackMappings } from "./provider-mappings.js";
+import { resolveProviderMappings, resolveTrackMappings } from "./provider-mappings.js";
+import { createServerProviderRegistry } from "./provider-registry.js";
+import type { CatalogTrack } from "./music.js";
 import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
 
-test("Mixcloud shows keep source playback without matching individual songs", async () => {
-  const unavailable = new Proxy({}, { get() { throw new Error("Song catalogs must not be accessed for a show"); } });
-  const result = await resolveTrackMappings({ provider: "mixcloud", providerId: "/dj/show/", title: "DJ show", artist: "DJ" },
-    unavailable as SpotifyApi, unavailable as AppleMusicApi);
-  assert.equal(result.canonicalId, "mixcloud:/dj/show/");
-  assert.equal(result.isrc, undefined);
-  assert.deepEqual(result.mappings, { mixcloud: { providerId: "/dj/show/", permalinkUrl: undefined, artworkUrl: undefined, matchMethod: "source" } });
+test("excluded providers cannot resolve sources or probe counterpart catalogs", async () => {
+  const unavailable = new Proxy({}, { get() { assert.fail("Excluded catalog was accessed"); } });
+  const spotify = { configured: false } as SpotifyApi;
+  for (const input of [
+    { provider: "mixcloud" as const, providerId: "/dj/show/", title: "DJ show" },
+    { provider: "apple" as const, providerId: "123", title: "Song" }
+  ]) await assert.rejects(resolveTrackMappings(input, spotify, unavailable as AppleMusicApi), /unavailable/);
+  const result = await resolveTrackMappings({ provider: "youtube", providerId: "abcdefghijk", title: "Video" }, spotify, unavailable as AppleMusicApi);
+  assert.deepEqual(Object.keys(result.mappings ?? {}), ["youtube"]);
 });
 
 test("disabled Spotify cannot resolve source tracks or probe counterpart catalogs", async () => {
@@ -27,40 +31,44 @@ test("disabled Spotify cannot resolve source tracks or probe counterpart catalog
 });
 
 test("conflicting catalog recordings keep source playback regardless of response order", async () => {
-  const input = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Recording", artist: "Artist", durationMs: 180_000 };
-  async function resolveWithFirst(first: "spotify" | "apple") {
-    const releases = {} as Record<"spotify" | "apple", () => void>;
-    const catalog = (provider: "spotify" | "apple") => ({
-      configured: true,
-      searchTracks: () => new Promise(resolve => {
+  const input = { provider: "soundcloud" as const, providerId: "soundcloud:tracks:123", title: "Recording", artist: "Artist", durationMs: 180_000 };
+  async function resolveWithFirst(first: "spotify" | "youtube") {
+    const releases = {} as Record<"spotify" | "youtube", () => void>;
+    const catalog = (provider: "spotify" | "youtube") => ({
+      configured: () => true,
+      findByIsrc: async () => undefined,
+      searchTracks: () => new Promise<CatalogTrack[]>(resolve => {
         releases[provider] = () => resolve([{ provider, id: `${provider}-track`, title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: `${provider}-isrc` }]);
       })
     });
-    const pending = resolveTrackMappings(input, catalog("spotify") as unknown as SpotifyApi, catalog("apple") as unknown as AppleMusicApi, undefined, { allowSpotify: true });
+    const providers = createServerProviderRegistry();
+    providers.spotify.catalog = catalog("spotify"); providers.youtube.catalog = catalog("youtube");
+    const pending = resolveProviderMappings(input, providers, undefined, { allowSpotify: true });
     releases[first]();
     await Promise.resolve();
-    releases[first === "spotify" ? "apple" : "spotify"]();
+    releases[first === "spotify" ? "youtube" : "spotify"]();
     return pending;
   }
   const first = await resolveWithFirst("spotify");
-  const retried = await resolveWithFirst("apple");
-  assert.equal(first.canonicalId, "youtube:abcdefghijk");
+  const retried = await resolveWithFirst("youtube");
+  assert.equal(first.canonicalId, "soundcloud:soundcloud:tracks:123");
   assert.equal(first.isrc, undefined);
-  assert.deepEqual(Object.keys(first.mappings ?? {}), ["youtube"]);
+  assert.deepEqual(Object.keys(first.mappings ?? {}), ["soundcloud"]);
   assert.deepEqual(retried, first);
 });
 
 test("verified source identity rejects a conflicting counterpart and accepts its corrected recording", async () => {
-  const input = { provider: "spotify" as const, providerId: "a".repeat(22), title: "Recording", artist: "Artist", durationMs: 180_000 };
-  const spotify = { configured: true, getTrack: async () => ({ provider: "spotify", id: input.providerId, title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: "USABC1234567" }) } as unknown as SpotifyApi;
+  const input = { provider: "youtube" as const, providerId: "abcdefghijk", title: "Recording", artist: "Artist", durationMs: 180_000 };
   let counterpartIsrc = "USABC7654321";
-  const apple = { configured: true, findByIsrc: async () => ({ provider: "apple", id: "123", title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: counterpartIsrc }) } as unknown as AppleMusicApi;
-  const first = await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
+  const spotify = { configured: true, findByIsrc: async () => ({ provider: "spotify", id: "a".repeat(22), title: input.title, artist: input.artist, durationMs: input.durationMs, isrc: counterpartIsrc }) } as unknown as SpotifyApi;
+  const providers = createServerProviderRegistry({ spotify });
+  const options = { allowSpotify: true, verifiedSource: { track: input, isrc: "USABC1234567", duration: { durationVerified: true } } };
+  const first = await resolveProviderMappings(input, providers, undefined, options);
   assert.equal(first.canonicalId, "isrc:USABC1234567");
-  assert.equal(first.mappings?.apple, undefined);
+  assert.equal(first.mappings?.spotify, undefined);
   counterpartIsrc = "USABC1234567";
-  const retried = await resolveTrackMappings(input, spotify, apple, undefined, { allowSpotify: true });
+  const retried = await resolveProviderMappings(input, providers, undefined, options);
   assert.equal(retried.canonicalId, first.canonicalId);
-  assert.equal(retried.mappings?.apple?.providerId, "123");
-  assert.equal(retried.mappings?.apple?.matchMethod, "isrc");
+  assert.equal(retried.mappings?.spotify?.providerId, "a".repeat(22));
+  assert.equal(retried.mappings?.spotify?.matchMethod, "isrc");
 });

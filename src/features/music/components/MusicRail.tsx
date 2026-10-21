@@ -31,7 +31,7 @@ import { resolveMusicLink } from '../resolve-music-link';
 import { detectMusicProvider, formatTrackDuration, parseMusicLink, providerLabel, readSearchProvider, SEARCH_PROVIDER_STORAGE_KEY, trackSourceUrl, type ProviderSearchResult } from "../music-presentation";
 import { socket } from "../../../lib/socket";
 import { requestSocketAction, type SocketReply } from "../../../lib/socket-request";
-import type { Provider, RoomSnapshot, Track } from "../../../types";
+import type { ArtworkSources, Provider, RoomSnapshot, Track } from "../../../types";
 import { allowedRoomProviders, roomAllowsProvider } from "../../../../shared/providers";
 import "../../../styles/music-qol.css";
 import "../../../styles/room-music.css";
@@ -65,6 +65,7 @@ interface TrackInput {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  artworkSources?: ArtworkSources;
   permalinkUrl?: string;
   durationMs?: number;
 }
@@ -83,7 +84,7 @@ const matchesResult = (track: Track | null, result: Pick<ProviderSearchResult, "
 
 function asTrackInput(result: ProviderSearchResult): TrackInput {
   return { provider: result.provider, providerId: result.id, title: result.title, artist: result.artist,
-    artworkUrl: result.thumbnail, permalinkUrl: result.permalinkUrl, durationMs: result.durationMs };
+    artworkUrl: result.thumbnail, artworkSources: result.artworkSources, permalinkUrl: result.permalinkUrl, durationMs: result.durationMs };
 }
 
 /** Reset personal rail state on room/account changes, without touching the player. */
@@ -760,10 +761,11 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
             const existing = rowStatus(result);
             const adding = pending?.kind === "add" && pending.key === key;
             const providerDisabled = !roomAllowsProvider(snapshot.room.settings, result.provider);
+            const sourceUrl = result.provider === "audius" ? trackSourceUrl({ provider: result.provider, providerId: result.id, permalinkUrl: result.permalinkUrl }) : undefined;
             return <div className="search-result-row" key={key}>
-              <span className={`search-provider-mark ${result.provider}`} aria-hidden="true">{result.provider === "soundcloud" ? "SC" : result.provider === "spotify" ? "S" : result.provider === "mixcloud" ? "M" : "▶"}</span>
-              <TrackArtwork track={{ provider: result.provider, providerId: result.id, artworkUrl: result.thumbnail }} compact />
-              <span className="search-result-copy"><strong>{result.title}</strong><small>{[result.artist, result.duration || formatTrackDuration(result.durationMs)].filter(Boolean).join(" · ")}</small>{((!inlineAddMusic && existing) || adding || providerDisabled) && <small className="music-result-confirmation">{providerDisabled ? t('rail.providerDisabled') : adding ? t('rail.adding') : existing}</small>}</span>
+              <span className={`search-provider-mark ${result.provider}`} style={result.provider === "audius" ? { background: "transparent", color: "var(--muted-foreground)" } : undefined} aria-hidden="true">{result.provider === "audius" ? <ProviderIcon provider="audius" size={14} /> : result.provider === "soundcloud" ? "SC" : result.provider === "spotify" ? "S" : result.provider === "mixcloud" ? "M" : "▶"}</span>
+              <TrackArtwork track={{ provider: result.provider, providerId: result.id, artworkUrl: result.thumbnail, artworkSources: result.artworkSources }} compact />
+              <span className="search-result-copy"><strong>{result.title}</strong><small>{sourceUrl && <><a href={sourceUrl} target="_blank" rel="noreferrer">{providerLabel(result.provider)}</a> · </>}{[result.artist, result.duration || formatTrackDuration(result.durationMs)].filter(Boolean).join(" · ")}</small>{((!inlineAddMusic && existing) || adding || providerDisabled) && <small className="music-result-confirmation">{providerDisabled ? t('rail.providerDisabled') : adding ? t('rail.adding') : existing}</small>}</span>
               <button type="button" className={existing ? "added" : ""} aria-label={existing ? t('rail.resultStatus', { title: result.title, status: existing }) : t('rail.addResult', { title: result.title })} title={providerDisabled ? t('rail.providerDisabled') : existing || (searching ? t('rail.waitForResults') : pending ? t('rail.waitForAction') : t('rail.addToPrivateQueue'))} disabled={!connected || Boolean(existing) || Boolean(pending) || searching || providerDisabled} onClick={() => void enqueueTrack(asTrackInput(result), "search")}>
                 {existing ? <Check size={15} /> : adding ? <Loader2 size={15} className="music-busy-icon" /> : <Plus size={15} />}{inlineAddMusic && <span>{existing || (adding ? t('rail.adding') : t('rail.add'))}</span>}
               </button>
@@ -820,7 +822,7 @@ function MusicRailContent({ snapshot, currentUserId, accessToken, setNotice, con
               <span className="history-song-drag" draggable title={t('nowPlaying.dragSongToChat')} onDragStart={event => { if (!writeSongDrag(event.dataTransfer, snapshot.room.id, songFromTrack(track))) event.preventDefault(); }}><TrackArtwork track={track} compact active={tab === "history"} /></span>
               <span className="rail-track-copy"><strong title={track.title}>{track.title}</strong><small title={[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}>{[track.artist, providerLabel(track.provider), formatTrackDuration(track.durationMs)].filter(Boolean).join(" · ")}</small>{providerDisabled && <small>{t('rail.providerDisabled')}</small>}{existing && <small className="music-result-confirmation">{existing}</small>}</span>
               <DropdownMenu><DropdownMenuTrigger ref={(button) => { if (button) historyButtonRefs.current.set(track.id, button); else historyButtonRefs.current.delete(track.id); }} render={<Button variant="ghost" size="icon" aria-label={t('rail.historyTrackActions', { title: track.title })} />}><MoreHorizontal size={16} /></DropdownMenuTrigger><DropdownMenuContent align="end" className="music-track-menu">
-                <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing) || providerDisabled} onClick={() => void enqueueTrack({ provider: track.provider, providerId: track.providerId, title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }, "history")}><Plus />{t('rail.addToQueue')}</DropdownMenuItem>
+                <DropdownMenuItem disabled={!connected || Boolean(pending) || Boolean(existing) || providerDisabled} onClick={() => void enqueueTrack(libraryTrack(track), "history")}><Plus />{t('rail.addToQueue')}</DropdownMenuItem>
                 <DropdownMenuItem disabled={!accessToken || libraryBusy || isSaved(track)} onClick={() => savePick(track)}><Bookmark />{isSaved(track) ? t('rail.savedFavorite') : t('rail.saveFavorite')}</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => openTrackDetails(track, historyButtonRefs.current.get(track.id) || queueButtonRefs.current.get(track.id))}><Info />{t('rail.trackDetails')}</DropdownMenuItem>
                 {sourceUrl && <DropdownMenuItem render={<a href={sourceUrl} target="_blank" rel="noreferrer" />}><ExternalLink />{t('rail.openOnProvider', { provider: providerLabel(track.provider) })}</DropdownMenuItem>}

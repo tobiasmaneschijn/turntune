@@ -279,16 +279,16 @@ test("disconnect queued during Spotify connection leaves no stored or cached cre
   await assert.rejects(accounts.getAccessToken("user"), /Connect Spotify first/);
 });
 
-test("Apple Music counterpart mapping rejects a different remix and accepts exact metadata", async () => {
+test("an enabled Spotify counterpart rejects a different remix and accepts exact metadata", async () => {
   const source = { provider: "soundcloud" as const, providerId: "soundcloud:tracks:123", title: "Midnight City (Club Remix)", artist: "M83", durationMs: 244_000 };
-  const candidate = { provider: "apple" as const, id: "base-recording", title: "Midnight City", artist: "M83", durationMs: 244_000 };
-  const spotify = { configured: false } as SpotifyApi;
-  const apple = { configured: true, searchTracks: async () => [candidate] } as unknown as AppleMusicApi;
-  assert.equal((await resolveTrackMappings(source, spotify, apple)).mappings?.apple, undefined);
-  const exactApple = { configured: true, searchTracks: async () => [{ ...candidate, id: "exact-remix", title: source.title }] } as unknown as AppleMusicApi;
-  const resolved = await resolveTrackMappings(source, spotify, exactApple);
-  assert.equal(resolved.mappings?.apple?.providerId, "exact-remix");
-  assert.equal(resolved.mappings?.apple?.matchMethod, "exact-metadata");
+  const candidate = { provider: "spotify" as const, id: "a".repeat(22), title: "Midnight City", artist: "M83", durationMs: 244_000 };
+  const apple = { configured: false } as AppleMusicApi;
+  const spotify = { configured: true, searchTracks: async () => [candidate] } as unknown as SpotifyApi;
+  assert.equal((await resolveTrackMappings(source, spotify, apple, undefined, { allowSpotify: true })).mappings?.spotify, undefined);
+  const exactSpotify = { configured: true, searchTracks: async () => [{ ...candidate, title: source.title }] } as unknown as SpotifyApi;
+  const resolved = await resolveTrackMappings(source, exactSpotify, apple, undefined, { allowSpotify: true });
+  assert.equal(resolved.mappings?.spotify?.providerId, candidate.id);
+  assert.equal(resolved.mappings?.spotify?.matchMethod, "exact-metadata");
 });
 
 test("an account suspended during Spotify code exchange never persists or caches the returned credentials", async () => {

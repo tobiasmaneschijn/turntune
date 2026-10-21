@@ -13,6 +13,27 @@ SDKs or credentials; browser and server implementations remain separate.
 room policy and fallback approval into a provider, mapping and execution mode.
 `use-playback-host.tsx` mounts that target and rejects callbacks from previous
 adapter generations. `NowPlaying` renders the resulting player and room controls.
+Browser registrations can declare `video: true` to render their existing adapter
+in the room's visible video surface. YouTube is the only current video provider.
+The workspace keeps that target mounted above the dock across viewport changes;
+providers without video reserve no space there.
+
+Audius uses the official REST API at `https://api.audius.co/v1` and native audio.
+It supports public, ungated tracks, keyword search and individual track URLs.
+Source verification rejects unavailable, unlisted, scheduled and restricted
+recordings; playback checks current room admission and provider policy again.
+There is no personal login or listener preference. Local volume, room pause,
+seek, drift correction and Sync recovery use the existing playback controls.
+Artwork retains size variants and approved mirror origins through queues, saved
+sets, profiles and chat. The shared artwork loader retries mirrors on failure.
+See the [Audius agent guide](https://audius.co/agents.md) and
+[developer docs](https://docs.audius.co/).
+
+Application availability lives in the shared provider definitions, separately
+from known provider IDs. Apple Music and Mixcloud are unavailable for 1.0 even
+when old room policy or credentials name them. Keep their saved data readable;
+gate provider work, admission and playback through the shared availability
+policy. See [1.0 provider scope](provider-scope.md).
 
 ## Add a provider
 
@@ -24,7 +45,9 @@ adapter generations. `NowPlaying` renders the resulting player and room controls
 2. Implement its SDK component under `src/features/playback/providers/`, then add a
    browser registration adapting `RegisteredPlaybackProps` to that component.
    Every registration receives the resolved mapping separately from the room's
-   original track; always report the room track UUID in measured status.
+   original track; always report the room track UUID in measured status. Declare
+   `video: true` when the adapter requires a visible video player; the host routes
+   the same instance to that surface without adding another playback owner.
 3. Add an entry to `PLAYBACK_PREFERENCES` when listeners can select it independently
    of the room source. The settings parser and preference buttons use this table;
    include translated option labels. Provider-specific device/consent controls

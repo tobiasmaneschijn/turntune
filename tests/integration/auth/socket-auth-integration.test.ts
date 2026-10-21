@@ -91,7 +91,17 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
   assert.equal(joined.users[0].name, "Verified listener");
   assert.equal((await spotifySearch(shortToken, "another-room")).status, 403);
   assert.equal((await spotifySearch(shortToken)).status, 503, "An admitted account reaches the unconfigured test catalog without provider traffic.");
+  const roomRequestCounts = async () => {
+    const diagnostics = once(server, "message", { signal: AbortSignal.timeout(3_000) });
+    server.send({ fixture: "metrics" });
+    return ((await diagnostics)[0] as { roomCommandRequests: { accessStatus: number; admission: number; writes: number } }).roomCommandRequests;
+  };
+  const beforeDjJoin = await roomRequestCounts();
   assert.deepEqual(await socket.timeout(3_000).emitWithAck("dj:join", undefined), { ok: true });
+  const afterDjJoin = await roomRequestCounts();
+  assert.equal(afterDjJoin.accessStatus - beforeDjJoin.accessStatus, 0, "A room command avoids a redundant restriction round trip before its fresh queued admission.");
+  assert.equal(afterDjJoin.admission - beforeDjJoin.admission, 1, "A room command still verifies fresh account, room and membership access before mutating.");
+  assert.equal(afterDjJoin.writes - beforeDjJoin.writes, 1, "The admitted command persists once before success.");
   const [reason] = await waitEvent("disconnect");
   assert.equal(reason, "io server disconnect");
   assert.equal(socket.connected, false);
@@ -132,11 +142,15 @@ test("the real socket enforces signed actor claims, expiry, refreshed identity a
     assert.deepEqual((await updated)[0], { fixtureUpdated: fixture });
   };
   await updateFixture("room", true);
+  assert.equal((await socket.timeout(3_000).emitWithAck("dj:join", undefined)).ok, false,
+    "The optimized room command rejects a newly disabled room before mutating.");
   const deniedRoom = await join();
   assert.equal(deniedRoom.ok, false);
   await updateFixture("room", false);
   assert.deepEqual(await join(), { ok: true });
   await updateFixture("account", true);
+  assert.equal((await socket.timeout(3_000).emitWithAck("dj:join", undefined)).ok, false,
+    "The optimized room command rejects the next action after account suspension.");
   const rejectedChat = await socket.timeout(3_000).emitWithAck('chat:message', {
     roomId: 'auth-room', message: { ...message, id: randomUUID(), content: 'Must not be saved' }
   });

@@ -12,8 +12,9 @@ const profile = { user_id: userId, display_name: "Verified listener", is_app_adm
 const metadata = () => ({ slug: state.id, state, name: state.name, owner_id: userId, is_public: true, access_mode: "public", password_hash: null, settings: state.settings });
 let accountSuspended = false, roomDisabled = false;
 const messages = new Map();
+const roomCommandRequests = { accessStatus: 0, admission: 0, writes: 0 };
 process.on("message", message => {
-  if (message?.fixture === 'metrics') { process.send?.({ metrics: runtimeMetrics.snapshot() }); return; }
+  if (message?.fixture === 'metrics') { process.send?.({ metrics: runtimeMetrics.snapshot(), roomCommandRequests }); return; }
   if (message?.fixture === "account") accountSuspended = message.disabled === true;
   else if (message?.fixture === "room") roomDisabled = message.disabled === true;
   else return;
@@ -46,11 +47,15 @@ globalThis.fetch = async (input, init) => {
     if (table === 'soundspin_load_room') return json(body.p_room_slug === state.id ? {
       ...metadata(), room_roles: [{ user_id: userId, role: 'owner' }], moderation: {}
     } : null);
-    if (table === 'soundspin_access_status') return json({
-      accounts: accountSuspended ? [] : body.p_accounts.filter(id => id === userId),
-      rooms: roomDisabled || accountSuspended ? [] : body.p_rooms.filter(slug => slug === state.id)
-    });
+    if (table === 'soundspin_access_status') {
+      roomCommandRequests.accessStatus++;
+      return json({
+        accounts: accountSuspended ? [] : body.p_accounts.filter(id => id === userId),
+        rooms: roomDisabled || accountSuspended ? [] : body.p_rooms.filter(slug => slug === state.id)
+      });
+    }
     if (table === 'soundspin_room_access') {
+      roomCommandRequests.admission++;
       const exists = body.p_room_slug === state.id;
       return json({ exists, isPublic: true, passwordHash: null, accessMode: 'public', settings: state.settings,
         role: body.p_actor === userId ? 'owner' : null, banned: false,
@@ -92,6 +97,7 @@ globalThis.fetch = async (input, init) => {
     return json(headers.get("accept")?.includes("vnd.pgrst.object") ? value : [value]);
   }
   if (table === "soundspin_rooms" && method === "PATCH") {
+    roomCommandRequests.writes++;
     const payload = JSON.parse(init?.body || await request?.text() || "{}");
     if (payload.state) state = payload.state;
     return json([metadata()]);

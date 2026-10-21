@@ -59,9 +59,15 @@
   border-radius: 0;
   overflow: hidden;
 }
+.open-room .open-room-stage { position: relative; display: flex; flex: 1; min-height: 0; }
 .open-room .open-room-body { flex: 1; min-height: 0; gap: 0; }
 .open-room .open-room-activity { overflow: auto; background: var(--background); }
 .open-room .open-room-activity-content { height: 100%; min-height: 0; }
+.open-room .playback-video-slot { position: absolute; inset: auto auto 0 0; width: var(--room-activity-width, 232px); }
+.open-room .playback-video-slot:empty { display: none; }
+.open-room .open-room-stage:has(.playback-video-slot:not(:empty)) { min-height: 200px; }
+.open-room .open-room-stage:has(.playback-video-slot:not(:empty)) .open-room-activity { padding-bottom: 200px; }
+.app-shell.open-room .open-room-workspace[data-keyboard-open=true]:has(.playback-video-slot:not(:empty)) { overflow-y: auto; }
 .open-room .open-room-workspace .room-panel { min-width: 0; padding: 0; border: 0; border-radius: 0; background: var(--background); }
 .open-room .open-room-resize { width: 1px; background: var(--border); }
 .open-room .open-room-resize::after { inset: 0 -3px; }
@@ -110,6 +116,9 @@
   .open-room .room-workspace-details > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .open-room .room-workspace-details .room-workspace-context { max-height: none; border-bottom: 0; }
   .open-room .open-room-body { display: block !important; position: relative; }
+  .open-room .open-room-stage { flex-direction: column; }
+  .open-room .open-room-stage:has(.playback-video-slot:not(:empty)) { min-height: 360px; }
+  .open-room .playback-video-slot { position: relative; inset: auto; flex: 0 0 auto; width: min(100%, 356px); }
   .open-room .open-room-activity, .open-room .open-room-resize { display: none !important; }
   .open-room .open-room-body > .room-panel { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; transform: none !important; }
   .open-room .open-room-body > [data-active=false] { visibility: hidden; pointer-events: none; opacity: 0; }
@@ -139,4 +148,5 @@
 @media (max-height: 440px) {
   .app-shell.open-room { overflow-y: auto; }
   .app-shell.open-room .open-room-workspace { min-height: 260px; }
+  .app-shell.open-room .open-room-workspace:has(.playback-video-slot:not(:empty)) { overflow-y: auto; }
 }

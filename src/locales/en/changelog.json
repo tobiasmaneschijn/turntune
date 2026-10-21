@@ -1,6 +1,35 @@
 {
   "releases": [
     {
+      "version": "0.2.0",
+      "date": "2026-10-21",
+      "title": "Audius and visible YouTube playback",
+      "sections": [
+        {
+          "title": "Added",
+          "items": [
+            "Audius search, track links, saved favorites and sets, and synchronized playback for public, ungated tracks. No Audius account is required.",
+            "Audius artwork recovers through alternate image servers when a cover cannot load."
+          ]
+        },
+        {
+          "title": "Improved",
+          "items": [
+            "YouTube video stays visible while opening the queue, room settings and other panels. Automatic playback waits until the video is visible.",
+            "Shorter room layouts keep panel controls reachable without losing chat drafts or playback."
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            "Apple Music and Mixcloud are unavailable for the 1.0 launch. Existing saved tracks remain intact.",
+            "Spotify access follows the room's administrator grant across search, playback, account connections and saved-set imports.",
+            "Room connections recover after signing in or refreshing credentials without stale callbacks changing the current session."
+          ]
+        }
+      ]
+    },
+    {
       "version": "0.1.12",
       "date": "2026-10-20",
       "title": "New design and shared chat",

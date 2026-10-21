@@ -73,8 +73,8 @@ const chatHistorySource: ChatHistorySource = {
   saveReaction: async () => {},
   loadMediaUrl: async () => "",
 };
-type TestState = { spotifyActive: boolean; setSpotifyEnabled: (enabled: boolean) => void; useSpotify: () => void; mounts: number; calls: string[]; requests: Array<{ event: string; payload: unknown }>; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void; setAllowedProviders: (providers: Provider[]) => void; useMixcloud: () => void; savedRoomSettings?: { allowedProviders: Provider[] } };
-const qa: TestState = { spotifyActive: false, setSpotifyEnabled: () => {}, useSpotify: () => {}, mounts: 0, calls: [], requests: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {}, setAllowedProviders: () => {}, useMixcloud: () => {} };
+type TestState = { spotifyActive: boolean; setSpotifyEnabled: (enabled: boolean) => void; useSpotify: () => void; mounts: number; calls: string[]; requests: Array<{ event: string; payload: unknown }>; pending?: (reply: SocketReply) => void; ready: boolean; actualPlaying?: boolean; buffering: boolean; failConnections: boolean; status?: (value: PlayerStatus) => void; error?: (text: string) => void; update: () => void; setVotes: (votes: Record<string, -1 | 1>) => void; setAllowedProviders: (providers: Provider[]) => void; useSoundCloud: () => void; savedRoomSettings?: { allowedProviders: Provider[] } };
+const qa: TestState = { spotifyActive: false, setSpotifyEnabled: () => {}, useSpotify: () => {}, mounts: 0, calls: [], requests: [], ready: true, actualPlaying: undefined, buffering: false, failConnections: false, update: () => {}, setVotes: () => {}, setAllowedProviders: () => {}, useSoundCloud: () => {} };
 declare global { interface Window { playerQolTest: TestState } }
 window.playerQolTest = qa;
 const originalFetch = globalThis.fetch;
@@ -92,8 +92,8 @@ function FixturePlayer({ playback, onStatus, onError, syncRevision, volume }: Re
     onStatus({ ready: qa.ready, buffering: qa.buffering, playing: qa.actualPlaying, currentTime: playback.position + (playback.playing ? Math.max(0, Date.now() - playback.updatedAt) / 1000 : 0), duration: 180, trackId: playback.track?.id });
     if (polished && new URLSearchParams(location.search).has("error")) queueMicrotask(() => onError?.("Could not start playback."));
   }, [playback.track?.id, playback.playing, playback.updatedAt, syncRevision, onStatus]);
-  return playback.track?.provider === "mixcloud"
-    ? <div className="mixcloud-shell"><iframe title="Fixture Mixcloud player" style={{ width: "100%", height: 120, border: 0 }} /><button type="button">Play Mixcloud</button></div>
+  return playback.track?.provider === "soundcloud"
+    ? <div className="soundcloud-shell"><iframe title="Fixture SoundCloud player" style={{ width: "100%", height: 120, border: 0 }} /></div>
     : <div className="youtube-shell"><iframe title="Fixture YouTube player" style={{ width: "100%", height: "100%", border: 0 }} /><span>Fixture provider · volume {volume}</span></div>;
 }
 function SpotifyFixture({ playback, onStatus }: React.ComponentProps<typeof FixturePlayer>) {
@@ -101,7 +101,7 @@ function SpotifyFixture({ playback, onStatus }: React.ComponentProps<typeof Fixt
   useEffect(() => { onStatus({ ready: true, buffering: false, currentTime: playback.position, duration: 180, trackId: playback.track?.id }); }, [playback, onStatus]);
   return null;
 }
-const adapters = { youtube: FixturePlayer, mixcloud: FixturePlayer, spotify: SpotifyFixture };
+const adapters = { youtube: FixturePlayer, soundcloud: FixturePlayer, spotify: SpotifyFixture };
 const requestAction = (event: string, payload: unknown, reply: (result: SocketReply) => void) => { qa.calls.push(event); qa.requests.push({ event, payload }); qa.pending = reply; };
 function ReadyDialog({ onClose }: { onClose: () => void }) { return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}><DialogContent><DialogTitle>Deferred panel</DialogTitle><DialogDescription>Ready</DialogDescription></DialogContent></Dialog>; }
 let releaseModule: () => void;
@@ -133,7 +133,7 @@ function Harness() {
   qa.useSpotify = () => { setSettings(value => ({ ...value, playback: { ...value.playback, preference: "spotify-web" } })); setRoom(value => ({ ...value, room: { ...value.room, playback: { ...value.room.playback, track: { ...track, mappings: { spotify: { providerId: "fixture-spotify", matchMethod: "isrc" } } } } } })); };
   qa.update = () => setRevision(value => value + 1);
   qa.setAllowedProviders = allowedProviders => setRoom(value => ({ ...value, room: { ...value.room, settings: { ...value.room.settings, allowedProviders } } }));
-  qa.useMixcloud = () => { setSettings(value => ({ ...value, playback: { ...value.playback, preference: "source", defaultVolume: 0 } })); setRoom(value => ({ ...value, room: { ...value.room, playback: { ...value.room.playback, track: { ...track, provider: "mixcloud", providerId: "/artist/show/", permalinkUrl: "https://www.mixcloud.com/artist/show/" }, updatedAt: Date.now() } } })); };
+  qa.useSoundCloud = () => { setSettings(value => ({ ...value, playback: { ...value.playback, preference: "source", defaultVolume: 0 } })); setRoom(value => ({ ...value, room: { ...value.room, playback: { ...value.room.playback, track: { ...track, provider: "soundcloud", providerId: "soundcloud:tracks:123", permalinkUrl: "https://soundcloud.com/artist/track" }, updatedAt: Date.now() } } })); };
   qa.setVotes = votes => setRoom(value => ({ ...value, users: [user, ...Object.keys(votes).map(id => ({ id, name: id, avatarSeed: id }))], room: { ...value.room, vibe: { trackId: value.room.playback.track!.id, votes } } }));
   return <main className={polished ? "app-shell open-room" : "app-shell"}>
     {polished ? <RoomHeader unified roomName={room.room.name} roomSlug={room.room.id} listenerCount={room.users.length} currentUser={user} onHome={() => {}} onSettings={() => setSettingsOpen(true)} onProfile={() => {}} onResetLayout={() => {}} onNotice={() => {}} onOpenQueue={openQueue} onOpenRoomDetails={() => setMobileDetailsOpen(true)} connected={connected} participants={room.users} ownerUserId={user.id} djUserId={user.id} onOpenProfile={() => {}} /> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: 8 }}>

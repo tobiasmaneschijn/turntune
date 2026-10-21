@@ -1,4 +1,4 @@
-import { MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "../../../shared/provider-definitions.js";
+import { AVAILABLE_MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "../../../shared/provider-definitions.js";
 import { providerSignal } from "../../integrations/provider-http.js";
 import { telemetry } from "../../observability/index.js";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
@@ -9,14 +9,14 @@ import { assertProviderAccess, createServerProviderRegistry, type ServerProvider
 
 export type { TrackInput } from "./provider-registry.js";
 interface MappingOptions { allowSpotify?: boolean; verifiedSource?: VerifiedProviderSource }
-type MappingResult = Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>;
+type MappingResult = Pick<Track, "canonicalId" | "isrc" | "mappings"> & Partial<Pick<Track, "title" | "artist" | "artworkUrl" | "artworkSources" | "permalinkUrl" | "durationMs" | "durationVerified" | "isLive">>;
 
 function mapping(track: CatalogTrack, matchMethod: NonNullable<ProviderTrackMapping["matchMethod"]>): ProviderTrackMapping {
-  return { providerId: track.id, permalinkUrl: track.permalinkUrl, artworkUrl: track.thumbnail, storefront: track.storefront, matchMethod };
+  return { providerId: track.id, permalinkUrl: track.permalinkUrl, artworkUrl: track.thumbnail, ...(track.artworkSources ? { artworkSources: track.artworkSources } : {}), storefront: track.storefront, matchMethod };
 }
 
 function sourceMapping(track: TrackInput): ProviderTrackMapping {
-  return { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl, matchMethod: "source" };
+  return { providerId: track.providerId, permalinkUrl: track.permalinkUrl, artworkUrl: track.artworkUrl, ...(track.artworkSources ? { artworkSources: track.artworkSources } : {}), matchMethod: "source" };
 }
 
 export async function resolveProviderMappings(input: TrackInput, providers: ServerProviderRegistry, signal?: AbortSignal, options: MappingOptions = {}): Promise<MappingResult> {
@@ -26,6 +26,7 @@ export async function resolveProviderMappings(input: TrackInput, providers: Serv
   let source = options.verifiedSource;
   const sourceProvider = providers[input.provider];
   if (!sourceProvider) throw new Error("This playback provider is unavailable.");
+  if (!source && sourceProvider.requiresVerifiedSource) source = await sourceProvider.resolveSource(input, signal);
   const mappings: NonNullable<Track["mappings"]> = { [input.provider]: source?.mapping ?? sourceMapping(source?.track ?? input) };
   // Shows do not identify a single recording and cannot acquire song counterparts.
   if (!PROVIDER_DEFINITIONS[input.provider].catalogMatching) {
@@ -41,7 +42,7 @@ export async function resolveProviderMappings(input: TrackInput, providers: Serv
   mappings[input.provider] = source?.mapping ?? sourceMapping(track);
   const sourceIsrc = source?.isrc;
   const query = [track.artist, track.title].filter(Boolean).join(" ");
-  const counterparts = await Promise.all(MUSIC_PROVIDERS.map(async provider => {
+  const counterparts = await Promise.all(AVAILABLE_MUSIC_PROVIDERS.map(async provider => {
     const catalog = providers[provider]?.catalog;
     if (provider === input.provider || !catalog || PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant && !options.allowSpotify || !catalog.configured()) return undefined;
     try {

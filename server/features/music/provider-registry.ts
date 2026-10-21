@@ -1,4 +1,4 @@
-import { PROVIDER_DEFINITIONS, type Provider } from "../../../shared/provider-definitions.js";
+import { isProviderAvailable, PROVIDER_DEFINITIONS, type Provider } from "../../../shared/provider-definitions.js";
 import type { ProviderTrackMapping, Track } from "../../types.js";
 import { serverT } from "../../lib/i18n.js";
 import { providerJson } from "../../integrations/provider-http.js";
@@ -6,6 +6,7 @@ import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
 import type { SoundCloudApi } from "../../integrations/soundcloud.js";
 import { MixcloudApi } from "../../integrations/mixcloud.js";
+import type { AudiusApi } from "../../integrations/audius.js";
 import type { CatalogTrack } from "./music.js";
 
 export interface TrackInput {
@@ -14,6 +15,7 @@ export interface TrackInput {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  artworkSources?: CatalogTrack["artworkSources"];
   permalinkUrl?: string;
   durationMs?: number;
 }
@@ -28,6 +30,8 @@ export interface VerifiedProviderSource {
 
 export interface ServerMusicProvider {
   resolveSource: (input: TrackInput, signal: AbortSignal) => Promise<VerifiedProviderSource>;
+  /** Reject unavailable recordings before admitting a new queue item. */
+  requiresVerifiedSource?: boolean;
   verifyDuration?: (input: TrackInput, signal: AbortSignal) => Promise<VerifiedDuration>;
   catalog?: {
     configured: () => boolean;
@@ -41,6 +45,7 @@ export interface ServerProviderOptions {
   spotify?: Pick<SpotifyApi, "configured" | "getTrack" | "findByIsrc" | "searchTracks">;
   appleMusic?: Pick<AppleMusicApi, "configured" | "getTrack" | "findByIsrc" | "searchTracks">;
   soundCloud?: Pick<SoundCloudApi, "configured" | "resolveTrack">;
+  audius?: Pick<AudiusApi, "configured" | "getTrack">;
   mixcloud?: Pick<MixcloudApi, "resolveTrack">;
   youtubeApiKey?: string;
   fetchImpl?: typeof fetch;
@@ -48,9 +53,9 @@ export interface ServerProviderOptions {
 
 function verifiedSource(input: TrackInput, source: Omit<CatalogTrack, "provider">): VerifiedProviderSource {
   return {
-    track: { ...input, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, permalinkUrl: source.permalinkUrl, durationMs: source.durationMs },
+    track: { ...input, title: source.title, artist: source.artist, artworkUrl: source.thumbnail, ...(source.artworkSources ? { artworkSources: source.artworkSources } : {}), permalinkUrl: source.permalinkUrl, durationMs: source.durationMs },
     isrc: source.isrc,
-    mapping: { providerId: source.id, permalinkUrl: source.permalinkUrl, artworkUrl: source.thumbnail, storefront: source.storefront, matchMethod: "source" },
+    mapping: { providerId: source.id, permalinkUrl: source.permalinkUrl, artworkUrl: source.thumbnail, ...(source.artworkSources ? { artworkSources: source.artworkSources } : {}), storefront: source.storefront, matchMethod: "source" },
     duration: { durationMs: source.durationMs, durationVerified: Boolean(source.durationMs), isLive: false }
   };
 }
@@ -64,7 +69,7 @@ export function parseIsoDuration(value: string): number | undefined {
 
 /** SDK credentials and provider-specific source rules stay behind this registry. */
 export function createServerProviderRegistry(options: ServerProviderOptions = {}): ServerProviderRegistry {
-  const { spotify, appleMusic, soundCloud, youtubeApiKey } = options;
+  const { spotify, appleMusic, soundCloud, audius, youtubeApiKey } = options;
   const fetcher = options.fetchImpl ?? fetch;
   const mixcloud = options.mixcloud ?? new MixcloudApi(fetcher);
   const youtubeDuration = async (input: TrackInput, signal: AbortSignal): Promise<VerifiedDuration> => {
@@ -94,6 +99,12 @@ export function createServerProviderRegistry(options: ServerProviderOptions = {}
     if (source.id !== input.providerId) throw new Error(serverT("this_mixcloud_link_now_resolves_to_a_different_show"));
     return verifiedSource(input, source);
   };
+  const resolveAudius = async (input: TrackInput, signal: AbortSignal) => {
+    if (!audius?.configured) throw new Error("Audius is not configured.");
+    const source = await audius.getTrack(input.providerId, signal);
+    if (source.id !== input.providerId) throw new Error("This Audius source identifies a different recording.");
+    return verifiedSource(input, source);
+  };
   return {
     youtube: {
       resolveSource: async (input, signal) => {
@@ -110,6 +121,7 @@ export function createServerProviderRegistry(options: ServerProviderOptions = {}
       verifyDuration: youtubeDuration
     },
     soundcloud: { resolveSource: resolveSoundCloud, verifyDuration: async (input, signal) => (await resolveSoundCloud(input, signal)).duration },
+    audius: { requiresVerifiedSource: true, resolveSource: resolveAudius, verifyDuration: async (input, signal) => (await resolveAudius(input, signal)).duration },
     mixcloud: { resolveSource: resolveMixcloud, verifyDuration: async (input, signal) => (await resolveMixcloud(input, signal)).duration },
     spotify: {
       resolveSource: async (input, signal) => {
@@ -137,5 +149,6 @@ export function createServerProviderRegistry(options: ServerProviderOptions = {}
 }
 
 export function assertProviderAccess(provider: Provider, allowSpotify = false) {
+  if (!isProviderAvailable(provider)) throw new Error(`${PROVIDER_DEFINITIONS[provider].label} is unavailable.`);
   if (PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant && !allowSpotify) throw new Error(serverT("spotify_is_disabled_in_this_room"));
 }

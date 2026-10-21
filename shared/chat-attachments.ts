@@ -1,5 +1,6 @@
 import { MUSIC_PROVIDERS, type Provider } from './provider-definitions.js'
 import { normalizeChatTriviaRound, type ChatTriviaRound } from './chat-trivia.js'
+import { normalizeArtworkSources, type ArtworkSources } from './artwork.js'
 
 /** Public room music only. Private waiting queues are never attachment sources. */
 export interface ChatSongAttachment {
@@ -9,6 +10,7 @@ export interface ChatSongAttachment {
   title: string
   artist?: string
   artworkUrl?: string
+  artworkSources?: ArtworkSources
   permalinkUrl?: string
   durationMs?: number
   positionSeconds?: number
@@ -59,10 +61,12 @@ function publicUrl(value: unknown): string | undefined {
 export function normalizeChatSong(value: unknown): ChatSongAttachment | undefined {
   const song = object(value)
   if (!song || !text(song.id, 100) || !MUSIC_PROVIDERS.includes(song.provider as Provider) || !text(song.providerId, 2048) || !text(song.title, 500)) return undefined
+  const artworkSources = normalizeArtworkSources(song.artworkSources)
   return {
     id: song.id, provider: song.provider as Provider, providerId: song.providerId, title: song.title,
     artist: text(song.artist, 500) ? song.artist : undefined,
     artworkUrl: publicUrl(song.artworkUrl), permalinkUrl: publicUrl(song.permalinkUrl),
+    ...(artworkSources ? { artworkSources } : {}),
     durationMs: typeof song.durationMs === 'number' && Number.isFinite(song.durationMs) && song.durationMs >= 0 && song.durationMs <= 7 * 86400_000 ? song.durationMs : undefined,
     positionSeconds: typeof song.positionSeconds === 'number' && Number.isFinite(song.positionSeconds) && song.positionSeconds >= 0 && song.positionSeconds <= 7 * 86400 ? song.positionSeconds : undefined,
   }

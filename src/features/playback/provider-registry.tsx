@@ -5,12 +5,13 @@ import type { Provider, ProviderTrackMapping } from "../../types";
 import type { SoundSpinUserSettings } from "../settings/user-settings";
 import type { CheckpointProviderPlaybackProps } from "./provider-playback";
 import { AppleMusicPlayer } from "./providers/AppleMusicPlayer";
+import { AudiusPlayer } from "./providers/AudiusPlayer";
 import { MixcloudPlayer } from "./providers/MixcloudPlayer";
 import { SoundCloudPlayer } from "./providers/SoundCloudPlayer";
 import { SpotifyPlayer } from "./providers/SpotifyPlayer";
 import { YouTubePlayer } from "./providers/YouTubePlayer";
 
-const nativePlayers = { youtube: YouTubePlayer, soundcloud: SoundCloudPlayer, spotify: SpotifyPlayer, apple: AppleMusicPlayer, mixcloud: MixcloudPlayer };
+const nativePlayers = { youtube: YouTubePlayer, soundcloud: SoundCloudPlayer, spotify: SpotifyPlayer, apple: AppleMusicPlayer, mixcloud: MixcloudPlayer, audius: AudiusPlayer };
 export type ProviderPlayerOverrides = Partial<{ [P in keyof typeof nativePlayers]: ComponentType<ComponentProps<(typeof nativePlayers)[P]>> }>;
 
 export interface ProviderConnection {
@@ -43,6 +44,8 @@ export interface RegisteredPlaybackProps extends CheckpointProviderPlaybackProps
 
 interface PlaybackProviderRegistration {
   Player: ComponentType<RegisteredPlaybackProps>;
+  /** Render this adapter's player in the room's visible video surface. */
+  video?: boolean;
   stageClassName?: string;
   artworkPreview?: boolean;
   /** Session players can remain mounted through an empty queue without recreating the SDK. */
@@ -62,7 +65,11 @@ function SpotifyAdapter(props: RegisteredPlaybackProps) {
 }
 
 export const PLAYBACK_PROVIDER_REGISTRY = {
-  youtube: { Player: (props) => createElement(props.players?.youtube || YouTubePlayer, props) },
+  youtube: { Player: (props) => createElement(props.players?.youtube || YouTubePlayer, props), video: true },
+  audius: {
+    Player: (props) => createElement(props.players?.audius || AudiusPlayer, props),
+    connectionState: (connections) => connections.loaded && !connections.providers.audius?.configured ? "unconfigured" : undefined
+  },
   soundcloud: { Player: (props) => createElement(props.players?.soundcloud || SoundCloudPlayer, props) },
   mixcloud: { Player: (props) => createElement(props.players?.mixcloud || MixcloudPlayer, props), stageClassName: "has-mixcloud" },
   apple: {
