@@ -78,15 +78,15 @@ project or guessing IDs.
   and the same append-only `supabase/migrations` chain. Keep Dokploy automatic
   deployment disabled; deploy manually only after that commit's migrations and
   CI checks succeed. Keep `develop` as the persistent staging branch after
-  promotion; do not delete it after promoting changes to `master`.
+  merging changes into `master`.
 - Primary deployment origins are `https://beta.turntune.app` for staging and
   `https://turntune.app` for production. Verify each configured domain and keep
   `APP_ORIGIN`, Supabase Auth's Site URL and the exact `/update-password` redirect
   allowlist entry aligned with that environment's primary origin.
 - Follow `docs/self-hosting.md`, `docs/github-deployments.md`, and
   `docs/production-hardening.md` for configuration and release gates. Apply pending
-  database migrations before deploying the server. Deploy to isolated staging
-  and complete the required evidence review before opening public ingress.
+  database migrations before deploying the server. Use isolated staging for
+  hosting and recovery checks before opening public ingress.
 - Keep exactly **one active Node instance per environment**, including during
   deploys and rollbacks. Stop the target service and verify its process exited
   before starting its replacement.
@@ -108,23 +108,19 @@ project or guessing IDs.
   port labels after deployment, even when the saved domain configuration is correct.
 - Prefer the manual **Deploy** GitHub workflow described in
   `docs/github-deployments.md`. Select **Use workflow from** (`develop` for
-  staging, `master` for production), the matching **Target**, and **Confirm
-  deployment** (`confirm_deployment`). GitHub's native workflow dispatch write
-  permission authorizes the run. The workflow supplies the revision, builds and
-  scans the staging image, and records evidence automatically. Production finds
-  the latest successful manual staging **Deploy** run with the same Git tree as
-  the selected `master` commit, verifies its immutable image, current attempt,
-  artifacts and runtime checks, and promotes the digest unchanged. Start a fresh
-  production **Run workflow** action after that staging attempt completes;
-  starting a queued job or rerunning an earlier dispatch does not establish a
-  later confirmation. Keep the CI, migration and single-instance gates. For an
-  explicitly requested source build with `compose.yaml`, set `SOUNDSPIN_REVISION`
-  to the actual checked-out commit
-  SHA for `BUILD_REVISION`; this label alone does not pin the source. Record the
-  resulting image digest and migration history with the release evidence.
+  staging, `master` for production) and the matching **Target**. GitHub's
+  repository write access and environment permissions authorize the run. One job
+  checks CI and migrations for the selected commit, builds and scans its image,
+  and deploys that immutable GHCR digest to the selected environment. Each target
+  builds its own selected branch. Keep the CI, migration and single-instance
+  gates. Report the revision, digest, environment and runtime checks in the job
+  summary. For an explicitly requested source build with `compose.yaml`, set
+  `SOUNDSPIN_REVISION` to the actual checked-out commit SHA for `BUILD_REVISION`;
+  this label alone does not pin the source. Record the
+  resulting image digest and migration history with the deployment result.
   Deployment is asynchronous: record the deployment ID, check status and logs
-  until completion, wait for container health
-  and proxy registration, then verify `/api/health` and `/api/ready` through the
+  until completion, wait for container health and proxy registration, then verify
+  `/api/health` and `/api/ready` through the
   intended ingress. Verify Socket.IO polling and a real WebSocket upgrade, hostile
   Origin rejection and missing namespace-credential rejection. Traefik forwards
   secure WebSocket upgrades as `wss`; preserve the app's trusted-peer, GET,

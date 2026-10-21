@@ -3,10 +3,9 @@ import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { createDokploy, createGitHub } from './clients.mjs';
+import { createDokploy } from './clients.mjs';
 import { createImageManifest } from './image-manifest.mjs';
 import { inspectTarget, releaseContext, runPreflight, targetOrigins } from './preflight.mjs';
-import { verifyPromotion } from './promotion.mjs';
 import { verifyIngress } from './verify-ingress.mjs';
 
 const imageLine = '    image: ${SOUNDSPIN_IMAGE:?Set an immutable GHCR image}';
@@ -88,25 +87,21 @@ function verifyRunningContainer(container, manifest, target) {
 
 /** Stop, verify exit, replace with an immutable image, then verify the ingress. */
 export async function deployRelease({
-  dokploy, github, manifest, template, promotion, env = process.env,
+  dokploy, manifest, template, env = process.env,
   context = releaseContext(env), preflight = runPreflight, inspect = inspectTarget,
   verify = verifyIngress, wait = pause, attempts = 120, intervalMs = 5_000,
   root = process.cwd(), save = async (path, value) => writeFile(path, JSON.stringify(value, null, 2) + '\n'),
 }) {
   let phase = 'validation';
   let deploymentId;
-  const evidenceBase = { schemaVersion: 1, environment: context.environment, githubRunId: String(env.GITHUB_RUN_ID), githubRunAttempt: String(env.GITHUB_RUN_ATTEMPT), revision: context.sha };
+  const runId = env.GITHUB_RUN_ID || manifest?.runId;
+  const runAttempt = env.GITHUB_RUN_ATTEMPT || manifest?.runAttempt;
+  const evidenceBase = { schemaVersion: 1, environment: context.environment, githubRunId: String(runId), githubRunAttempt: String(runAttempt), revision: context.sha };
   try {
-    if (!context.target || !/^[1-9]\d*$/.test(String(env.GITHUB_RUN_ID || '')) || !/^[1-9]\d*$/.test(String(env.GITHUB_RUN_ATTEMPT || ''))) throw new Error('Deployment requires its GitHub Actions run identity and environment.');
+    if (!context.target) throw new Error('Select a deployment environment.');
     const expected = await createImageManifest({ ...manifest, root });
     if (!isDeepStrictEqual(manifest, expected) || manifest.repository !== context.repository) throw new Error('The release image manifest does not match the checked-out lockfile and migrations.');
-    if (context.environment === 'staging') {
-      if (manifest.branch !== 'develop' || manifest.revision !== context.sha || manifest.runId !== String(env.GITHUB_RUN_ID) || manifest.runAttempt !== String(env.GITHUB_RUN_ATTEMPT)) throw new Error('Staging must deploy the image built by this exact workflow run and attempt.');
-    } else {
-      if (!promotion || promotion.revision !== context.sha || promotion.image !== manifest.image || !isDeepStrictEqual(promotion.manifest, manifest)) throw new Error('Production requires the verified staging promotion record.');
-      const rechecked = await verifyPromotion({ github, repository: context.repository, sha: context.sha, stagingRunUrl: promotion.stagingRun?.url, loadArtifact: async () => ({ 'deployment-evidence.json': promotion.evidence }) });
-      if (!isDeepStrictEqual(rechecked.manifest, manifest) || rechecked.treeSha !== promotion.treeSha) throw new Error('The production promotion record changed.');
-    }
+    if (manifest.branch !== context.branch || manifest.revision !== context.sha) throw new Error('The release image must match the selected branch and revision.');
     if (typeof template !== 'string' || template.split(imageLine).length !== 2 || /^\s*build:/m.test(template)) throw new Error('The release Compose template must contain one immutable image slot and no build command.');
     const composeFile = template.replace(imageLine, `    image: ${manifest.image}`);
     let initial = await inspect(dokploy, context, env.SUPABASE_PROJECT_REF);
@@ -118,15 +113,12 @@ export async function deployRelease({
     let proxyAddress = await observeProxy(dokploy, initial.compose, initial.runtime);
     const previous = await observeTargets(dokploy, initial.compose);
     assertSingleInstance(previous);
-    // Recheck CI/migrations after approvals and artifact preparation. Read the
+    // Recheck CI/migrations after building the image. Read the
     // source again immediately before the first live mutation.
-    const gates = await preflight('deploy', env);
+    const gates = await preflight(env);
     initial = await inspect(dokploy, context, env.SUPABASE_PROJECT_REF);
     if (!isDeepStrictEqual(sourceSnapshot(initial.compose), original)) throw new Error('Dokploy configuration changed during release preparation; review it and retry.');
     if (!gates?.gates) throw new Error('Release preflight did not return verified CI and migration gates.');
-    if (context.environment === 'production' && (gates.gates.authorization?.stagingRunId !== promotion.stagingRun.id
-      || gates.gates.authorization?.stagingRunAttempt !== promotion.stagingRun.attempt
-      || gates.gates.authorization?.stagingRunUrl !== promotion.stagingRun.url)) throw new Error('The selected staging deployment changed during release preparation; start a new Deploy workflow.');
     const compose = initial.compose;
     const oldIds = new Set(previous.map(item => item.Id));
     phase = 'stopping';
@@ -149,7 +141,7 @@ export async function deployRelease({
     if (!isDeepStrictEqual(sourceSnapshot(updated.compose), { ...original, sourceType: 'raw', composeFile, autoDeploy: false })) throw new Error('Dokploy did not save the exact immutable release configuration.');
     if ((await observeTargets(dokploy, compose)).some(active)) throw new Error('An application process appeared before replacement; refusing to deploy.');
     phase = 'deployment';
-    const title = `GitHub ${env.GITHUB_RUN_ID} attempt ${env.GITHUB_RUN_ATTEMPT}`;
+    const title = `GitHub ${runId} attempt ${runAttempt}`;
     const oldDeployments = new Set(initial.deployments.map(item => item.deploymentId));
     await dokploy.call('compose.deploy', { composeId: compose.composeId, title, description: `Revision ${context.sha}; image ${manifest.image}` }, 'POST');
     let complete = false;
@@ -209,9 +201,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const env = process.env;
     const manifest = JSON.parse(await readFile('release-image.json', 'utf8'));
     const template = await readFile('compose.release.yaml', 'utf8');
-    const promotion = env.DEPLOY_ENVIRONMENT === 'production' ? JSON.parse(await readFile('promotion.json', 'utf8')) : undefined;
     const dokploy = createDokploy({ url: env.DOKPLOY_API_URL || env.DOKPLOY_API, key: env.DOKPLOY_API_KEY });
-    const evidence = await deployRelease({ dokploy, github: createGitHub(env.GH_TOKEN), manifest, template, promotion, env });
-    if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nDeployed **${evidence.environment}**.\n\nRevision: \`${evidence.revision}\`\n\nImage: \`${evidence.image}\`\n\nIngress and single-instance checks passed.\n`);
+    const evidence = await deployRelease({ dokploy, manifest, template, env });
+    if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nDeployed **${evidence.environment}**.\n\nRevision: \`${evidence.revision}\`\n\nImage: \`${evidence.image}\`\n\nDokploy deployment: \`${evidence.deploymentId}\`\n\nIngress and single-instance checks passed.\n`);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

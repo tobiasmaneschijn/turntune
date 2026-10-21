@@ -2,7 +2,6 @@ import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { createGitHub, createDokploy } from './clients.mjs';
 import { verifyGitHubGates } from './github-gates.mjs';
-import { verifyDeploymentDispatch, verifyStagingForDispatch } from './dispatch.mjs';
 
 export const targets = JSON.parse(await readFile(new URL('../../deploy/targets.json', import.meta.url), 'utf8'));
 
@@ -14,14 +13,6 @@ export function releaseContext(env = process.env) {
   if (environment && (!targets[environment] || targets[environment].branch !== branch)) throw new Error('Staging requires develop; production requires master.');
   if (!['develop', 'master'].includes(branch) || env.GITHUB_REF !== `refs/heads/${branch}`) throw new Error('Only the develop and master branches may release.');
   return { repository: env.GITHUB_REPOSITORY, sha: env.GITHUB_SHA, branch, environment, target: targets[environment] };
-}
-
-export async function verifyEnvironmentProtection(github, repository, environment) {
-  const [owner, repo] = repository.split('/');
-  const { data } = await github.request('GET /repos/{owner}/{repo}/environments/{environment_name}', { owner, repo, environment_name: environment });
-  if (!data.deployment_branch_policy?.custom_branch_policies) throw new Error('Configure an explicit deployment branch policy for the GitHub Environment.');
-  const { data: policies } = await github.request('GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies', { owner, repo, environment_name: environment, per_page: 100 });
-  if (policies.total_count !== 1 || policies.branch_policies?.[0]?.name !== targets[environment].branch || policies.branch_policies[0].type !== 'branch') throw new Error('The GitHub Environment must allow only its assigned release branch.');
 }
 
 export function parseRuntime(value = '') {
@@ -84,34 +75,22 @@ export async function inspectTarget(dokploy, context, projectRef) {
   return { compose, runtime, deployments };
 }
 
-export async function runPreflight(mode, env = process.env) {
+export async function runPreflight(env = process.env) {
   const context = releaseContext(env);
   const github = createGitHub(env.GH_TOKEN);
-  const imageOnly = mode === 'image';
-  if (!imageOnly && mode !== 'deploy') throw new Error('Expected preflight mode image or deploy.');
   let migrationContext;
-  if (!imageOnly) {
-    await verifyEnvironmentProtection(github, context.repository, context.environment);
-    context.authorization = await verifyDeploymentDispatch({ github, ...context, eventName: env.GITHUB_EVENT_NAME,
-      confirmed: env.DEPLOYMENT_CONFIRMED, runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT });
-    if (context.environment === 'production') context.authorization = await verifyStagingForDispatch({ github,
-      repository: context.repository, stagingRunUrl: env.STAGING_RUN_URL, dispatch: context.authorization });
-    try { migrationContext = JSON.parse(env.MIGRATION_CHECK_JSON); } catch { throw new Error('Configure MIGRATION_CHECK_JSON from the observed Supabase GitHub check.'); }
-    const expectedIdentity = `https://supabase.com/dashboard/project/${env.SUPABASE_PROJECT_REF}`;
-    if (!env.SUPABASE_PROJECT_REF || migrationContext.identity?.field !== 'details_url' || ![expectedIdentity, `${expectedIdentity}/branches`].includes(migrationContext.identity.value)) throw new Error('The migration check identity must identify this environment’s Supabase dashboard project.');
-  }
-  const gates = await verifyGitHubGates({ github, ...context, migrationContext, requireMigrations: !imageOnly });
-  if (context.authorization) gates.authorization = context.authorization;
-  if (!imageOnly) {
-    const dokploy = createDokploy({ url: env.DOKPLOY_API_URL || env.DOKPLOY_API, key: env.DOKPLOY_API_KEY });
-    await inspectTarget(dokploy, context, env.SUPABASE_PROJECT_REF);
-  }
+  try { migrationContext = JSON.parse(env.MIGRATION_CHECK_JSON); } catch { throw new Error('Configure MIGRATION_CHECK_JSON from the observed Supabase GitHub check.'); }
+  const expectedIdentity = `https://supabase.com/dashboard/project/${env.SUPABASE_PROJECT_REF}`;
+  if (!env.SUPABASE_PROJECT_REF || migrationContext.identity?.field !== 'details_url' || ![expectedIdentity, `${expectedIdentity}/branches`].includes(migrationContext.identity.value)) throw new Error('The migration check identity must identify this environment’s Supabase dashboard project.');
+  const gates = await verifyGitHubGates({ github, ...context, migrationContext, requireMigrations: true });
+  const dokploy = createDokploy({ url: env.DOKPLOY_API_URL || env.DOKPLOY_API, key: env.DOKPLOY_API_KEY });
+  await inspectTarget(dokploy, context, env.SUPABASE_PROJECT_REF);
   const evidence = { ...context, gates }; delete evidence.target;
-  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nRevision: \`${context.sha}\`\n\n${imageOnly ? 'Image CI gates passed.' : `Target: **${context.environment}**. CI and migration gates passed. Deployment: ${context.authorization.url}`}\n`);
-  if (mode === 'deploy') await writeFile('release-preflight.json', JSON.stringify(evidence, null, 2) + '\n');
+  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, `\nRevision: \`${context.sha}\`\n\nTarget: **${context.environment}**. CI and migration gates passed.\n`);
+  await writeFile('release-preflight.json', JSON.stringify(evidence, null, 2) + '\n');
   return evidence;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try { await runPreflight(process.argv[2]); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  try { await runPreflight(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

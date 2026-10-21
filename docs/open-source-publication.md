@@ -93,6 +93,6 @@ server-side artifacts, or private copies elsewhere.
 Publishing source does not deploy the service or approve production readiness.
 Follow [GitHub deployments](github-deployments.md) and
 [production hardening](production-hardening.md) for migrations, CI,
-staging evidence, manual deployment, and ingress checks. Music/provider rights,
+target configuration, manual deployment, and ingress checks. Music/provider rights,
 hosted subscription terms, and operational privacy requirements remain separate
 from the source license.

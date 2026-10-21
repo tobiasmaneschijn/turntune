@@ -70,7 +70,7 @@ async function main() {
   await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
   if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `image=${manifest.image}\ndigest=${manifest.digest}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) {
-    await appendFile(process.env.GITHUB_STEP_SUMMARY, `### Release image\n\nRevision: \`${manifest.revision}\` (${manifest.branch})\n\nImage: \`${manifest.image}\`\n\nDownload the \`release-image\` artifact or select this run when deploying.\n`);
+    await appendFile(process.env.GITHUB_STEP_SUMMARY, `### Release image\n\nRevision: \`${manifest.revision}\` (${manifest.branch})\n\nImage: \`${manifest.image}\`\n`);
   }
 }
 
