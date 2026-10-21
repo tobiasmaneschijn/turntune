@@ -10,7 +10,7 @@ function fixture(environment = 'production') {
   const production = { id: 456, run_attempt: 1, head_sha: sha, status: 'in_progress', conclusion: null,
     event: 'workflow_dispatch', head_branch: environment === 'production' ? 'master' : 'develop',
     path: '.github/workflows/deploy.yml', repository: { full_name: repository }, head_repository: { full_name: repository },
-    pull_requests: [], created_at: '2026-10-19T14:10:00Z' };
+    pull_requests: [{ number: 68 }], created_at: '2026-10-19T14:10:00Z' };
   const staging = { ...production, id: 123, head_sha: 'b'.repeat(40), head_branch: 'develop',
     status: 'completed', conclusion: 'success', updated_at: '2026-10-19T14:00:00Z' };
   const requests = [];
@@ -32,7 +32,7 @@ function fixture(environment = 'production') {
   return { production, staging, requests, verify, approveStaging };
 }
 
-test('an operator confirms a manual deployment without supplying evidence URLs', async () => {
+test('an operator confirms a manual deployment associated with a pull request without supplying evidence URLs', async () => {
   for (const environment of ['staging', 'production']) {
     const release = fixture(environment);
     const dispatch = await release.verify();
@@ -55,6 +55,10 @@ test('confirmation cannot authorize another revision or an obsolete workflow att
   release.production.run_attempt = 2;
   await assert.rejects(release.verify(), /active manual Deploy run/);
   assert.equal((await release.verify({ runAttempt: '2' })).runAttempt, 2);
+  for (const event of ['pull_request', 'pull_request_target']) {
+    release.production.event = event;
+    await assert.rejects(release.verify({ runAttempt: '2' }), /active manual Deploy run/);
+  }
 });
 
 test('a changed staging attempt requires a fresh confirmed production dispatch before promotion', async () => {

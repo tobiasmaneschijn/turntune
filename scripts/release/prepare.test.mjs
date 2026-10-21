@@ -9,7 +9,7 @@ test('an operator stages missing source, then confirms production without pastin
   const stagingSha = 'b'.repeat(40);
   const treeSha = 'c'.repeat(40);
   const identity = { event: 'workflow_dispatch', path: '.github/workflows/deploy.yml',
-    repository: { full_name: repository }, head_repository: { full_name: repository }, pull_requests: [] };
+    repository: { full_name: repository }, head_repository: { full_name: repository }, pull_requests: [{ number: 68 }] };
   const production = { ...identity, id: 900, run_attempt: 1, head_sha: sha, head_branch: 'master',
     status: 'in_progress', conclusion: null, created_at: '2026-10-19T12:00:00Z' };
   const staging = { ...identity, id: 123, run_attempt: 2, head_sha: stagingSha, head_branch: 'develop',

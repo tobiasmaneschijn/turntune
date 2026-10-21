@@ -12,7 +12,7 @@ function fixture() {
   const run = { id: 123, run_attempt: 2, head_sha: stagingSha, status: 'completed', conclusion: 'success',
     event: 'workflow_dispatch', head_branch: 'develop', path: '.github/workflows/deploy.yml',
     updated_at: '2026-10-19T12:00:00Z',
-    repository: { full_name: repository }, head_repository: { full_name: repository }, pull_requests: [] };
+    repository: { full_name: repository }, head_repository: { full_name: repository }, pull_requests: [{ number: 68 }] };
   const job = { name: 'Deploy staging', run_id: run.id, head_sha: stagingSha,
     status: 'completed', conclusion: 'success' };
   const manifest = { schemaVersion: 1, repository, branch: 'develop', revision: stagingSha,
@@ -56,7 +56,7 @@ function fixture() {
     artifactReads: () => artifactReads, verify: (overrides = {}) => verifyPromotion({ ...args, ...overrides }) };
 }
 
-test('production promotes the exact staged digest when a merge commit preserves the tested source tree', async () => {
+test('production promotes a PR-associated manual staging run when a merge commit preserves the tested source tree', async () => {
   const release = fixture();
   const promoted = await release.verify();
   assert.strictEqual(promoted.manifest, release.manifest);
@@ -130,9 +130,9 @@ test('an operator cannot select another repository or an arbitrary artifact URL'
 
 test('failed, pull request or unrelated workflow runs cannot supply staging promotion artifacts', async () => {
   for (const invalid of [
-    { conclusion: 'failure' }, { status: 'in_progress' }, { event: 'pull_request' },
+    { conclusion: 'failure' }, { status: 'in_progress' }, { event: 'pull_request' }, { event: 'pull_request_target' },
     { head_branch: 'master' }, { path: '.github/workflows/ci.yml' },
-    { head_repository: { full_name: 'someone/fork' } }, { pull_requests: [{ number: 1 }] },
+    { head_repository: { full_name: 'someone/fork' } },
     { run_attempt: 0 },
   ]) {
     const release = fixture();

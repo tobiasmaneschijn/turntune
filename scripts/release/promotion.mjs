@@ -57,14 +57,14 @@ export async function verifyStagingRun({ github, repository, stagingRunUrl }) {
   const runId = parseStagingRunUrl(repository, stagingRunUrl);
   const get = client(github, repository);
   const run = await get('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: runId });
+  // An associated PR does not change a manual run's event, source or deployment evidence.
   if (run?.id !== runId || !Number.isSafeInteger(run.run_attempt) || run.run_attempt <= 0
     || !SHA.test(run.head_sha ?? '')
     || run.status !== 'completed' || run.conclusion !== 'success'
     || run.event !== 'workflow_dispatch' || run.head_branch !== 'develop'
     || run.path !== '.github/workflows/deploy.yml'
     || !sameRepository(run.repository?.full_name, repository)
-    || !sameRepository(run.head_repository?.full_name, repository)
-    || !Array.isArray(run.pull_requests) || run.pull_requests.length !== 0) {
+    || !sameRepository(run.head_repository?.full_name, repository)) {
     fail('STAGING_RUN_UNTRUSTED', 'The run must be a successful manual staging deployment from this repository.');
   }
   const jobs = [];

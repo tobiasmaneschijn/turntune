@@ -18,12 +18,12 @@ export async function verifyDeploymentDispatch({ github, repository, sha, enviro
   }
   const [owner, repo] = repository.split('/');
   const { data: run } = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { owner, repo, run_id: Number(runId) });
+  // GitHub can associate PRs with manual runs; the event and run identity establish dispatch provenance.
   if (run?.id !== Number(runId) || run.run_attempt !== Number(runAttempt)
     || run.event !== 'workflow_dispatch' || run.head_branch !== (environment === 'production' ? 'master' : 'develop')
     || run.head_sha !== sha || run.path !== '.github/workflows/deploy.yml'
     || run.repository?.full_name?.toLowerCase() !== repository.toLowerCase()
     || run.head_repository?.full_name?.toLowerCase() !== repository.toLowerCase()
-    || !Array.isArray(run.pull_requests) || run.pull_requests.length !== 0
     || run.status !== 'in_progress' || run.conclusion !== null || !Number.isFinite(timestamp(run.created_at))) {
     throw new Error('Deployment requires the active manual Deploy run for the selected branch and revision.');
   }
