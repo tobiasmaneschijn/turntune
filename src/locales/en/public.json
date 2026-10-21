@@ -124,7 +124,7 @@
     "turnQuestion": "Do I have to take a turn?",
     "turnAnswer": "No. Listen and chat without joining the DJ rotation. Choose Join as DJ when you want to play your picks.",
     "servicesQuestion": "Which music services can I use?",
-    "servicesAnswer": "turntune supports YouTube, SoundCloud, Mixcloud, and configured Apple Music and Spotify integrations. Available services depend on the instance and room settings. Some require an account or subscription.",
+    "servicesAnswer": "turntune supports YouTube, SoundCloud and Audius. Available services depend on room settings.",
     "matchingNote": "Playback through another service depends on finding a matching recording.",
     "selfHostQuestion": "What do I need to self-host?",
     "selfHostAnswer": "A server running Docker Compose, a configured Supabase project, and the credentials for your chosen integrations. You manage configuration, updates, and backups.",

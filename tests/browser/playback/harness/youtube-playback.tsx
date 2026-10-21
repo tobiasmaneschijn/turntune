@@ -86,6 +86,7 @@ export interface YouTubeHarness {
   completeLoad(state?: number, position?: number): void;
   emitState(state: number, position?: number): void;
   emitStaleEvent(state: number): void;
+  setPageVisible(visible: boolean): void;
   unmount(): void;
 }
 declare global { interface Window { youtubeTest: YouTubeHarness } }
@@ -127,6 +128,13 @@ window.youtubeTest = {
     instance.emit(state);
   },
   emitStaleEvent: (state) => instance.emit(state),
+  setPageVisible(visible) {
+    // Headless Chromium keeps background pages visible; control the browser
+    // signal while the production adapter still owns its visibility handling.
+    if (visible) delete (document as unknown as Record<string, unknown>).visibilityState;
+    else Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  },
   unmount: () => root.unmount()
 };
 render();

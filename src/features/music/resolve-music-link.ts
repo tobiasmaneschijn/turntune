@@ -29,5 +29,5 @@ export async function resolveMusicLink(value: string, options: Options): Promise
   if (!response.ok || !data.result) throw new Error(data.error || i18n.t('music:rail.lookupError'))
   const track = data.result
   return { provider: parsed.provider, providerId: track.id, title: options.title?.trim() || track.title,
-    artist: track.artist, artworkUrl: track.thumbnail, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }
+    artist: track.artist, artworkUrl: track.thumbnail, artworkSources: track.artworkSources, permalinkUrl: track.permalinkUrl, durationMs: track.durationMs }
 }

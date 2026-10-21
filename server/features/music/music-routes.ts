@@ -1,5 +1,6 @@
 import { serverT } from "../../lib/i18n.js";
-import { MUSIC_PROVIDERS } from "../../../shared/provider-definitions.js";
+import { isProviderAvailable, MUSIC_PROVIDERS, PROVIDER_DEFINITIONS, PROVIDER_LABELS, type Provider } from "../../../shared/provider-definitions.js";
+import { audiusTrackUrl } from "../../../shared/audius.js";
 import { providerJson, providerSignal } from "../../integrations/provider-http.js";
 import { SignupAttemptLimiter } from "../auth/invite-signup.js";
 import express from "express";
@@ -9,6 +10,7 @@ import type { SpotifyApi } from "../../integrations/spotify/spotify.js";
 import type { SpotifyAccounts } from "../../integrations/spotify/spotify-accounts.js";
 import type { AppleMusicApi } from "../../integrations/apple-music.js";
 import type { GiphyApi } from "../../integrations/giphy.js";
+import type { AudiusApi } from "../../integrations/audius.js";
 import { MixcloudApi, type MixcloudSearchResult } from "../../integrations/mixcloud.js";
 import { mixcloudShowKey } from "../../../shared/mixcloud.js";
 import { BoundedCache } from "../../lib/bounded-cache.js";
@@ -22,6 +24,7 @@ export interface MusicRouteOptions {
   authEnabled: boolean;
   getUserId: (request: express.Request) => Promise<string | null>;
   canUseSpotify?: SpotifyAccessCheck;
+  canUseProvider?: (request: express.Request, userId: string, provider: Provider, roomSlug?: string) => Promise<boolean>;
   youtubeApiKey?: string;
   soundCloudApi: Pick<SoundCloudApi, "configured" | "searchTracks" | "resolveTrack">;
   spotifyApi: Pick<SpotifyApi, "configured" | "searchTracks" | "getTrack" | "request">;
@@ -29,6 +32,7 @@ export interface MusicRouteOptions {
   appleMusicApi: Pick<AppleMusicApi, "configured" | "storefront" | "searchTracks" | "getTrack" | "getDeveloperToken">;
   giphyApi: Pick<GiphyApi, "configured" | "gifs">;
   mixcloudApi?: Pick<MixcloudApi, "searchTracks" | "resolveTrack">;
+  audiusApi?: Pick<AudiusApi, "configured" | "searchTracks" | "resolveTrack" | "playbackUrl">;
   fetchImpl?: typeof fetch;
 }
 interface YouTubeSearchResult { id: string; title: string; channel: string; thumbnail: string; duration?: string; durationMs?: number }
@@ -40,6 +44,8 @@ const youtubeLiveSchema = z.object({
 });
 
 const soundCloudSearchSchema = youtubeSearchSchema;
+const audiusResolveSchema = z.object({ url: z.string().trim().url().max(2048) }).refine(value => Boolean(audiusTrackUrl(value.url)));
+const audiusPlaybackSchema = z.object({ id: z.string().refine(value => PROVIDER_DEFINITIONS.audius.locator.validId(value)) });
 const mixcloudSearchSchema = youtubeSearchSchema;
 const mixcloudResolveSchema = z.object({ url: z.string().trim().url().max(2048) })
   .refine(value => Boolean(mixcloudShowKey(value.url)), serverT("enter_a_valid_mixcloud_show_url"));
@@ -182,6 +188,8 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
     if (request.path === "/connect" || request.path === "/callback") return next();
     const userId = await getApiUserId(request);
     if (authEnabled && !userId) return response.status(401).json({ error: serverT("authentication_required") });
+    const provider = MUSIC_PROVIDERS.find(value => request.baseUrl.toLowerCase() === `/api/${value}`);
+    if (provider && !isProviderAvailable(provider)) return response.status(403).json({ error: `${PROVIDER_LABELS[provider]} is unavailable.` });
     const removingConnection=request.method==="DELETE"&&request.path.toLowerCase()==="/connection";
     if (request.baseUrl.toLowerCase() === "/api/spotify"&&!removingConnection) {
       let roomSlug: string | undefined;
@@ -191,7 +199,7 @@ export function mountMusicRoutes(app: express.Express, options: MusicRouteOption
     }
     const ip = request.ip || request.socket.remoteAddress || "unknown";
     const path = `${request.baseUrl}${request.path}`;
-    const endpoint = path === "/api/spotify/playback" ? playbackBudget : endpointBudget;
+    const endpoint = path === "/api/spotify/playback" || path === "/api/audius/playback" ? playbackBudget : endpointBudget;
     if (!localRateLimitsDisabled() && (!ipBudget.consume(ip) || userId && !accountBudget.consume(userId) ||
       (!userId && !endpoint.consume(`ip:${ip}:${path}`)) || userId && !endpoint.consume(`account:${userId}:${path}`))) {
       return response.status(429).json({ error: serverT("too_many_music_requests_try_again_shortly") });
@@ -363,14 +371,21 @@ app.get("/api/youtube/search", async (request, response) => {
         part: "contentDetails",
         id: ids
       });
-      const { response: videoResponse, payload: videoPayload } = await trackedProvider(() => providerJson<{
-        items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
-      }>("youtube", fetchImpl, `https://www.googleapis.com/youtube/v3/videos?${videoParams}`, { signal: requestSignal(request) }));
-      if (videoResponse.ok) {
-        for (const video of videoPayload.items || []) {
-          const duration = formatYouTubeDuration(video.contentDetails?.duration);
-          if (duration) durations.set(video.id, { label: duration, milliseconds: youtubeDurationMs(video.contentDetails?.duration) });
+      try {
+        // Duration labels are optional; a slow metadata lookup must not hold
+        // otherwise usable results for the full search deadline. Queue admission
+        // verifies source duration independently before applying length limits.
+        const { response: videoResponse, payload: videoPayload } = await trackedProvider(() => providerJson<{
+          items?: Array<{ id: string; contentDetails?: { duration?: string } }>;
+        }>("youtube", fetchImpl, `https://www.googleapis.com/youtube/v3/videos?${videoParams}`, { signal: requestSignal(request) }, { timeoutMs: 1_000 }));
+        if (videoResponse.ok) {
+          for (const video of videoPayload.items || []) {
+            const duration = formatYouTubeDuration(video.contentDetails?.duration);
+            if (duration) durations.set(video.id, { label: duration, milliseconds: youtubeDurationMs(video.contentDetails?.duration) });
+          }
         }
+      } catch {
+        requestSignal(request).throwIfAborted();
       }
     }
 
@@ -466,6 +481,56 @@ app.get("/api/soundcloud/resolve", async (request, response) => {
     response.status(400).json({
       error: serverT("could_not_resolve_that_soundcloud_url")
     });
+  }
+});
+
+app.get("/api/audius/search", async (request, response) => {
+  if (!options.audiusApi?.configured) return response.status(503).json({ error: "Audius is not configured." });
+  const parsed = youtubeSearchSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: serverT("enter_at_least_2_characters_to_search") });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: serverT("too_many_searches_please_try_again_shortly") });
+  try {
+    // Revalidate catalog availability on each request; do not persist a shared catalog cache.
+    response.json({ results: await trackedProvider(() => options.audiusApi!.searchTracks(parsed.data.q, undefined, requestSignal(request))) });
+  } catch (error) {
+    reportProviderError(error, request, "music.search", "audius");
+    response.status(502).json({ error: "Audius search failed. Try again." });
+  }
+});
+
+app.get("/api/audius/resolve", async (request, response) => {
+  if (!options.audiusApi?.configured) return response.status(503).json({ error: "Audius is not configured." });
+  const parsed = audiusResolveSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter a valid Audius track URL." });
+  if (!consumeProviderSearchLimit(request)) return response.status(429).json({ error: serverT("too_many_requests_please_try_again_shortly") });
+  try { response.json({ result: await trackedProvider(() => options.audiusApi!.resolveTrack(parsed.data.url, requestSignal(request))) }); }
+  catch {
+    response.status(400).json({ error: "This Audius recording could not be verified. Choose another track." });
+  }
+});
+
+app.get("/api/audius/playback", async (request, response) => {
+  const userId = await getApiUserId(request);
+  if (!userId) return response.status(401).json({ error: serverT("authentication_required") });
+  const parsed = audiusPlaybackSchema.safeParse(request.query);
+  if (!parsed.success) return response.status(400).json({ error: "Enter a valid Audius track ID." });
+  let roomSlug: string | undefined;
+  try { roomSlug = spotifyRoomContext(request); }
+  catch { return response.status(400).json({ error: serverT("invalid_room_context") }); }
+  const authorized = async () => {
+    if (!roomSlug || !request.get("x-soundspin-room") || !options.canUseProvider) return false;
+    try { return await options.canUseProvider(request, userId, "audius", roomSlug); }
+    catch { return false; }
+  };
+  if (!await authorized()) return response.status(403).json({ error: "Audius is unavailable in this room." });
+  if (!options.audiusApi?.configured) return response.status(503).json({ error: "Audius is not configured." });
+  try {
+    const url = await trackedProvider(() => options.audiusApi!.playbackUrl(parsed.data.id, requestSignal(request)));
+    if (!await authorized()) return response.status(403).json({ error: "Audius is unavailable in this room." });
+    response.json({ url });
+  } catch (error) {
+    reportProviderError(error, request, "music.playback", "audius");
+    response.status(502).json({ error: "Could not start Audius playback. Try again." });
   }
 });
 
@@ -630,7 +695,9 @@ app.get("/api/music/connections", async (request, response) => {
         connected: spotifyConnected,
         profile: spotifyProfile
       },
-      apple: { configured: appleMusicApi.configured }
+      apple: { configured: isProviderAvailable("apple") && appleMusicApi.configured },
+      mixcloud: { configured: isProviderAvailable("mixcloud") },
+      audius: { configured: isProviderAvailable("audius") && Boolean(options.audiusApi?.configured) }
     });
   } catch (error) {
     reportProviderError(error, request, "music.connections.load");

@@ -10,6 +10,8 @@
 
 ## Architecture and product
 
+- [TurnTune 1.0 roadmap](v1-roadmap.md): free launch, first-month validation,
+  and requirements before charging.
 - [Rooms and radio](rooms-and-radio.md): room access, private queues, DJ rotation,
   synchronization, persistence, and permissions.
 - [Chat](chat.md): delivery, history, commands, reactions, and media access.
@@ -25,8 +27,8 @@
 
 - [Production hardening](production-hardening.md): configuration, ingress,
   monitoring, backups, recovery, and release checks.
-- [GitHub deployments](github-deployments.md): manual staging deployments,
-  verified-image promotion, hosting setup, evidence, and recovery.
+- [GitHub deployments](github-deployments.md): manual staging and production
+  deployments, hosting setup, health checks, and recovery.
 - [Resource limits](resource-limits.md): plans, queue limits, retention, and
   operator configuration.
 - [Managed uploads](managed-upload-release.md): storage lifecycle and cleanup.

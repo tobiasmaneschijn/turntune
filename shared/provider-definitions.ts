@@ -1,6 +1,7 @@
 import { isMixcloudShowKey, mixcloudShowKey } from "./mixcloud.js";
+import { audiusTrackUrl, isAudiusTrackId } from "./audius.js";
 
-export const MUSIC_PROVIDERS = ["youtube", "soundcloud", "spotify", "apple", "mixcloud"] as const;
+export const MUSIC_PROVIDERS = ["youtube", "soundcloud", "audius", "spotify", "apple", "mixcloud"] as const;
 export type Provider = (typeof MUSIC_PROVIDERS)[number];
 
 export interface ProviderTrackLocator {
@@ -17,6 +18,7 @@ type LocatorContext = "queue" | "library";
 
 export interface ProviderDefinition {
   label: string;
+  available: boolean;
   supportsLocalVolume: boolean;
   supportsLive: boolean;
   catalogMatching: boolean;
@@ -49,34 +51,51 @@ function mixcloudPermalinkIssues(track: ProviderTrackLocator): ProviderLocatorIs
 
 export const PROVIDER_DEFINITIONS = {
   youtube: {
-    label: "YouTube", supportsLocalVolume: true, supportsLive: true, defaultPlaybackMode: "default",
+    label: "YouTube", available: true, supportsLocalVolume: true, supportsLive: true, defaultPlaybackMode: "default",
     catalogMatching: true, personalSession: false, requiresSpotifyGrant: false, counterpartMatchMethods: null,
     locator: { validId: (value: string) => /^[\w-]{11}$/.test(value), invalidIdMessage: "invalid_youtube_video_id" }
   },
   soundcloud: {
-    label: "SoundCloud", supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "default",
+    label: "SoundCloud", available: true, supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "default",
     catalogMatching: true, personalSession: false, requiresSpotifyGrant: false, counterpartMatchMethods: null,
     locator: {
       validId: (value: string) => /^soundcloud:tracks:\d+$/.test(value), invalidIdMessage: "invalid_soundcloud_track_urn",
       permalinkIssues: soundcloudPermalinkIssues
     }
   },
+  audius: {
+    label: "Audius", available: true, supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "default",
+    catalogMatching: true, personalSession: false, requiresSpotifyGrant: false, counterpartMatchMethods: null,
+    locator: {
+      validId: isAudiusTrackId, invalidIdMessage: "invalid_audius_track_id",
+      permalinkIssues: (track: ProviderTrackLocator): ProviderLocatorIssue[] => track.permalinkUrl && !audiusTrackUrl(track.permalinkUrl)
+        ? [{ path: "permalinkUrl", messageKey: "invalid_audius_track_url" }] : []
+    }
+  },
   spotify: {
-    label: "Spotify", supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "web",
+    label: "Spotify", available: true, supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "web",
     catalogMatching: true, personalSession: true, requiresSpotifyGrant: true, counterpartMatchMethods: ["isrc", "exact-metadata"],
     locator: { validId: (value: string) => /^[A-Za-z0-9]{22}$/.test(value), invalidIdMessage: "invalid_spotify_track_id" }
   },
   apple: {
-    label: "Apple Music", supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "default",
+    label: "Apple Music", available: false, supportsLocalVolume: true, supportsLive: false, defaultPlaybackMode: "default",
     catalogMatching: true, personalSession: true, requiresSpotifyGrant: false, counterpartMatchMethods: null,
     locator: { validId: (value: string) => /^\d+$/.test(value), invalidIdMessage: "invalid_apple_music_song_id" }
   },
   mixcloud: {
-    label: "Mixcloud", supportsLocalVolume: false, supportsLive: false, defaultPlaybackMode: "default",
+    label: "Mixcloud", available: false, supportsLocalVolume: false, supportsLive: false, defaultPlaybackMode: "default",
     catalogMatching: false, personalSession: false, requiresSpotifyGrant: false, counterpartMatchMethods: null,
     locator: { validId: isMixcloudShowKey, invalidIdMessage: "invalid_mixcloud_show_key", permalinkIssues: mixcloudPermalinkIssues }
   }
 } as const satisfies Record<Provider, ProviderDefinition>;
+
+// Keep every known provider above so excluded integrations retain saved work.
+// Availability is an application boundary; a room allowlist cannot override it.
+export const AVAILABLE_MUSIC_PROVIDERS = MUSIC_PROVIDERS.filter(isProviderAvailable);
+
+export function isProviderAvailable(provider: Provider): boolean {
+  return PROVIDER_DEFINITIONS[provider].available;
+}
 
 export const PROVIDER_LABELS = Object.fromEntries(
   MUSIC_PROVIDERS.map(provider => [provider, PROVIDER_DEFINITIONS[provider].label])

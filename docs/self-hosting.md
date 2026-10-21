@@ -121,10 +121,16 @@ cannot complete a flow on a different callback host. See
 
 ## Music providers
 
+Apple Music and Mixcloud are excluded from 1.0 in the shared application policy.
+Their adapters and saved-data formats remain, but credentials and room settings
+cannot enable them. SoundCloud is unchanged; see the
+[provider scope record](provider-scope.md) for the remaining approval checks.
+
 | Integration | Server configuration | Behavior and limitations |
 | --- | --- | --- |
 | YouTube | `YOUTUBE_API_KEY` | Enables YouTube Data API keyword search and live-status lookup. Playback uses the embedded player. |
 | SoundCloud | `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET` | Search uses a cached server-side client-credentials token. Playback uses the official widget and public tracks reported as playable. |
+| Audius | `AUDIUS_API_KEY`; optional server-only `AUDIUS_API_BEARER_TOKEN` | Search and individual track links use the official API. Each admitted listener streams public, ungated recordings through native audio without an Audius account. The public API key is included in stream URLs; the bearer token is unused for these reads and never sent to the browser. |
 | Mixcloud | None | Uses the public catalog API and official widget. Seeks may be refused, which limits synchronization. Listeners use device volume; the widget remains visible on phones. |
 | Spotify | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `PROVIDER_TOKEN_ENCRYPTION_KEY`; optional `SPOTIFY_MARKET` (default `US`) | Register the exact `APP_ORIGIN` + `/api/spotify/callback` URI. Spotify starts disabled for rooms; an application administrator with MFA/AAL2 must enable it. Listeners then link their own accounts and choose Web Playback or a Spotify Connect device. |
 | Apple Music | `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID`, `APPLE_MUSIC_PRIVATE_KEY`; optional `APPLE_MUSIC_STOREFRONT` (default `us`) | Requires a MusicKit media identifier and private key. Escaped `\n` line breaks are supported in the private key. Listeners authorize MusicKit in the player. |
@@ -192,22 +198,22 @@ capacity in staging. The `soundspin-data` volume is not a backup of Supabase.
 
 ### GitHub release images
 
-The repository's manual **Deploy** workflow builds and scans an image for staging,
-then promotes its immutable GHCR digest to production without rebuilding. It uses
-[`compose.release.yaml`](../compose.release.yaml), which has no source build step.
+The repository's manual **Deploy** workflow builds and scans the selected branch's
+image, then deploys its immutable GHCR digest to the selected environment in the
+same job. It uses [`compose.release.yaml`](../compose.release.yaml), which has no
+source build step.
 
 The workflow is bound to the project's hosting targets in
 [`deploy/targets.json`](../deploy/targets.json). Before using it for your own
 instance, configure those target bindings, GitHub Environments, migration-check
 identities, and registry access. Follow [GitHub deployments](github-deployments.md)
-for setup, dispatch, evidence review, and recovery.
+for setup, deployment, and recovery.
 
 Use `develop` for staging and `master` for production. Wait for CI and that
-commit's migration deployment, then select **Actions → Deploy → Run workflow**,
-the matching branch and target, and **Confirm deployment**. Production requires
-a fresh manual dispatch after the matching staging attempt finishes; it promotes
-the verified image only when the staged and production commits have the same
-Git tree. Keep `develop` as the persistent staging branch.
+commit's migration deployment, then select **Actions → Deploy → Run workflow**
+and the matching branch and target. GitHub's repository write access and
+environment permissions authorize the run. Check the completed job's revision,
+digest and runtime results. Keep `develop` as the persistent staging branch.
 
 For a manually managed release image, set `SOUNDSPIN_IMAGE` to a reviewed digest
 and use `docker compose -f compose.release.yaml` for the stop, status, pull, and
@@ -260,9 +266,9 @@ migration history. A deployment trigger alone does not confirm success.
   Verify both through the intended HTTPS ingress.
 - Verify Socket.IO polling and a real WebSocket upgrade, hostile Origin rejection,
   and rejection of connections without namespace credentials.
-- Complete [Production hardening](production-hardening.md) for ingress, capacity,
-  monitoring, backup/restore, and rollback checks, and complete its
-  [release verification record](production-hardening.md#release-verification-record).
+- Use [Production hardening](production-hardening.md) for ingress, capacity,
+  monitoring, backup/restore and rollback checks. The Deploy job summary records
+  [release verification](production-hardening.md#release-verification-record).
 - Follow [Managed uploads](managed-upload-release.md) for Storage checks and
   cleanup, [Platform security and privacy](platform-security-and-privacy.md) for
   administrator recovery, moderation, exports, and deletion, and

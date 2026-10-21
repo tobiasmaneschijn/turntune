@@ -9,23 +9,24 @@ test("hosts choose the room music services and listeners follow that policy", as
   await page.getByRole("button", { name: "Open room settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Room settings", exact: true });
   await dialog.getByRole("tab", { name: "Music", exact: true }).click();
-  for (const name of ["YouTube", "SoundCloud", "Spotify", "Apple Music", "Mixcloud"]) {
+  for (const name of ["YouTube", "SoundCloud", "Audius", "Spotify"]) {
     await expect(dialog.getByRole("switch", { name, exact: true })).toHaveAttribute("aria-checked", "true");
   }
+  for (const name of ["Apple Music", "Mixcloud"]) await expect(dialog.getByRole("switch", { name, exact: true })).toHaveCount(0);
   await dialog.getByRole("switch", { name: "Spotify", exact: true }).click();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Discard room changes?", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Keep editing", exact: true }).click();
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  expect(await page.evaluate(() => window.playerQolTest.savedRoomSettings?.allowedProviders)).toEqual(["youtube", "soundcloud", "apple", "mixcloud"]);
+  expect(await page.evaluate(() => window.playerQolTest.savedRoomSettings?.allowedProviders)).toEqual(["youtube", "soundcloud", "audius"]);
   await page.getByRole("button", { name: "Use silent fallback", exact: true }).click();
   await expect(page.getByText("Spotify is disabled in this room · using YouTube")).toBeVisible();
   await expect(page.getByText("Fixture provider · volume 80")).toBeVisible();
   await page.getByRole("button", { name: "Open room settings", exact: true }).click();
   await dialog.getByRole("tab", { name: "Music", exact: true }).click();
   await expect(dialog.getByRole("switch", { name: "Spotify", exact: true })).toHaveAttribute("aria-checked", "false");
-  for (const name of ["YouTube", "SoundCloud", "Apple Music", "Mixcloud"]) await dialog.getByRole("switch", { name, exact: true }).click();
+  for (const name of ["YouTube", "SoundCloud", "Audius"]) await dialog.getByRole("switch", { name, exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
   await expect(dialog.getByRole("status")).toContainText("Allow at least one music service.");
 });
@@ -39,9 +40,6 @@ test("mute restores local volume without changing shared room playback", async (
   await page.getByRole("button", { name: "Unmute my audio", exact: true }).click();
   await expect(page.getByText("Fixture provider · volume 80")).toBeVisible();
   expect(await page.evaluate(() => window.playerQolTest.calls)).toHaveLength(0);
-  await page.evaluate(() => window.playerQolTest.useMixcloud());
-  await expect(page.getByRole("button", { name: "Mute my audio", exact: true })).toBeDisabled();
-  await expect(page.getByText("Use your device volume for Mixcloud.")).toBeVisible();
 });
 
 test("listeners can preview a seek without changing playback and recover a rejected command", async ({ page }) => {

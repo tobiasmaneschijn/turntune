@@ -15,8 +15,8 @@ Room controls include reports, warnings, invitations, optional versioned rules, 
 The app uses the approved Open room system throughout: Inter, neutral light/dark
 surfaces, violet actions, and a shared Light, Dark, or System preference. The room
 places shared activity beside conversation and a private cover-art queue, with
-one persistent bottom player. Provider widgets and an expanded player are not
-part of the room UI. See [DESIGN.md](DESIGN.md) for shared tokens and
+one persistent bottom player. Video providers show their video above the dock,
+at the bottom of the DJ column; other provider widgets stay out of view. See [DESIGN.md](DESIGN.md) for shared tokens and
 [the listening-room brief](docs/design/listening-room.md) for room composition.
 
 Reuse shared Base UI controls and responsive dialogs. Use labeled rows,

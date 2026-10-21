@@ -1,4 +1,6 @@
 import type { Provider } from './types.js'
+import { audiusTrackUrl } from './audius.js'
+import { isProvider } from './provider-definitions.js'
 
 export interface ChatLinkPreview {
   url: string
@@ -27,6 +29,7 @@ export function musicLinkProvider(value: string): Provider | undefined {
   if ((host === 'youtube.com' && ((pathname === '/watch' && searchParams.has('v')) || /^\/(shorts|live)\//.test(pathname))) ||
       (host === 'youtu.be' && pathname.length > 1)) return 'youtube'
   if (host === 'soundcloud.com' && pathname.split('/').filter(Boolean).length >= 2) return 'soundcloud'
+  if (audiusTrackUrl(valid)) return 'audius'
   if (host === 'open.spotify.com' && /^\/(?:intl-[a-z]+\/)?track\//.test(pathname)) return 'spotify'
   if (host === 'mixcloud.com' && pathname.split('/').filter(Boolean).length >= 2) return 'mixcloud'
   if (host === 'music.apple.com' && /^\/[a-z]{2}\/(album|song)\//.test(pathname)) return 'apple'
@@ -65,5 +68,5 @@ export function isChatLinkPreview(value: unknown): value is ChatLinkPreview {
     typeof preview.title === 'string' && preview.title.length > 0 && preview.title.length <= 200 &&
     (preview.description === undefined || (typeof preview.description === 'string' && preview.description.length <= 280)) &&
     (preview.image === undefined || (typeof preview.image === 'string' && preview.image.length <= 100_000 && /^data:image\/webp;base64,[A-Za-z0-9+/]+=*$/.test(preview.image))) &&
-    (preview.musicProvider === undefined || ['youtube', 'soundcloud', 'spotify', 'mixcloud', 'apple'].includes(preview.musicProvider))
+    (preview.musicProvider === undefined || isProvider(preview.musicProvider))
 }

@@ -22,7 +22,7 @@ test("change personal settings before joining a room and recover music connectio
   await dialog.getByRole("button", { name: "Retry connection check", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).directoryReviewFixture.requests.filter((request: { path: string }) => request.path === "/api/music/connections").length)).toBe(2);
   await expect(dialog.getByRole("alert")).toHaveCount(0);
-  await expect(dialog.getByText("Apple Music", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Apple Music", { exact: true })).toHaveCount(0);
   await expect(dialog.getByText("Spotify", { exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: /^(Connect(?: Spotify)?|Reconnect|Disconnect)$/ })).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).directoryReviewFixture.requests.filter((request: { path: string; method: string }) => request.path.startsWith("/api/spotify/") && request.method !== "GET"))).toEqual([]);

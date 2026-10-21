@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { allowedRoomProviders, MUSIC_PROVIDERS } from "../../../shared/providers.js";
+import { allowedRoomProviders, AVAILABLE_MUSIC_PROVIDERS } from "../../../shared/providers.js";
 import { advanceRadio, appendQueueSet, normalizeRadioState, QueueUndoRegistry } from "./radio.js";
 import { RoomCommandService } from "./room-command-service.js";
 import type { LibraryTrack } from "../music/private-library.js";
@@ -21,7 +21,7 @@ import { ResourcePolicyStore } from "../../resources/resource-policy.js";
 const alice: User = { id: "alice", name: "Alice", avatarSeed: "alice" };
 const bob: User = { id: "bob", name: "Bob", avatarSeed: "bob" };
 const track = (title: string, provider: Provider = "youtube", user = alice): Track => ({
-  id: randomUUID(), provider, providerId: provider === "spotify" ? "a".repeat(22) : provider === "mixcloud" ? "/dj/show/" : title,
+  id: randomUUID(), provider, providerId: provider === "spotify" ? "a".repeat(22) : provider === "soundcloud" ? "soundcloud:tracks:123" : provider === "mixcloud" ? "/dj/show/" : provider === "apple" ? "123" : title,
   title, addedBy: user, addedAt: 1
 });
 const room = (): Room => ({
@@ -94,10 +94,10 @@ function mountActions(fixture: Awaited<ReturnType<typeof setupStore>>, overrides
   return { run, broadcasts };
 }
 
-test("music service settings require a nonempty unique list of known providers", async () => {
-  assert.deepEqual(allowedProvidersSchema.parse([...MUSIC_PROVIDERS]), [...MUSIC_PROVIDERS]);
+test("music service settings require a nonempty unique list of available providers", async () => {
+  assert.deepEqual(allowedProvidersSchema.parse([...AVAILABLE_MUSIC_PROVIDERS]), [...AVAILABLE_MUSIC_PROVIDERS]);
   const fixture = await setupStore();
-  for (const providers of [[], ["youtube", "youtube"], ["unknown"], null, "youtube"]) {
+  for (const providers of [[], ["youtube", "youtube"], ["unknown"], ["apple"], ["mixcloud"], null, "youtube"]) {
     assert.equal(allowedProvidersSchema.safeParse(providers).success, false);
     await assert.rejects(fixture.store.updateRoomSettings(fixture.state.id, alice.id, { allowedProviders: providers as Provider[] }));
   }
@@ -105,17 +105,24 @@ test("music service settings require a nonempty unique list of known providers",
   assert.equal(fixture.state.settings.allowedProviders, undefined);
 });
 
-test("legacy room state retains Mixcloud and pauses disabled Spotify without repeated playback changes", t => {
+test("legacy room state preserves excluded recordings and restrictions while pausing playback", t => {
   let now=1000;t.mock.method(Date,"now",()=>now);
-  const state = room(); const mix = track("show", "mixcloud");
+  const state = room(); const mix = track("show", "mixcloud"); const apple = track("song", "apple");
   state.djQueues.alice = [mix]; state.playback.track = mix; state.playback.playing = true;
   normalizeRadioState(state);
-  assert.deepEqual(allowedRoomProviders(state.settings), MUSIC_PROVIDERS.filter(provider => provider !== "spotify"));
+  assert.deepEqual(allowedRoomProviders(state.settings), ["youtube", "soundcloud", "audius"]);
   assert.equal(state.djQueues.alice[0].id, mix.id);
   assert.equal(state.playback.track?.id, mix.id);
-  state.settings.allowedProviders = ["mixcloud", "youtube", "mixcloud", "unknown"] as Provider[];
+  assert.equal(state.playback.playing, false);
+  state.settings.allowedProviders = ["mixcloud", "apple", "mixcloud", "unknown"] as Provider[];
+  state.djQueues.alice.push(apple); state.playback.track = apple; state.playback.playing = true;
   normalizeRadioState(state);
-  assert.deepEqual(state.settings.allowedProviders, ["youtube", "mixcloud"]);
+  assert.deepEqual(state.settings.allowedProviders, ["apple", "mixcloud"]);
+  assert.deepEqual(allowedRoomProviders(state.settings), []);
+  assert.deepEqual(state.djQueues.alice.map(item => item.id), [mix.id, apple.id]);
+  assert.equal(state.playback.track?.id, apple.id); assert.equal(state.playback.playing, false);
+  state.settings.allowedProviders = []; normalizeRadioState(state);
+  assert.deepEqual(allowedRoomProviders(state.settings), []);
   state.playback.track=track("Legacy Spotify","spotify");state.playback.playing=true;
   normalizeRadioState(state);assert.equal(state.playback.playing,false);
   const paused=JSON.stringify(state);now=2000;normalizeRadioState(state);
@@ -133,8 +140,8 @@ test("room owners cannot enable Spotify through generic room settings", () => {
 });
 
 test("radio skips disabled queued recordings without deleting them and keeps DJ rotation", () => {
-  const state = room(); state.settings.allowedProviders = ["youtube", "mixcloud"];
-  const blocked = track("blocked", "spotify"); const first = track("allowed"); const show = track("show", "mixcloud", bob);
+  const state = room(); state.settings.allowedProviders = ["youtube", "soundcloud"];
+  const blocked = track("blocked", "spotify"); const first = track("allowed"); const show = track("show", "soundcloud", bob);
   state.djQueues.alice = [blocked, first]; state.djQueues.bob = [show];
   assert.equal(advanceRadio(state, 10)?.id, first.id);
   assert.deepEqual(state.djQueues.alice, [blocked]);
@@ -150,7 +157,7 @@ test("set appends report disabled services and keep allowed input order", () => 
   const state = room(); state.settings.allowedProviders = ["youtube"];
   state.djQueueUserIds = [];
   const result = appendQueueSet(state, alice, [
-    { provider: "mixcloud", providerId: "/dj/show/", title: "Show" },
+    { provider: "soundcloud", providerId: "soundcloud:tracks:123", title: "Show" },
     { provider: "youtube", providerId: "first", title: "First" },
     { provider: "spotify", providerId: "a".repeat(22), title: "Song" },
     { provider: "youtube", providerId: "second", title: "Second" }
@@ -158,55 +165,55 @@ test("set appends report disabled services and keep allowed input order", () => 
   assert.equal(result.added, 2); assert.equal(result.started, false);
   assert.deepEqual(state.djQueues.alice.map(item => item.title), ["First", "Second"]);
   assert.deepEqual(result.skipped, [
-    { title: "Show", reason: "Mixcloud is disabled in this room" },
+    { title: "Show", reason: "SoundCloud is disabled in this room" },
     { title: "Song", reason: "Spotify is disabled in this room" }
   ]);
 });
 
 test("Undo rechecks current service settings and remains usable after re-enabling", () => {
-  const state = room(); const removed = track("removed", "mixcloud"); state.djQueues.alice = [removed];
+  const state = room(); const removed = track("removed", "soundcloud"); state.djQueues.alice = [removed];
   state.djQueueUserIds = [];
   const undo = new QueueUndoRegistry(); const receipt = undo.remove(state, alice.id, removed.id, 100);
   state.settings.allowedProviders = ["youtube"];
-  assert.throws(() => undo.restore(state, alice.id, receipt.token, 200), /Mixcloud is disabled/);
+  assert.throws(() => undo.restore(state, alice.id, receipt.token, 200), /SoundCloud is disabled/);
   assert.deepEqual(state.djQueues.alice, []);
-  state.settings.allowedProviders = ["mixcloud"];
+  state.settings.allowedProviders = ["soundcloud"];
   assert.equal(undo.restore(state, alice.id, receipt.token, 201).track.id, removed.id);
   assert.equal(state.playback.track, null);
 });
 
 test("only owners and moderators can change allowed services", async () => {
   const fixture = await setupStore(); fixture.state.moderatorUserIds = [bob.id];
-  await assert.rejects(fixture.store.updateRoomSettings(fixture.state.id, "listener", { allowedProviders: ["mixcloud"] }), /Only the owner or a moderator/);
+  await assert.rejects(fixture.store.updateRoomSettings(fixture.state.id, "listener", { allowedProviders: ["soundcloud"] }), /Only the owner or a moderator/);
   assert.equal(fixture.commits.length, 0);
-  await fixture.store.updateRoomSettings(fixture.state.id, bob.id, { allowedProviders: ["mixcloud"] });
-  assert.deepEqual(fixture.state.settings.allowedProviders, ["mixcloud"]);
+  await fixture.store.updateRoomSettings(fixture.state.id, bob.id, { allowedProviders: ["soundcloud"] });
+  assert.deepEqual(fixture.state.settings.allowedProviders, ["soundcloud"]);
   await fixture.store.updateRoomSettings(fixture.state.id, alice.id, { allowedProviders: ["youtube"] });
   assert.deepEqual(fixture.state.settings.allowedProviders, ["youtube"]);
 });
 
 test("disabling the playing service commits settings and advancement atomically and rolls back failures", async () => {
-  const state = room(); const current = track("current", "spotify"); const disabled = track("waiting", "spotify"); const next = track("next", "mixcloud");
+  const state = room(); const current = track("current", "spotify"); const disabled = track("waiting", "spotify"); const next = track("next", "soundcloud");
   state.settings.spotifyEnabled = true;
   state.djUserId = alice.id; state.playback = { track: current, playing: true, position: 25, updatedAt: 1 };
   state.djQueues.alice = [disabled, next]; state.vibe = { trackId: current.id, votes: { bob: 1 } };
   const fixture = await setupStore(state); const started = gate(); const unblock = gate();
   fixture.controls.beforeCommit = async () => { started.release(); await unblock.promise; throw new Error("storage offline"); };
   const before = structuredClone(state);
-  const pending = fixture.store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["mixcloud"] });
+  const pending = fixture.store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["soundcloud"] });
   await started.promise;
   assert.deepEqual(state, before);
-  assert.deepEqual(fixture.commits[0].p_metadata.settings, { spotifyEnabled: true, allowedProviders: ["mixcloud"] });
+  assert.deepEqual(fixture.commits[0].p_metadata.settings, { spotifyEnabled: true, allowedProviders: ["soundcloud"] });
   assert.equal(fixture.commits[0].p_state.playback.track?.id, next.id);
   assert.equal(fixture.commits[0].p_state.history[0].id, current.id);
   assert.deepEqual(fixture.commits[0].p_state.djQueues.alice.map(item => item.id), [disabled.id]);
   unblock.release(); await assert.rejects(pending, /storage offline/);
   assert.deepEqual(state, before);
   fixture.controls.beforeCommit = async () => {};
-  await fixture.store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["mixcloud"] });
+  await fixture.store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["soundcloud"] });
   assert.equal(state.playback.track?.id, next.id);
   assert.deepEqual(state.vibe, { trackId: next.id, votes: {} });
-  assert.deepEqual(state.settings.allowedProviders, ["mixcloud"]);
+  assert.deepEqual(state.settings.allowedProviders, ["soundcloud"]);
 });
 
 test("re-enabling queued services starts an idle room and survives a local storage restart", async t => {
@@ -217,13 +224,13 @@ test("re-enabling queued services starts an idle room and survives a local stora
     await rm(directory, { recursive: true, force: true });
   });
   const store = new Store({ dataDir: directory, supabase: null }); await store.init();
-  const state = room(); const show = track("show", "mixcloud"); state.settings.allowedProviders = ["youtube"];
+  const state = room(); const show = track("show", "soundcloud"); state.settings.allowedProviders = ["youtube"];
   state.djQueues.alice = [show]; await store.saveRoom(state);
   assert.equal(advanceRadio(state), null); assert.equal(state.djQueues.alice[0].id, show.id);
-  await store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["youtube", "mixcloud"] });
+  await store.updateRoomSettings(state.id, alice.id, { allowedProviders: ["youtube", "soundcloud"] });
   assert.equal(state.playback.track?.id, show.id);
   const restored = new Store({ dataDir: directory, supabase: null }); await restored.init();
-  assert.deepEqual(restored.getRoom(state.id)?.settings.allowedProviders, ["youtube", "mixcloud"]);
+  assert.deepEqual(restored.getRoom(state.id)?.settings.allowedProviders, ["youtube", "soundcloud"]);
   assert.equal(restored.getRoom(state.id)?.playback.track?.id, show.id);
 });
 
@@ -278,25 +285,35 @@ test("play-next cannot promote a disabled recording but it can still be removed"
   assert.deepEqual(fixture.state.djQueues.alice.map(item => item.id), [first.id]);
 });
 
-test("disabled Spotify blocks direct and saved additions before resolution and removes counterpart mappings", async () => {
+test("disabled and excluded services cannot add saved or direct picks or resume legacy playback", async () => {
   const fixture = await setupStore(); fixture.state.djQueueUserIds = [];
   const setId = randomUUID(); let spotifyCalls = 0;
   fixture.store.getPrivateLibrary = async () => ({ picks: [], sets: [{ id: setId, name: "Saved", savedAt: 1, tracks: [
     { provider: "spotify", providerId: "a".repeat(22), title: "Spotify" },
+    { provider: "apple", providerId: "123", title: "Apple Music" },
+    { provider: "mixcloud", providerId: "/dj/show/", title: "Mixcloud", permalinkUrl: "https://www.mixcloud.com/dj/show/" },
     { provider: "youtube", providerId: "abcdefghijk", title: "YouTube" }
   ] }] });
   const { run } = mountActions(fixture, {
-    resolveTrack: async input => { if (input.provider === "spotify") spotifyCalls++; return { mappings: { spotify: { providerId: "a".repeat(22) } } }; },
-    resolveSavedRecording: async input => { if (input.provider === "spotify") spotifyCalls++; return { ...input, mappings: { spotify: { providerId: "a".repeat(22) } } }; }
+    resolveTrack: async input => { if (input.provider !== "youtube") spotifyCalls++; return { mappings: { spotify: { providerId: "a".repeat(22) } } }; },
+    resolveSavedRecording: async input => { if (input.provider !== "youtube") spotifyCalls++; return { ...input, mappings: { spotify: { providerId: "a".repeat(22) } } }; }
   });
   assert.equal((await run("queue:add", { provider: "spotify", providerId: "a".repeat(22), title: "Spotify" })).ok, false);
+  assert.equal((await run("queue:add", { provider: "apple", providerId: "123", title: "Apple Music" })).ok, false);
+  assert.equal((await run("queue:add", { provider: "mixcloud", providerId: "/dj/show/", title: "Mixcloud", permalinkUrl: "https://www.mixcloud.com/dj/show/" })).ok, false);
   const appended = await run("queue:set-add", { setId, requestId: randomUUID() });
   assert.equal(appended.ok, true); assert.equal(appended.added, 1);
-  assert.deepEqual(appended.skipped, [{ title: "Spotify", reason: "Spotify is disabled in this room" }]);
+  assert.deepEqual(appended.skipped, [
+    { title: "Spotify", reason: "Spotify is disabled in this room" },
+    { title: "Apple Music", reason: "Apple Music is disabled in this room" },
+    { title: "Mixcloud", reason: "Mixcloud is disabled in this room" }
+  ]);
   assert.equal(spotifyCalls, 0);
   assert.equal(fixture.state.djQueues.alice[0].mappings?.spotify, undefined);
   const legacy = track("Legacy", "spotify"); fixture.state.djUserId = alice.id; fixture.state.playback.track = legacy;
   assert.equal((await run("playback:update", { trackId: legacy.id, playing: true, position: 0 })).ok, false);
+  const excluded = track("Legacy Apple", "apple"); fixture.state.playback.track = excluded;
+  assert.equal((await run("playback:update", { trackId: excluded.id, playing: true, position: 0 })).ok, false);
 });
 
 test("queue limits protect saved work and import retries spend capacity once", async () => {

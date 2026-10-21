@@ -123,7 +123,7 @@ test("saved YouTube verification forwards one caller deadline through counterpar
   const catalogSignals: Array<AbortSignal | undefined> = [];
   const upstreamSignals: AbortSignal[] = [];
   const spotify = { configured: true, searchTracks: async (_query: string, _limit: number, signal: AbortSignal) => { catalogSignals.push(signal); return []; } } as unknown as SpotifyApi;
-  const appleMusic = { configured: true, searchTracks: async (_query: string, _limit: number, _storefront: string, signal: AbortSignal) => { catalogSignals.push(signal); return []; } } as unknown as AppleMusicApi;
+  const appleMusic = { configured: true, searchTracks: async () => assert.fail("Excluded Apple catalog was contacted") } as unknown as AppleMusicApi;
   const resolver = createSavedSetResolver({ spotify, appleMusic, soundCloud: new SoundCloudApi(), youtubeApiKey: "fixture", allowSpotify: true, fetchImpl: async (url, init) => {
     upstreamSignals.push(init!.signal as AbortSignal);
     return String(url).includes("/oembed") ? Response.json({ title: "Verified", author_name: "Artist" }) : Response.json({ items: [{ id: "abcdefghijk", contentDetails: { duration: "PT3M" } }] });
@@ -131,7 +131,7 @@ test("saved YouTube verification forwards one caller deadline through counterpar
   const track = await resolver({ provider: "youtube", providerId: "abcdefghijk", title: "Client hint" }, controller.signal);
   assert.equal(track.durationVerified, true);
   assert.equal(track.durationMs, 180_000);
-  assert.equal(catalogSignals.length, 2);
+  assert.equal(catalogSignals.length, 1);
   assert.ok(catalogSignals.every(signal => signal instanceof AbortSignal && signal === catalogSignals[0]));
   assert.equal(upstreamSignals.length, 2);
   controller.abort();

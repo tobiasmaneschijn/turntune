@@ -5,6 +5,9 @@ import { detectMusicProvider, youtubeId } from "../../../src/features/music/musi
 test("Pasting a music link cannot send a listener to an impersonated provider", () => {
   assert.equal(detectMusicProvider("https://open.spotify.com/track/5bJ1DrEM4hNCafcDd1oxHx"), "spotify");
   assert.equal(detectMusicProvider("https://soundcloud.com/artist/song"), "soundcloud");
+  assert.equal(detectMusicProvider("https://audius.co/artist/song"), "audius");
+  assert.equal(detectMusicProvider("https://audius.co.evil.test/artist/song"), null);
+  assert.equal(detectMusicProvider("https://api.audius.co/artist/song"), null);
   assert.equal(detectMusicProvider("https://music.apple.com/us/song/song/123"), "apple");
   assert.equal(detectMusicProvider("https://www.mixcloud.com/artist/show/"), "mixcloud");
   assert.equal(detectMusicProvider("https://mixcloud.com/artist/show/"), "mixcloud");

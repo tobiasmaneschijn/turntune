@@ -22,7 +22,7 @@ import { localRateLimitsDisabled } from "../../security/local-development.js";
 interface Membership { room: Room; user: User }
 interface RoomActionOptions {
   socket: Socket;
-  onAction: (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => void;
+  onAction: (event: string, handler: Parameters<typeof safeSocketHandler>[0], options?: { authorizeInRoomCommand: true }) => void;
   store: Store;
   commands: RoomCommandService;
   getMembership: (socketId: string) => Membership | null;
@@ -90,13 +90,15 @@ export function mountRoomActions(options: RoomActionOptions) {
   };
   const runImport = <T>(member: Membership, operation: () => Promise<T>) => options.runImport ? options.runImport(member.user.id, operation) : operation();
   const action = <T>(event: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>, change: (draft: Room, member: Membership, input: T) => RoomChange<Record<string, unknown>>) => {
+    // These commands do no external work before their fresh admission check in
+    // the room queue. That check also covers account and room restrictions.
     onAction(event, async (payload, reply) => {
       const input = schema.safeParse(payload);
       if (!input.success) return reply?.({ ok: false, error: serverT("invalid_room_command") });
       const member = currentMember();
       const result = await commands.execute(member.room, async draft => { await assertFreshCurrent(member);if(["dj:join","queue:next","playback:update","playback:skip-vote","vibe:vote"].includes(event)&&draft.settings.requireRulesAcceptance&&draft.moderation?.rulesAcceptance?.[member.user.id]!==(draft.settings.rulesVersion??1))fail("Accept the room rules before participating.");return change(draft, member, input.data); });
       reply?.({ ok: true, ...result });
-    });
+    }, options.authorizeCurrent ? { authorizeInRoomCommand: true } : undefined);
   };
   const cleanupRemoved = (room: Room, previous: string[]) => {
     for (const id of previous.filter(id => !room.djQueueUserIds.includes(id))) {

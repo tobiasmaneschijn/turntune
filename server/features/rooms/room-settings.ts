@@ -1,6 +1,6 @@
 import { serverT } from "../../lib/i18n.js";
 import { z } from "zod";
-import { MUSIC_PROVIDERS } from "../../../shared/providers.js";
+import { isProviderAvailable, MUSIC_PROVIDERS } from "../../../shared/providers.js";
 import type { Room, RoomCapability } from "../../types.js";
 import { requireRoomCapability, requireNotBanned } from "./room-access.js";
 import { RoomCommandError } from "../../realtime/socket-handler.js";
@@ -8,6 +8,7 @@ import { RoomCommandError } from "../../realtime/socket-handler.js";
 export const allowedProvidersSchema = z.array(z.enum(MUSIC_PROVIDERS))
   .min(1, serverT("allow_at_least_one_music_service"))
   .max(MUSIC_PROVIDERS.length)
+  .refine(providers => providers.every(isProviderAvailable), "A music service is unavailable.")
   .refine(providers => new Set(providers).size === providers.length, serverT("music_services_must_be_unique"));
 
 const feature = z.enum(["everyone", "staff", "nobody"]);

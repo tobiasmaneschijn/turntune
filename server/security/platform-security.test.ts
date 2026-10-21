@@ -8,14 +8,46 @@ test("platform gates fail closed outside explicit local fixtures and verify trus
   assert.equal(await new PlatformSecurity(null).activeAccount("any"),false);
   assert.equal(await new PlatformSecurity(null,true).activeAccount("any"),true);
   let state: string|null=null,confirmed=false,failed=false,authReads=0;
+  let authWait: Promise<void> | undefined, authFailureStatus: number | undefined;
   const client={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:state?{state}:null,error:failed?{message:"private DB detail"}:null})})})}),
-    auth:{admin:{getUserById:async()=>{authReads++;return{data:{user:{email_confirmed_at:confirmed?"2026-10-13T00:00:00Z":null,user_metadata:{email_verified:true}}},error:null};}}}} as unknown as SupabaseClient;
+    auth:{admin:{getUserById:async()=>{authReads++;const allowed=confirmed,status=authFailureStatus;await authWait;return{data:{user:{email_confirmed_at:allowed?"2026-10-13T00:00:00Z":null,user_metadata:{email_verified:true}}},error:status?{status}:null};}}}} as unknown as SupabaseClient;
   const gate=new PlatformSecurity(client);
   assert.equal(await gate.activeAccount("user"),false,"metadata claim cannot substitute for confirmed Auth identity");
   confirmed=true;gate.invalidate("user");assert.equal(await gate.activeAccount("user"),true);
   assert.equal(await gate.activeAccount("user"),true);assert.equal(authReads,2,"confirmation cache is bounded, restriction reads stay fresh");
   state="suspended";assert.equal(await gate.activeAccount("user"),false,"cached confirmed identity cannot bypass immediate suspension");
   failed=true;await assert.rejects(gate.activeAccount("user"),/could not be verified/);
+
+  const hold = () => { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; };
+  state=null;failed=false;gate.invalidate("user");
+  const cold=hold();authWait=cold.promise;
+  const concurrent=[gate.verifiedAccount("user"),gate.verifiedAccount("user"),gate.activeAccount("user")];
+  assert.equal(authReads,3,"simultaneous requests share one cold Auth confirmation");
+  state="suspended";
+  assert.equal(await gate.activeAccount("user"),false,"shared identity work never shares or caches restriction grants");
+  cold.release();assert.deepEqual(await Promise.all(concurrent),[true,true,true]);
+
+  state=null;gate.invalidate("user");
+  const stale=hold();authWait=stale.promise;
+  const oldLookup=gate.verifiedAccount("user");
+  gate.invalidate("user");confirmed=false;
+  const fresh=hold();authWait=fresh.promise;
+  const newLookup=gate.verifiedAccount("user");
+  assert.equal(authReads,5,"invalidation starts a new identity check while the older check is pending");
+  stale.release();assert.equal(await oldLookup,true,"an already-running caller retains its original verification result");
+  const sharedFresh=gate.verifiedAccount("user");
+  assert.equal(authReads,5,"an older completion cannot cache its grant or discard the newer pending check");
+  fresh.release();assert.deepEqual(await Promise.all([newLookup,sharedFresh]),[false,false]);
+  assert.equal(await gate.verifiedAccount("user"),false,"only the current check populates the confirmation cache");
+
+  gate.invalidate("user");authFailureStatus=503;
+  const unavailable=hold();authWait=unavailable.promise;
+  const failures=[assert.rejects(gate.verifiedAccount("user"),/identity could not be verified/),assert.rejects(gate.verifiedAccount("user"),/identity could not be verified/)];
+  assert.equal(authReads,6,"concurrent callers share a failed Auth request as well");
+  unavailable.release();await Promise.all(failures);
+  authWait=undefined;authFailureStatus=undefined;confirmed=true;
+  assert.equal(await gate.verifiedAccount("user"),true,"a failed shared lookup releases its slot so a later request can recover");
+  assert.equal(authReads,7);
 });
 
 test("security event fields are bounded, redacted and keep fixed metric labels during log sampling",()=>{

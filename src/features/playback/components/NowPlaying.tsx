@@ -32,6 +32,7 @@ import { notifyWithAttention } from "../../../lib/notifications";
 import { useRoomNotificationMuted } from "../../rooms/hooks/use-room-notifications";
 import { EmptyPlayerDock } from "./EmptyPlayerDock";
 import { PlaybackTimeline } from "./PlaybackTimeline";
+import { PlaybackVideo } from "./PlaybackVideo";
 import { formatPlaybackTime } from "../format-playback-time";
 import { useArtworkColor } from "../use-artwork-color";
 import { useMediaQuery } from "../../../hooks/use-media-query";
@@ -431,7 +432,7 @@ export function NowPlaying({
   const checkedProvider = effectiveProvider || preferredProvider;
   const connectionState = playbackProvider(checkedProvider).connectionState?.(connections, accessToken);
   const needsConnection = connectionState === "needs-connection";
-  const { persistentPlayer, stagePlayer, registration } = usePlaybackHost({
+  const { persistentPlayer, stagePlayer, videoPlayer, registration } = usePlaybackHost({
     playback, target: selection.target, suppressed: fallbackNeedsApproval || fallbackSuppressed,
     preference: playbackPreference, allowedProviders: allowedRoomProviders(snapshot.room.settings),
     controlsRef: adapterControls, isDj, volume, accessToken, userId: currentUserId, roomSlug,
@@ -525,7 +526,7 @@ export function NowPlaying({
           <div data-provider={effectiveProvider} className={`track-stage ${registration?.artworkPreview && previewArtwork ? "has-album-art" : ""} ${providerActionRequired ? "requires-action" : ""} ${registration?.stageClassName || ""}`}>
             <TrackArtwork track={track} />
             {registration?.artworkPreview && previewArtwork && (
-              <TrackArtwork track={track} src={previewArtwork} className="album-art-preview" alt={t("nowPlaying.artwork", { title: track.title })} />
+              <TrackArtwork track={track} src={previewArtwork} artworkSources={effectiveMapping?.artworkSources} className="album-art-preview" alt={t("nowPlaying.artwork", { title: track.title })} />
             )}
             {fallbackNeedsApproval ? (
               <div className="provider-player-shell fallback-player-shell">
@@ -539,7 +540,7 @@ export function NowPlaying({
                 <small>{t("nowPlaying.noMatchPaused", { provider: providerLabel(preferredProvider) })}</small>
                 <Button type="button" onClick={() => setFallbackApprovedTrackId(track.id)}>{t("nowPlaying.useForTrack", { provider: providerName })}</Button>
               </div>
-            ) : selection.target ? stagePlayer : (
+            ) : selection.target ? videoPlayer ? <PlaybackVideo docked={docked}>{videoPlayer}</PlaybackVideo> : stagePlayer : (
               <div className="provider-player-shell">
                 <strong>{t("nowPlaying.noVersion")}</strong>
                 <small>{t("nowPlaying.chooseProvider")}</small>
@@ -559,7 +560,7 @@ export function NowPlaying({
                 <Button ref={detailsButtonRef} variant="ghost" size="icon" className="track-details-action" aria-label={t("nowPlaying.trackDetails")} title={t("nowPlaying.trackDetails")} onClick={() => setDetailsOpen(true)}><Info size={16} /></Button>
               </div>
               <p className="current-track-meta">
-                {mobileDock ? <span className="current-track-artist" title={track.artist || providerLabel(track.provider)}>{track.artist || providerLabel(track.provider)}</span> : <>
+                {mobileDock && track.provider !== "audius" ? <span className="current-track-artist" title={track.artist || providerLabel(track.provider)}>{track.artist || providerLabel(track.provider)}</span> : <>
                 {track.artist && <span className="current-track-artist" title={track.artist}>{track.artist}</span>}
                 {track.artist && <span aria-hidden="true">·</span>}
                 {track.permalinkUrl ? (

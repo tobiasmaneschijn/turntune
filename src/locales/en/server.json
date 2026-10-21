@@ -240,6 +240,7 @@
   "room_access_could_not_be_verified": "Room access could not be verified.",
   "artwork_must_use_a_supported_image_host": "Artwork must use a supported image host.",
   "invalid_individual_track_identifier": "Invalid individual track identifier.",
+  "invalid_audius_track_url": "Enter a valid Audius track URL.",
   "a_matching_mixcloud_show_url_is_required": "A matching Mixcloud show URL is required.",
   "your_value1_saved_picks_are_full_delete_a_pick_before_saving_another": "Your {{value1}} saved favorites are full. Remove a favorite before saving another.",
   "sets_can_contain_up_to_value1_tracks": "Sets can contain up to {{value1}} tracks.",

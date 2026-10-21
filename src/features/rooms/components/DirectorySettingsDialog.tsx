@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SoundSpinUserSettings } from "../../settings/user-settings";
 import { requestJson } from "../../../lib/authenticated-http";
 import { UserSettingsDialog, type MusicConnections } from "../../settings/UserSettingsDialog";
+import { isProviderAvailable } from "../../../../shared/provider-definitions";
 
 /** Personal settings are also available before joining a room or mounting a player. */
 export function DirectorySettingsDialog({ accessToken, settings, onSettingsChange, onClose }: {
@@ -28,7 +29,7 @@ export function DirectorySettingsDialog({ accessToken, settings, onSettingsChang
     }).then(payload => {
       if (controller.signal.aborted || tokenRef.current !== accessToken) return;
       setConnections({ loaded: true, spotifyConfigured: false, spotifyConnected: false,
-        spotifyProfile: null, appleConfigured: Boolean(payload.apple?.configured) });
+        spotifyProfile: null, appleConfigured: isProviderAvailable("apple") && Boolean(payload.apple?.configured) });
     }).catch(() => {
       if (!controller.signal.aborted && tokenRef.current === accessToken) setConnectionError(t("musicConnectionsCheckError"));
     });

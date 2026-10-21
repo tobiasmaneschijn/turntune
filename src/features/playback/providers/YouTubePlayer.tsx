@@ -73,6 +73,19 @@ function seekToLiveEdge(player: YouTubePlayerApi) {
   return false;
 }
 
+function playerCanStart(element: HTMLElement | null, intersecting: boolean) {
+  if (!element || !intersecting || document.visibilityState === "hidden") return false;
+  if (element.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true }) === false) return false;
+  // Recheck geometry before a command: scrolling can precede the observer's callback.
+  const bounds = element.getBoundingClientRect();
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0;
+  const top = viewport?.offsetTop ?? 0;
+  const width = Math.max(0, Math.min(bounds.right, left + (viewport?.width ?? window.innerWidth)) - Math.max(bounds.left, left));
+  const height = Math.max(0, Math.min(bounds.bottom, top + (viewport?.height ?? window.innerHeight)) - Math.max(bounds.top, top));
+  return bounds.width > 0 && bounds.height > 0 && width * height > bounds.width * bounds.height / 2;
+}
+
 export function YouTubePlayer({
   playback,
   syncRevision,
@@ -92,6 +105,10 @@ export function YouTubePlayer({
   const liveMetadataRef = useRef<{ key: string; isLive: boolean; expiresAt: number } | null>(null);
   const liveEdgeTrackKeyRef = useRef("");
   const appliedSyncRevisionRef = useRef(syncRevision);
+  const appliedCheckpointRef = useRef("");
+  const deferredStartRef = useRef("");
+  const intersectingRef = useRef(false);
+  const visibilityObservedRef = useRef(false);
   const playbackRef = useRef(playback);
   const onStatusRef = useRef(onStatus);
   const isDjRef = useRef(isDj);
@@ -99,12 +116,15 @@ export function YouTubePlayer({
   const onErrorRef = useRef(onError);
   const [ready, setReady] = useState(false);
   const [loadedRevision, setLoadedRevision] = useState(0);
+  const [visibleRevision, setVisibleRevision] = useState(0);
 
   playbackRef.current = playback;
   onStatusRef.current = onStatus;
   isDjRef.current = isDj;
   onEndedRef.current = onEnded;
   onErrorRef.current = onError;
+
+  const canStart = () => playerCanStart(mountRef.current, intersectingRef.current);
 
   const isLive = (player: YouTubePlayerApi, key: string) => {
     const metadata = liveMetadataRef.current;
@@ -115,6 +135,39 @@ export function YouTubePlayer({
     if (!live) liveEdgeTrackKeyRef.current = "";
     else if (liveEdgeTrackKeyRef.current !== key && seekToLiveEdge(player)) liveEdgeTrackKeyRef.current = key;
   };
+
+  useEffect(() => {
+    const element = mountRef.current;
+    if (!ready || !element) return;
+    let active = true;
+    let eligible = false;
+    const update = (firstObservation = false) => {
+      const next = playerCanStart(element, intersectingRef.current);
+      if (firstObservation || (next && !eligible)) setVisibleRevision(revision => revision + 1);
+      eligible = next;
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!active) return;
+      const firstObservation = !visibilityObservedRef.current;
+      visibilityObservedRef.current = true;
+      intersectingRef.current = entry.isIntersecting && entry.intersectionRatio > 0.5;
+      update(firstObservation);
+    }, { threshold: [0, 0.5, 0.500001, 1] });
+    const onVisibility = () => update();
+    observer.observe(element);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.visualViewport?.addEventListener("resize", onVisibility);
+    window.visualViewport?.addEventListener("scroll", onVisibility);
+    return () => {
+      active = false;
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.visualViewport?.removeEventListener("resize", onVisibility);
+      window.visualViewport?.removeEventListener("scroll", onVisibility);
+      intersectingRef.current = false;
+      visibilityObservedRef.current = false;
+    };
+  }, [ready]);
 
   useEffect(() => {
     liveMetadataRef.current = null;
@@ -165,10 +218,18 @@ export function YouTubePlayer({
               confirmedTrackKeyRef.current = key;
               setLoadedRevision((revision) => revision + 1);
             }
+            // A pending load can finish after the listener hides the player.
+            if (state === 1 && playedTrackKeyRef.current !== key && !canStart()) {
+              deferredStartRef.current = key;
+              player.pauseVideo();
+              onStatusRef.current({ ready: true, buffering: false, currentTime: player.getCurrentTime() || 0,
+                duration: player.getDuration() || 0, playing: false, trackId: current.track.id });
+              return;
+            }
             if (state === 1) playedTrackKeyRef.current = key;
             if (state === 1 || state === 2 || state === 5) onErrorRef.current?.("");
             const live = isLive(player, key);
-            if (state !== window.YT?.PlayerState.ENDED) enterLivePlayback(player, key, live);
+            if (state !== window.YT?.PlayerState.ENDED && (state === 1 || canStart())) enterLivePlayback(player, key, live);
             const checkpoint = `${key}:${current.position}:${current.updatedAt}`;
             if (event.data === window.YT?.PlayerState.ENDED && state === window.YT?.PlayerState.ENDED &&
               isDjRef.current && current.playing && endedCheckpointRef.current !== checkpoint) {
@@ -205,7 +266,7 @@ export function YouTubePlayer({
   }, []);
 
   useEffect(() => {
-    if (!ready || !playerRef.current) return;
+    if (!ready || !visibilityObservedRef.current || !playerRef.current) return;
     const player = playerRef.current;
     if (!playback.track) {
       player.pauseVideo();
@@ -213,11 +274,14 @@ export function YouTubePlayer({
       confirmedTrackKeyRef.current = "";
       playedTrackKeyRef.current = "";
       liveEdgeTrackKeyRef.current = "";
+      appliedCheckpointRef.current = "";
+      deferredStartRef.current = "";
       onStatusRef.current({ ready: true, buffering: false, currentTime: 0, duration: 0 });
       return;
     }
     const position = playbackTargetPosition(playback);
     const key = trackKey(playback);
+    const checkpoint = `${key}:${playback.playing}:${playback.position}:${playback.updatedAt}:${syncRevision}`;
     if (requestedTrackKeyRef.current !== key) {
       requestedTrackKeyRef.current = key;
       confirmedTrackKeyRef.current = "";
@@ -225,8 +289,11 @@ export function YouTubePlayer({
       endedCheckpointRef.current = "";
       liveEdgeTrackKeyRef.current = "";
       appliedSyncRevisionRef.current = syncRevision;
-      onStatusRef.current({ ready: true, buffering: playback.playing, currentTime: 0, duration: 0 });
-      const action = playback.playing ? "loadVideoById" : "cueVideoById";
+      appliedCheckpointRef.current = "";
+      const start = playback.playing && canStart();
+      deferredStartRef.current = playback.playing && !start ? key : "";
+      onStatusRef.current({ ready: true, buffering: start, currentTime: 0, duration: 0 });
+      const action = start ? "loadVideoById" : "cueVideoById";
       const metadata = liveMetadataRef.current;
       const live = metadata?.key === key && metadata.expiresAt > Date.now() && metadata.isLive;
       player[action]({ videoId: playback.track.providerId, ...(live ? {} : { startSeconds: position }) });
@@ -234,13 +301,21 @@ export function YouTubePlayer({
       // A room checkpoint may change before the requested video finishes
       // loading. Apply its latest intent after the SDK confirms that video.
       if (confirmedTrackKeyRef.current !== key || loadedVideoId(player) !== playback.track.providerId) return;
+      if (appliedCheckpointRef.current === checkpoint && deferredStartRef.current !== key) return;
+      if (!canStart()) {
+        if (!playback.playing) player.pauseVideo();
+        else if (player.getPlayerState() !== 1) deferredStartRef.current = key;
+        return;
+      }
       if (isLive(player, key)) {
         if (appliedSyncRevisionRef.current !== syncRevision) seekToLiveEdge(player);
       } else player.seekTo(position, true);
       appliedSyncRevisionRef.current = syncRevision;
+      appliedCheckpointRef.current = checkpoint;
+      deferredStartRef.current = "";
       playback.playing ? player.playVideo() : player.pauseVideo();
     }
-  }, [ready, loadedRevision, playback.track?.id, playback.track?.providerId, playback.playing, playback.position, playback.updatedAt, syncRevision]);
+  }, [ready, loadedRevision, visibleRevision, playback.track?.id, playback.track?.providerId, playback.playing, playback.position, playback.updatedAt, syncRevision]);
 
   useEffect(() => {
     if (!ready || !playerRef.current) return;
@@ -258,7 +333,7 @@ export function YouTubePlayer({
       if (state === window.YT?.PlayerState.ENDED && playedTrackKeyRef.current !== key) return;
       if (state === 1) playedTrackKeyRef.current = key;
       const live = isLive(player, key);
-      if (state !== window.YT?.PlayerState.ENDED) enterLivePlayback(player, key, live);
+      if (state !== window.YT?.PlayerState.ENDED && (state === 1 || canStart())) enterLivePlayback(player, key, live);
       const currentTime = player.getCurrentTime();
       onStatusRef.current({
         ready: true,
@@ -269,7 +344,7 @@ export function YouTubePlayer({
         playing: state === 1,
         trackId: current.track.id
       });
-      if (!live && current.playing && state !== window.YT?.PlayerState.ENDED) {
+      if (!live && current.playing && state !== window.YT?.PlayerState.ENDED && (state === 1 || canStart())) {
         const expected = playbackTargetPosition(current);
         if (playbackNeedsSeek(currentTime, expected, "health")) player.seekTo(expected, true);
       }

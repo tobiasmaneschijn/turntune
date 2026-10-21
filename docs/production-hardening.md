@@ -1,9 +1,9 @@
 # Production hardening and release gate
 
-This is the operator runbook for the security release. Repository changes do not
-verify a hosted deployment. Release stays blocked until the staging and operator
-checks below have recorded evidence. Use staging accounts and a disposable
-project for abuse/deletion/restore tests. Never run destructive checks on users.
+Use this runbook to configure and verify a hosted environment. Routine releases
+use the manual [Deploy workflow](github-deployments.md), authorized by GitHub's
+repository and environment permissions. Use staging accounts and a disposable
+project for abuse, deletion and restore tests. Never run destructive checks on users.
 Follow [Platform security and privacy](platform-security-and-privacy.md) for MFA,
 moderation, export/deletion steps and the detailed data/retention inventory.
 
@@ -80,11 +80,11 @@ The example is a list of names/placeholders, not deployable credentials.
 | Provider admission budgets | `PROVIDER_REQUESTS_PER_MINUTE=300`, `SPOTIFY_REQUESTS_PER_MINUTE=1200`, `PROVIDER_MAX_CONCURRENT=12`, `PROVIDER_GLOBAL_MAX_CONCURRENT=48` are initial process-wide ceilings. Spotify polling can cost about 40 calls/minute per active listener. Measure actual normal concurrency before raising limits; provider-side spend/quota caps are still required. Validated maximums are 10000 requests/minute, 32 concurrent/provider and 96 concurrent globally. |
 | `SOUNDSPIN_PORT` | Host loopback binding: `3001` for staging, `3002` for production on this Dokploy host. Dokploy itself publishes host port `3000`. Keep the container's internal port `3000`. |
 | `SOUNDSPIN_REVISION` | Source builds with `compose.yaml` only: reviewed Git commit used for the OCI image revision label. The GitHub release workflow supplies the revision automatically. `unknown` is allowed for local testing only. |
-| `SOUNDSPIN_IMAGE` | Release Compose only: workflow-supplied `ghcr.io/...@sha256:...` reference. Production must use the digest verified in staging. |
+| `SOUNDSPIN_IMAGE` | Release Compose only: workflow-supplied `ghcr.io/...@sha256:...` reference built and scanned for the selected commit. |
 
 If frontend `VITE_SUPABASE_*` values are baked into a build, they must identify
 the same production project as `/api/config`. Prefer the runtime configuration
-path when sharing an artifact between staging and production. Never bake a
+path so each deployment reads its own environment's configuration. Never bake a
 service secret into frontend configuration.
 
 For local development, use separate provider credentials, set `APP_ORIGIN` to
@@ -158,7 +158,7 @@ Keep default/unknown-host servers separate and reject them. The example assumes
 Nginx itself sees the real client; it requires adaptation behind a CDN. Do not
 serve Node directly on the internet or trust every private network.
 
-Staging completion evidence:
+Ingress checks:
 
 - Record HTTP-to-HTTPS redirect, certificate chain, expiry, TLS versions and
   final SPA/API/error security headers. Never treat HSTS as backend isolation.
@@ -232,16 +232,12 @@ Compose replicas, autoscaling or a rolling overlap without implementing and
 testing shared coordination first. Replacing the process disconnects sockets;
 the client reconnects and loads durable state.
 
-Build once from a reviewed revision and record the image digest, migration
-history, dependency lock hash and runtime configuration version. The manual
-[GitHub deployment workflow](github-deployments.md) builds and scans in staging,
-then promotes that exact digest to production. It checks CI and Supabase results
-for the selected commit and binds evidence to the run and attempt. Production
-requires a maintainer with write access to select **Confirm deployment** in a
-fresh manual workflow run. It automatically selects a successful staging
-deployment with the same source tree, completed before that dispatch. A merge commit may
-have a different SHA only when its Git tree equals the staged source tree. The
-full hosted release gates in this runbook still apply.
+The manual [Deploy workflow](github-deployments.md) checks CI and Supabase
+migration results for the selected commit, builds and scans its image, then
+deploys its immutable digest in one job. Select `develop` with `staging`, or
+`master` with `production`. The job records the revision, digest and runtime
+verification in its summary. Stop the target service and verify the old process
+exited before starting the replacement, including during rollback.
 
 The base-image digest is reviewed, not permanently frozen: merge verified update
 proposals and rebuild on a regular schedule. With a corporate/session TLS proxy, supply the
@@ -390,137 +386,30 @@ from every recipient.
 
 ## Release verification record
 
-Repository checks are a prerequisite, not the hosted gate:
+The **Deploy** job summary records the selected environment, commit, immutable
+image digest and verification results. The workflow checks
+CI and the correct Supabase migration result before replacing the server, then
+waits for health and verifies HTTPS and Socket.IO. Use the job log to investigate
+a failure before retrying.
 
-```sh
-npm ci --include=dev
-npm test
-npm run test:sql
-npm run build
-npm run test:production
-npm run audit:dependencies
-node scripts/check-dependencies.mjs --self-test
-node scripts/check-secrets.mjs --self-test
-npm run security:secrets
-```
+Check the following when configuring an environment or changing its infrastructure:
 
-The secrets commands require the checksum-pinned Gitleaks binary used by CI,
-on PATH or selected with `GITLEAKS_BIN`. Build/smoke tests use isolated fixtures;
-they are not permission to contact production providers or modify production data.
-Run the relevant existing behavior/browser tests as CI requires. Review the
-`static-analysis` and image scan results. Semgrep CE uses pinned tooling and local
-rules; see `security/static-analysis/README.md` for setup, rule provenance,
-enforced coverage, licenses and failure-path checks. It does not upload source to
-a scanner service and does not claim CodeQL-equivalent coverage. GitHub CodeQL
-code scanning is unavailable for private personal Free/Pro repositories; private
-code scanning requires an eligible organization plan with Code Security, as
-[GitHub documents](https://docs.github.com/en/code-security/reference/code-scanning/troubleshoot-analysis-errors/private-repository-enablement). This
-repository therefore enforces the local static-analysis gate instead. Never
-silently disable a failing scanner or accept an incomplete scan as clean.
-The ordinary unit, SQL, compiled smoke and browser npm test commands use the
-shared environment allowlist: application/provider credentials, Auth overrides,
-proxy trust and Node injection settings are removed. Browser suites force
-`NODE_ENV=test`, start isolated fixture servers, preserve only the explicit
-browser installation path and basic OS/proxy/CA settings, and run the fixed
-selected configurations. Non-live groups explicitly default to one worker;
-explicit `--workers`/`-j` choices override that default. `CI` disables fixture
-server reuse but does not itself limit Playwright's CPU-based worker default.
-`test:ui:live` and user-seeding commands are separate
-manual operations requiring an explicitly authorized environment. The required
-CI behavior job has a 20-minute timeout for the reduced one-worker use-case suite;
-failures still fail the gate.
-Fixture-suite failure diagnostics retain a final failure screenshot, test
-sources/API-call records, console output and the reporter's accessible error context. Its
-`snapshots:false` setting disables DOM snapshots and Playwright network HAR;
-continuous trace screenshots are also disabled to avoid repeated paints of
-large chat fixtures. These artifacts must not be presented as HAR evidence. Other suites retain
-their own trace settings.
-
-On 2026-10-13 the dependency remediation produced **zero known advisories** in
-both full and production `npm audit` results. Patched `proxy-addr` 2.0.8 is deduped
-under Express. Gitleaks 8.30.0 scanned all 76 available commits and the working
-tree without finding a leak; both scanner failure-path self-tests passed. The
-final history/working-tree scan was repeated after the browser-fixture and
-documentation corrections and exited 0 at 2026-10-13 18:41 UTC; evidence is
-`work/gitleaks-final-canonical-network.log` and its completion record. The first
-attempt in the default execution sandbox could not launch the scanner (`EPERM`)
-and did not scan files; the successful retry used the available execution profile.
-The
-HTTP/proxy/origin security regression suite passed 6/6, including real polling
-SID reuse and WebSocket transport/authentication checks. These observations expire
-as dependencies/code change and do not cover unavailable history or secret stores.
-The bounded Supabase transport suite passed 8/8 with local mocks, covering a
-stalled fetch/body, an uncooperative cancellation promise, oversize/aggregate
-bytes, shared admission, caller abort, credential destination and SDK RPC results.
-After the account-restriction, history-pagination/scroll, JWKS configuration,
-APNG and Vite isolation fixes, the latest isolated unit suite passed 473/473, full
-frontend/server typechecking and production compilation passed, and the compiled
-production-entrypoint smoke suite passed 4/4, including inline-JWKS rejection.
-Earlier hardened-image verification used fresh locked build/runtime installs.
-That local fixture became ready with UID 1000, read-only compiled assets, dropped
-capabilities/no-new-privileges, 512 MiB/one CPU/128 PID limits and working native
-Sharp encode/decode. Fresh-volume and temporary writes succeeded; compiled writes
-failed; build tooling/package managers were absent. Idle SIGTERM exited cleanly
-with code 0 in 0.35 seconds. In-flight writes and staging capacity remain hosted
-gates. The base image initially contained eight High npm-tooling advisories; the
-unused package managers were removed from the runtime image instead of excluding
-those findings from scanning. Trivy 0.75.0 then reported **zero High/Critical
-findings** in the rebuilt runtime image using the downloaded vulnerability DB.
-This scan is separate from npm's all-severity dependency audit.
-The current working-tree image rebuilt successfully after the APNG, history-scroll,
-Vite isolation and production JWKS fixes; its image ID is
-`sha256:6aff81e9c953b2d52dcceb903d1da0fcd4a64bd58c7093573597caa4d9bf858d`.
-Its OCI revision label is `unknown`; release CI must rebuild the reviewed committed
-revision and record its revision label and immutable digest. The container
-restrictions above were verified on the preceding image with the same Dockerfile
-and Compose controls. Staging readiness, shutdown during writes and capacity
-still require verification for the committed release artifact.
-On this current image, the compiled upload validator ran in a disposable,
-network-disabled, read-only container with the configured process restrictions.
-The valid 218-byte two-frame APNG was rejected for avatar, chat and feedback
-purposes; a static PNG containing literal `acTL` text was accepted for all three.
-This also exercised the current image's native Sharp decoder with local fixtures.
-The final isolated Player-QOL run passed **29/29**, with exit code 0 recorded in
-`work/release-player-qol-final.result.json`. The measured-sync fixture fixes Date
-before navigation for that named case, preserving real timers and the original
-pending, playback and prior-track assertions. The canonical browser gate passed
-**439/439** with exit code 0: fixtures285, playback64, Music-QOL61 and Player-QOL29,
-using one worker in sequence. Evidence is in
-`work/release-browser-canonical-final.log` and its completion record, dated
-2026-10-13 18:02–18:35 UTC. Earlier interrupted or mixed logs are retained as
-diagnostics and do not substantiate this final gate. The held-poll-acknowledgement
-fixture controls timer progression only for that functional stale-response
-scenario; it does not verify the real 15-second deadline. The application deadline
-is unchanged, and the separate bounded-operation checks remain in place. These
-browser results cover Chromium desktop/mobile viewports and local SDK/API mocks;
-actual providers and hosted configuration remain staging gates.
-
-Record each remaining gate with operator, date, revision/configuration, evidence
-and decision. All checkboxes remain open until actual hosted/operator evidence
-exists:
-
-- [ ] DNS, TLS renewal/redirect, Host policy and HSTS verified on the public edge.
-- [ ] Backend/admin/database/container-engine isolation verified for IPv4/IPv6.
-- [ ] Actual proxy topology recorded; spoofed headers and HTTP/WS budgets tested.
-- [ ] Production keys/scopes/quotas and OAuth/Auth redirects verified; none exposed
-  in browser assets, history, screenshots, logs or deployment build configuration.
-- [ ] All migrations applied to staging, real Supabase RLS/RPC/Storage/Realtime
-  direct-client bypass tests passed, then production migration plan reviewed.
-- [ ] Signup verification/recovery/SMTP/rate limits passed with staging accounts.
-- [ ] Music SDK authorization/logout/playback passed under enforced CSP for every
-  enabled provider. No unexplained CSP violation is accepted; missing hosts are
-  reviewed individually instead of adding `*`, unsafe-eval or unsafe-inline scripts.
-- [ ] Image scan and static-analysis gates passed or exact reviewed expiring exceptions
-  recorded; branch/ruleset requires app/security checks and code/migration review.
-- [ ] Host reports nonroot/restricted resources and exactly one active process;
-  controlled concurrency/restart/shutdown checks passed.
-- [ ] Primary/backup administrators tested suspension, room takedown and audit
-  access; central logs/alerts delivered a safe synthetic incident notification.
-- [ ] Approved retention schedule and complete deletion/export retry test recorded.
-- [ ] Encrypted database/Storage/config backups, deletion-ledger replay and separate
-  restore/rollback drill passed the approved recovery objectives.
-- [ ] Final authenticated end-to-end staging check passed at the intended release
-  revision; no unresolved deployment-blocking finding or untested critical flow.
-
-Public launch requires every gate above to pass and its release evidence to be
-reviewed. A completed repository change alone does not approve a deployment.
+- DNS, TLS renewal, redirects, Host policy and HSTS work on the intended edge.
+- The backend, admin, database and container engine are isolated on IPv4 and IPv6.
+- The proxy's observed address is trusted explicitly; spoofed forwarding headers
+  fail and HTTP/WebSocket budgets hold.
+- Credentials, provider quotas, OAuth callbacks, Auth Site URL and password-reset
+  redirects match the environment; server secrets stay out of browser assets and logs.
+- The full migration chain is applied. Supabase RLS, RPC, Storage and Realtime
+  permissions hold against direct-client bypass attempts.
+- Signup, verification, recovery and SMTP work with staging accounts.
+- Every enabled music provider works with enforced CSP and real accounts.
+  Review missing hosts individually instead of allowing arbitrary scripts or origins.
+- The deployed image runs with the configured resource restrictions and one active
+  Node process. Capacity, graceful shutdown and durable-state recovery work.
+- Operators can use moderation and recovery controls, and logs and alerts reach
+  their configured destination.
+- Retention, export and deletion retries work. Encrypted database, Storage and
+  configuration backups can be restored into an isolated project.
+- An authenticated group session works through the intended ingress with no
+  unresolved failure in account access, saved work or playback recovery.

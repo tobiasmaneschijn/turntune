@@ -1,5 +1,5 @@
-/* One provider owner. App controls form the dock; native widgets stay out of
-   view while provider-owned activation buttons retain their click gesture. */
+/* One provider owner. Video adapters use the room's visible video surface;
+   other native widgets retain their existing activation controls. */
 section.now-playing.now-playing--dock.panel {
   --dock-artwork-size: var(--room-player-artwork-size, 48px);
   --dock-actions-size: 32px;
@@ -35,7 +35,7 @@ section.now-playing.now-playing--dock.panel {
 .now-playing.now-playing--dock :is(.now-playing-main, .player-details, .player-utilities) { display: contents; }
 section.now-playing.now-playing--dock.panel .track-stage { display: contents; }
 section.now-playing.now-playing--dock.panel .track-stage > .track-artwork,
-section.now-playing.now-playing--dock.panel .track-stage :is(.youtube-shell, .soundcloud-shell),
+section.now-playing.now-playing--dock.panel .track-stage .soundcloud-shell,
 section.now-playing.now-playing--dock.panel .mixcloud-shell > iframe { display: none; }
 section.now-playing.now-playing--dock.panel .mixcloud-shell { display: contents; }
 section.now-playing.now-playing--dock .current-track { grid-column: 1; grid-row: 1; display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0; text-align: left; }

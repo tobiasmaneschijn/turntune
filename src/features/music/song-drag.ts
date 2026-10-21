@@ -8,7 +8,7 @@ const MAX_DRAG_LENGTH = 16_384
 /** Only the public player and History write this format; private queue drags do not. */
 export function songFromTrack(track: Track, positionSeconds?: number): ChatSongAttachment | undefined {
   return normalizeChatSong({ id: track.id, provider: track.provider, providerId: track.providerId,
-    title: track.title, artist: track.artist, artworkUrl: track.artworkUrl,
+    title: track.title, artist: track.artist, artworkUrl: track.artworkUrl, artworkSources: track.artworkSources,
     permalinkUrl: track.permalinkUrl, durationMs: track.durationMs, positionSeconds })
 }
 

@@ -1,6 +1,6 @@
 import { serverT } from "../../lib/i18n.js";
 import { randomUUID } from "node:crypto";
-import { allowedRoomProviders, MUSIC_PROVIDERS, PROVIDER_LABELS, roomAllowsProvider } from "../../../shared/providers.js";
+import { MUSIC_PROVIDERS, PROVIDER_LABELS, roomAllowsProvider } from "../../../shared/providers.js";
 import type { Room, SnapshotRoom, Track, User } from "../../types.js";
 import { effectiveRoomPolicy, roomCapabilities } from "../../../shared/room-policy.js";
 import { activeDjRestriction, radioState, recordTrackStart, roomSession, skipVoteSummary, trackEligibility } from "./radio-policy.js";
@@ -56,9 +56,11 @@ export function normalizeRadioState(room: Room) {
   if (!object(room.settings)) room.settings = {};
   room.settings.djAccess = room.settings.djAccess === "roles" ? "roles" : "everyone";
   if (Array.isArray(room.settings.allowedProviders)) {
-    const providers = allowedRoomProviders(room.settings);
-    if (providers.length) room.settings.allowedProviders = providers;
-    else delete room.settings.allowedProviders;
+    // Preserve an explicit restriction even when none of its providers ship.
+    // Falling back to defaults would silently enable other services on restart.
+    room.settings.allowedProviders = MUSIC_PROVIDERS.filter(provider =>
+      room.settings.allowedProviders!.includes(provider) &&
+      (provider !== "spotify" || room.settings.spotifyEnabled === true));
   } else delete room.settings.allowedProviders;
   if (typeof room.settings.themePrompt === "string" && room.settings.themePrompt.trim().length <= 160 && room.settings.themePrompt.trim()) {
     room.settings.themePrompt = room.settings.themePrompt.trim();
@@ -119,7 +121,7 @@ export function normalizeRadioState(room: Room) {
   } else {
     room.vibe = null;
   }
-  if(room.playback.playing&&room.playback.track?.provider==="spotify"&&!roomAllowsProvider(room.settings,"spotify")) {
+  if(room.playback.playing&&room.playback.track&&!roomAllowsProvider(room.settings,room.playback.track.provider)) {
     room.playback.playing=false;
     room.playback.updatedAt=Date.now();
   }

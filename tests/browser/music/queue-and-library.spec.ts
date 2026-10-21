@@ -27,26 +27,26 @@ async function openAddMusic(page: Page) {
 }
 
 test("follow a room's music-service restrictions when searching and adding a link", async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "mixcloud"));
+  await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "soundcloud"));
   let requestStarted = false;
   let release!: () => void;
   const responseGate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/api/mixcloud/search?**", async (route) => {
+  await page.route("**/api/soundcloud/search?**", async (route) => {
     requestStarted = true;
     await responseGate;
-    await route.fulfill({ json: { results: [{ id: "/fixture/stale/", title: "Stale Mixcloud Show", artist: "DJ" }] } }).catch(() => {});
+    await route.fulfill({ json: { results: [{ id: "soundcloud:tracks:123", title: "Stale SoundCloud Track", artist: "DJ", permalinkUrl: "https://soundcloud.com/fixture/stale" }] } }).catch(() => {});
   });
   await open(page);
   await search(page);
   await expect.poll(() => requestStarted).toBe(true);
-  await api(page, "music.setAllowedProviders(['soundcloud', 'spotify'])");
-  await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toContainText("SoundCloud");
+  await api(page, "music.setAllowedProviders(['youtube', 'spotify'])");
+  await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toContainText("YouTube");
   release();
   await expect(page.locator(".search-result-list")).toHaveAttribute("aria-busy", "false");
   await expect(page.locator(".search-result-row")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("midnight");
   await page.getByRole("combobox", { name: "Music provider", exact: true }).click();
-  await expect(page.getByRole("option")).toHaveText(["SoundCloud", "Spotify"]);
+  await expect(page.getByRole("option")).toHaveText(["YouTube", "Spotify"]);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Add by link", exact: true }).click();
   await page.getByRole("textbox", { name: "Track link", exact: true }).fill("https://mixcloud.com/fixture/show/");
@@ -130,6 +130,57 @@ test("build a private queue after correcting search and recovering a failed add 
   await expect(page.getByRole("textbox", { name: "Search music", exact: true })).toHaveValue("taet");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Add music", exact: true })).toBeFocused();
+});
+
+test("build a saved set from Audius search and a track link when cover artwork needs a mirror", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("soundspin-search-provider", "audius"));
+  await mockLibrary(page);
+  const artworkSources = {
+    "150x150": "https://creatornode2.audius.co/content/fixture/150x150.jpg",
+    "480x480": "https://creatornode2.audius.co/content/fixture/480x480.jpg",
+    "1000x1000": "https://creatornode2.audius.co/content/fixture/1000x1000.jpg",
+    mirrors: ["https://creatornode3.audius.co"]
+  };
+  const track = { provider: "audius", id: "D7KyD", title: "Open Track", artist: "Independent Artist", durationMs: 180000,
+    thumbnail: artworkSources["480x480"], artworkSources, permalinkUrl: "https://audius.co/fixture/open-track" };
+  const linkedTrack = { ...track, id: "x5pJ3", title: "Linked Track", permalinkUrl: "https://audius.co/fixture/linked-track" };
+  let resolveUrl: string | undefined;
+  let savedTracks: any[] = [];
+  page.on("request", request => {
+    if (request.url().endsWith("/api/library") && request.method() === "POST") {
+      const mutation = request.postDataJSON();
+      if (mutation.type === "save-set") savedTracks = mutation.tracks;
+    }
+  });
+  await page.route("https://creatornode2.audius.co/**", route => route.abort());
+  await page.route("https://creatornode3.audius.co/**", route => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#8251d4"/></svg>' }));
+  await page.route("**/api/audius/search?**", route => route.fulfill({ json: { results: [track] } }));
+  await page.route("**/api/audius/resolve?**", route => {
+    resolveUrl = new URL(route.request().url()).searchParams.get("url") || undefined;
+    return route.fulfill({ json: { result: linkedTrack } });
+  });
+  await open(page, "library", true);
+  await search(page, "open music");
+  await expect(page.getByRole("combobox", { name: "Music provider", exact: true })).toContainText("Audius");
+  const result = page.locator(".search-result-row").filter({ hasText: "Open Track" });
+  await expect(result.getByRole("link", { name: "Audius", exact: true })).toHaveAttribute("href", track.permalinkUrl);
+  await expect(result.getByRole("link", { name: "Audius", exact: true })).toBeInViewport({ ratio: 1 });
+  await expect.poll(() => result.locator("img").evaluateAll(images => images.some(image => image.naturalWidth > 0 && image.src.startsWith("https://creatornode3.audius.co/")))).toBe(true);
+  await result.getByRole("button", { name: "Add Open Track to your queue", exact: true }).click();
+  await page.getByRole("button", { name: "Add by link", exact: true }).click();
+  await page.getByRole("textbox", { name: "Track link", exact: true }).fill(linkedTrack.permalinkUrl);
+  await page.getByRole("button", { name: "Find track", exact: true }).click();
+  const resolved = page.locator(".music-link-preview");
+  await expect(resolved).toContainText("Linked Track");
+  expect(resolveUrl).toBe(linkedTrack.permalinkUrl);
+  await resolved.getByRole("button", { name: "Add to my queue", exact: true }).click();
+  await page.getByRole("button", { name: "View queue", exact: true }).click();
+  expect(await api(page, "return music.snapshot().room.queue.filter(track => track.provider === 'audius').map(track => track.artworkSources)")).toEqual([artworkSources, artworkSources]);
+  await startSaveQueue(page);
+  await page.getByRole("textbox", { name: "Set name", exact: true }).fill("Audius picks");
+  await page.getByRole("button", { name: "Save set", exact: true }).click();
+  await expect(page.locator(".music-saved-set")).toContainText("Audius picks");
+  expect(savedTracks.filter(track => track.provider === "audius").map(track => track.artworkSources)).toEqual([artworkSources, artworkSources]);
 });
 
 test("reorder the private queue and undo a removal without changing room playback", async ({ page }) => {
