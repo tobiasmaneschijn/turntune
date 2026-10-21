@@ -1,5 +1,5 @@
 import { Trans, useTranslation } from 'react-i18next'
-import { ArrowDown, Bell, BellOff, ChartNoAxesColumn, ImagePlus, Music2, Pin, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
+import { ArrowDown, Bell, BellOff, ChartNoAxesColumn, Film, ImagePlus, Music2, Pin, Plus, Reply, Search, Send, Smile, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { createPortal } from 'react-dom'
 import { insertComposerText } from '@/features/chat/composer-edit'
@@ -86,6 +86,7 @@ import { useChatPickerBounds } from '@/features/chat/hooks/use-chat-picker-bound
 import { createChatAttentionTracker, isAppInBackground, notifyWithAttention } from '@/lib/notifications'
 import type { SoundSpinUserSettings } from '@/features/settings/user-settings'
 import { effectiveScrollBehavior, useEffectiveMotion } from '@/hooks/use-effective-motion'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useRealtimeChat } from '@/features/chat/hooks/use-realtime-chat'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@/components/ui/input-group'
@@ -179,6 +180,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
 }, ref) {
   const { t } = useTranslation('chat')
   const reducedMotion = useEffectiveMotion()
+  const compactComposer = useMediaQuery('(max-width: 640px), (pointer: coarse)')
   const mentionListId = useId()
   const composerHintId = useId()
   const mediaPanelId = useId()
@@ -448,7 +450,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     if (!composer) return
     composer.style.height = 'auto'
     composer.style.height = `${Math.min(Math.max(composer.scrollHeight, 40), 128)}px`
-  }, [draftText, isVisible])
+  }, [draftText, isVisible, compactComposer])
 
   useEffect(() => {
     const composer = composerRef.current
@@ -1046,6 +1048,16 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
     setShowGiphy((current) => !current)
   }
 
+  const openMediaPickerFromMenu = (emoji: boolean) => {
+    composerMenuHandsOffFocusRef.current = true
+    gameComposerGenerationRef.current++; setGameComposer(null)
+    setShowEmoji(emoji)
+    setShowGiphy(!emoji)
+    requestAnimationFrame(() => {
+      document.getElementById(`${mediaPanelId}-${emoji ? 'emoji' : 'gif'}`)?.focus({ preventScroll: true })
+    })
+  }
+
   const closeHistorySearch = () => {
     setShowHistorySearch(false)
     history.clearSearch()
@@ -1347,8 +1359,13 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               disabled={!isConnected || !canChat || Boolean(cooldownRemaining) || uploading || sending}
               aria-label={t('addToMessage')}
               title={t('addToMessage')}
+              onPointerDown={() => { if (messageInputRef.current) selectionRef.current = { start: messageInputRef.current.selectionStart, end: messageInputRef.current.selectionEnd } }}
             />}><Plus className="size-5" /></DropdownMenuTrigger>
             <DropdownMenuContent side="top" align="start" className="chat-composer-menu" finalFocus={() => composerMenuHandsOffFocusRef.current ? false : true}>
+              {compactComposer && <>
+                <DropdownMenuItem onClick={() => openMediaPickerFromMenu(true)}><Smile />{t('addEmoji')}</DropdownMenuItem>
+                <DropdownMenuItem disabled={!canMedia || !giphy.configured} onClick={() => openMediaPickerFromMenu(false)}><Film />{giphy.configured ? t('addGif') : t('gifsUnavailable')}</DropdownMenuItem>
+              </>}
               {currentSong && canChat && <DropdownMenuItem onClick={() => { composerMenuHandsOffFocusRef.current = true; changeAttachedSong(currentSong) }}><Music2 />{t('attachCurrentSong')}</DropdownMenuItem>}
               {canMedia && <DropdownMenuItem onClick={() => fileInputRef.current?.click()}><ImagePlus />{t('uploadImage')}</DropdownMenuItem>}
               {canChat && <ChatGamesMenu onChoose={chooseGame} />}
@@ -1361,6 +1378,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
               }}><ChartNoAxesColumn />{t('newPoll')}</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
+          {!compactComposer && <>
           <Button
             type="button"
             variant="ghost"
@@ -1389,6 +1407,7 @@ export const RealtimeChat = forwardRef<RealtimeChatHandle, RealtimeChatProps>(fu
           >
             <span>{t('gif')}</span>
           </Button>
+          </>}
           <Button
             className="chat-send-button"
             type="submit"

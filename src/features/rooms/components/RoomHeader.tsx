@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Copy, Keyboard, ListMusic, MoreHorizontal, PanelsTopLeft, RotateCcw, Shield, Users } from "lucide-react";
+import { ChevronDown, Copy, Keyboard, ListMusic, MoreHorizontal, PanelsTopLeft, RotateCcw, Shield, Users } from "lucide-react";
 import type { User } from "../../../types";
 import type { FeedbackDiagnosticContext } from "../../feedback/feedback-diagnostics";
 import { AppHeader } from "../../../app/components/AppHeader";
@@ -17,7 +17,7 @@ import "../../../styles/layout-completion.css";
 
 export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, diagnosticContext,
   onHome, onSettings, onRoomSettings, onModeration, moderationCount = 0, onRules, participantActions, onAdmin, onProfile, onSignOut, onResetLayout, onNotice, connected = true, onReconnect,
-  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, muted = false, layoutPreset = "balanced", onLayoutPresetChange, unified = false }: {
+  participants, ownerUserId, moderatorUserIds, djUserId, onOpenProfile, onFriends, onThemeNight, onFocusSearch, onOpenQueue, onOpenPlayer, onToggleMute, onFocusChat, onOpenRoomDetails, muted = false, layoutPreset = "balanced", onLayoutPresetChange, unified = false }: {
   roomName: string;
   roomSlug: string;
   listenerCount: number;
@@ -49,6 +49,7 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   onOpenPlayer?: () => void;
   onToggleMute?: () => void;
   onFocusChat?: () => void;
+  onOpenRoomDetails?: () => void;
   muted?: boolean;
   layoutPreset?: RoomLayoutPreset;
   onLayoutPresetChange?: (preset: RoomLayoutPreset) => void;
@@ -101,7 +102,10 @@ export function RoomHeader({ roomName, roomSlug, listenerCount, currentUser, dia
   ]);
 
   const roomContextHeading = <div className="room-context-heading">
-        <h1 title={roomName} tabIndex={-1}>{roomName}</h1>
+        <h1 title={roomName} tabIndex={-1}>{onOpenRoomDetails ? <>
+          <span className="room-desktop-name">{roomName}</span>
+          <Button variant="ghost" className="room-mobile-name" onClick={onOpenRoomDetails} aria-label={t("roomWorkspace.details")} aria-haspopup="dialog"><span>{roomName}</span><ChevronDown aria-hidden="true" /></Button>
+        </> : roomName}</h1>
         {participants && onOpenProfile ? <Button ref={listenersRef} variant="ghost" size="sm" className="room-listener-count" data-navigation-focus="room-listeners" aria-label={t("roomHeader.listenerCountLabel", { count: listenerCount })} onClick={() => { peopleReturnRef.current = listenersRef.current; setPeopleOpen(true); }}><Users aria-hidden="true" /> {t("roomHeader.listenerCount", { count: listenerCount })}</Button> : <small><Users size={14} aria-hidden="true" /> {t("roomHeader.listenerCount", { count: listenerCount })}</small>}
       </div>;
   const roomContextActions = <div className="room-context-actions">

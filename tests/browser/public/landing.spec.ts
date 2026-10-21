@@ -75,7 +75,7 @@ test("A visitor follows the listening demo and chooses the cloud app or self-hos
 });
 
 test("A visitor who prefers reduced motion can step through the room on a narrow screen", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 390, height: 600 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.clock.install();
   await page.goto("/");
@@ -84,14 +84,20 @@ test("A visitor who prefers reduced motion can step through the room on a narrow
   await demo.scrollIntoViewIfNeeded();
   const steps = demo.getByRole("group", { name: "Listening room demo steps" });
   const queue = steps.getByRole("button", { name: "Your private queue", exact: true });
+  const ownQueue = demo.getByLabel("Your private queue", { exact: true });
+  const player = demo.getByLabel("Player", { exact: true });
   await page.clock.runFor(60_000);
   await expect(queue).toHaveAttribute("aria-pressed", "true");
+  await expect(ownQueue.getByText("Sunset Lover", { exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(ownQueue.getByText("A Walk", { exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(player.getByText("Midnight City", { exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(steps).toBeInViewport({ ratio: 1 });
   for (const name of ["Join as DJ", "Your turn", "Room reactions"]) {
     const step = steps.getByRole("button", { name, exact: true });
     await step.focus();
     await step.press("Enter");
     await expect(step).toHaveAttribute("aria-pressed", "true");
-    await expect(step).toBeInViewport();
+    await expect(step).toBeInViewport({ ratio: 1 });
   }
   const reactions = demo.getByRole("button", { name: "Vote Banger", exact: true, includeHidden: true });
   await expect(reactions).toBeInViewport();

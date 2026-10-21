@@ -22,7 +22,26 @@ Desktop gives the most space to conversation:
 
 The private panel can close without leaving the room. Resizing and narrow-screen
 navigation change the visible space without restarting playback or clearing a
-chat draft. Narrow layouts switch between music and chat above the same player.
+chat draft. Narrow layouts keep chat as the main screen. The room name opens
+Room details with the theme, note, listening setup, DJ rotation, and listeners.
+Required rules and participant warnings remain visible in the main screen.
+
+The phone player is one row: artwork, title and artist, play/pause, Queue, and
+More. More opens Playback controls with seeking, reactions, local volume, and
+other playback actions. Empty playback omits disabled placeholders; stopped
+playback retains Resume when allowed. The composer shares one row with Add and
+Send, with Emoji and GIF in the Add menu.
+
+Queue opens a bottom drawer over chat. Search, queue selection, and library state
+stay mounted while it closes or the viewport changes. Escape returns from search
+to the queue before dismissing the drawer. Close, backdrop, and downward swipe
+dismiss it and restore focus to Queue without focusing the composer. The embedded
+landing demo retains its contained pane navigation so it never opens a modal over
+the landing page.
+
+The mobile composition draws on [Apple Music's mini-player](https://mobbin.com/screens/25829d3f-3a1d-4cc2-b31c-9e32f6f3e50a)
+and [Spotify's queue sheet](https://mobbin.com/screens/42c348f8-02f5-46f3-b946-82ef07ed899e),
+using turntune's existing tokens and controls.
 
 ## Personal and shared state
 
@@ -48,6 +67,7 @@ require explicit approval.
 | Room sizing variables, header, responsive shell | `src/styles/open-room.css` |
 | Default pane proportions and saved layout presets | `src/features/rooms/hooks/use-room-layout-presets.ts`, `openRoomLayoutPresets` |
 | Region composition and pane visibility | `src/features/rooms/components/OpenRoomWorkspace.tsx` |
+| Persistent mobile drawers | `src/features/rooms/components/ResponsiveRoomDrawer.tsx`, `src/styles/room-drawer.css` |
 | Room wiring, personal panel state, and shared activity target | `src/app/RoomApplication.tsx` |
 | Rotation and listener presentation | `src/features/music/components/RoomActivity.tsx` |
 | Personal panel heading and search/back controls | `src/features/music/components/PrivateMusicHeader.tsx` |
@@ -77,12 +97,13 @@ region and `inlineAddMusic` to keep search inside the private panel. Its
 `onOpenProfile` and `onClose` callbacks connect room navigation. The existing
 sheet presentation remains available to other callers.
 
-`NowPlaying` uses `presentation="dock"`. The bottom bar is the only player
-surface; it has no expansion view. Provider instances stay mounted while their
-widgets remain outside the visible interface. Keep required connection,
-activation, and recovery actions in the bottom bar. Mixcloud uses device volume.
+`NowPlaying` uses `presentation="dock"`. Provider instances stay mounted in the
+bottom bar while their widgets remain outside the visible interface. The mobile
+Playback controls sheet contains app controls and recovery, with no second
+provider instance. Provider-owned activation retains its original click target
+when the service requires a gesture. Mixcloud uses device volume.
 
-Empty playback keeps the same bar, with disabled transport and timeline controls.
+Desktop empty playback keeps the same bar, with disabled transport and timeline controls.
 Do not inherit the legacy panel's empty-state height. Routine updates such as
 seeking do not appear below the player. Actionable playback errors and provider
 activation appear in an overlay without changing the bar or content height.

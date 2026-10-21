@@ -12,19 +12,21 @@ type PanelGroupProps = Pick<ComponentProps<typeof ResizablePanelGroup>, "default
 export type RoomWorkspaceProps = PanelGroupProps & {
   radio: ReactNode; player: ReactNode; chat: ReactNode;
   compact?: boolean; value: RoomPane; onValueChange: (pane: RoomPane) => void;
-  unreadCount?: number; miniPlayer?: ReactNode; listeningChecklist?: ReactNode; roomNotice?: ReactNode;
+  unreadCount?: number; miniPlayer?: ReactNode; listeningChecklist?: ReactNode; roomNotice?: ReactNode; roomStatus?: ReactNode;
   experience?: boolean; activityContainerRef?: Ref<HTMLDivElement>;
   musicOpen?: boolean;
   musicOpenRequest?: number;
+  mobileDetailsOpen?: boolean;
+  onMobileDetailsOpenChange?: (open: boolean) => void;
 };
 
-export function RoomWorkspace({ experience, activityContainerRef, musicOpen, musicOpenRequest, ...props }: RoomWorkspaceProps) {
+export function RoomWorkspace({ experience, activityContainerRef, musicOpen, musicOpenRequest, mobileDetailsOpen, onMobileDetailsOpenChange, ...props }: RoomWorkspaceProps) {
   return experience
-    ? <OpenRoomWorkspace {...props} activityContainerRef={activityContainerRef} musicOpen={musicOpen} musicOpenRequest={musicOpenRequest} />
+    ? <OpenRoomWorkspace {...props} activityContainerRef={activityContainerRef} musicOpen={musicOpen} musicOpenRequest={musicOpenRequest} mobileDetailsOpen={mobileDetailsOpen} onMobileDetailsOpenChange={onMobileDetailsOpenChange} />
     : <ClassicRoomWorkspace {...props} />;
 }
 
-function ClassicRoomWorkspace({ radio, player, chat, compact = false, value, onValueChange, unreadCount = 0, miniPlayer, listeningChecklist, roomNotice, ...panelProps }: PanelGroupProps & {
+function ClassicRoomWorkspace({ radio, player, chat, compact = false, value, onValueChange, unreadCount = 0, miniPlayer, listeningChecklist, roomNotice, roomStatus, ...panelProps }: PanelGroupProps & {
   radio: ReactNode;
   player: ReactNode;
   chat: ReactNode;
@@ -35,6 +37,7 @@ function ClassicRoomWorkspace({ radio, player, chat, compact = false, value, onV
   miniPlayer?: ReactNode;
   listeningChecklist?: ReactNode;
   roomNotice?: ReactNode;
+  roomStatus?: ReactNode;
 }) {
   const { t } = useTranslation("rooms");
   const narrow = useMediaQuery("(max-width: 1024px)");
@@ -49,6 +52,7 @@ function ClassicRoomWorkspace({ radio, player, chat, compact = false, value, onV
     tabIndex: -1,
   });
   return <section ref={workspaceRef} id="room-workspace" tabIndex={-1} aria-label={t("roomWorkspace.listeningRoomWorkspace")} className={`room-layout ${compact ? "compact-player-layout" : ""} ${tabletDual ? "room-tablet-dual" : ""} ${value === "radio" ? "room-radio-active" : ""}`}>
+    {roomStatus && <div className="room-workspace-status">{roomStatus}</div>}
     {(roomNotice || listeningChecklist) && <div className="room-workspace-context">{roomNotice && <div className="room-notice-strip">{roomNotice}</div>}{listeningChecklist}</div>}
     <ResizablePanelGroup className="room-panels" orientation="horizontal" {...panelProps}>
       <ResizablePanel className="room-panel room-panel-radio" id="radio" minSize="260px" maxSize="340px" {...semantics("radio")}>{radio}</ResizablePanel>

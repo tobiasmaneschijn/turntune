@@ -168,6 +168,9 @@ test("reorder the private queue and undo a removal without changing room playbac
   await page.getByRole("button", { name: "Actions for Beta", exact: true }).click();
   await page.getByRole("menu", { name: "Actions for Beta", exact: true }).getByRole("menuitem", { name: "First in my queue", exact: true }).click();
   await expect(page.locator(".music-queue-pane .queue-track .rail-track-copy strong")).toHaveText(["Beta", "Gamma", "Alpha"]);
+  // Reduced-motion CSS transitions need a rendered frame to finish; ongoing
+  // queue movement must still be absent after that style update settles.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   expect(await rows.evaluateAll(items => items.every(item => item.getAnimations().every(animation => animation.playState !== "running")))).toBe(true);
   expect(await api(page, "return music.snapshot().room.playback")).toEqual(playback);
 });
@@ -335,10 +338,21 @@ async function startSaveQueue(page: Page) {
 }
 
 test("save a played song to private favorites and reuse it in another room", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockLibrary(page);
-  await open(page, "library-listener");
+  await open(page, "library-listener", true);
   await page.getByRole("tab", { name: "History", exact: true }).click();
-  await page.getByRole("button", { name: "Actions for played track Beta", exact: true }).click();
+  const historyActions = page.getByRole("button", { name: "Actions for played track Beta", exact: true });
+  await historyActions.focus();
+  const actionLayout = await historyActions.evaluate(button => {
+    const action = button.getBoundingClientRect();
+    const row = button.closest(".music-history-row")!.getBoundingClientRect();
+    return { width: action.width, height: action.height, contained: action.left >= row.left && action.right <= row.right && action.top >= row.top && action.bottom <= row.bottom };
+  });
+  expect(actionLayout.contained, "History actions stay inside the highlighted row").toBe(true);
+  expect(actionLayout.width).toBeGreaterThanOrEqual(44);
+  expect(actionLayout.height).toBeGreaterThanOrEqual(44);
+  await historyActions.click();
   await page.getByRole("menuitem", { name: "Save to favorites", exact: true }).click();
   await expect(page.locator(".music-action-status")).toContainText("Saved Beta");
   await api(page, "music.setRoom('second-room')");

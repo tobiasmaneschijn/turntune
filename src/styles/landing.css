@@ -116,7 +116,7 @@ body:has(.landing-page) { min-width: 0; }
   .landing-demo-toolbar strong { font-size: 13px; }
   .landing-demo-avatars { display: none; }
   .landing-demo-viewport,
-  .landing-demo-viewport.open-room { height: 480px; }
+  .landing-demo-viewport.open-room { height: clamp(280px, 60svh, 400px); }
   .landing-demo-steps { padding-inline: 4px; }
   .landing-demo-steps button { flex-direction: column; gap: 4px; min-height: 60px; padding-inline: 4px; font-size: 12px; }
   .landing-demo-caption { min-height: 64px; padding: 12px; }
