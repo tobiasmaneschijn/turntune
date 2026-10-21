@@ -75,11 +75,11 @@ before exposing an instance.
 
 ### Dokploy deployment
 
-Maintainer releases use the manual **Deploy** GitHub workflow. Staging builds and
-verifies an immutable image; production promotes the verified digest from a
-successful staging deployment with the same source tree. See
-[GitHub deployments](docs/github-deployments.md) for setup, confirmation, and
-verification. Keep Dokploy automatic deployment disabled.
+Maintainer releases use **Actions → Deploy → Run workflow**. Choose `develop` with
+`staging`, or `master` with `production`. One job checks CI and migrations, builds
+and scans the selected commit, and deploys its immutable GHCR image digest. See
+[GitHub deployments](docs/github-deployments.md) for setup and verification. Keep
+Dokploy automatic deployment disabled.
 
 ## Documentation
 

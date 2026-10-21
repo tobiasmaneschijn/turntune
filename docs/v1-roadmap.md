@@ -156,8 +156,8 @@ resource limits and release runbooks exist. Hosted checks require recorded evide
   [hosted release gate](production-hardening.md), including enforced browser
   policy, migrations, access isolation, alerts, backup restoration and rollback.
   Record explicit exclusions for integrations disabled by the provider decision.
-- [ ] Follow [manual staging and production promotion](github-deployments.md),
-  preserving the single-active-Node-instance rule and required runtime evidence.
+- [ ] Follow [manual staging and production deployments](github-deployments.md),
+  preserving the single-active-Node-instance rule and runtime checks.
 
 Done when the existing release checklist is satisfied for the launch revision and
 the supported features, and support/recovery exercises have recorded outcomes.

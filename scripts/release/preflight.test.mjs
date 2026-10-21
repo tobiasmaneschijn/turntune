@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDokploy, dokployBase } from './clients.mjs';
-import { inspectTarget, releaseContext, targets, verifyEnvironmentProtection } from './preflight.mjs';
+import { inspectTarget, releaseContext, targets } from './preflight.mjs';
 
 const context = environment => releaseContext({ DEPLOY_ENVIRONMENT: environment, GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: targets[environment].branch, GITHUB_REF: `refs/heads/${targets[environment].branch}` });
 
@@ -11,6 +11,8 @@ test('operators can release only the assigned branch and use authenticated API r
   assert.equal(context('staging').repository, 'tobiasmaneschijn/turntune');
   assert.throws(() => releaseContext({ DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: 'tobiasmaneschijn/SoundSpin', GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: 'develop', GITHUB_REF: 'refs/heads/develop' }), /repository/);
   assert.throws(() => releaseContext({ DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: 'master', GITHUB_REF: 'refs/heads/master' }), /requires/);
+  assert.throws(() => releaseContext({ DEPLOY_ENVIRONMENT: 'production', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: 'develop', GITHUB_REF: 'refs/heads/develop' }), /requires/);
+  assert.throws(() => releaseContext({ DEPLOY_ENVIRONMENT: 'production', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: 'a'.repeat(40), GITHUB_REF_NAME: 'master', GITHUB_REF: 'refs/tags/master' }), /Only the develop and master branches/);
   assert.equal(dokployBase('https://deploy.example/api/api/'), 'https://deploy.example/api/');
   assert.throws(() => dokployBase('http://deploy.example'), /HTTPS/);
   const api = createDokploy({ url: 'https://deploy.example/api', key: 'fixture-secret', fetchImpl: async (url, options) => {
@@ -72,12 +74,4 @@ test('staging keeps its approved legacy origin while rejecting a mistyped primar
   await assert.rejects(inspectTarget(api, c, ref), /Every approved HTTPS domain/);
   compose.domains.push(alias);
   await inspectTarget(api, c, ref);
-});
-
-test('the deployment environment cannot grant production access to other branches or tags', async () => {
-  const policy = { total_count: 1, branch_policies: [{ name: 'master', type: 'branch' }] };
-  const github = { request: async route => ({ data: route.endsWith('deployment-branch-policies') ? policy : { deployment_branch_policy: { custom_branch_policies: true } } }) };
-  await verifyEnvironmentProtection(github, targets.repository, 'production');
-  policy.branch_policies[0].name = '*';
-  await assert.rejects(verifyEnvironmentProtection(github, targets.repository, 'production'), /only its assigned/);
 });

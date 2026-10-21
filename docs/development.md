@@ -153,8 +153,8 @@ literal version. Keep previous versions fixed and describe changes users can see
 tooling.
 
 For deployment, follow [GitHub deployments](github-deployments.md). The manual
-workflow builds and scans once in staging, then promotes the verified digest to
-production. It does not apply migrations or approve the remaining hosted gates.
+workflow builds and scans the selected branch, then deploys its immutable digest
+to staging or production. Apply migrations through the Supabase integration first.
 
 ## Localization and compatibility
 

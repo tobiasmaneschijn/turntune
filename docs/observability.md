@@ -30,8 +30,8 @@ Docker also records `BUILD_REVISION` and the OCI revision label. The manual
 release workflow supplies the build revision. Source builds use
 `SOUNDSPIN_REVISION`; direct builds can set `BUILD_REVISION` before `npm run build`.
 Local builds without a revision use `unknown`. Do not override the revision at
-deployment: production promotes the original staging image, including its release
-identity, even when the production merge commit has a different SHA.
+deployment: each environment builds its selected branch, and the embedded release
+identifies that exact image's source revision.
 
 ## Enable Sentry
 
@@ -62,7 +62,7 @@ optionally uploads both artifact sets, and removes every `.map` from `dist` and
 `dist-server`. Maps are removed on an upload failure too, and that build fails.
 The runtime image contains neither source maps nor the upload token.
 
-Configure repository-level GitHub settings for the reusable image workflow:
+Configure GitHub settings for the Deploy workflow:
 
 | Type | Name | Value |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ Configure repository-level GitHub settings for the reusable image workflow:
 | Variable | `SENTRY_SERVER_PROJECT` | `turntune-server` |
 | Variable | `SENTRY_URL` | Optional HTTPS API base for a regional or self-hosted Sentry installation. Leave blank for the CLI default. |
 
-The image workflow passes the token as a BuildKit secret. Organization, project
+The Deploy workflow passes the token as a BuildKit secret. Organization, project
 and API URL are nonsecret build arguments. Keep the upload token out of `.env`,
 `VITE_*`, Docker build arguments and runtime settings. A configured token requires
 both projects, the organization and a full build revision; incomplete upload
@@ -91,8 +91,8 @@ variable, together with the nonsecret settings and `BUILD_REVISION`.
 
 Debug IDs connect events to the uploaded artifacts, while the embedded release
 ties errors and logs to the immutable image. Upload completes before the image
-can be published or deployed. Production promotion reuses that image and its
-already uploaded maps; it does not rebuild or upload a second artifact set.
+can be published or deployed. Each environment's build uploads the maps for its
+own image and embedded source revision.
 
 See Sentry's [source-map troubleshooting guide](https://docs.sentry.io/platforms/javascript/guides/react/sourcemaps/troubleshooting_js/)
 for checking artifact Debug IDs and using `sentry-cli sourcemaps explain` on an

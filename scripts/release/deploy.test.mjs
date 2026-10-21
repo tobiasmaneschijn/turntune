@@ -6,21 +6,25 @@ import { createDokploy } from './clients.mjs';
 import { targets } from './preflight.mjs';
 
 const revision = 'a'.repeat(40);
-const env = { DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: revision, GITHUB_REF: 'refs/heads/develop', GITHUB_REF_NAME: 'develop', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', SUPABASE_PROJECT_REF: targets.staging.supabaseProjectRef, GITHUB_EVENT_NAME: 'workflow_dispatch', DEPLOYMENT_CONFIRMED: 'true' };
+const env = { DEPLOY_ENVIRONMENT: 'staging', GITHUB_REPOSITORY: targets.repository, GITHUB_SHA: revision, GITHUB_REF: 'refs/heads/develop', GITHUB_REF_NAME: 'develop', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', SUPABASE_PROJECT_REF: targets.staging.supabaseProjectRef };
 const template = 'services:\n  soundspin:\n    image: ${SOUNDSPIN_IMAGE:?Set an immutable GHCR image}\n';
 const manifest = await createImageManifest({ repository: targets.repository, branch: 'develop', revision, digest: `sha256:${'b'.repeat(64)}`, runId: '123', runAttempt: '1' });
+const productionManifest = await createImageManifest({ repository: targets.repository, branch: 'master', revision: 'c'.repeat(40), digest: `sha256:${'d'.repeat(64)}`, runId: '123', runAttempt: '1' });
 
-function fixture({ neverExits = false, inventoryFailure = false, sourceChanges = false, missingRegistry = false, badPort = false, deploymentFails = false, aliasFails = false } = {}) {
+function fixture({ environment = 'staging', neverExits = false, inventoryFailure = false, sourceChanges = false, missingRegistry = false, badPort = false, deploymentFails = false, aliasFails = false } = {}) {
+  const target = targets[environment];
+  const releaseManifest = environment === 'production' ? productionManifest : manifest;
+  const releaseEnv = { ...env, DEPLOY_ENVIRONMENT: environment, GITHUB_REF_NAME: target.branch, GITHUB_REF: `refs/heads/${target.branch}`, GITHUB_SHA: releaseManifest.revision, SUPABASE_PROJECT_REF: target.supabaseProjectRef };
   let stopped = false;
   let deployed = false;
   let preflightDone = false;
   const events = [];
   const saved = {};
-  let compose = { composeId: targets.staging.composeId, environmentId: targets.staging.environmentId, appName: 'soundspin-staging-abcd', name: targets.staging.service, sourceType: 'github', owner: 'tobiasmaneschijn', repository: 'turntune', branch: 'develop', composePath: './compose.yaml', composeFile: '', env: 'secret=must-not-appear', autoDeploy: false, composeType: 'docker-compose', serverId: null, domains: [], mounts: [] };
+  let compose = { composeId: target.composeId, environmentId: target.environmentId, appName: `soundspin-${environment}-abcd`, name: target.service, sourceType: 'github', owner: 'tobiasmaneschijn', repository: 'turntune', branch: target.branch, composePath: './compose.yaml', composeFile: '', env: 'secret=must-not-appear', autoDeploy: false, composeType: 'docker-compose', serverId: null, domains: [], mounts: [] };
   const runtime = { TRUSTED_PROXY_CIDRS: '10.0.1.2/32' };
   const proxy = { Id: 'proxy', State: { Running: true, Pid: 10 }, NetworkSettings: { Networks: { 'dokploy-network': { IPAddress: '10.0.1.2' } } } };
   function app(id, running, healthy = false) {
-    return { Id: id, State: { Running: running, Pid: running ? 20 : 0, Health: { Status: healthy ? 'healthy' : 'starting' } }, Config: { Image: id === 'new' ? manifest.image : 'old-image', Env: ['SECRET=must-not-appear'], Labels: { 'com.docker.compose.project': compose.appName, 'com.docker.compose.service': 'soundspin', 'org.opencontainers.image.revision': manifest.revision, 'traefik.http.services.soundspin.loadbalancer.server.port': badPort ? '80' : '3000' } }, HostConfig: { PortBindings: { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '3001' }] } } };
+    return { Id: id, State: { Running: running, Pid: running ? 20 : 0, Health: { Status: healthy ? 'healthy' : 'starting' } }, Config: { Image: id === 'new' ? releaseManifest.image : 'old-image', Env: ['SECRET=must-not-appear'], Labels: { 'com.docker.compose.project': compose.appName, 'com.docker.compose.service': 'soundspin', 'org.opencontainers.image.revision': releaseManifest.revision, 'traefik.http.services.soundspin.loadbalancer.server.port': badPort ? '80' : '3000' } }, HostConfig: { PortBindings: { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: target.hostPort }] } } };
   }
   const apiContracts = [
     ['compose.stop', 'post', ['composeId']], ['compose.update', 'post', ['composeId', 'sourceType', 'composeFile', 'autoDeploy']], ['compose.deploy', 'post', ['composeId', 'title', 'description']],
@@ -42,21 +46,26 @@ function fixture({ neverExits = false, inventoryFailure = false, sourceChanges =
     if (name === 'compose.stop') { assert.equal(method, 'POST'); stopped = true; return {}; }
     if (name === 'compose.update') { assert.equal(method, 'POST'); assert.ok(stopped); compose = { ...compose, ...parameters }; return {}; }
     if (name === 'compose.deploy') { assert.equal(method, 'POST'); deployed = true; return {}; }
-    if (name === 'deployment.allByCompose') return deployed ? [{ deploymentId: 'deployment-1', title: 'GitHub 123 attempt 1', status: deploymentFails ? 'error' : 'done' }] : [];
+    if (name === 'deployment.allByCompose') return deployed ? [{ deploymentId: 'deployment-1', title: `GitHub ${options.env.GITHUB_RUN_ID || releaseManifest.runId} attempt ${options.env.GITHUB_RUN_ATTEMPT || releaseManifest.runAttempt}`, status: deploymentFails ? 'error' : 'done' }] : [];
     if (name === 'deployment.readLogs') return { logs: 'SECRET=must-not-appear' };
     throw new Error(`Unexpected fixture request ${name}`);
   } };
-  const options = { dokploy, env, manifest, template, attempts: 2, intervalMs: 0, wait: async () => {},
+  const options = { dokploy, env: releaseEnv, manifest: releaseManifest, template, attempts: 2, intervalMs: 0, wait: async () => {},
     inspect: async () => ({ compose: structuredClone({ ...compose, ...(sourceChanges && preflightDone ? { branch: 'changed' } : {}) }), runtime, deployments: [] }),
     preflight: async () => { events.push({ name: 'preflight' }); preflightDone = true; return { gates: { ci: true, migrations: true } }; },
-    verify: async origin => { events.push({ name: 'verifyIngress', origin }); if (aliasFails && origin === targets.staging.additionalOrigins[0]) throw new Error('The approved legacy domain is unavailable.'); return { health: true, ready: true, socketPolling: true, websocketUpgrade: true, hostileOrigin: true, missingCredential: true }; },
+    verify: async origin => { events.push({ name: 'verifyIngress', origin }); if (aliasFails && origin === target.additionalOrigins?.[0]) throw new Error('The approved legacy domain is unavailable.'); return { health: true, ready: true, socketPolling: true, websocketUpgrade: true, hostileOrigin: true, missingCredential: true }; },
     save: async (path, value) => { saved[path] = value; },
   };
   return { options, events, saved };
 }
 
-test('An operator deploys the scanned staging image after the old process exits and receives verified evidence', async () => {
-  const { options, events, saved } = fixture();
+for (const environment of ['staging', 'production']) test(`An operator deploys the selected ${environment} branch image after the old process exits and receives verified evidence`, async () => {
+  const { options, events, saved } = fixture({ environment });
+  const target = targets[environment];
+  const releaseManifest = options.manifest;
+  // Run metadata correlates logs; it does not authorize the image or require
+  // another workflow's staging artifacts before the selected master build.
+  if (environment === 'production') options.env = { ...options.env, GITHUB_RUN_ID: '456', GITHUB_RUN_ATTEMPT: '2' };
   const backend = options.dokploy;
   let logReads = 0;
   options.dokploy = createDokploy({ url: 'https://deploy.example/api', key: 'fixture-private', wait: async () => {},
@@ -72,22 +81,39 @@ test('An operator deploys the scanned staging image after the old process exits 
   const result = await deployRelease(options);
   assert.equal(result.verified, true);
   assert.equal(result.deploymentId, 'deployment-1');
-  assert.equal(result.image, manifest.image);
+  assert.equal(result.environment, environment);
+  assert.equal(result.revision, options.env.GITHUB_SHA);
+  assert.equal(result.image, releaseManifest.image);
+  assert.equal(result.imageRevision, options.env.GITHUB_SHA);
+  assert.equal(result.manifest.branch, target.branch);
+  assert.equal(result.githubRunId, options.env.GITHUB_RUN_ID);
   assert.ok(Object.values(result.checks).every(value => value === true));
-  assert.deepEqual(result.migrations, manifest.migrations);
-  assert.deepEqual(events.filter(item => item.name === 'verifyIngress').map(item => item.origin), [targets.staging.origin, ...targets.staging.additionalOrigins]);
-  assert.deepEqual(result.config.additionalOrigins, targets.staging.additionalOrigins);
+  assert.deepEqual(result.migrations, releaseManifest.migrations);
+  assert.deepEqual(events.filter(item => item.name === 'verifyIngress').map(item => item.origin), [target.origin, ...(target.additionalOrigins || [])]);
+  assert.deepEqual(result.config.additionalOrigins, target.additionalOrigins || []);
+  assert.equal(result.config.composeId, target.composeId);
+  assert.equal(result.config.projectRef, target.supabaseProjectRef);
   const names = events.map(item => item.name);
   assert.ok(names.indexOf('preflight') < names.indexOf('compose.stop'));
   assert.ok(names.indexOf('compose.stop') < names.indexOf('compose.update'));
   assert.ok(names.indexOf('compose.update') < names.indexOf('compose.deploy'));
-  assert.match(events.find(item => item.name === 'compose.update').parameters.composeFile, new RegExp(manifest.digest));
+  assert.match(events.find(item => item.name === 'compose.update').parameters.composeFile, new RegExp(releaseManifest.digest));
   assert.equal(events.filter(item => item.name === 'compose.deploy').length, 1);
   assert.equal(events.filter(item => item.name === 'compose.stop').length, 1);
   assert.equal(events.filter(item => item.name === 'compose.update').length, 1);
   assert.equal(logReads, 2);
   assert.equal(events.some(item => item.name === 'compose.redeploy'), false);
   assert.equal(JSON.stringify(saved).includes('must-not-appear'), false);
+});
+
+test('An image from another branch or revision, or different local source files, cannot stop the live service', async () => {
+  for (const mismatch of [{ branch: 'master' }, { revision: 'e'.repeat(40) }, { lockfileSha256: 'f'.repeat(64) }]) {
+    const { options, events, saved } = fixture();
+    options.manifest = { ...options.manifest, ...mismatch };
+    await assert.rejects(deployRelease(options), /selected branch and revision|manifest does not match/);
+    assert.equal(events.some(item => item.method === 'POST'), false);
+    assert.equal(saved['failure-evidence.json'].phase, 'validation');
+  }
 });
 
 test('An operator can retry a blocked release without starting a replacement when the old process exit cannot be proved', async () => {
