@@ -3,6 +3,7 @@ import { once } from "node:events";
 import test from "node:test";
 import express from "express";
 import { mountMusicRoutes, type MusicRouteOptions } from "./music-routes.js";
+import { mountConfigRoutes } from "../../app/config-routes.js";
 
 async function fixture(run: (base: string, state: { calls: Array<{ kind: string; value?: string; path?: string; body?: unknown }>; unauthorizedOnce: boolean }) => Promise<void>, overrides: Partial<MusicRouteOptions> = {}) {
   const state = { calls: [] as Array<{ kind: string; value?: string; path?: string; body?: unknown }>, unauthorizedOnce: false };
@@ -19,37 +20,41 @@ async function fixture(run: (base: string, state: { calls: Array<{ kind: string;
     appleMusicApi: { configured: true, storefront: "us", searchTracks: async () => [], getTrack: async () => ({}), getDeveloperToken: () => "developer-fixture" },
     giphyApi: { configured: true, gifs: async () => [] },
     mixcloudApi: { searchTracks: async (q: string) => { state.calls.push({ kind: "mixcloud-search", value: q }); return []; }, resolveTrack: async (url: string) => { state.calls.push({ kind: "mixcloud-resolve", value: url }); return {}; } },
+    audiusApi: { configured: true, searchTracks: async (q: string) => { state.calls.push({ kind: "audius-search", value: q }); return [{ provider: "audius", id: "a5aXGmz", title: "Public recording", artist: "Creator" }]; },
+      resolveTrack: async (url: string) => { state.calls.push({ kind: "audius-resolve", value: url }); return { provider: "audius", id: "a5aXGmz", title: "Public recording", artist: "Creator" }; },
+      playbackUrl: async (id: string) => { state.calls.push({ kind: "audius-playback", value: id }); return `https://api.audius.co/v1/tracks/${id}/stream?api_key=public-fixture`; } },
     fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => { assert.ok(init?.signal); state.calls.push({ kind: "youtube-request", value: String(input) }); return Response.json({ items: [] }); }
   } as unknown as MusicRouteOptions;
   const app = express();
   mountMusicRoutes(app, { ...options, ...overrides });
+  mountConfigRoutes(app, { authEnabled: true, getApiUserId: options.getUserId,
+    canUseSpotify: overrides.canUseSpotify ? (request, userId) => overrides.canUseSpotify!(request, userId) : async () => false,
+    spotifyAccounts: options.spotifyAccounts, appleMusicApi: options.appleMusicApi, giphyApi: options.giphyApi });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   try { await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, state); }
   finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }
 const authenticated = { headers: { Authorization: "Bearer alice" } };
-test("Mixcloud routes cache searches and reject unsafe source links before catalog access", async () => {
+test("excluded providers reject direct API requests and report unavailable connections before provider work", async () => {
   await fixture(async (base, state) => {
-    for (const q of ["long set", "LONG SET"]) assert.equal((await fetch(`${base}/api/mixcloud/search?q=${encodeURIComponent(q)}`, authenticated)).status, 200);
-    assert.equal(state.calls.filter(call => call.kind === "mixcloud-search").length, 1);
-    assert.equal((await fetch(`${base}/api/mixcloud/search?q=x`, authenticated)).status, 400);
-    for (const url of ["https://evil.test/artist/show/", "http://mixcloud.com/artist/show/", "https://www.mixcloud.com/artist/", "https://www.mixcloud.com/artist/show/embed-html/"]) {
-      assert.equal((await fetch(`${base}/api/mixcloud/resolve?url=${encodeURIComponent(url)}`, authenticated)).status, 400);
+    for (const path of ["mixcloud/search?q=long%20set", "mixcloud/resolve?url=https://mixcloud.com/dj/show/", "apple/search?q=song", "apple/resolve?url=https://music.apple.com/us/song/song/123", "apple/token", "APPLE/token"]) {
+      const response = await fetch(`${base}/api/${path}`, authenticated);
+      assert.equal(response.status, 403, path);
+      assert.equal(response.headers.get("cache-control"), "no-store");
     }
-    assert.equal(state.calls.filter(call => call.kind === "mixcloud-resolve").length, 0);
-    const url = "https://www.mixcloud.com/artist/show/";
-    const response = await fetch(`${base}/api/mixcloud/resolve?url=${encodeURIComponent(url)}`, authenticated);
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.deepEqual(state.calls.at(-1), { kind: "mixcloud-resolve", value: url });
-    for (let n = 0; n < 37; n++) assert.equal((await fetch(`${base}/api/mixcloud/search?q=long%20set`, authenticated)).status, 200);
-    assert.equal((await fetch(`${base}/api/mixcloud/search?q=long%20set`, authenticated)).status, 429);
+    assert.deepEqual(state.calls, []);
+    const response = await fetch(`${base}/api/music/connections`, authenticated);
+    const connections = await response.json();
+    assert.deepEqual(connections.apple, { configured: false });
+    assert.deepEqual(connections.mixcloud, { configured: false });
+    const config = await fetch(`${base}/api/config`, authenticated);
+    assert.equal((await config.json()).music.appleMusicConfigured, false);
   });
 });
 test("music routes deny missing authentication before catalogs/accounts and prevent sensitive caching", async () => {
   await fixture(async (base, state) => {
-    for (const path of ["youtube/search?q=mix", "youtube/live?id=aaaaaaaaaaa", "soundcloud/search?q=mix", "soundcloud/resolve?url=https://soundcloud.com/artist/song", "mixcloud/search?q=mix", "mixcloud/resolve?url=https://www.mixcloud.com/artist/show/", "spotify/search?q=mix", "spotify/resolve?url=abcdefghijk123456789012", "apple/search?q=mix", "apple/resolve?url=https://music.apple.com/us/song/song/123", "giphy", "music/connections", "spotify/token", "spotify/devices", "spotify/playback", "apple/token"]) {
+    for (const path of ["youtube/search?q=mix", "youtube/live?id=aaaaaaaaaaa", "soundcloud/search?q=mix", "soundcloud/resolve?url=https://soundcloud.com/artist/song", "audius/search?q=mix", "audius/resolve?url=https://audius.co/creator/song", "audius/playback?id=a5aXGmz", "mixcloud/search?q=mix", "mixcloud/resolve?url=https://www.mixcloud.com/artist/show/", "spotify/search?q=mix", "spotify/resolve?url=abcdefghijk123456789012", "apple/search?q=mix", "apple/resolve?url=https://music.apple.com/us/song/song/123", "giphy", "music/connections", "spotify/token", "spotify/devices", "spotify/playback", "apple/token"]) {
       const response = await fetch(`${base}/api/${path}`);
       assert.equal(response.status, 401, path);
       assert.equal(response.headers.get("cache-control"), "no-store");
@@ -60,6 +65,61 @@ test("music routes deny missing authentication before catalogs/accounts and prev
     assert.deepEqual(await token.json(), { accessToken: "fixture-token" });
     assert.deepEqual(state.calls, [{ kind: "token", value: "alice" }]);
   });
+});
+
+test("an authenticated listener finds Audius picks and corrects an invalid source without stale catalog results", async () => {
+  await fixture(async (base, state) => {
+    assert.equal((await fetch(`${base}/api/audius/search?q=x`, authenticated)).status, 400);
+    assert.equal((await fetch(`${base}/api/audius/resolve?url=https://evil.test/creator/song`, authenticated)).status, 400);
+    assert.equal(state.calls.length, 0);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(`${base}/api/audius/search?q=public`, authenticated);
+      assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal((await response.json()).results[0].provider, "audius");
+    }
+    assert.equal(state.calls.filter(call => call.kind === "audius-search").length, 2);
+    const resolved = await fetch(`${base}/api/audius/resolve?url=https://audius.co/creator/song`, authenticated);
+    assert.equal(resolved.status, 200); assert.equal((await resolved.json()).result.id, "a5aXGmz");
+    const connections = await fetch(`${base}/api/music/connections`, authenticated);
+    assert.deepEqual((await connections.json()).audius, { configured: true });
+  });
+  await fixture(async (base, state) => {
+    assert.equal((await fetch(`${base}/api/audius/search?q=public`, authenticated)).status, 503);
+    assert.equal((await fetch(`${base}/api/audius/resolve?url=https://audius.co/creator/song`, authenticated)).status, 503);
+    assert.deepEqual(state.calls, []);
+  }, { audiusApi: undefined });
+});
+
+test("Audius playback requires the listener's current allowed room and rejects permission revoked during verification", async () => {
+  let enabled = false, hold = false;
+  let release!: () => void, began!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { began = resolve; });
+  const roomAuth = { headers: { ...authenticated.headers, "x-soundspin-room": "lounge" } };
+  await fixture(async (base, state) => {
+    assert.equal((await fetch(`${base}/api/audius/playback?id=a5aXGmz`, roomAuth)).status, 403);
+    assert.equal((await fetch(`${base}/api/audius/playback?id=a5aXGmz&roomSlug=lounge`, authenticated)).status, 403);
+    assert.deepEqual(state.calls, []);
+    enabled = true;
+    assert.equal((await fetch(`${base}/api/audius/playback?id=a5aXGmz&roomSlug=other-room`, roomAuth)).status, 400);
+    assert.equal((await fetch(`${base}/api/audius/playback?id=invalid-id`, roomAuth)).status, 400);
+    const allowed = await fetch(`${base}/api/audius/playback?id=a5aXGmz`, roomAuth);
+    assert.equal(allowed.status, 200); assert.equal(allowed.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await allowed.json(), { url: "https://api.audius.co/v1/tracks/a5aXGmz/stream?api_key=public-fixture" });
+    hold = true;
+    const pending = fetch(`${base}/api/audius/playback?id=a5aXGmz`, roomAuth);
+    await started; enabled = false; release();
+    const revoked = await pending;
+    assert.equal(revoked.status, 403); assert.equal((await revoked.json()).url, undefined);
+  }, {
+    canUseProvider: async (_request, actor, provider, roomSlug) => enabled && actor === "alice" && provider === "audius" && roomSlug === "lounge",
+    audiusApi: { configured: true, searchTracks: async () => [], resolveTrack: async () => { throw new Error("unused"); },
+      playbackUrl: async (_id, signal) => { assert.ok(signal instanceof AbortSignal); if (hold) { began(); await gate; } return "https://api.audius.co/v1/tracks/a5aXGmz/stream?api_key=public-fixture"; } }
+  });
+  await fixture(async (base, state) => {
+    assert.equal((await fetch(`${base}/api/audius/playback?id=a5aXGmz`, roomAuth)).status, 403);
+    assert.deepEqual(state.calls, []);
+  }, { canUseProvider: undefined });
 });
 test("Spotify requires current authorized room context before tokens, provider work, or connection metadata", async () => {
   let enabled = false;
@@ -108,6 +168,36 @@ test("catalog searches reuse provider caches, YouTube requests have deadlines, a
     assert.equal((await fetch(`${base}/api/spotify/search?q=mix`, authenticated)).status, 429);
   });
 });
+test("searching YouTube returns results when duration metadata stalls and later searches recover", { timeout: 5_000 }, async () => {
+  let requests = 0;
+  let durationCanceled = false;
+  await fixture(async base => {
+    const search = (query: string) => fetch(`${base}/api/youtube/search?q=${query}`, authenticated);
+    const response = await search("mix");
+    assert.equal(response.status, 200);
+    const { results } = await response.json();
+    assert.equal(results[0].id, "abcdefghijk");
+    assert.equal(results[0].title, "Artist & Song");
+    assert.equal(results[0].durationMs, undefined);
+    assert.equal(durationCanceled, true);
+    assert.equal(requests, 2);
+    assert.deepEqual(await (await search("MIX")).json(), { results });
+    assert.equal(requests, 2);
+
+    const recovered = await search("another-mix");
+    assert.equal(recovered.status, 200);
+    assert.equal((await recovered.json()).results[0].durationMs, 180_000);
+    assert.equal(requests, 4);
+  }, { fetchImpl: async input => {
+    requests++;
+    if (new URL(String(input)).pathname.endsWith("/search")) return Response.json({ items: [{
+      id: { videoId: "abcdefghijk" }, snippet: { title: "Artist &amp; Song", channelTitle: "Artist", thumbnails: {} }
+    }] });
+    if (requests === 2) return new Response(new ReadableStream({ cancel() { durationCanceled = true; } }));
+    return Response.json({ items: [{ id: "abcdefghijk", contentDetails: { duration: "PT3M" } }] });
+  } });
+});
+
 test("Spotify request retries refresh once, playback commands retain their semantics, and account identity stays verified", async () => {
   await fixture(async (base, state) => {
     state.unauthorizedOnce = true;

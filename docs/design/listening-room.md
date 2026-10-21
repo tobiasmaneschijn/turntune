@@ -9,7 +9,8 @@ Light, Dark, and System; the selected preference persists. Shared tokens live in
 
 Desktop gives the most space to conversation:
 
-- **Left:** shared DJ rotation, Join/Leave rotation, and room listeners.
+- **Left:** shared DJ rotation, Join/Leave rotation, and room listeners. Video
+  playback sits at the bottom of this column, directly above the player dock.
 - **Center:** room chat and its composer.
 - **Right:** My queue, with cover art, ordering controls, Favorites, and History.
   Add music replaces the contents of this panel with search and link lookup.
@@ -25,6 +26,9 @@ navigation change the visible space without restarting playback or clearing a
 chat draft. Narrow layouts keep chat as the main screen. The room name opens
 Room details with the theme, note, listening setup, DJ rotation, and listeners.
 Required rules and participant warnings remain visible in the main screen.
+
+Video remains visible above the dock on narrow layouts, outside the room details
+drawer. Providers without video leave this space available for chat.
 
 The phone player is one row: artwork, title and artist, play/pause, Queue, and
 More. More opens Playback controls with seeking, reactions, local volume, and
@@ -97,8 +101,11 @@ region and `inlineAddMusic` to keep search inside the private panel. Its
 `onOpenProfile` and `onClose` callbacks connect room navigation. The existing
 sheet presentation remains available to other callers.
 
-`NowPlaying` uses `presentation="dock"`. Provider instances stay mounted in the
-bottom bar while their widgets remain outside the visible interface. The mobile
+`NowPlaying` uses `presentation="dock"`. Providers registered with `video: true`
+render their existing player in the workspace's stable video target. YouTube uses
+this surface, with a minimum 200-by-200-pixel viewport. Its width follows the DJ
+column on desktop; resizing does not move or recreate the iframe. Other provider
+widgets remain outside the visible interface. The mobile
 Playback controls sheet contains app controls and recovery, with no second
 provider instance. Provider-owned activation retains its original click target
 when the service requires a gesture. Mixcloud uses device volume.

@@ -36,10 +36,18 @@ test("local fallback persists library across restart, isolates owners and serial
   t.after(async () => { assert.equal(path.dirname(path.resolve(dataDir)), path.resolve(os.tmpdir())); assert.ok(path.basename(dataDir).startsWith("soundspin-library-test-")); await rm(dataDir, { recursive: true, force: true }); });
   const store = new Store({ dataDir, supabase: null }); await store.init();
   await Promise.all([store.updatePrivateLibrary("alice", { type: "save-pick", track }), store.updatePrivateLibrary("alice", { type: "save-pick", track: { ...track, providerId: "9bZkp7q19f0" } })]);
+  const legacyTracks = [
+    { provider: "apple" as const, providerId: "123", title: "Saved song" },
+    { provider: "mixcloud" as const, providerId: "/dj/show/", title: "Saved show", permalinkUrl: "https://www.mixcloud.com/dj/show/" },
+    { provider: "audius" as const, providerId: "a5aXGmz", title: "Public recording", permalinkUrl: "https://audius.co/creator/public-recording",
+      artworkSources: { "150x150": "https://creatornode.audius.co/content/cover/150x150.jpg", "480x480": "https://creatornode.audius.co/content/cover/480x480.jpg", mirrors: ["https://cn0.mainnet.audiusindex.org"] } }
+  ];
+  await store.updatePrivateLibrary("alice", { type: "save-set", id: "11111111-1111-4111-8111-111111111111", name: "Saved", tracks: legacyTracks });
   assert.equal((await store.getPrivateLibrary("alice")).picks.length, 2);
   assert.deepEqual(await store.getPrivateLibrary("bob"), emptyLibrary());
   const restored = new Store({ dataDir, supabase: null }); await restored.init();
   assert.equal((await restored.getPrivateLibrary("alice")).picks.length, 2);
+  assert.deepEqual((await restored.getPrivateLibrary("alice")).sets[0].tracks, legacyTracks);
 });
 
 test("database revision conflict merges a concurrent writer instead of overwriting saved picks", async () => {

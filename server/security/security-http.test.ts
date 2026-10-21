@@ -117,6 +117,10 @@ test("approved legacy domains serve HTTP while headers protect success and rejec
   assert.match(response.headers["content-security-policy"] as string, /frame-ancestors 'none'/);
   assert.match(response.headers["content-security-policy-report-only"] as string, /project\.supabase\.co wss:\/\/project\.supabase\.co/);
   const connectionPolicy = (response.headers["content-security-policy-report-only"] as string).split(";").find(value => value.trim().startsWith("connect-src"))!;
+  const mediaPolicy = (response.headers["content-security-policy-report-only"] as string).split(";").find(value => value.trim().startsWith("media-src"))!;
+  assert.match(mediaPolicy, /https:\/\/api\.audius\.co/);
+  assert.match(mediaPolicy, /https:\/\/\*\.audius\.co/);
+  assert.doesNotMatch(mediaPolicy, /(?:^|\s)https:(?:\s|$)/);
   assert.match(connectionPolicy, /https:\/\/browser-monitoring\.invalid/);
   assert.doesNotMatch(connectionPolicy, /server-monitoring|serverkey|browserkey/);
   for (const host of ["lydman.test", "legacy.test:8443"]) {

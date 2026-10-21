@@ -1,10 +1,10 @@
-import { approvedImageUrl } from "../../../lib/remote-images"
+import { artworkImageCandidates } from "../../../lib/remote-images"
 import { useEffect, useRef, useState } from 'react'
-import type { Track } from '@/types'
+import type { ArtworkSources, Track } from '@/types'
 import { useEffectiveMotion } from '@/hooks/use-effective-motion'
 import '@/styles/track-artwork.css'
 
-type ArtworkTrack = Pick<Track, 'provider' | 'providerId' | 'artworkUrl'>
+type ArtworkTrack = Pick<Track, 'provider' | 'providerId' | 'artworkUrl' | 'artworkSources'>
 interface ArtworkImage { source: string; crossOrigin?: 'anonymous' }
 
 const pendingArtwork = new Map<Element, () => void>()
@@ -33,23 +33,32 @@ function observeArtwork(element: Element, onVisible: () => void) {
 }
 
 export function trackArtworkUrl(track: ArtworkTrack) {
-  return track.provider === 'youtube' ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg` : track.artworkUrl
+  return track.provider === 'youtube' ? `https://i.ytimg.com/vi/${track.providerId}/hqdefault.jpg`
+    : track.artworkUrl || track.artworkSources?.['480x480'] || track.artworkSources?.['150x150'] || track.artworkSources?.['1000x1000']
 }
 
 /** Only decorative image layers transition; no provider or audio lifetime belongs here. */
-export function TrackArtwork({ track, compact = false, active = true, src, className = '', alt = '', onImageReady }: {
+export function TrackArtwork({ track, compact = false, active = true, src, artworkSources, className = '', alt = '', onImageReady }: {
   track: ArtworkTrack
   compact?: boolean
   active?: boolean
   src?: string | null
+  artworkSources?: ArtworkSources
   className?: string
   alt?: string
   /** Opt in to reading the displayed cover; failed CORS loads retain a normal image. */
   onImageReady?: (image: HTMLImageElement | null) => void
 }) {
-  const artwork = approvedImageUrl(src !== undefined ? src : trackArtworkUrl(track))
-  const source = compact && track.provider === 'youtube' && src === undefined
-    ? artwork?.replace('hqdefault', 'default') : artwork
+  const [artworkSize, setArtworkSize] = useState(compact ? 150 : 480)
+  const fallback = src !== undefined ? src : trackArtworkUrl(track)
+  const variants = artworkSources || (src === undefined || src === track.artworkUrl ? track.artworkSources : undefined)
+  const candidates = artworkImageCandidates(compact && track.provider === 'youtube' && src === undefined
+    ? fallback?.replace('hqdefault', 'default') : fallback, variants, artworkSize)
+  const sourceKey = candidates.join('\n')
+  const [attempt, setAttempt] = useState({ sourceKey, index: 0 })
+  const candidateIndex = attempt.sourceKey === sourceKey ? attempt.index : 0
+  const source = candidates[candidateIndex]
+  const retryImage = () => setAttempt({ sourceKey, index: candidateIndex + 1 })
   const reducedMotion = useEffectiveMotion()
   const reducedMotionRef = useRef(reducedMotion)
   reducedMotionRef.current = reducedMotion
@@ -59,17 +68,27 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
   imageReadyRef.current = onImageReady
   const readable = Boolean(onImageReady)
   const [visibleSource, setVisibleSource] = useState<string | undefined>()
-  const loadAllowed = active && (!compact || visibleSource === source)
+  const loadAllowed = active && (!compact || visibleSource === sourceKey)
   const [images, setImages] = useState<{ current: ArtworkImage | null; previous: ArtworkImage | null }>({ current: null, previous: null })
   const imagesRef = useRef(images)
   imagesRef.current = images
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>(source ? 'loading' : 'fallback')
 
   useEffect(() => {
+    if (compact || !elementRef.current || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      const size = Math.max(entry.contentRect.width, entry.contentRect.height)
+      if (size > 0) setArtworkSize(size * (window.devicePixelRatio || 1))
+    })
+    observer.observe(elementRef.current)
+    return () => observer.disconnect()
+  }, [compact])
+
+  useEffect(() => {
     if (!compact || !active || !source || !elementRef.current) return
     // The page viewport also clips nested scroll panes and display:none tabs.
-    return observeArtwork(elementRef.current, () => setVisibleSource(source))
-  }, [active, compact, source])
+    return observeArtwork(elementRef.current, () => setVisibleSource(sourceKey))
+  }, [active, compact, sourceKey])
 
   useEffect(() => {
     let active = true
@@ -109,13 +128,11 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
         return
       }
       settled = true
-      setImages({ current: null, previous: null })
-      setState('fallback')
-      imageReadyRef.current?.(null)
+      setAttempt({ sourceKey, index: candidateIndex + 1 })
     }
     replacement.src = source
     return () => { active = false; replacement.onload = null; replacement.onerror = null; replacement.removeAttribute('src') }
-  }, [loadAllowed, source, readable])
+  }, [loadAllowed, source, readable, sourceKey, candidateIndex])
 
   useEffect(() => {
     const image = currentImageRef.current
@@ -141,6 +158,6 @@ export function TrackArtwork({ track, compact = false, active = true, src, class
     {images.current && <img ref={currentImageRef} crossOrigin={images.current.crossOrigin} referrerPolicy="no-referrer" key={images.current.source} className="track-artwork-current" src={images.current.source} alt="" aria-hidden="true"
       data-motion={reducedMotion ? 'off' : 'on'} onAnimationEnd={() => setImages((current) => current.current?.source === images.current?.source ? { ...current, previous: null } : current)}
       onLoad={event => { if (images.current?.source === source) imageReadyRef.current?.(event.currentTarget) }}
-      onError={() => { if (images.current?.source === source) { setImages({ current: null, previous: null }); setState('fallback'); imageReadyRef.current?.(null) } }} />}
+      onError={() => { if (images.current?.source === source) retryImage() }} />}
   </span>
 }

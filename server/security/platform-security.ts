@@ -8,25 +8,31 @@ const accessStatusSchema = z.object({ accounts: z.array(z.string()), rooms: z.ar
  * saved bearer tokens and the next command on an existing connection. */
 export class PlatformSecurity {
   private readonly confirmed = new Map<string, { allowed: boolean; expiresAt: number }>();
+  private readonly confirming = new Map<string, Promise<boolean>>();
   constructor(private readonly client: SupabaseClient | null, private readonly localFixture = false) {}
 
   async verifiedAccount(userId: string): Promise<boolean> {
     if (!this.client) return this.localFixture;
     const cached = this.confirmed.get(userId);
     if (cached && cached.expiresAt > Date.now()) return cached.allowed;
-    const { data, error } = await this.client.auth.admin.getUserById(userId);
-    if (error) {
-      if (error.status === 404) {
+    const underway = this.confirming.get(userId);
+    if (underway) return underway;
+    const lookup = this.client.auth.admin.getUserById(userId).then(({ data, error }) => {
+      if (error && error.status !== 404) throw new Error(serverT("account_identity_could_not_be_verified"));
+      const allowed = !error && Boolean(data.user?.email_confirmed_at);
+      // Invalidating an account may start a newer check while this one is in
+      // flight. Only its current lookup can populate the confirmation cache.
+      if (this.confirming.get(userId) === lookup) {
         if (this.confirmed.size >= 5000) this.confirmed.clear();
-        this.confirmed.set(userId, { allowed: false, expiresAt: Date.now() + 30_000 });
-        return false;
+        this.confirmed.set(userId, { allowed, expiresAt: Date.now() + 30_000 });
       }
-      throw new Error(serverT("account_identity_could_not_be_verified"));
+      return allowed;
+    });
+    this.confirming.set(userId, lookup);
+    try { return await lookup; }
+    finally {
+      if (this.confirming.get(userId) === lookup) this.confirming.delete(userId);
     }
-    const allowed = Boolean(data.user?.email_confirmed_at);
-    if (this.confirmed.size >= 5000) this.confirmed.clear();
-    this.confirmed.set(userId, { allowed, expiresAt: Date.now() + 30_000 });
-    return allowed;
   }
 
   async activeAccount(userId: string): Promise<boolean> {
@@ -96,5 +102,5 @@ export class PlatformSecurity {
     return result;
   }
 
-  invalidate(userId: string) { this.confirmed.delete(userId); }
+  invalidate(userId: string) { this.confirmed.delete(userId); this.confirming.delete(userId); }
 }

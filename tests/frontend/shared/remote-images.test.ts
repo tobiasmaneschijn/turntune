@@ -18,9 +18,13 @@ test('View shared artwork without loading an external tracking image',()=>{
 
 test('Save or queue a track only with approved artwork',()=>{
   const base={provider:'spotify',providerId:'abcdefghijklmnopqrstuv',title:'Recording'};
+  const audius={provider:'audius',providerId:'a5aXGmz',title:'Recording',artworkSources:{'150x150':'https://creatornode.audius.co/content/cover/150x150.jpg',mirrors:['https://cn0.mainnet.audiusindex.org']}};
   for(const schema of [trackSchema,libraryMutationSchema]) {
     const parse=(track:unknown)=>schema.safeParse(schema===trackSchema?track:{type:'save-pick',track}).success;
     assert.equal(parse({...base,artworkUrl:'https://tracker.invalid/pixel'}),false);
     assert.equal(parse({...base,artworkUrl:'https://i.scdn.co/image/recording'}),true);
+    assert.equal(parse(audius),true);
+    assert.equal(parse({...audius,artworkSources:{...audius.artworkSources,mirrors:['https://tracker.invalid']}}),false);
+    assert.equal(parse({...audius,artworkSources:{...audius.artworkSources,mirrors:['https://creatornode.audius.co/redirect?url=tracker']}}),false);
   }
 });

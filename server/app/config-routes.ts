@@ -3,8 +3,10 @@ import { serverT } from "../lib/i18n.js";
 import type { ResourcePolicyStore } from "../resources/resource-policy.js";
 import type { GiphyApi } from "../integrations/giphy.js";
 import type { AppleMusicApi } from "../integrations/apple-music.js";
+import type { AudiusApi } from "../integrations/audius.js";
 import type { SpotifyAccounts } from "../integrations/spotify/spotify-accounts.js";
 import { browserObservabilityConfig } from "../observability/config.js";
+import { isProviderAvailable } from "../../shared/provider-definitions.js";
 
 export interface ConfigRouteOptions {
   authEnabled: boolean;
@@ -12,6 +14,7 @@ export interface ConfigRouteOptions {
   supabasePublishableKey?: string;
   giphyApi: Pick<GiphyApi, "configured">;
   appleMusicApi: Pick<AppleMusicApi, "configured">;
+  audiusApi?: Pick<AudiusApi, "configured">;
   spotifyAccounts: Pick<SpotifyAccounts, "configured">;
   getApiUserId: (request: express.Request) => Promise<string | null>;
   canUseSpotify: (request: express.Request, userId: string) => Promise<boolean>;
@@ -27,7 +30,8 @@ export function mountConfigRoutes(app: express.Express, options: ConfigRouteOpti
       giphyConfigured: options.giphyApi.configured,
       music: {
         spotifyConfigured,
-        appleMusicConfigured: options.appleMusicApi.configured
+        audiusConfigured: isProviderAvailable("audius") && Boolean(options.audiusApi?.configured),
+        appleMusicConfigured: isProviderAvailable("apple") && options.appleMusicApi.configured
       },
       supabase: authEnabled
         ? { url: supabaseUrl, anonKey: supabasePublishableKey }

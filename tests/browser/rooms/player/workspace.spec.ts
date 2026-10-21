@@ -63,8 +63,30 @@ test("listeners can open their queue over chat without losing playback, search, 
   await page.getByRole("button", { name: "Open my queue", exact: true }).click();
   await expect(page.getByText("Sunset Lover", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Expand player", exact: true })).toHaveCount(0);
-  await expect(page.getByTitle("Fixture YouTube player")).toHaveCount(1);
-  await expect(page.getByTitle("Fixture YouTube player")).not.toBeInViewport();
+  const youtubeVideo = page.getByTitle("Fixture YouTube player");
+  const expectVisibleVideo = async () => {
+    await expect(youtubeVideo).toHaveCount(1);
+    await expect(youtubeVideo).toBeVisible();
+    await expect(youtubeVideo).toBeInViewport({ ratio: 1 });
+    // YouTube requires an embedded viewport of at least 200 by 200 pixels.
+    await expect.poll(async () => {
+      const box = await youtubeVideo.boundingBox();
+      return Boolean(box && box.width >= 200 && box.height >= 200);
+    }).toBe(true);
+    const video = (await youtubeVideo.boundingBox())!;
+    const dock = (await page.locator(".now-playing--dock").boundingBox())!;
+    expect(video.y + video.height).toBeLessThanOrEqual(dock.y + 1);
+    await expect.poll(() => youtubeVideo.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return [[.1, .1], [.9, .1], [.5, .5], [.1, .9], [.9, .9]].every(([x, y]) =>
+        document.elementFromPoint(bounds.left + bounds.width * x, bounds.top + bounds.height * y) === element);
+    })).toBe(true);
+  };
+  await expectVisibleVideo();
+  const desktopVideo = (await youtubeVideo.boundingBox())!;
+  const djColumn = (await page.locator(".open-room-activity").boundingBox())!;
+  expect(Math.abs(desktopVideo.x - djColumn.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs(desktopVideo.width - djColumn.width)).toBeLessThanOrEqual(2);
   const composer = page.getByRole("textbox", { name: "Message room chat" });
   await composer.fill("Keep this song in the conversation");
   const songDrag = await page.evaluateHandle(() => new DataTransfer());
@@ -78,6 +100,7 @@ test("listeners can open their queue over chat without losing playback, search, 
   await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeInViewport({ ratio: 1 });
   await expect(composer).toBeInViewport({ ratio: 1 });
+  await expectVisibleVideo();
   const roomDetails = page.getByRole("button", { name: "Room details", exact: true });
   const listeningSetup = page.getByRole("button", { name: "Open listening checklist", exact: true });
   const roomWarning = page.getByRole("status").filter({ hasText: "Keep room chat respectful." });
@@ -86,11 +109,13 @@ test("listeners can open their queue over chat without losing playback, search, 
   await roomDetails.click();
   const roomDetailsDrawer = page.getByRole("dialog", { name: "Room details", exact: true });
   await expect(roomDetailsDrawer).toBeVisible();
+  await expectVisibleVideo();
   await expect(page.getByLabel("Read room theme: After hours", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Read full room note: One song per turn. Pick something you love.", exact: true })).toBeVisible();
   await listeningSetup.click();
   const setupDialog = page.getByRole("dialog", { name: "Listening setup", exact: true });
   await expect(setupDialog).toBeVisible();
+  await expectVisibleVideo();
   await setupDialog.press("Escape");
   await expect(listeningSetup).toBeFocused();
   await roomDetailsDrawer.press("Escape");
@@ -106,6 +131,7 @@ test("listeners can open their queue over chat without losing playback, search, 
   const playbackMenu = page.getByRole("button", { name: "Playback controls", exact: true });
   await playbackMenu.click();
   const playbackControls = page.getByRole("dialog", { name: "Playback controls", exact: true });
+  await expectVisibleVideo();
   await expect(playbackControls.getByRole("button", { name: "Sync playback with room", exact: true })).toBeEnabled();
   await expect(playbackControls.getByRole("button", { name: "Next track", exact: true })).toBeEnabled();
   for (const name of ["Volume", "Playback position"]) {
@@ -116,18 +142,22 @@ test("listeners can open their queue over chat without losing playback, search, 
   await playbackControls.getByRole("button", { name: "Track details", exact: true }).click();
   const trackDetails = page.getByRole("dialog", { name: "Track details", exact: true });
   await expect(trackDetails).toContainText("Midnight City");
+  await expectVisibleVideo();
   await trackDetails.press("Escape");
   await expect(playbackMenu).toBeFocused();
   const openQueue = page.getByRole("button", { name: "Open my queue", exact: true });
   await openQueue.click();
   const queueDrawer = page.getByRole("dialog", { name: "My queue", exact: true });
+  await expectVisibleVideo();
   await expect(queueDrawer.getByText("Sunset Lover", { exact: true })).toBeInViewport({ ratio: 1 });
   await expect(queueDrawer.getByText("A Walk", { exact: true })).toBeInViewport({ ratio: 1 });
   await expect(queueDrawer.getByRole("button", { name: "Add music", exact: true })).toBeInViewport({ ratio: 1 });
   await queueDrawer.getByRole("button", { name: "Close my queue", exact: true }).click({ trial: true });
-  const drawerBox = (await queueDrawer.boundingBox())!;
-  const rowBox = (await queueDrawer.getByText("Tadow", { exact: true }).boundingBox())!;
-  await dragTouch({ x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height / 2 }, { x: rowBox.x + rowBox.width / 2, y: drawerBox.y + 100 });
+  const listBox = (await queueDrawer.locator(".music-queue-pane").boundingBox())!;
+  for (let swipe = 0; swipe < 2; swipe += 1) {
+    await dragTouch({ x: listBox.x + listBox.width / 2, y: listBox.y + listBox.height - 16 },
+      { x: listBox.x + listBox.width / 2, y: listBox.y + 16 });
+  }
   await expect(queueDrawer).toBeVisible();
   await expect(queueDrawer.getByText("Intro", { exact: true })).toBeInViewport({ ratio: 1 });
   const handleBox = (await queueDrawer.locator(".room-drawer-handle").boundingBox())!;
@@ -151,6 +181,7 @@ test("listeners can open their queue over chat without losing playback, search, 
   await expect(queueDrawer).toBeHidden();
   await expect(openQueue).toBeFocused();
   await expect(composer).toBeInViewport({ ratio: 1 });
+  await expectVisibleVideo();
   await playbackMenu.click();
   await playbackControls.getByRole("button", { name: "1 song comment", exact: true }).click();
   await page.getByRole("menuitem").filter({ hasText: "This is the perfect soundtrack for the evening." }).click();
@@ -166,14 +197,29 @@ test("listeners can open their queue over chat without losing playback, search, 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   expect(errors).toEqual([]);
   await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  // Short windows must keep the video and transport reachable without overlap.
+  await page.setViewportSize({ width: 390, height: 350 });
+  await page.locator(".open-room-player").scrollIntoViewIfNeeded();
+  await expectVisibleVideo();
+  await expect(page.getByRole("button", { name: "Pause room", exact: true })).toBeInViewport({ ratio: 1 });
+  await playbackMenu.click();
+  const shortWindowSync = playbackControls.getByRole("button", { name: "Sync playback with room", exact: true });
+  await shortWindowSync.scrollIntoViewIfNeeded();
+  await expect(shortWindowSync).toBeInViewport({ ratio: 1 });
+  await shortWindowSync.click({ trial: true });
+  await expect(youtubeVideo).toBeInViewport({ ratio: .5 });
+  await playbackControls.press("Escape");
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(composer).toHaveValue("One line\nAnother line");
+  await expectVisibleVideo();
   expect(await page.evaluate(() => (window as any).playerQolTest.mounts)).toBe(1);
-  // The native provider stays mounted without becoming another visible player.
-  await page.evaluate(() => (window as any).playerQolTest.useMixcloud());
+  // Providers without video keep their native widget out of view.
+  await page.evaluate(() => (window as any).playerQolTest.useSoundCloud());
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByTitle("Fixture Mixcloud player")).toHaveCount(1);
-  await expect(page.getByTitle("Fixture Mixcloud player")).not.toBeInViewport();
+  await expect(page.getByTitle("Fixture SoundCloud player")).toHaveCount(1);
+  await expect(page.getByTitle("Fixture SoundCloud player")).not.toBeInViewport();
+  await expect(youtubeVideo).toHaveCount(0);
+  await expect(page.locator(".playback-video-slot")).toBeHidden();
   await expect(composer).toHaveValue("One line\nAnother line");
   await page.setViewportSize({ width: 390, height: 600 });
   await page.goto("/tests/browser/rooms/player/harness/index.html?workspace&empty");
@@ -181,6 +227,8 @@ test("listeners can open their queue over chat without losing playback, search, 
   await expect(page.getByText("Leaving this on while I finish up.", { exact: true })).toBeInViewport({ ratio: 1 });
   await expect(page.getByText("Same here.", { exact: true })).toBeInViewport({ ratio: 1 });
   await expect(page.getByText("Nothing playing right now", { exact: true })).toBeVisible();
+  await expect(youtubeVideo).toHaveCount(0);
+  await expect(page.locator(".playback-video-slot")).toBeHidden();
   await expect(openQueue).toBeEnabled();
   await expect(page.getByRole("slider", { name: "Playback position", exact: true })).toBeHidden();
   // A short room must still fit the media picker above its persistent player.

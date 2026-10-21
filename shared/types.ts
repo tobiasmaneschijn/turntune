@@ -1,4 +1,6 @@
 import type { Provider } from "./provider-definitions.js";
+import type { ArtworkSources } from "./artwork.js";
+export type { ArtworkSources } from "./artwork.js";
 export type { Provider } from "./provider-definitions.js";
 
 export interface User {
@@ -33,6 +35,7 @@ export interface ProfileTrack {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  artworkSources?: ArtworkSources;
   permalinkUrl?: string;
   durationMs?: number;
 }
@@ -53,6 +56,7 @@ export interface Track {
   title: string;
   artist?: string;
   artworkUrl?: string;
+  artworkSources?: ArtworkSources;
   permalinkUrl?: string;
   durationMs?: number;
   /** Set only by a provider lookup on the server. */
@@ -69,6 +73,7 @@ export interface ProviderTrackMapping {
   providerId: string;
   permalinkUrl?: string;
   artworkUrl?: string;
+  artworkSources?: ArtworkSources;
   storefront?: string;
   matchMethod?: "source" | "isrc" | "exact-metadata" | "fuzzy";
 }

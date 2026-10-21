@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
@@ -8,6 +8,7 @@ import { openRoomLayoutPresets } from "../hooks/use-room-layout-presets";
 import { useRoomViewport } from "../hooks/use-room-viewport";
 import { RoomPaneTabs } from "./RoomPaneTabs";
 import { ResponsiveRoomDrawer } from "./ResponsiveRoomDrawer";
+import { PlaybackVideoContext } from "../../playback/components/PlaybackVideo";
 import type { RoomWorkspaceProps } from "./RoomWorkspace";
 import "../../../styles/open-room.css";
 import "../../../styles/room-chat.css";
@@ -23,6 +24,8 @@ export function OpenRoomWorkspace({ radio, player, chat, value, onValueChange, u
   const mobileDrawer = narrow && !embedded;
   const contentPane = value === "radio" ? "radio" : "chat";
   const workspaceRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [videoContainer, setVideoContainer] = useState<HTMLDivElement | null>(null);
   const musicPanelRef = useRef<PanelImperativeHandle>(null);
   const previousNarrow = useRef(narrow);
   useRoomAppearance(!embedded);
@@ -48,7 +51,7 @@ export function OpenRoomWorkspace({ radio, player, chat, value, onValueChange, u
     tabIndex: -1,
   });
   const layout = defaultLayout && "activity" in defaultLayout ? defaultLayout : openRoomLayoutPresets.balanced;
-  return <section ref={workspaceRef} id="room-workspace" tabIndex={-1}
+  return <PlaybackVideoContext value={videoContainer}><section ref={workspaceRef} id="room-workspace" tabIndex={-1}
     aria-label={t("roomWorkspace.listeningRoomWorkspace")}
     className="room-layout open-room-workspace" data-pane={contentPane}
     data-music-open={musicOpen} data-chat-main={!embedded}>
@@ -68,9 +71,11 @@ export function OpenRoomWorkspace({ radio, player, chat, value, onValueChange, u
         {roomNotice && <div className="room-notice-strip">{roomNotice}</div>}{listeningChecklist}
       </div>
     </details>}
+    <div className="open-room-stage" ref={stageRef}>
     <ResizablePanelGroup className="room-panels open-room-body" orientation="horizontal"
       defaultLayout={layout} groupRef={groupRef} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="activity" className="open-room-activity" minSize="232px" maxSize="280px"
+        onResize={({ inPixels }) => { if (inPixels > 0) stageRef.current?.style.setProperty("--room-activity-width", `${inPixels}px`); }}
         role="region" aria-label={t("roomWorkspace.activity", { defaultValue: "Room activity" })}>
         <div ref={narrow ? undefined : activityContainerRef} className="open-room-activity-content" />
       </ResizablePanel>
@@ -94,7 +99,9 @@ export function OpenRoomWorkspace({ radio, player, chat, value, onValueChange, u
         </ResponsiveRoomDrawer>}
       </ResizablePanel>
     </ResizablePanelGroup>
+    <div ref={setVideoContainer} className="playback-video-slot" />
+    </div>
     <div id="player" className="open-room-player" role="region" aria-label={t("roomWorkspace.player")} tabIndex={-1}>{player}</div>
     {embedded && <RoomPaneTabs value={contentPane} panes={["radio", "chat"]} onValueChange={onValueChange} unreadCount={unreadCount} />}
-  </section>;
+  </section></PlaybackVideoContext>;
 }

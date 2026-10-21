@@ -16,14 +16,17 @@ identities. Replies, links, mentions, uploads and cache misses can add work.
 | --- | ---: | ---: |
 | Plain-text socket message | 31 | 5 |
 | Typing event | 21 | 2 |
-| Changed playback/room command | 9 | 3 |
-| Unchanged playback/room command | 8 | 2 |
+| Changed queued playback/room command | 9 | 2 |
+| Unchanged queued playback/room command | 8 | 1 |
 | Cold room load | 3 | 1 |
 | History image verification/signing, up to 100 supplied image rows | Up to 300 | 3 |
 | Admin dashboard totals/activity | 6 | 1 |
 
 The real socket integration workflow checks the five-request send and
-two-request typing budgets, together with denial after account suspension.
+two-request typing budgets and the two-request queued room-command budget,
+together with denial after account suspension or room disablement. Provider
+actions retain an early access check before external work; queued commands
+check fresh access immediately before changing the room.
 Database tests exercise the complete migration chain, grants, private-room
 revocation, immutable retries and removal behavior.
 
@@ -34,7 +37,8 @@ revocation, immutable retries and removal behavior.
   are capped at 100. Moderation documents remain inside PostgreSQL.
 - `RoomAdmission.accountActive` covers account restriction state. Callers still
   combine it with `PlatformSecurity.verifiedAccount` for trusted Auth identity.
-  Only the existing account-confirmation cache is retained.
+  Concurrent confirmation lookups for the same account share one request. Only
+  the existing account-confirmation cache is retained; restrictions stay fresh.
 - Connection maintenance batches account/room restrictions instead of making
   one request per identity. An unavailable identity is unknown; it does not
   prevent removal of other known restricted accounts or rooms. Command checks

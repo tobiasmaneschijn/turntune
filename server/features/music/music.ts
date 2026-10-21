@@ -1,4 +1,4 @@
-import type { Provider } from "../../types.js";
+import type { ArtworkSources, Provider } from "../../types.js";
 export type { ProviderTrackMapping } from "../../types.js";
 
 export interface CatalogTrack {
@@ -7,6 +7,7 @@ export interface CatalogTrack {
   title: string;
   artist: string;
   thumbnail?: string;
+  artworkSources?: ArtworkSources;
   duration?: string;
   durationMs?: number;
   permalinkUrl?: string;

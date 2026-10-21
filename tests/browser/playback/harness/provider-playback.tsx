@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { AppleMusicPlayer } from "../../../../src/features/playback/providers/AppleMusicPlayer";
 import { SoundCloudPlayer } from "../../../../src/features/playback/providers/SoundCloudPlayer";
+import { AudiusPlayer } from "../../../../src/features/playback/providers/AudiusPlayer";
 import { NowPlaying, type NowPlayingLocalState } from "../../../../src/features/playback/components/NowPlaying";
 import { TooltipProvider } from "../../../../src/components/ui/tooltip";
 import { readUserSettings } from "../../../../src/features/settings/user-settings";
@@ -11,7 +12,8 @@ import { configureTelemetry, type MetricOptions, type MetricType } from "../../.
 import "../../../../src/styles/shadcn.css";
 import "../../../../src/styles/index.css";
 
-const provider = new URLSearchParams(location.search).get("provider") === "apple" ? "apple" : "soundcloud";
+const requestedProvider = new URLSearchParams(location.search).get("provider");
+const provider = requestedProvider === "apple" || requestedProvider === "audius" ? requestedProvider : "soundcloud";
 const hostMode = new URLSearchParams(location.search).has("host");
 const root = createRoot(document.getElementById("root")!);
 const calls: { method: string; value?: unknown }[] = [];
@@ -19,6 +21,18 @@ const statusCallbacks: number[] = [];
 const statusSamples: (PlayerStatus & { version: number })[] = [];
 const endCallbacks: number[] = [];
 const errors: string[] = [];
+if (provider === "audius") {
+  const nativePlay = HTMLMediaElement.prototype.play;
+  let blockPlay = new URLSearchParams(location.search).has("block-audio");
+  HTMLMediaElement.prototype.play = function () {
+    calls.push({ method: "audio:play", value: { activated: navigator.userActivation.isActive } });
+    if (blockPlay) {
+      blockPlay = false;
+      return Promise.reject(new DOMException("User activation required", "NotAllowedError"));
+    }
+    return nativePlay.call(this);
+  };
+}
 const metrics: Array<{ type: MetricType; name: string; value: number; options: MetricOptions }> = [];
 configureTelemetry({ captureError() {}, log() {}, metric(type, name, value, options) { metrics.push({ type, name, value, options }); }, async flush() {} });
 const positionCallbacks: ((position: number) => void)[] = [];
@@ -30,7 +44,7 @@ const hostRequests: string[] = [];
 let hostState: NowPlayingLocalState | undefined;
 let deferredFinish: (() => void) | undefined;
 let hostSettings = readUserSettings();
-hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "source", defaultVolume: 50 } };
+hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, defaultVolume: 50 } };
 let deferWidgetReady = new URLSearchParams(location.search).has("defer-ready");
 let deferWidgetLoad = false;
 let widgetCreations = 0;
@@ -49,8 +63,8 @@ let playback: Playback = {
   track: {
     id: "room-track",
     provider,
-    providerId: "provider-track",
-    permalinkUrl: "https://soundcloud.com/test/track",
+    providerId: provider === "audius" ? "D7KyD" : "provider-track",
+    permalinkUrl: provider === "audius" ? "https://audius.co/test/track" : "https://soundcloud.com/test/track",
     title: "Regression track",
     durationMs: 180_000,
     mappings: { apple: { providerId: "123456789" } },
@@ -68,7 +82,7 @@ function createMusic() { return {
   isAuthorized: musicAuthorized,
   currentPlaybackTime: 10,
   currentPlaybackDuration: 180,
-  playbackState: playbackStates.playing as number | string,
+  playbackState: playbackStates.stopped as number | string,
   volume: 1,
   authorize: async () => { musicAuthorized = true; music.isAuthorized = true; calls.push({ method: "authorize" }); return "music-user-token"; },
   unauthorize: async () => { musicAuthorized = false; music.isAuthorized = false; calls.push({ method: "unauthorize" }); },
@@ -139,7 +153,15 @@ function render() {
       compact: false, onToggleCompact() {}, settingsOpen: false, onCloseSettings() {},
       userSettings: hostSettings, onUserSettingsChange(settings) { hostSettings = settings; render(); },
       onLocalStateChange(state) { hostState = state; },
-      requestAction(event, _payload, reply) { hostRequests.push(event); reply({ ok: true }); }
+      requestAction(event, payload, reply) {
+        hostRequests.push(event);
+        if (provider === "audius" && event === "playback:update") {
+          const update = payload as { playing: boolean; position: number };
+          playback = { ...playback, playing: update.playing, position: update.position, updatedAt: now };
+          render();
+        }
+        reply({ ok: true });
+      }
     })));
     return;
   }
@@ -158,6 +180,7 @@ function render() {
   };
   root.render(provider === "apple"
     ? createElement(AppleMusicPlayer, { ...common, accessToken, userId, mapping: { providerId: "provider-track" } })
+    : provider === "audius" ? createElement(AudiusPlayer, { ...common, accessToken, userId, roomSlug: "provider-switch-room" })
     : createElement(SoundCloudPlayer, common));
 }
 
@@ -169,14 +192,12 @@ Object.assign(window, {
     endCallbacks,
     errors,
     metrics,
-    inspectHost: () => ({ state: hostState, requests: hostRequests, musicPlaying: music.playbackState === playbackStates.playing }),
+    inspectHost: () => ({ state: hostState, requests: hostRequests, musicPlaying: music.playbackState === playbackStates.playing, track: playback.track }),
     holdSoundCloudCallbacks() {
       deferPaused = true;
       listeners.get("progress")?.({ currentPosition: 179_000 });
       deferredFinish = listeners.get("finish");
     },
-    useApple() { hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "apple" } }; render(); },
-    useRoomSource() { hostSettings = { ...hostSettings, playback: { ...hostSettings.playback, preference: "source" } }; render(); },
     reportSoundCloudProgress(position: number) {
       const held = deferPaused;
       deferPaused = false;
@@ -210,13 +231,14 @@ Object.assign(window, {
       music.currentPlaybackTime = progress;
       music.playbackState = playbackStates[state as keyof typeof playbackStates] ?? state;
     },
-    render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string }) {
+    render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string; providerId?: string }) {
       userId = options.userId ?? userId;
       accessToken = options.accessToken ?? accessToken;
       callbackVersion = options.callbackVersion ?? callbackVersion;
       syncRevision = options.syncRevision ?? syncRevision;
       if (options.position !== undefined || options.playing !== undefined) playback = { ...playback, position: options.position ?? playback.position, playing: options.playing ?? playback.playing, updatedAt: now };
       if (options.trackId && playback.track) playback = { ...playback, track: { ...playback.track, id: options.trackId, permalinkUrl: `https://soundcloud.com/test/${options.trackId}` }, updatedAt: now };
+      if (options.providerId && playback.track) playback = { ...playback, track: { ...playback.track, providerId: options.providerId }, updatedAt: now };
       render();
     },
     unmount() { root.unmount(); }

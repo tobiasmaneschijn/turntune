@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import i18n from "../../i18n";
 import { requestJson } from "../../lib/authenticated-http";
-import { MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "../../../shared/provider-definitions";
+import { isProviderAvailable, MUSIC_PROVIDERS, PROVIDER_DEFINITIONS } from "../../../shared/provider-definitions";
 import type { Provider } from "../../types";
 import type { PlaybackConnections, ProviderConnection } from "./provider-registry";
 import { PROVIDER_CONNECTION_ACTIONS } from "./provider-connection-actions";
@@ -100,7 +100,7 @@ export function useProviderConnections({
       if (!current()) return;
       const providers: PlaybackConnections["providers"] = {};
       for (const provider of MUSIC_PROVIDERS) {
-        const granted = !PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant || spotifyEnabled;
+        const granted = isProviderAvailable(provider) && (!PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant || spotifyEnabled);
         const connection = granted ? payload[provider] : undefined;
         if (granted && !connection) continue;
         providers[provider] = {

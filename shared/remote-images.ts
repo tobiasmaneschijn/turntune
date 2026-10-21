@@ -3,9 +3,10 @@ export const REMOTE_IMAGE_HOSTS = [
   'i.ytimg.com', 'img.youtube.com', 'yt3.ggpht.com',
   'i.scdn.co', 'mosaic.scdn.co',
   'thumbnailer.mixcloud.com',
+  'audius-content-1.figment.io', 'audius-content-2.figment.io', 'audius-content-3.figment.io', 'audius-content-4.figment.io', 'audius-content-5.figment.io',
   'media.giphy.com', 'media0.giphy.com', 'media1.giphy.com', 'media2.giphy.com', 'media3.giphy.com', 'media4.giphy.com', 'i.giphy.com',
 ] as const;
-export const REMOTE_IMAGE_SUFFIXES = ['mzstatic.com', 'sndcdn.com'] as const;
+export const REMOTE_IMAGE_SUFFIXES = ['mzstatic.com', 'sndcdn.com', 'audius.co', 'audius.org', 'audiusindex.org', 'theblueprint.xyz', 'open-audio-validator.com', 'soundmaxx.xyz', 'monophonic.digital'] as const;
 export const REMOTE_IMAGE_MAX_BYTES = 4096;
 
 export function approvedRemoteImageUrl(value: unknown, storageOrigin?: string): string | undefined {

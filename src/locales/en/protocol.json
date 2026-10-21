@@ -6,6 +6,8 @@
   "artwork_must_use_a_supported_image_host": "Artwork must use a supported image host.",
   "artwork_must_use_https": "Artwork must use HTTPS.",
   "invalid_youtube_video_id": "Invalid YouTube video ID.",
+  "invalid_audius_track_id": "Invalid Audius track ID.",
+  "invalid_audius_track_url": "Enter a valid Audius track URL.",
   "invalid_spotify_track_id": "Invalid Spotify track ID.",
   "invalid_apple_music_song_id": "Invalid Apple Music song ID.",
   "invalid_mixcloud_show_key": "Invalid Mixcloud show key.",

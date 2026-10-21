@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { approvedRemoteImageUrl } from "../../../shared/remote-images.js";
 import { MUSIC_PROVIDERS, validateProviderTrackLocator } from "../../../shared/provider-definitions.js";
+import { artworkSourcesSchema } from "../../../shared/artwork.js";
 import { DEFAULT_PLAN_LIMITS, planLimitsSchema, type PlanLimits } from "../../../shared/resource-policy.js";
 import { PublicRequestError } from "../../lib/public-request-error.js";
 
@@ -16,6 +17,7 @@ export const libraryTrackSchema = z.object({
   title: z.string().trim().min(1).max(120),
   artist: z.string().trim().min(1).max(120).optional(),
   artworkUrl: z.string().url().max(2048).refine(value => Boolean(approvedRemoteImageUrl(value)), serverT("artwork_must_use_a_supported_image_host")).optional(),
+  artworkSources: artworkSourcesSchema.optional(),
   permalinkUrl: z.string().url().startsWith("https://").max(2048).optional(),
   durationMs: z.number().int().positive().max(86_400_000).optional()
 }).superRefine((track, context) => {

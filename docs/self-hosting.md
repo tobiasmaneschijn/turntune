@@ -121,10 +121,16 @@ cannot complete a flow on a different callback host. See
 
 ## Music providers
 
+Apple Music and Mixcloud are excluded from 1.0 in the shared application policy.
+Their adapters and saved-data formats remain, but credentials and room settings
+cannot enable them. SoundCloud is unchanged; see the
+[provider scope record](provider-scope.md) for the remaining approval checks.
+
 | Integration | Server configuration | Behavior and limitations |
 | --- | --- | --- |
 | YouTube | `YOUTUBE_API_KEY` | Enables YouTube Data API keyword search and live-status lookup. Playback uses the embedded player. |
 | SoundCloud | `SOUNDCLOUD_CLIENT_ID`, `SOUNDCLOUD_CLIENT_SECRET` | Search uses a cached server-side client-credentials token. Playback uses the official widget and public tracks reported as playable. |
+| Audius | `AUDIUS_API_KEY`; optional server-only `AUDIUS_API_BEARER_TOKEN` | Search and individual track links use the official API. Each admitted listener streams public, ungated recordings through native audio without an Audius account. The public API key is included in stream URLs; the bearer token is unused for these reads and never sent to the browser. |
 | Mixcloud | None | Uses the public catalog API and official widget. Seeks may be refused, which limits synchronization. Listeners use device volume; the widget remains visible on phones. |
 | Spotify | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `PROVIDER_TOKEN_ENCRYPTION_KEY`; optional `SPOTIFY_MARKET` (default `US`) | Register the exact `APP_ORIGIN` + `/api/spotify/callback` URI. Spotify starts disabled for rooms; an application administrator with MFA/AAL2 must enable it. Listeners then link their own accounts and choose Web Playback or a Spotify Connect device. |
 | Apple Music | `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID`, `APPLE_MUSIC_PRIVATE_KEY`; optional `APPLE_MUSIC_STOREFRONT` (default `us`) | Requires a MusicKit media identifier and private key. Escaped `\n` line breaks are supported in the private key. Listeners authorize MusicKit in the player. |

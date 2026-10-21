@@ -74,6 +74,7 @@ import { RoomCommandError, safeSocketHandler, serialSocketHandler } from "./real
 import { roomPresence, uniqueUsers } from "./features/rooms/presence.js";
 import { activeAnnouncement, AnnouncementExpiryRegistry } from "./features/rooms/announcements.js";
 import { SoundCloudApi } from "./integrations/soundcloud.js";
+import { AudiusApi } from "./integrations/audius.js";
 import { AppleMusicApi } from "./integrations/apple-music.js";
 import { resolveProviderMappings } from "./features/music/provider-mappings.js";
 import { createServerProviderRegistry } from "./features/music/provider-registry.js";
@@ -88,7 +89,7 @@ import {
   removeDj,
   roomForListener
 } from "./features/rooms/radio.js";
-import type { Room, RoomMemberRecord, RoomSnapshot, User } from "./types.js";
+import type { Provider, Room, RoomMemberRecord, RoomSnapshot, User } from "./types.js";
 
 validateServerConfig(process.env);
 
@@ -137,9 +138,10 @@ const soundCloudApi = new SoundCloudApi(
   process.env.SOUNDCLOUD_CLIENT_SECRET
 );
 const spotifyApi = new SpotifyApi();
+const audiusApi = new AudiusApi();
 const giphyApi = new GiphyApi();
 const appleMusicApi = new AppleMusicApi();
-const musicProviders = createServerProviderRegistry({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi, youtubeApiKey });
+const musicProviders = createServerProviderRegistry({ spotify: spotifyApi, appleMusic: appleMusicApi, soundCloud: soundCloudApi, audius: audiusApi, youtubeApiKey });
 const spotifyAccounts = new SpotifyAccounts(store, spotifyApi);
 const authEnabled = Boolean(
   supabaseUrl &&
@@ -216,6 +218,13 @@ async function canUseSpotify(request:express.Request,userId:string,explicitRoom?
   // already-checked room; all later provider requests require live admission.
   if(callback)return true;
   return [...(roomUsers.get(roomId)?.values()??[])].some(user=>user.id===userId);
+}
+
+async function canUseProvider(_request: express.Request, userId: string, provider: Provider, roomId?: string) {
+  if (!roomId || !canReadAdmission(await freshRoomAdmission(userId, roomId))) return false;
+  const room = await store.loadRoom(roomId);
+  return Boolean(room && roomAllowsProvider(room.settings, provider) && !isRoomBanned(room, userId) &&
+    [...(roomUsers.get(roomId)?.values() ?? [])].some(user => user.id === userId));
 }
 
 mountApiAccess(app, { getApiUserId, getSelfServiceUserId, platform, blockedRooms,
@@ -297,8 +306,8 @@ const chatCommands=new ChatCommandService({client:supabaseAdmin,
     const room = await store.loadRoom(roomId);
     const track = [room?.playback.track, ...(room?.history || [])].find(track => track?.id === trackId);
     if (!track) return null;
-    const { id, provider, providerId, title, artist, artworkUrl, permalinkUrl, durationMs } = track;
-    return { id, provider, providerId, title, artist, artworkUrl, permalinkUrl, durationMs };
+    const { id, provider, providerId, title, artist, artworkUrl, artworkSources, permalinkUrl, durationMs } = track;
+    return { id, provider, providerId, title, artist, artworkUrl, artworkSources, permalinkUrl, durationMs };
   },
   withRoomOperation:(roomId,run)=>store.withRoomOperation(roomId,run),
   getMentionAudience:async(roomId)=>{
@@ -601,12 +610,12 @@ io.on("connection", (socket) => {
   };
   const cancelCredentialExpiry = lease?.scheduleExpiry(() => socket.disconnect(true));
   socket.once("disconnect", () => cancelCredentialExpiry?.());
-  const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0]) => {
+  const onAction = (event: string, handler: Parameters<typeof safeSocketHandler>[0], options?: { authorizeInRoomCommand: true }) => {
     const safe = safeSocketHandler(async (payload, reply) => {
       assertAuthorized();
-      // Chat owns a fresh check before its write and another before delivery.
-      // Other actions retain an early gate before provider calls or other work.
-      if (!event.startsWith("chat:")) {
+      // Chat and queued room commands own fresh admission at their write
+      // boundary. Provider actions still need an early gate before external work.
+      if (!event.startsWith("chat:") && !options?.authorizeInRoomCommand) {
         const member = getMembership(socket.id);
         const access = await platform.checkAccess(authEnabled ? [socket.data.authUserId] : [], member ? [member.room.id] : []);
         if (authEnabled && !access.accounts.get(socket.data.authUserId)) { await restrictAccount(socket.data.authUserId); throw new RoomCommandError(serverT("account_access_is_unavailable")); }
@@ -823,15 +832,15 @@ mountProfileRoutes(app, { store, platform, getApiUserId });
 mountRoomRoutes(app, { store, platform, securityBudget, resourcePolicies, getApiUserId,
   roomUsers, watchIdleRoom, cancelDjEviction, forgetDjUser, broadcast });
 
-mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,canUseSpotify,
-  soundCloudApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
+mountMusicRoutes(app, { authEnabled, getUserId: getApiUserId, youtubeApiKey,canUseSpotify, canUseProvider,
+  soundCloudApi, audiusApi, spotifyApi, spotifyAccounts, appleMusicApi, giphyApi });
 mountSpotifyOAuthRoutes(app, { getUserId: getApiUserId, accounts: spotifyAccounts,canUseSpotify,
   isAccountActive:userId=>platform.activeAccount(userId),
   authorizationUrl: (redirectUri, state) => spotifyApi.authorizationUrl(redirectUri, state), redirectUri: spotifyRedirectUri });
 mountResourcePolicyRoute(app, { getApiUserId, resourcePolicies });
 mountSpotifyAccessRoutes(app, { store, platform, getApiAdminUserId, broadcast });
 mountConfigRoutes(app, { authEnabled, supabaseUrl, supabasePublishableKey, getApiUserId, canUseSpotify,
-  giphyApi, spotifyAccounts, appleMusicApi });
+  giphyApi, spotifyAccounts, appleMusicApi, audiusApi });
 
 mountApiErrors(app);
 

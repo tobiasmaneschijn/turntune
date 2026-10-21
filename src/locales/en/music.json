@@ -422,7 +422,13 @@
     "spotifyTrack": "Paste a Spotify track link. Albums and playlists cannot be added here.",
     "soundcloudTrack": "Paste an individual SoundCloud track link, rather than a set or playlist.",
     "appleTrack": "Paste an Apple Music song link. Album links need the selected song’s i= parameter.",
-    "mixcloudShow": "Paste a secure Mixcloud show link, not a profile or playlist link."
+    "mixcloudShow": "Paste a secure Mixcloud show link, not a profile or playlist link.",
+    "audiusTrack": "Paste an individual Audius track link, not a profile, album or playlist link."
+  },
+  "audius": {
+    "unavailable": "This Audius track is unavailable.",
+    "playbackBlocked": "Playback was blocked. Select Sync to listen.",
+    "playbackFailed": "Could not play this track. Select Sync to retry."
   },
   "feedback": {
     "attention": "Playback needs attention",
@@ -478,6 +484,7 @@
   "providers": {
     "youtube": "YouTube",
     "soundcloud": "SoundCloud",
+    "audius": "Audius",
     "spotify": "Spotify",
     "apple": "Apple Music",
     "mixcloud": "Mixcloud"

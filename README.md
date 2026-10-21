@@ -10,14 +10,15 @@ self-hosting, use your own domain and provider callbacks.
 ## Features
 
 - Rotating DJ turns, private queues, saved tracks, and reusable sets.
-- YouTube, SoundCloud, Spotify, Apple Music, and Mixcloud support.
+- YouTube, SoundCloud and public Audius playback. Spotify requires a separate administrator room grant.
 - Chat with replies, reactions, polls, GIFs, and image uploads.
 - Public, unlisted, and members-only rooms with roles and moderation tools.
 - Profiles, friends, room invitations, and optional activity sharing.
 - Responsive room layouts, keyboard controls, and light/dark themes.
 
 Playback depends on provider availability, account entitlements, and browser
-autoplay rules. Mixcloud may limit seeking and synchronization. See
+autoplay rules. Apple Music and Mixcloud are excluded from 1.0; saved recordings
+remain readable and removable in the library. See
 [provider setup and limitations](docs/self-hosting.md#music-providers).
 
 <a id="local-development"></a>

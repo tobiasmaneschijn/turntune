@@ -81,5 +81,10 @@ export function usePlaybackHost({ target, suppressed, controlsRef, preference, a
     mode: activeTarget.mode, mapping: target?.mapping, syncRevision, controlsRef: nativeControls,
     onStatus, onError, onEnded, onConnectionLost
   }) : null;
-  return { persistentPlayer: persistent ? player : null, stagePlayer: persistent ? null : player, registration };
+  return {
+    persistentPlayer: persistent && !registration?.video ? player : null,
+    stagePlayer: !persistent && !registration?.video ? player : null,
+    videoPlayer: registration?.video ? player : null,
+    registration
+  };
 }

@@ -1,4 +1,4 @@
-import { PROVIDER_DEFINITIONS, roomAllowsProvider } from "../../../shared/providers";
+import { isProviderAvailable, PROVIDER_DEFINITIONS, roomAllowsProvider } from "../../../shared/providers";
 import type { Playback, Provider, ProviderTrackMapping, RoomSettings } from "../../types";
 import type { PlaybackFallback, PlaybackPreference } from "../settings/user-settings";
 
@@ -12,7 +12,7 @@ export const PLAYBACK_PREFERENCES = {
 
 export function playbackPreferenceAllowed(preference: PlaybackPreference, spotifyEnabled: boolean) {
   const provider = PLAYBACK_PREFERENCES[preference].provider;
-  return !provider || !PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant || spotifyEnabled;
+  return !provider || isProviderAvailable(provider) && (!PROVIDER_DEFINITIONS[provider].requiresSpotifyGrant || spotifyEnabled);
 }
 
 export interface PlaybackTarget {
