@@ -105,7 +105,8 @@ function contentSecurityPolicy(env: NodeJS.ProcessEnv, publicOrigins: URL[]): st
     `img-src 'self' data: blob: ${supabaseImages} https://cdn.jsdelivr.net/gh/jdecked/twemoji@17.0.3/assets/ ${REMOTE_IMAGE_HOSTS.map(host => `https://${host}`).join(" ")} ${REMOTE_IMAGE_SUFFIXES.flatMap(host => [`https://${host}`, `https://*.${host}`]).join(" ")}`,
     "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://w.soundcloud.com https://open.spotify.com https://music.apple.com https://authorize.music.apple.com https://www.mixcloud.com",
     `connect-src 'self' ${appSocketOrigin} ${supabase} ${sentryOrigin} https://www.youtube.com https://api.spotify.com https://*.spotify.com wss://*.spotify.com https://*.scdn.co https://*.music.apple.com https://*.mzstatic.com https://*.apple.com`,
-    "media-src 'self' blob: https://*.scdn.co https://*.spotify.com https://*.music.apple.com https://*.mzstatic.com https://*.apple.com https://api.audius.co https://*.audius.co",
+    // Audius can redirect streams to its signed R2 object storage URLs.
+    "media-src 'self' blob: https://*.scdn.co https://*.spotify.com https://*.music.apple.com https://*.mzstatic.com https://*.apple.com https://api.audius.co https://*.audius.co https://validator.eeba4a6ca56a0d87af802270217c2a51.r2.cloudflarestorage.com",
     "worker-src 'self' blob:",
     env.NODE_ENV === "production" ? "upgrade-insecure-requests" : ""
   ].filter(Boolean).join("; ");

@@ -1,4 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { once } from "node:events";
+import express from "express";
+import { configureHttpSecurity } from "../../../server/security/security-http";
 
 async function freezeProviderClock(page: Page) {
   const clockTime = new Date("2026-10-06T12:00:00Z");
@@ -35,7 +38,7 @@ type ProviderHarness = {
   render(options: { userId?: string; accessToken?: string; callbackVersion?: number; position?: number; playing?: boolean; syncRevision?: number; trackId?: string; providerId?: string }): void;
   unmount(): void;
 };
-declare global { interface Window { providerTest: ProviderHarness } }
+declare global { interface Window { providerTest: ProviderHarness; mediaPolicyViolations: string[] } }
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/apple/token", async (route) => {
@@ -59,20 +62,80 @@ function nativeAudioRecording(seconds: number) {
   return recording;
 }
 
+async function productionMediaPolicy() {
+  const app = express();
+  configureHttpSecurity(app, { NODE_ENV: "production", APP_ORIGIN: "https://fixture.turntune.test" });
+  app.get("/api/health", (_request, response) => response.sendStatus(204));
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("The security header fixture did not open a local port.");
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/health`);
+    const policy = response.headers.get("content-security-policy")?.split(";").map(value => value.trim())
+      .find(value => value.startsWith("media-src "));
+    await response.arrayBuffer();
+    if (!response.ok || !policy) throw new Error("The production response did not provide its media policy.");
+    return policy;
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    });
+  }
+}
+
 test("listeners can recover blocked Audius audio, follow room controls and leave without advancing twice", async ({ page }) => {
   const recording = nativeAudioRecording(40);
   const playbackHeaders: Record<string, string>[] = [];
   let pendingSource: Route | undefined;
+  const mediaPolicy = await productionMediaPolicy();
+  await page.addInitScript(() => {
+    window.mediaPolicyViolations = [];
+    document.addEventListener("securitypolicyviolation", event => window.mediaPolicyViolations.push(event.effectiveDirective));
+  });
+  await page.route(url => url.pathname === "/tests/browser/playback/harness/provider-playback.html" && url.searchParams.get("provider") === "audius", async route => {
+    const response = await route.fetch();
+    // Use the actual enforced server directive without restricting Vite's dev scripts.
+    await route.fulfill({ response, headers: { ...response.headers(), "content-security-policy": mediaPolicy } });
+  });
+  const redirectedMediaUrl = "https://validator.eeba4a6ca56a0d87af802270217c2a51.r2.cloudflarestorage.com/audius/recording.wav?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=fixture&X-Amz-Signature=fixture-signature";
+  let redirectedRequests = 0;
+  let redirectedRangeRequests = 0;
   await page.route("**/api/music/connections", route => route.fulfill({ json: { audius: { configured: true } } }));
-  await page.route("https://api.audius.co/v1/tracks/*/stream?*", route => {
-    const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? "");
-    const start = range ? Number(range[1]) : 0;
-    const end = range?.[2] ? Math.min(Number(range[2]), recording.length - 1) : recording.length - 1;
-    return route.fulfill({
-      status: range ? 206 : 200, contentType: "audio/wav", body: recording.subarray(start, end + 1),
-      headers: { "access-control-allow-origin": "*", "accept-ranges": "bytes",
-        ...(range ? { "content-range": `bytes ${start}-${end}/${recording.length}` } : {}) }
-    });
+  // Playwright routes only the first request in a redirect chain. Keep both media
+  // hops in Chromium's network layer so the browser enforces the real policy.
+  const media = await page.context().newCDPSession(page);
+  const mediaErrors: unknown[] = [];
+  await media.send("Fetch.enable", { patterns: [
+    { urlPattern: "https://api.audius.co/v1/tracks/*/stream?*", requestStage: "Request" },
+    { urlPattern: redirectedMediaUrl, requestStage: "Request" }
+  ] });
+  media.on("Fetch.requestPaused", async event => {
+    try {
+      if (new URL(event.request.url).hostname === "api.audius.co") {
+        await media.send("Fetch.fulfillRequest", { requestId: event.requestId, responseCode: 302,
+          responseHeaders: [{ name: "location", value: redirectedMediaUrl }] });
+        return;
+      }
+      redirectedRequests++;
+      const rangeHeader = Object.entries(event.request.headers).find(([name]) => name.toLowerCase() === "range")?.[1];
+      const range = /^bytes=(\d+)-(\d*)$/.exec(String(rangeHeader ?? ""));
+      if (range) redirectedRangeRequests++;
+      const start = range ? Number(range[1]) : 0;
+      const end = range?.[2] ? Math.min(Number(range[2]), recording.length - 1) : recording.length - 1;
+      await media.send("Fetch.fulfillRequest", {
+        requestId: event.requestId, responseCode: range ? 206 : 200, body: recording.subarray(start, end + 1).toString("base64"),
+        responseHeaders: [
+          { name: "content-type", value: "audio/wav" }, { name: "access-control-allow-origin", value: "*" },
+          { name: "accept-ranges", value: "bytes" }, { name: "content-length", value: String(end - start + 1) },
+          ...(range ? [{ name: "content-range", value: `bytes ${start}-${end}/${recording.length}` }] : [])
+        ]
+      });
+    } catch (error) {
+      // A failed assertion can close the page while a media request is pending.
+      mediaErrors.push(error);
+    }
   });
   const playbackUrl = (id: string) => `https://api.audius.co/v1/tracks/${id}/stream?api_key=fixture-public-key&app_name=TurnTune`;
   await page.route("**/api/audius/playback?*", async route => {
@@ -82,6 +145,7 @@ test("listeners can recover blocked Audius audio, follow room controls and leave
     await route.fulfill({ json: { url: playbackUrl(id) } });
   });
   await page.goto("/tests/browser/playback/harness/provider-playback.html?provider=audius&host=1&block-audio=1");
+  await expect.poll(() => redirectedRequests).toBeGreaterThan(0);
   const audio = page.locator("audio");
   const audioState = () => audio.evaluate(element => {
     const player = element as HTMLAudioElement;
@@ -119,6 +183,7 @@ test("listeners can recover blocked Audius audio, follow room controls and leave
   await page.evaluate(() => window.providerTest.render({ position: 40, playing: true }));
   await expect.poll(async () => (await audioState()).position).toBe(40);
   expect((await audioState()).paused).toBe(true);
+  expect(redirectedRangeRequests).toBeGreaterThan(0);
   expect(await originalAudio!.evaluate(element => element === document.querySelector("audio"))).toBe(true);
   await page.evaluate(() => window.providerTest.render({ trackId: "next-room-track", providerId: "W39xP", position: 5, playing: true }));
   await expect.poll(() => Boolean(pendingSource)).toBe(true);
@@ -129,6 +194,9 @@ test("listeners can recover blocked Audius audio, follow room controls and leave
   expect(await departingAudio!.evaluate(element => ({ paused: (element as HTMLAudioElement).paused, source: element.getAttribute("src") })))
     .toEqual({ paused: true, source: null });
   expect(await page.evaluate(() => window.providerTest.inspectHost().requests.filter(event => event === "playback:ended"))).toHaveLength(1);
+  expect(await page.evaluate(() => window.mediaPolicyViolations)).toEqual([]);
+  expect(mediaErrors).toEqual([]);
+  await media.detach();
 });
 
 

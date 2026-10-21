@@ -120,7 +120,12 @@ test("approved legacy domains serve HTTP while headers protect success and rejec
   const mediaPolicy = (response.headers["content-security-policy-report-only"] as string).split(";").find(value => value.trim().startsWith("media-src"))!;
   assert.match(mediaPolicy, /https:\/\/api\.audius\.co/);
   assert.match(mediaPolicy, /https:\/\/\*\.audius\.co/);
+  assert.ok(mediaPolicy.split(/\s+/).includes("https://validator.eeba4a6ca56a0d87af802270217c2a51.r2.cloudflarestorage.com"));
+  assert.doesNotMatch(mediaPolicy, /https:\/\/\*\.r2\.cloudflarestorage\.com/);
   assert.doesNotMatch(mediaPolicy, /(?:^|\s)https:(?:\s|$)/);
+  const scriptPolicy = (response.headers["content-security-policy-report-only"] as string).split(";").find(value => value.trim().startsWith("script-src"))!;
+  assert.doesNotMatch(scriptPolicy, /cloudflarestorage\.com|'unsafe-inline'/);
+  assert.doesNotMatch(connectionPolicy, /cloudflarestorage\.com/);
   assert.match(connectionPolicy, /https:\/\/browser-monitoring\.invalid/);
   assert.doesNotMatch(connectionPolicy, /server-monitoring|serverkey|browserkey/);
   for (const host of ["lydman.test", "legacy.test:8443"]) {

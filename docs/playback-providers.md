@@ -24,6 +24,10 @@ Source verification rejects unavailable, unlisted, scheduled and restricted
 recordings; playback checks current room admission and provider policy again.
 There is no personal login or listener preference. Local volume, room pause,
 seek, drift correction and Sync recovery use the existing playback controls.
+Stream redirects may end at signed object storage URLs. The media policy includes
+the verified Audius store at
+`validator.eeba4a6ca56a0d87af802270217c2a51.r2.cloudflarestorage.com`.
+The playback workflow tests those redirects with the server's actual media policy.
 Artwork retains size variants and approved mirror origins through queues, saved
 sets, profiles and chat. The shared artwork loader retries mirrors on failure.
 See the [Audius agent guide](https://audius.co/agents.md) and
